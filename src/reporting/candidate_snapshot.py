@@ -45,10 +45,12 @@ CANDIDATE_SNAPSHOT_FIELDS = (
     "ml_score",
     "mean_reversion_score",
     "expected_edge_bps",
+    "expected_edge_source",
     "required_edge_bps",
     "cost_bps",
     "selected_total_cost_bps",
     "cost_source",
+    "cost_source_quality",
     "cost_model_version",
     "cost_gate_verified",
     "would_block_by_cost",
@@ -97,6 +99,34 @@ def candidate_snapshot_cost_defaults(cfg: Any) -> dict[str, Any]:
     }
 
 
+def load_quant_lab_cost_cache(path: str | Path | None, *, max_rows: int = 5000) -> dict[str, dict[str, Any]]:
+    if path in (None, ""):
+        return {}
+    cache_path = Path(path)
+    if not cache_path.is_file():
+        return {}
+    rows: list[dict[str, Any]] = []
+    try:
+        with cache_path.open("r", encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except Exception:
+        return {}
+    for line in lines[-max_rows:]:
+        text = str(line or "").strip()
+        if not text:
+            continue
+        try:
+            obj = json.loads(text)
+        except Exception:
+            continue
+        if not isinstance(obj, Mapping):
+            continue
+        if not _row_has_cost_fields(obj):
+            continue
+        rows.append(dict(obj))
+    return _cost_lookup_from_rows(rows, force_cached=True)
+
+
 def build_candidate_snapshot_rows(
     *,
     run_id: str,
@@ -119,6 +149,7 @@ def build_candidate_snapshot_rows(
     score_proxy_floor: Any = None,
     score_per_bps: Any = None,
     no_signal_reasons: Mapping[str, Any] | None = None,
+    quant_lab_cost_cache: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     prices = dict(prices or {})
     target_weights_raw = dict(target_weights_raw or getattr(audit, "targets_pre_risk", {}) or {})
@@ -130,6 +161,7 @@ def build_candidate_snapshot_rows(
     router_decisions = _router_decisions_by_symbol(getattr(audit, "router_decisions", []) or [])
     strategy_lookup = _strategy_signal_lookup(getattr(audit, "strategy_signals", []) or [])
     quant_lab_costs = _quant_lab_cost_lookup(getattr(audit, "quant_lab", {}) or {})
+    quant_lab_cost_cache = dict(quant_lab_cost_cache or {})
     no_signal_reasons = dict(no_signal_reasons or {})
     order_lookup = _orders_by_symbol(orders)
     position_lookup = _positions_by_symbol(positions)
@@ -159,6 +191,7 @@ def build_candidate_snapshot_rows(
         mean_reversion = strategy_signals.get("MeanReversion", {})
         order = order_lookup.get(symbol)
         qlab = _merge_mappings(
+            _lookup_symbol_mapping(quant_lab_cost_cache, symbol),
             _lookup_symbol_mapping(quant_lab_costs, symbol),
             _first_mapping(top.get("quant_lab"), top.get("cost_estimate"), top.get("cost")),
             _first_mapping(explain.get("quant_lab"), explain.get("cost_estimate"), explain.get("cost")),
@@ -230,17 +263,17 @@ def build_candidate_snapshot_rows(
             alpha6_score=alpha6_score,
             alpha6_side=alpha6_side,
         )
-        expected_edge = _first_float(
-            _nested_get(order, ("meta", "expected_edge_bps")),
-            _nested_get(order, ("meta", "expected_net_bps")),
-            _nested_get(order, ("meta", "expected_net_edge_bps")),
-            _nested_get(qlab, ("expected_edge_bps",)),
-            _nested_get(qlab, ("expected_net_bps",)),
-            _nested_get(top, ("expected_edge_bps",)),
-            _nested_get(top, ("expected_net_bps",)),
-            _nested_get(explain, ("expected_edge_bps",)),
-            _nested_get(explain, ("expected_net_bps",)),
-            _nested_get(alpha6, ("metadata", "expected_edge_bps")),
+        expected_edge, expected_edge_source = _first_float_with_source(
+            (_nested_get(order, ("meta", "expected_edge_bps")), _nested_get(order, ("meta", "expected_edge_source")) or "order.meta.expected_edge_bps"),
+            (_nested_get(order, ("meta", "expected_net_bps")), _nested_get(order, ("meta", "expected_edge_source")) or "order.meta.expected_net_bps"),
+            (_nested_get(order, ("meta", "expected_net_edge_bps")), _nested_get(order, ("meta", "expected_edge_source")) or "order.meta.expected_net_edge_bps"),
+            (_nested_get(qlab, ("expected_edge_bps",)), _nested_get(qlab, ("expected_edge_source")) or "quant_lab.expected_edge_bps"),
+            (_nested_get(qlab, ("expected_net_bps",)), _nested_get(qlab, ("expected_edge_source")) or "quant_lab.expected_net_bps"),
+            (_nested_get(top, ("expected_edge_bps",)), _nested_get(top, ("expected_edge_source")) or "top_scores.expected_edge_bps"),
+            (_nested_get(top, ("expected_net_bps",)), _nested_get(top, ("expected_edge_source")) or "top_scores.expected_net_bps"),
+            (_nested_get(explain, ("expected_edge_bps",)), _nested_get(explain, ("expected_edge_source")) or "target_execution_explain.expected_edge_bps"),
+            (_nested_get(explain, ("expected_net_bps",)), _nested_get(explain, ("expected_edge_source")) or "target_execution_explain.expected_net_bps"),
+            (_nested_get(alpha6, ("metadata", "expected_edge_bps")), _nested_get(alpha6, ("metadata", "expected_edge_source")) or "Alpha6Factor.metadata.expected_edge_bps"),
         )
         if expected_edge is None:
             expected_edge = _score_proxy_expected_edge(
@@ -249,8 +282,11 @@ def build_candidate_snapshot_rows(
                 score_floor=score_proxy_floor,
                 score_per_bps=score_per_bps,
             )
+            if expected_edge is not None:
+                expected_edge_source = "score_proxy"
         if expected_edge is None:
             expected_edge = 0.0
+            expected_edge_source = "not_available"
         required_edge = _first_float(
             _nested_get(qlab, ("required_edge_bps",)),
             _nested_get(qlab, ("min_required_edge_bps",)),
@@ -299,6 +335,7 @@ def build_candidate_snapshot_rows(
             used_local_cost=used_local_cost,
             absence_reason=cost_absence_reason,
         )
+        cost_source_quality = _cost_source_quality(cost_source, qlab=qlab, used_local_cost=used_local_cost)
         cost_model_version = _first(
             _nested_get(qlab, ("cost_model_version",)),
             _nested_get(qlab, ("cost_contract_version",)),
@@ -375,10 +412,12 @@ def build_candidate_snapshot_rows(
             ),
             "mean_reversion_score": _first_float(mean_reversion.get("score"), mean_reversion.get("raw_score")),
             "expected_edge_bps": expected_edge,
+            "expected_edge_source": expected_edge_source,
             "required_edge_bps": required_edge,
             "cost_bps": cost_bps,
             "selected_total_cost_bps": selected_total_cost_bps,
             "cost_source": cost_source,
+            "cost_source_quality": cost_source_quality,
             "cost_model_version": cost_model_version,
             "cost_gate_verified": bool(cost_gate_verified),
             "would_block_by_cost": bool(would_block_by_cost),
@@ -492,6 +531,9 @@ def _backfill_legacy_cost_fields(
     out["selected_total_cost_bps"] = _first_float(out.get("selected_total_cost_bps"), cost_bps)
     out["cost_model_version"] = _first(out.get("cost_model_version"), fallback_model)
     out["required_edge_bps"] = _first_float(out.get("required_edge_bps"), out.get("min_required_edge_bps"), (cost_bps or 0.0) * 1.5)
+    out["expected_edge_bps"] = _first_float(out.get("expected_edge_bps"), 0.0)
+    out["expected_edge_source"] = _first(out.get("expected_edge_source"), "not_available")
+    out["cost_source_quality"] = _first(out.get("cost_source_quality"), "local_estimate")
     out["cost_gate_verified"] = False
     out["would_block_by_cost"] = False
     out["cost_reason"] = _first(out.get("cost_reason"), "legacy_candidate_snapshot_schema_backfilled_local_estimate")
@@ -616,8 +658,14 @@ def _quant_lab_cost_lookup(quant_lab: Any) -> dict[str, dict[str, Any]]:
             if event_type in {"cost_estimate", "quant_lab_cost_estimate"}:
                 rows.append(event)
 
+    return _cost_lookup_from_rows(rows, force_cached=False)
+
+
+def _cost_lookup_from_rows(rows: Iterable[Mapping[str, Any]], *, force_cached: bool) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for row in rows:
+        if not isinstance(row, Mapping) or not _row_has_cost_fields(row):
+            continue
         symbol_values = (
             row.get("symbol"),
             row.get("request_symbol"),
@@ -630,9 +678,28 @@ def _quant_lab_cost_lookup(quant_lab: Any) -> dict[str, dict[str, Any]]:
         if not aliases:
             continue
         normalized_row = dict(row)
+        if force_cached:
+            normalized_row.setdefault("cached_cost_estimate", True)
+            if _missing_value(normalized_row.get("cost_source")) and _missing_value(normalized_row.get("source")):
+                normalized_row["cost_source"] = "quant_lab_cached"
         for alias in aliases:
             out[alias] = _merge_mappings(out.get(alias, {}), normalized_row)
     return out
+
+
+def _row_has_cost_fields(row: Mapping[str, Any]) -> bool:
+    return _mapping_has_any(
+        row,
+        (
+            "effective_total_cost_bps",
+            "selected_total_cost_bps",
+            "total_cost_bps",
+            "cost_bps",
+            "cost_source",
+            "source",
+            "cost_model_version",
+        ),
+    )
 
 
 def _lookup_symbol_mapping(rows: Mapping[str, Mapping[str, Any]], symbol: Any) -> dict[str, Any]:
@@ -700,6 +767,15 @@ def _score_proxy_expected_edge(
     return max(0.0, float(score) - float(floor)) / float(per_bps)
 
 
+def _first_float_with_source(*items: tuple[Any, Any]) -> tuple[Optional[float], Optional[str]]:
+    for value, source in items:
+        number = _float_or_none(value)
+        if number is not None:
+            source_text = str(source or "").strip() or None
+            return number, source_text
+    return None, None
+
+
 def _normalized_cost_source(
     value: Any,
     *,
@@ -710,12 +786,29 @@ def _normalized_cost_source(
     text = str(value or "").strip()
     lowered = text.lower()
     if used_local_cost or lowered in {"local_only", "permission_only_skip_cost", "local"}:
-        return absence_reason or "cost_not_available"
+        return "local_estimate"
     if text:
         return text
     if qlab_has_cost:
         return "quant_lab_cached"
-    return absence_reason or "cost_not_available"
+    return "local_estimate"
+
+
+def _cost_source_quality(cost_source: Any, *, qlab: Mapping[str, Any], used_local_cost: bool) -> str:
+    source = str(cost_source or "").strip().lower()
+    if used_local_cost or source == "local_estimate":
+        return "local_estimate"
+    if source == "mixed_actual_proxy":
+        return "mixed_actual_proxy"
+    if source in {"public_spread_proxy", "public_proxy"}:
+        return "public_proxy"
+    if bool(_first_bool(_nested_get(qlab, ("cached_cost_estimate",)), _nested_get(qlab, ("from_cache",)))):
+        return "quant_lab_cached"
+    if source == "quant_lab_cached":
+        return "quant_lab_cached"
+    if source:
+        return "quant_lab_symbol_estimate"
+    return "local_estimate"
 
 
 def _cost_absence_reason(*, order: Any, final_decision: str) -> str:

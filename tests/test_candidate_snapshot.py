@@ -9,6 +9,7 @@ from src.reporting.candidate_snapshot import (
     CANDIDATE_SNAPSHOT_FIELDS,
     build_candidate_snapshot_rows,
     candidate_id_for,
+    load_quant_lab_cost_cache,
     write_candidate_snapshot,
 )
 
@@ -106,10 +107,12 @@ def test_candidate_snapshot_builds_symbol_rows_and_stable_ids(tmp_path: Path) ->
     assert bnb["strategy_candidate"] == "portfolio_alpha6_factor"
     assert bnb["current_weight"] == 0.12
     assert bnb["expected_edge_bps"] == 60.0
+    assert bnb["expected_edge_source"] == "order.meta.expected_edge_bps"
     assert bnb["required_edge_bps"] == 45.0
     assert bnb["cost_bps"] == 30.0
     assert bnb["selected_total_cost_bps"] == 28.0
     assert bnb["cost_source"] == "public_spread_proxy"
+    assert bnb["cost_source_quality"] == "public_proxy"
     assert bnb["cost_model_version"] == "cost_v2"
     assert bnb["cost_gate_verified"] is True
     assert bnb["would_block_by_cost"] is False
@@ -120,11 +123,13 @@ def test_candidate_snapshot_builds_symbol_rows_and_stable_ids(tmp_path: Path) ->
     assert sol["no_signal_reason"] is None
     assert sol["final_decision"] == "blocked"
     assert sol["f4_volume_expansion"] == 0.4
-    assert sol["cost_source"] == "cost_not_requested_no_order"
+    assert sol["cost_source"] == "local_estimate"
+    assert sol["cost_source_quality"] == "local_estimate"
     assert sol["cost_bps"] == 30.0
     assert sol["selected_total_cost_bps"] == 30.0
     assert sol["required_edge_bps"] == 45.0
     assert sol["expected_edge_bps"] == (0.83 - 0.18) / 0.003
+    assert sol["expected_edge_source"] == "score_proxy"
     assert sol["cost_gate_verified"] is False
     assert sol["would_block_by_cost"] is False
     assert sol["cost_reason"] == "cost_not_requested_no_order"
@@ -184,13 +189,115 @@ def test_candidate_snapshot_uses_quant_lab_cost_estimates_for_blocked_candidate(
     btc = rows[0]
     assert btc["final_decision"] == "blocked"
     assert btc["cost_source"] == "mixed_actual_proxy"
+    assert btc["cost_source_quality"] == "mixed_actual_proxy"
     assert btc["cost_bps"] == 18.5
     assert btc["selected_total_cost_bps"] == 17.0
     assert btc["cost_model_version"] == "cost_v2"
     assert btc["expected_edge_bps"] == 40.0
+    assert btc["expected_edge_source"] == "quant_lab.expected_edge_bps"
     assert btc["required_edge_bps"] == 27.75
     assert btc["cost_gate_verified"] is True
     assert btc["would_block_by_cost"] is False
+
+
+def test_blocked_candidate_uses_recent_quant_lab_cached_cost() -> None:
+    audit = SimpleNamespace(
+        top_scores=[{"symbol": "BTC/USDT", "score": 0.64, "rank": 1}],
+        targets_pre_risk={"BTC/USDT": 0.10},
+        targets_post_risk={"BTC/USDT": 0.0},
+        router_decisions=[
+            {"symbol": "BTC/USDT", "action": "skip", "reason": "protect_entry_alpha6_score_too_low"}
+        ],
+        target_execution_explain=[],
+        strategy_signals=[],
+        quant_lab={},
+    )
+
+    rows = build_candidate_snapshot_rows(
+        run_id="run_cached",
+        ts_utc="2026-05-15T00:00:00Z",
+        symbols=["BTC/USDT"],
+        audit=audit,
+        local_cost_bps=30.0,
+        local_cost_model_version="v5_local_execution.cost_aware_roundtrip_cost_bps",
+        quant_lab_cost_cache={
+            "BTC/USDT": {
+                "cost_source": "quant_lab_cached",
+                "effective_total_cost_bps": 19.0,
+                "selected_total_cost_bps": 18.0,
+                "cost_model_version": "cached_symbol_cost_v1",
+                "cached_cost_estimate": True,
+            }
+        },
+    )
+
+    btc = rows[0]
+    assert btc["final_decision"] == "blocked"
+    assert btc["cost_source"] == "quant_lab_cached"
+    assert btc["cost_source_quality"] == "quant_lab_cached"
+    assert btc["cost_bps"] == 19.0
+    assert btc["selected_total_cost_bps"] == 18.0
+    assert btc["cost_model_version"] == "cached_symbol_cost_v1"
+
+
+def test_no_order_candidate_uses_public_proxy_cache_when_available() -> None:
+    audit = SimpleNamespace(
+        top_scores=[],
+        targets_pre_risk={},
+        targets_post_risk={},
+        router_decisions=[],
+        target_execution_explain=[],
+        strategy_signals=[],
+        quant_lab={},
+    )
+
+    rows = build_candidate_snapshot_rows(
+        run_id="run_public_proxy",
+        ts_utc="2026-05-15T00:00:00Z",
+        symbols=["ETH/USDT"],
+        audit=audit,
+        local_cost_bps=30.0,
+        local_cost_model_version="v5_local_execution.cost_aware_roundtrip_cost_bps",
+        quant_lab_cost_cache={
+            "ETH-USDT": {
+                "cost_source": "public_spread_proxy",
+                "effective_total_cost_bps": 12.0,
+                "selected_total_cost_bps": 11.0,
+                "cost_model_version": "public_proxy_v1",
+                "cached_cost_estimate": True,
+            }
+        },
+    )
+
+    eth = rows[0]
+    assert eth["final_decision"] == "no_order"
+    assert eth["cost_source"] == "public_spread_proxy"
+    assert eth["cost_source_quality"] == "public_proxy"
+    assert eth["cost_bps"] == 12.0
+    assert eth["selected_total_cost_bps"] == 11.0
+    assert eth["expected_edge_bps"] == 0.0
+    assert eth["expected_edge_source"] == "not_available"
+
+
+def test_quant_lab_cost_cache_loader_keeps_latest_symbol_cost(tmp_path: Path) -> None:
+    usage_path = tmp_path / "quant_lab_usage.jsonl"
+    usage_path.write_text(
+        "\n".join(
+            [
+                '{"symbol":"BTC/USDT","cost_source":"public_spread_proxy","effective_total_cost_bps":21,"cost_model_version":"old"}',
+                '{"symbol":"BTC/USDT","cost_source":"mixed_actual_proxy","effective_total_cost_bps":18,"selected_total_cost_bps":17,"cost_model_version":"new"}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    cache = load_quant_lab_cost_cache(usage_path)
+
+    btc = cache["BTC/USDT"]
+    assert btc["cost_source"] == "mixed_actual_proxy"
+    assert btc["effective_total_cost_bps"] == 18
+    assert btc["selected_total_cost_bps"] == 17
 
 
 def test_candidate_snapshot_falls_back_to_local_estimate_without_remote_cost() -> None:
@@ -218,13 +325,15 @@ def test_candidate_snapshot_falls_back_to_local_estimate_without_remote_cost() -
     )
 
     eth = rows[0]
-    assert eth["cost_source"] == "cost_not_requested_no_order"
+    assert eth["cost_source"] == "local_estimate"
+    assert eth["cost_source_quality"] == "local_estimate"
     assert eth["cost_bps"] == 30.0
     assert eth["selected_total_cost_bps"] == 30.0
     assert eth["cost_model_version"] == "v5_local_execution.cost_aware_roundtrip_cost_bps"
     assert eth["required_edge_bps"] == 45.0
     assert eth["cost_gate_verified"] is False
     assert eth["cost_reason"] == "cost_not_requested_no_order"
+    assert eth["expected_edge_source"] == "score_proxy"
 
 
 def test_write_candidate_snapshot_rewrites_old_aggregate_schema(tmp_path: Path) -> None:
@@ -301,6 +410,8 @@ def test_candidate_snapshot_covers_full_universe_with_no_order_and_blocked_rows(
     assert len(rows) == 4
     assert by_symbol["ETH/USDT"]["final_decision"] == "no_order"
     assert by_symbol["ETH/USDT"]["no_signal_reason"] == "no_signal"
+    assert by_symbol["ETH/USDT"]["expected_edge_bps"] == 0.0
+    assert by_symbol["ETH/USDT"]["expected_edge_source"] == "not_available"
     assert by_symbol["BNB/USDT"]["final_decision"] == "no_order"
     assert by_symbol["BNB/USDT"]["no_signal_reason"] == "no_signal"
     assert by_symbol["SOL/USDT"]["final_decision"] == "blocked"
@@ -308,9 +419,11 @@ def test_candidate_snapshot_covers_full_universe_with_no_order_and_blocked_rows(
     assert by_symbol["SOL/USDT"]["alpha6_score"] == 0.22
     assert by_symbol["SOL/USDT"]["strategy_candidate"] == "sol_protect_alpha6_low_exception"
     assert all(row["expected_edge_bps"] is not None for row in rows)
+    assert all(row["expected_edge_source"] for row in rows)
     assert all(row["required_edge_bps"] is not None for row in rows)
     assert all(row["cost_bps"] is not None for row in rows)
-    assert all(row["cost_source"] == "cost_not_requested_no_order" for row in rows)
+    assert all(row["cost_source"] == "local_estimate" for row in rows)
+    assert all(row["cost_source_quality"] == "local_estimate" for row in rows)
     assert all(row["cost_model_version"] for row in rows)
 
 

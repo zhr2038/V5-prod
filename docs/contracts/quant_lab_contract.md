@@ -241,7 +241,7 @@ V5 emits candidate-level research snapshots for Quant Lab alpha search. Each run
 
 Current marker:
 
-- `candidate_snapshot_schema_version = v5.candidate_snapshot.v1`
+- `candidate_snapshot_schema_version = v5.candidate_snapshot.v2`
 
 Required columns:
 
@@ -267,10 +267,12 @@ Required columns:
 - `ml_score`
 - `mean_reversion_score`
 - `expected_edge_bps`
+- `expected_edge_source`
 - `required_edge_bps`
 - `cost_bps`
 - `selected_total_cost_bps`
 - `cost_source`
+- `cost_source_quality`
 - `cost_model_version`
 - `cost_gate_verified`
 - `would_block_by_cost`
@@ -286,8 +288,10 @@ Quant Lab imports this file into `silver/v5_candidate_event`. Labels are derived
 Label outputs should include gross bps, net bps after cost, MFE bps, MAE bps, win, and
 label status. Data quality checks should report rows by run, feature completeness, label
 completeness, and cost source coverage. Candidate cost fields are populated for actual
-orders, blocked candidates, and no-order candidates: Quant Lab cost estimates are used
-when present, otherwise V5 writes a degraded `local_estimate` based on configured
-roundtrip cost assumptions. Every live run should include at least one row per current
-live universe symbol; symbols with no candidate and no order are emitted as
-`final_decision=no_order` with `no_signal_reason`.
+orders, blocked candidates, and no-order candidates: current-run Quant Lab cost
+estimates and recent symbol-level Quant Lab cost cache are used when present, otherwise
+V5 writes a degraded `local_estimate` based on configured roundtrip cost assumptions.
+Every live run should include at least one row per current live universe symbol; symbols
+with no candidate and no order are emitted as `final_decision=no_order` with
+`no_signal_reason`. If no strategy edge is observable, `expected_edge_bps=0` and
+`expected_edge_source=not_available`.

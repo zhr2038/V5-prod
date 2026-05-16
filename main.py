@@ -1669,8 +1669,16 @@ def _write_candidate_snapshot_for_run(
     from src.reporting.candidate_snapshot import (
         build_candidate_snapshot_rows,
         candidate_snapshot_cost_defaults,
+        load_quant_lab_cost_cache,
         write_candidate_snapshot,
     )
+    quant_lab_cost_cache = {}
+    try:
+        quant_lab_cost_cache = load_quant_lab_cost_cache(
+            _resolve_quant_lab_artifact_path(cfg, "quant_lab_usage_path", "quant_lab_usage")
+        )
+    except Exception:
+        quant_lab_cost_cache = {}
 
     rows = build_candidate_snapshot_rows(
         run_id=run_id,
@@ -1686,6 +1694,7 @@ def _write_candidate_snapshot_for_run(
         target_weights_after_risk=dict(getattr(audit, "targets_post_risk", {}) or {}),
         orders=orders,
         no_signal_reasons=no_signal_reasons,
+        quant_lab_cost_cache=quant_lab_cost_cache,
         **candidate_snapshot_cost_defaults(cfg),
     )
     write_candidate_snapshot(
@@ -1699,6 +1708,11 @@ def _write_candidate_snapshot_for_run(
         audit.counts["candidate_cost_source_coverage"] = (
             float(len(filled_sources)) / float(len(rows)) if rows else 0.0
         )
+        source_quality_counts: dict[str, int] = {}
+        for row in rows:
+            quality = str(row.get("cost_source_quality") or "not_observable")
+            source_quality_counts[quality] = source_quality_counts.get(quality, 0) + 1
+        audit.counts["candidate_cost_source_quality_counts"] = source_quality_counts
     except Exception:
         pass
     return len(rows)
