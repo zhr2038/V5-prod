@@ -407,6 +407,63 @@ def test_bnb_global_default_cache_falls_back_to_latest_symbol_cost_table() -> No
     assert bnb["cost_model_version"] != "global_default_v0"
 
 
+def test_blocked_bnb_candidate_uses_symbol_level_cost_over_global_candidate_meta() -> None:
+    audit = SimpleNamespace(
+        top_scores=[
+            {
+                "symbol": "BNB/USDT",
+                "score": 0.57,
+                "rank": 4,
+                "f3_vol_adj_ret": 1.5,
+                "cost_estimate": {
+                    "cost_source": "global_default",
+                    "effective_total_cost_bps": 25.0,
+                    "selected_total_cost_bps": 25.0,
+                    "cost_model_version": "global_default_v0",
+                    "fallback_level": "GLOBAL_DEFAULT",
+                },
+            }
+        ],
+        targets_pre_risk={"BNB/USDT": 0.10},
+        targets_post_risk={"BNB/USDT": 0.0},
+        router_decisions=[
+            {"symbol": "BNB/USDT", "action": "skip", "reason": "protect_entry_rsi_confirm_too_weak"}
+        ],
+        target_execution_explain=[],
+        strategy_signals=[],
+        quant_lab={},
+    )
+
+    rows = build_candidate_snapshot_rows(
+        run_id="run_bnb_blocked",
+        ts_utc="2026-05-15T00:00:00Z",
+        symbols=["BNB/USDT"],
+        audit=audit,
+        local_cost_bps=30.0,
+        local_cost_model_version="v5_local_execution.cost_aware_roundtrip_cost_bps",
+        symbol_cost_table={
+            "BNB-USDT": {
+                "cost_source": "mixed_actual_proxy",
+                "effective_total_cost_bps": 15.0,
+                "selected_total_cost_bps": 14.5,
+                "cost_model_version": "cost_bucket_daily:2026-05-14",
+                "cost_resolution_reason": "latest_symbol_cost_table_symbol_cost",
+            }
+        },
+    )
+
+    bnb = rows[0]
+    assert bnb["final_decision"] == "blocked"
+    assert bnb["strategy_candidate"] == "f3_dominant_entry"
+    assert bnb["cost_source"] == "mixed_actual_proxy"
+    assert bnb["cost_source_quality"] == "mixed_actual_proxy"
+    assert bnb["degraded_cost_model"] is False
+    assert bnb["candidate_cost_trusted"] is True
+    assert bnb["cost_resolution_reason"] == "latest_symbol_cost_table_symbol_cost"
+    assert bnb["cost_bps"] == 15.0
+    assert bnb["cost_model_version"] != "global_default_v0"
+
+
 def test_no_order_candidate_uses_public_proxy_cache_when_available() -> None:
     audit = SimpleNamespace(
         top_scores=[],
@@ -582,7 +639,7 @@ def test_candidate_snapshot_marks_global_default_cost_degraded() -> None:
     assert btc["cost_source_quality"] == "global_default_degraded"
     assert btc["degraded_cost_model"] is True
     assert btc["candidate_cost_trusted"] is False
-    assert btc["cost_resolution_reason"] == "symbol_missing_cache_missing_global_default"
+    assert btc["cost_resolution_reason"] == "cache_missing"
     assert btc["cost_reason"] == "global_default_cost"
 
 

@@ -244,16 +244,20 @@ def build_candidate_snapshot_rows(
             _first_mapping(explain.get("quant_lab"), explain.get("cost_estimate"), explain.get("cost")),
         )
         order_cost_meta = _order_quant_lab_meta(order)
-        symbol_level_cost = _preferred_cost_mapping(
+        preferred_cost = _preferred_cost_mapping(
+            order_cost_meta,
+            current_run_symbol_cost,
             cached_symbol_cost,
             table_symbol_cost,
-            current_run_symbol_cost,
             candidate_cost_meta,
         )
-        qlab = (
-            _merge_mappings(symbol_level_cost, candidate_cost_meta, order_cost_meta)
-            if order is not None
-            else symbol_level_cost
+        qlab = _merge_cost_context(
+            preferred_cost,
+            candidate_cost_meta,
+            table_symbol_cost,
+            cached_symbol_cost,
+            current_run_symbol_cost,
+            order_cost_meta,
         )
         position = position_lookup.get(symbol)
         current_position = _float_or_none(getattr(position, "qty", None))
@@ -769,7 +773,11 @@ def _cost_lookup_from_rows(
             if _missing_value(normalized_row.get("cost_source")) and _missing_value(normalized_row.get("source")):
                 normalized_row["cost_source"] = "quant_lab_cached"
         if source_label and _missing_value(normalized_row.get("cost_resolution_reason")):
-            normalized_row["cost_resolution_reason"] = f"{source_label}_symbol_cost"
+            normalized_row["cost_resolution_reason"] = (
+                _global_default_resolution_reason(normalized_row)
+                if _mapping_is_degraded_cost_model(normalized_row)
+                else f"{source_label}_symbol_cost"
+            )
         row_priority = _cost_mapping_priority(normalized_row)
         for alias in aliases:
             current_priority = priority_by_alias.get(alias, -1)
@@ -787,11 +795,10 @@ def _preferred_cost_mapping(*items: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(item, Mapping) or not _row_has_cost_fields(item):
             continue
         priority = _cost_mapping_priority(item)
-        if priority < best_priority:
+        if priority <= best_priority:
             continue
-        if priority > best_priority:
-            best_priority = priority
-            best = dict(item)
+        best_priority = priority
+        best = dict(item)
     return best
 
 
@@ -801,6 +808,23 @@ def _cost_mapping_priority(item: Mapping[str, Any]) -> int:
     if _mapping_is_degraded_cost_model(item):
         return 1
     return 2
+
+
+def _merge_cost_context(preferred_cost: Mapping[str, Any], *items: Mapping[str, Any]) -> dict[str, Any]:
+    merged = _merge_mappings(*items)
+    if preferred_cost:
+        merged = _merge_mappings(merged, preferred_cost)
+    if preferred_cost and not _mapping_is_degraded_cost_model(preferred_cost):
+        _drop_stale_degraded_cost_markers(merged, preferred_cost)
+    if preferred_cost and _mapping_is_degraded_cost_model(preferred_cost):
+        merged["cost_resolution_reason"] = _global_default_resolution_reason(merged)
+    return merged
+
+
+def _drop_stale_degraded_cost_markers(merged: dict[str, Any], preferred_cost: Mapping[str, Any]) -> None:
+    for key in ("fallback_level", "degraded_cost_model"):
+        if key not in preferred_cost:
+            merged.pop(key, None)
 
 
 def _read_symbol_cost_rows(path: Path, *, max_rows: int) -> list[dict[str, Any]]:
@@ -1040,14 +1064,14 @@ def _cost_resolution_reason(
     degraded_cost_model: bool,
     absence_reason: str,
 ) -> str:
+    if degraded_cost_model:
+        return _global_default_resolution_reason(qlab)
     explicit = _first(
         _nested_get(qlab, ("cost_resolution_reason",)),
         _nested_get(qlab, ("resolution_reason",)),
     )
     if explicit:
         return str(explicit)
-    if degraded_cost_model:
-        return _global_default_resolution_reason(qlab)
     if used_local_cost:
         return absence_reason
     source = str(cost_source or "").strip().lower()
@@ -1061,6 +1085,13 @@ def _cost_resolution_reason(
 
 
 def _global_default_resolution_reason(qlab: Mapping[str, Any]) -> str:
+    explicit = str(
+        _nested_get(qlab, ("cost_resolution_reason",))
+        or _nested_get(qlab, ("resolution_reason",))
+        or ""
+    ).strip()
+    if explicit in {"symbol_missing", "cache_missing", "service_unavailable"}:
+        return explicit
     service_fields = (
         _nested_get(qlab, ("error_type",)),
         _nested_get(qlab, ("error_message_short",)),
@@ -1069,8 +1100,22 @@ def _global_default_resolution_reason(qlab: Mapping[str, Any]) -> str:
     )
     success = _first_bool(_nested_get(qlab, ("success",)))
     if success is False or any(not _missing_value(value) for value in service_fields):
-        return "cost_service_unavailable_global_default"
-    return "symbol_missing_cache_missing_global_default"
+        return "service_unavailable"
+    reason_text = " ".join(
+        str(value or "").strip().lower()
+        for value in (
+            _nested_get(qlab, ("fallback_reason",)),
+            _nested_get(qlab, ("reason",)),
+            _nested_get(qlab, ("diagnosis",)),
+            _nested_get(qlab, ("warning",)),
+        )
+        if not _missing_value(value)
+    )
+    if "service" in reason_text or "timeout" in reason_text or "unavailable" in reason_text:
+        return "service_unavailable"
+    if "symbol" in reason_text and "missing" in reason_text:
+        return "symbol_missing"
+    return "cache_missing"
 
 
 def _cost_absence_reason(*, order: Any, final_decision: str) -> str:
