@@ -273,6 +273,7 @@ Required columns:
 - `selected_total_cost_bps`
 - `cost_source`
 - `cost_source_quality`
+- `degraded_cost_model`
 - `cost_model_version`
 - `cost_gate_verified`
 - `would_block_by_cost`
@@ -288,9 +289,14 @@ Quant Lab imports this file into `silver/v5_candidate_event`. Labels are derived
 Label outputs should include gross bps, net bps after cost, MFE bps, MAE bps, win, and
 label status. Data quality checks should report rows by run, feature completeness, label
 completeness, and cost source coverage. Candidate cost fields are populated for actual
-orders, blocked candidates, and no-order candidates: current-run Quant Lab cost
-estimates and recent symbol-level Quant Lab cost cache are used when present, otherwise
-V5 writes a degraded `local_estimate` based on configured roundtrip cost assumptions.
+orders, blocked candidates, and no-order candidates. Current-run/order cost
+metadata remains authoritative; when that is absent, V5 first uses recent
+Quant Lab cost cache, then a local latest symbol cost table when present, and
+only falls back to configured local roundtrip assumptions when no symbol-level
+estimate is available. Any
+`global_default` source, `GLOBAL_DEFAULT` fallback level, or `global_default_v0`
+model version is marked with `degraded_cost_model=true` and
+`cost_source_quality=global_default_degraded`.
 Every live run should include at least one row per current live universe symbol; symbols
 with no candidate and no order are emitted as `final_decision=no_order` with
 `no_signal_reason`. If no strategy edge is observable, `expected_edge_bps=0` and

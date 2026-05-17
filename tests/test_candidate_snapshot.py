@@ -9,6 +9,7 @@ from src.reporting.candidate_snapshot import (
     CANDIDATE_SNAPSHOT_FIELDS,
     build_candidate_snapshot_rows,
     candidate_id_for,
+    load_latest_symbol_cost_table,
     load_quant_lab_cost_cache,
     write_candidate_snapshot,
 )
@@ -240,6 +241,68 @@ def test_blocked_candidate_uses_recent_quant_lab_cached_cost() -> None:
     assert btc["cost_model_version"] == "cached_symbol_cost_v1"
 
 
+def test_blocked_btc_sol_bnb_candidates_use_cached_symbol_costs() -> None:
+    audit = SimpleNamespace(
+        top_scores=[
+            {"symbol": "BTC/USDT", "score": 0.64, "rank": 1},
+            {"symbol": "SOL/USDT", "score": 0.62, "rank": 2},
+            {"symbol": "BNB/USDT", "score": 0.59, "rank": 3},
+        ],
+        targets_pre_risk={"BTC/USDT": 0.10, "SOL/USDT": 0.10, "BNB/USDT": 0.10},
+        targets_post_risk={"BTC/USDT": 0.0, "SOL/USDT": 0.0, "BNB/USDT": 0.0},
+        router_decisions=[
+            {"symbol": "BTC/USDT", "action": "skip", "reason": "protect_entry_alpha6_score_too_low"},
+            {"symbol": "SOL/USDT", "action": "skip", "reason": "protect_entry_rsi_confirm_too_weak"},
+            {"symbol": "BNB/USDT", "action": "skip", "reason": "protect_negative_expectancy_short_cycle_block"},
+        ],
+        target_execution_explain=[],
+        strategy_signals=[],
+        quant_lab={},
+    )
+
+    rows = build_candidate_snapshot_rows(
+        run_id="run_cached_multi",
+        ts_utc="2026-05-15T00:00:00Z",
+        symbols=["BTC/USDT", "SOL/USDT", "BNB/USDT"],
+        audit=audit,
+        local_cost_bps=30.0,
+        local_cost_model_version="v5_local_execution.cost_aware_roundtrip_cost_bps",
+        quant_lab_cost_cache={
+            "BTC/USDT": {
+                "cost_source": "quant_lab_cached",
+                "effective_total_cost_bps": 18.0,
+                "selected_total_cost_bps": 17.5,
+                "cost_model_version": "cached_symbol_cost_v1",
+                "cached_cost_estimate": True,
+            },
+            "SOL/USDT": {
+                "cost_source": "mixed_actual_proxy",
+                "effective_total_cost_bps": 24.0,
+                "selected_total_cost_bps": 23.0,
+                "cost_model_version": "mixed_actual_proxy_v1",
+                "cached_cost_estimate": True,
+            },
+            "BNB-USDT": {
+                "cost_source": "public_spread_proxy",
+                "effective_total_cost_bps": 21.0,
+                "selected_total_cost_bps": 20.0,
+                "cost_model_version": "public_proxy_v1",
+                "cached_cost_estimate": True,
+            },
+        },
+    )
+
+    by_symbol = {row["symbol"]: row for row in rows}
+    assert by_symbol["BTC/USDT"]["cost_source"] == "quant_lab_cached"
+    assert by_symbol["SOL/USDT"]["cost_source"] == "mixed_actual_proxy"
+    assert by_symbol["BNB/USDT"]["cost_source"] == "public_spread_proxy"
+    assert by_symbol["BTC/USDT"]["cost_source_quality"] == "quant_lab_cached"
+    assert by_symbol["SOL/USDT"]["cost_source_quality"] == "mixed_actual_proxy"
+    assert by_symbol["BNB/USDT"]["cost_source_quality"] == "public_proxy"
+    assert {row["cost_bps"] for row in rows} == {18.0, 24.0, 21.0}
+    assert {row["cost_bps"] for row in rows} != {30.0}
+
+
 def test_no_order_candidate_uses_public_proxy_cache_when_available() -> None:
     audit = SimpleNamespace(
         top_scores=[],
@@ -279,6 +342,43 @@ def test_no_order_candidate_uses_public_proxy_cache_when_available() -> None:
     assert eth["expected_edge_source"] == "not_available"
 
 
+def test_no_order_candidate_uses_latest_symbol_cost_table_when_cache_missing() -> None:
+    audit = SimpleNamespace(
+        top_scores=[],
+        targets_pre_risk={},
+        targets_post_risk={},
+        router_decisions=[],
+        target_execution_explain=[],
+        strategy_signals=[],
+        quant_lab={},
+    )
+
+    rows = build_candidate_snapshot_rows(
+        run_id="run_symbol_table",
+        ts_utc="2026-05-15T00:00:00Z",
+        symbols=["ETH/USDT"],
+        audit=audit,
+        local_cost_bps=30.0,
+        local_cost_model_version="v5_local_execution.cost_aware_roundtrip_cost_bps",
+        symbol_cost_table={
+            "ETH-USDT": {
+                "cost_source": "public_spread_proxy",
+                "effective_total_cost_bps": 13.0,
+                "selected_total_cost_bps": 12.5,
+                "cost_model_version": "latest_symbol_public_proxy_v1",
+            }
+        },
+    )
+
+    eth = rows[0]
+    assert eth["final_decision"] == "no_order"
+    assert eth["cost_source"] == "public_spread_proxy"
+    assert eth["cost_source_quality"] == "public_proxy"
+    assert eth["cost_bps"] == 13.0
+    assert eth["selected_total_cost_bps"] == 12.5
+    assert eth["cost_model_version"] == "latest_symbol_public_proxy_v1"
+
+
 def test_quant_lab_cost_cache_loader_keeps_latest_symbol_cost(tmp_path: Path) -> None:
     usage_path = tmp_path / "quant_lab_usage.jsonl"
     usage_path.write_text(
@@ -298,6 +398,65 @@ def test_quant_lab_cost_cache_loader_keeps_latest_symbol_cost(tmp_path: Path) ->
     assert btc["cost_source"] == "mixed_actual_proxy"
     assert btc["effective_total_cost_bps"] == 18
     assert btc["selected_total_cost_bps"] == 17
+
+
+def test_latest_symbol_cost_table_loader_reads_csv_and_keeps_latest(tmp_path: Path) -> None:
+    table_path = tmp_path / "latest_symbol_costs.csv"
+    table_path.write_text(
+        "\n".join(
+            [
+                "symbol,cost_source,effective_total_cost_bps,selected_total_cost_bps,cost_model_version",
+                "SOL/USDT,public_spread_proxy,26,25,old",
+                "SOL/USDT,mixed_actual_proxy,22,21,new",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    table = load_latest_symbol_cost_table(table_path)
+
+    sol = table["SOL/USDT"]
+    assert sol["cost_source"] == "mixed_actual_proxy"
+    assert sol["effective_total_cost_bps"] == "22"
+    assert sol["selected_total_cost_bps"] == "21"
+    assert sol["cost_model_version"] == "new"
+
+
+def test_candidate_snapshot_marks_global_default_cost_degraded() -> None:
+    audit = SimpleNamespace(
+        top_scores=[{"symbol": "BTC/USDT", "score": 0.64, "rank": 1}],
+        targets_pre_risk={"BTC/USDT": 0.10},
+        targets_post_risk={"BTC/USDT": 0.0},
+        router_decisions=[{"symbol": "BTC/USDT", "action": "skip", "reason": "protect_entry_block"}],
+        target_execution_explain=[],
+        strategy_signals=[],
+        quant_lab={},
+    )
+
+    rows = build_candidate_snapshot_rows(
+        run_id="run_global_default",
+        ts_utc="2026-05-15T00:00:00Z",
+        symbols=["BTC/USDT"],
+        audit=audit,
+        local_cost_bps=30.0,
+        local_cost_model_version="v5_local_execution.cost_aware_roundtrip_cost_bps",
+        quant_lab_cost_cache={
+            "BTC/USDT": {
+                "cost_source": "global_default",
+                "effective_total_cost_bps": 30.0,
+                "selected_total_cost_bps": 30.0,
+                "cost_model_version": "global_default_v0",
+                "cached_cost_estimate": True,
+            }
+        },
+    )
+
+    btc = rows[0]
+    assert btc["cost_source"] == "global_default"
+    assert btc["cost_source_quality"] == "global_default_degraded"
+    assert btc["degraded_cost_model"] is True
+    assert btc["cost_reason"] == "global_default_cost"
 
 
 def test_candidate_snapshot_falls_back_to_local_estimate_without_remote_cost() -> None:

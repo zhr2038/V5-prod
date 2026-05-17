@@ -1669,10 +1669,19 @@ def _write_candidate_snapshot_for_run(
     from src.reporting.candidate_snapshot import (
         build_candidate_snapshot_rows,
         candidate_snapshot_cost_defaults,
+        candidate_snapshot_symbol_cost_table_paths,
+        load_latest_symbol_cost_table,
         load_quant_lab_cost_cache,
         write_candidate_snapshot,
     )
+    symbol_cost_table = {}
     quant_lab_cost_cache = {}
+    try:
+        symbol_cost_table = load_latest_symbol_cost_table(
+            candidate_snapshot_symbol_cost_table_paths(runtime_reports_dir)
+        )
+    except Exception:
+        symbol_cost_table = {}
     try:
         quant_lab_cost_cache = load_quant_lab_cost_cache(
             _resolve_quant_lab_artifact_path(cfg, "quant_lab_usage_path", "quant_lab_usage")
@@ -1694,6 +1703,7 @@ def _write_candidate_snapshot_for_run(
         target_weights_after_risk=dict(getattr(audit, "targets_post_risk", {}) or {}),
         orders=orders,
         no_signal_reasons=no_signal_reasons,
+        symbol_cost_table=symbol_cost_table,
         quant_lab_cost_cache=quant_lab_cost_cache,
         **candidate_snapshot_cost_defaults(cfg),
     )

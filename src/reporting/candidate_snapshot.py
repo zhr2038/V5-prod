@@ -51,6 +51,7 @@ CANDIDATE_SNAPSHOT_FIELDS = (
     "selected_total_cost_bps",
     "cost_source",
     "cost_source_quality",
+    "degraded_cost_model",
     "cost_model_version",
     "cost_gate_verified",
     "would_block_by_cost",
@@ -60,6 +61,22 @@ CANDIDATE_SNAPSHOT_FIELDS = (
     "block_reason",
     "no_signal_reason",
     "strategy_candidate",
+)
+
+DEFAULT_SYMBOL_COST_TABLE_FILENAMES = (
+    "summaries/quant_lab_cost_usage.csv",
+    "quant_lab_cost_usage.csv",
+    "symbol_cost_table.csv",
+    "quant_lab_symbol_costs.csv",
+    "quant_lab_latest_symbol_costs.csv",
+    "latest_symbol_cost_table.csv",
+    "latest_symbol_costs.csv",
+    "symbol_cost_table.jsonl",
+    "quant_lab_symbol_costs.jsonl",
+    "latest_symbol_costs.jsonl",
+    "symbol_cost_table.json",
+    "quant_lab_symbol_costs.json",
+    "latest_symbol_costs.json",
 )
 
 
@@ -127,6 +144,31 @@ def load_quant_lab_cost_cache(path: str | Path | None, *, max_rows: int = 5000) 
     return _cost_lookup_from_rows(rows, force_cached=True)
 
 
+def candidate_snapshot_symbol_cost_table_paths(reports_dir: str | Path | None) -> list[Path]:
+    if reports_dir in (None, ""):
+        return []
+    root = Path(reports_dir)
+    return [root / name for name in DEFAULT_SYMBOL_COST_TABLE_FILENAMES]
+
+
+def load_latest_symbol_cost_table(
+    paths: str | Path | Iterable[str | Path] | None,
+    *,
+    max_rows_per_file: int = 5000,
+) -> dict[str, dict[str, Any]]:
+    if paths in (None, ""):
+        return {}
+    if isinstance(paths, (str, Path)):
+        candidate_paths = [Path(paths)]
+    else:
+        candidate_paths = [Path(path) for path in paths or []]
+
+    rows: list[dict[str, Any]] = []
+    for path in candidate_paths:
+        rows.extend(_read_symbol_cost_rows(path, max_rows=max_rows_per_file))
+    return _cost_lookup_from_rows(rows, force_cached=True)
+
+
 def build_candidate_snapshot_rows(
     *,
     run_id: str,
@@ -149,6 +191,7 @@ def build_candidate_snapshot_rows(
     score_proxy_floor: Any = None,
     score_per_bps: Any = None,
     no_signal_reasons: Mapping[str, Any] | None = None,
+    symbol_cost_table: Mapping[str, Mapping[str, Any]] | None = None,
     quant_lab_cost_cache: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     prices = dict(prices or {})
@@ -161,6 +204,7 @@ def build_candidate_snapshot_rows(
     router_decisions = _router_decisions_by_symbol(getattr(audit, "router_decisions", []) or [])
     strategy_lookup = _strategy_signal_lookup(getattr(audit, "strategy_signals", []) or [])
     quant_lab_costs = _quant_lab_cost_lookup(getattr(audit, "quant_lab", {}) or {})
+    symbol_cost_table = dict(symbol_cost_table or {})
     quant_lab_cost_cache = dict(quant_lab_cost_cache or {})
     no_signal_reasons = dict(no_signal_reasons or {})
     order_lookup = _orders_by_symbol(orders)
@@ -191,6 +235,7 @@ def build_candidate_snapshot_rows(
         mean_reversion = strategy_signals.get("MeanReversion", {})
         order = order_lookup.get(symbol)
         qlab = _merge_mappings(
+            _lookup_symbol_mapping(symbol_cost_table, symbol),
             _lookup_symbol_mapping(quant_lab_cost_cache, symbol),
             _lookup_symbol_mapping(quant_lab_costs, symbol),
             _first_mapping(top.get("quant_lab"), top.get("cost_estimate"), top.get("cost")),
@@ -342,6 +387,7 @@ def build_candidate_snapshot_rows(
         )
         if not cost_model_version and used_local_cost:
             cost_model_version = local_cost_model_version or "v5_local_cost_estimate"
+        degraded_cost_model = _is_degraded_cost_model(cost_source, qlab=qlab, cost_model_version=cost_model_version)
         cost_gate_verified = _first_bool(
             _nested_get(qlab, ("cost_gate_verified",)),
             _nested_get(qlab, ("cost_gate_passed",)),
@@ -371,6 +417,8 @@ def build_candidate_snapshot_rows(
                 if used_local_cost
                 else "quant_lab_cost_estimate"
             )
+        if degraded_cost_model:
+            cost_reason = "global_default_cost"
         no_signal_reason = _no_signal_reason(
             symbol=symbol,
             final_decision=final_decision,
@@ -418,6 +466,7 @@ def build_candidate_snapshot_rows(
             "selected_total_cost_bps": selected_total_cost_bps,
             "cost_source": cost_source,
             "cost_source_quality": cost_source_quality,
+            "degraded_cost_model": bool(degraded_cost_model),
             "cost_model_version": cost_model_version,
             "cost_gate_verified": bool(cost_gate_verified),
             "would_block_by_cost": bool(would_block_by_cost),
@@ -534,6 +583,7 @@ def _backfill_legacy_cost_fields(
     out["expected_edge_bps"] = _first_float(out.get("expected_edge_bps"), 0.0)
     out["expected_edge_source"] = _first(out.get("expected_edge_source"), "not_available")
     out["cost_source_quality"] = _first(out.get("cost_source_quality"), "local_estimate")
+    out["degraded_cost_model"] = _first(out.get("degraded_cost_model"), False)
     out["cost_gate_verified"] = False
     out["would_block_by_cost"] = False
     out["cost_reason"] = _first(out.get("cost_reason"), "legacy_candidate_snapshot_schema_backfilled_local_estimate")
@@ -687,6 +737,66 @@ def _cost_lookup_from_rows(rows: Iterable[Mapping[str, Any]], *, force_cached: b
     return out
 
 
+def _read_symbol_cost_rows(path: Path, *, max_rows: int) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".csv":
+            with path.open("r", encoding="utf-8", newline="") as fh:
+                rows = [dict(row) for row in csv.DictReader(fh) if row]
+            return [row for row in rows[-max_rows:] if _row_has_cost_fields(row)]
+        if suffix == ".jsonl":
+            with path.open("r", encoding="utf-8") as fh:
+                lines = fh.readlines()
+            rows: list[dict[str, Any]] = []
+            for line in lines[-max_rows:]:
+                text = str(line or "").strip()
+                if not text:
+                    continue
+                try:
+                    obj = json.loads(text)
+                except Exception:
+                    continue
+                rows.extend(_extract_symbol_cost_rows(obj))
+            return [row for row in rows[-max_rows:] if _row_has_cost_fields(row)]
+        if suffix == ".json":
+            with path.open("r", encoding="utf-8") as fh:
+                obj = json.load(fh)
+            rows = _extract_symbol_cost_rows(obj)
+            return [row for row in rows[-max_rows:] if _row_has_cost_fields(row)]
+    except Exception:
+        return []
+    return []
+
+
+def _extract_symbol_cost_rows(obj: Any) -> list[dict[str, Any]]:
+    if isinstance(obj, list):
+        return [dict(row) for row in obj if isinstance(row, Mapping)]
+    if not isinstance(obj, Mapping):
+        return []
+    if _row_has_cost_fields(obj) and any(obj.get(key) not in (None, "") for key in ("symbol", "request_symbol", "normalized_symbol", "response_symbol")):
+        return [dict(obj)]
+    for key in ("rows", "data", "costs", "symbols", "symbol_costs", "latest_symbol_costs"):
+        value = obj.get(key)
+        if isinstance(value, list):
+            return [dict(row) for row in value if isinstance(row, Mapping)]
+        if isinstance(value, Mapping):
+            return _symbol_mapping_cost_rows(value)
+    return _symbol_mapping_cost_rows(obj)
+
+
+def _symbol_mapping_cost_rows(rows_by_symbol: Mapping[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for symbol, value in rows_by_symbol.items():
+        if not isinstance(value, Mapping):
+            continue
+        row = dict(value)
+        row.setdefault("symbol", symbol)
+        rows.append(row)
+    return rows
+
+
 def _row_has_cost_fields(row: Mapping[str, Any]) -> bool:
     return _mapping_has_any(
         row,
@@ -796,6 +906,12 @@ def _normalized_cost_source(
 
 def _cost_source_quality(cost_source: Any, *, qlab: Mapping[str, Any], used_local_cost: bool) -> str:
     source = str(cost_source or "").strip().lower()
+    if _is_degraded_cost_model(
+        cost_source,
+        qlab=qlab,
+        cost_model_version=_first(_nested_get(qlab, ("cost_model_version",)), _nested_get(qlab, ("cost_contract_version",))),
+    ):
+        return "global_default_degraded"
     if used_local_cost or source == "local_estimate":
         return "local_estimate"
     if source == "mixed_actual_proxy":
@@ -809,6 +925,18 @@ def _cost_source_quality(cost_source: Any, *, qlab: Mapping[str, Any], used_loca
     if source:
         return "quant_lab_symbol_estimate"
     return "local_estimate"
+
+
+def _is_degraded_cost_model(cost_source: Any, *, qlab: Mapping[str, Any], cost_model_version: Any) -> bool:
+    source = str(cost_source or _nested_get(qlab, ("source",)) or _nested_get(qlab, ("cost_source",)) or "").strip().lower()
+    fallback_level = str(_nested_get(qlab, ("fallback_level",)) or "").strip().upper()
+    version = str(cost_model_version or "").strip().lower()
+    return bool(
+        _first_bool(_nested_get(qlab, ("degraded_cost_model",)))
+        or source == "global_default"
+        or fallback_level == "GLOBAL_DEFAULT"
+        or version == "global_default_v0"
+    )
 
 
 def _cost_absence_reason(*, order: Any, final_decision: str) -> str:
