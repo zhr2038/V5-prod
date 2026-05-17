@@ -1640,6 +1640,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     high_score_blocked_rows = []
     market_impulse_selection_shadow_rows = []
     factor_contribution_rows = []
+    f3_dominant_swing_guard_cases = []
+    f3_dominant_swing_guard_outcomes = []
     quant_lab_compliance_rows = []
     quant_lab_permission_audit_rows = []
     quant_lab_mode_audit_rows = []
@@ -2109,6 +2111,58 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             router_rows.append(row)
 
             router_intent = normalize_trade_intent(item)
+            entry_reason_value = first_observed(
+                item.get("entry_reason"),
+                item.get("entry_type"),
+                item.get("source_reason"),
+                not_obs,
+            )
+            dominant_factor_value = flatten_value(first_observed(item.get("dominant_factor"), not_obs))
+            swing_f3_blocked_value = bool_observed(item.get("swing_f3_dominant_blocked"))
+            if (
+                action == "create"
+                and router_intent == "OPEN_LONG"
+                and entry_reason_value == "normal_entry"
+                and (dominant_factor_value == "f3_vol_adj_ret" or swing_f3_blocked_value == "true")
+            ):
+                f3_dominant_swing_guard_cases.append({
+                    "ts_utc": audit_ts,
+                    "run_id": run_id,
+                    "symbol": symbol,
+                    "action": action,
+                    "side": flatten_value(item.get("side")),
+                    "intent": router_intent,
+                    "reason": reason,
+                    "router_reason": reason,
+                    "entry_reason": entry_reason_value,
+                    "dominant_factor": dominant_factor_value,
+                    "dominant_factor_contribution_pct": flatten_value(first_observed(
+                        item.get("dominant_factor_contribution_pct"),
+                        item.get("contribution_pct"),
+                        not_obs,
+                    )),
+                    "swing_f3_dominant_blocked": swing_f3_blocked_value,
+                    "swing_hold_position": bool_observed(item.get("swing_hold_position")),
+                    "f4_volume_expansion": flatten_value(first_observed(
+                        item.get("f4_volume_expansion"),
+                        item.get("f4"),
+                        not_obs,
+                    )),
+                    "f5_rsi_trend_confirm": flatten_value(first_observed(
+                        item.get("f5_rsi_trend_confirm"),
+                        item.get("f5"),
+                        not_obs,
+                    )),
+                    "swing_hold_block_reason": flatten_value(first_observed(
+                        item.get("swing_hold_block_reason"),
+                        item.get("swing_audit_reason"),
+                        not_obs,
+                    )),
+                    "factor_contribution_source": flatten_value(first_observed(
+                        item.get("factor_contribution_source"),
+                        not_obs,
+                    )),
+                })
             if action == "create" and router_intent in {"OPEN_LONG", "CLOSE_LONG"}:
                 trade_reason = router_trade_reason(item, router_intent)
                 router_trade_decisions[(run_id, symbol, router_intent)].append({
@@ -4669,6 +4723,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         for horizon in label_horizons:
             row[f"forward_{horizon}h_net_bps"] = factor_forward_value(row, horizon)
 
+    f3_dominant_swing_guard_outcomes = [dict(row) for row in f3_dominant_swing_guard_cases]
+    for row in f3_dominant_swing_guard_outcomes:
+        for horizon in label_horizons:
+            row[f"forward_{horizon}h_net_bps"] = factor_forward_value(row, horizon)
+
     def aggregate_factor_contribution(rows):
         grouped = defaultdict(list)
         for row in rows:
@@ -4701,6 +4760,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     f3_dominant_avg_12h_net_bps = as_float(f3_dominant_row.get("avg_12h_net_bps")) if f3_dominant_row else None
     f3_dominant_avg_24h_net_bps = as_float(f3_dominant_row.get("avg_24h_net_bps")) if f3_dominant_row else None
     f3_dominant_win_rate_24h = as_float(f3_dominant_row.get("win_rate_24h")) if f3_dominant_row else None
+    f3_dominant_swing_guard_candidate_count = len(f3_dominant_swing_guard_cases)
+    f3_dominant_swing_guard_blocked_count = sum(
+        1
+        for row in f3_dominant_swing_guard_cases
+        if row.get("swing_f3_dominant_blocked") == "true"
+        or row.get("swing_hold_block_reason") == "swing_f3_dominant_not_qualified"
+    )
+    f3_dominant_swing_guard_still_swing_count = sum(
+        1
+        for row in f3_dominant_swing_guard_cases
+        if row.get("dominant_factor") == "f3_vol_adj_ret" and row.get("swing_hold_position") == "true"
+    )
     f3_dominant_negative_evidence = (
         f3_dominant_count >= 20
         and f3_dominant_avg_24h_net_bps is not None
@@ -6950,6 +7021,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         ["dominant_factor", "count", *[f"avg_{int(h)}h_net_bps" for h in label_horizons], *[f"win_rate_{int(h)}h" for h in label_horizons]],
     )
     write_csv(
+        "summaries/f3_dominant_swing_guard_cases.csv",
+        f3_dominant_swing_guard_cases,
+        ["ts_utc", "run_id", "symbol", "action", "side", "intent", "reason", "router_reason", "entry_reason", "dominant_factor", "dominant_factor_contribution_pct", "swing_f3_dominant_blocked", "swing_hold_position", "f4_volume_expansion", "f5_rsi_trend_confirm", "swing_hold_block_reason", "factor_contribution_source"],
+    )
+    write_csv(
+        "summaries/f3_dominant_swing_guard_outcomes.csv",
+        f3_dominant_swing_guard_outcomes,
+        ["ts_utc", "run_id", "symbol", "action", "side", "intent", "reason", "router_reason", "entry_reason", "dominant_factor", "dominant_factor_contribution_pct", "swing_f3_dominant_blocked", "swing_hold_position", "f4_volume_expansion", "f5_rsi_trend_confirm", "swing_hold_block_reason", "factor_contribution_source", *[f"forward_{int(h)}h_net_bps" for h in label_horizons]],
+    )
+    write_csv(
         "summaries/high_score_blocked_targets.csv",
         high_score_blocked_rows,
         ["ts_utc", "run_id", "symbol", "final_score", "selected_rank", "target_w", "router_action", "router_reason", "high_score_block_category", "trend_score", "trend_side", "alpha6_score", "alpha6_side", "f4_volume_expansion", "f5_rsi_trend_confirm", "last_exit_reason", "last_exit_px", "highest_px_before_exit", "elapsed_hours", "required_cooldown_hours", "breakout_exception_met", "entry_px", "current_level", "regime"],
@@ -7591,6 +7672,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "f3_dominant_avg_24h_net_bps": f3_dominant_avg_24h_net_bps if f3_dominant_avg_24h_net_bps is not None else not_obs,
         "f3_dominant_win_rate_24h": f3_dominant_win_rate_24h if f3_dominant_win_rate_24h is not None else not_obs,
         "f3_dominant_negative_evidence": bool(f3_dominant_negative_evidence),
+        "f3_dominant_swing_guard_candidate_count": f3_dominant_swing_guard_candidate_count,
+        "f3_dominant_swing_guard_blocked_count": f3_dominant_swing_guard_blocked_count,
+        "f3_dominant_swing_guard_still_swing_count": f3_dominant_swing_guard_still_swing_count,
         "probe_rows": len(probe_rows),
         "probe_lifecycle_rows": len(lifecycle_rows),
         "dust_anti_chase_rows": len(dust_rows),
@@ -8198,12 +8282,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "",
         "## F3-dominant 风险检查",
         f"- f3_dominant_count: {f3_dominant_count}",
+        f"- f3_dominant_swing_guard_candidate_count: {f3_dominant_swing_guard_candidate_count}",
+        f"- f3_dominant_swing_guard_blocked_count: {f3_dominant_swing_guard_blocked_count}",
+        f"- f3_dominant_still_marked_swing: {'yes' if f3_dominant_swing_guard_still_swing_count else 'no'} ({f3_dominant_swing_guard_still_swing_count})",
         f"- avg_4h_net_bps: {fmt_num(f3_dominant_avg_4h_net_bps, 6)}",
         f"- avg_8h_net_bps: {fmt_num(f3_dominant_avg_8h_net_bps, 6)}",
         f"- avg_12h_net_bps: {fmt_num(f3_dominant_avg_12h_net_bps, 6)}",
         f"- avg_24h_net_bps: {fmt_num(f3_dominant_avg_24h_net_bps, 6)}",
         f"- win_rate_24h: {fmt_num(f3_dominant_win_rate_24h, 6)}",
         f"- f3_dominant_negative_evidence: {'true' if f3_dominant_negative_evidence else 'false'}",
+        f"- output: summaries/f3_dominant_swing_guard_cases.csv and summaries/f3_dominant_swing_guard_outcomes.csv",
         f"- action: diagnostic_only_monitor_no_trade_block",
         "",
         "## 高分但未成交目标",

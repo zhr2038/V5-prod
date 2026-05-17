@@ -2547,6 +2547,22 @@ def fixture_factor_contribution_root(root):
                 "symbol": "SOL/USDT",
                 "action": "skip",
                 "reason": "protect_entry_trend_only",
+            },
+            {
+                "symbol": "BNB/USDT",
+                "action": "create",
+                "reason": "ok",
+                "side": "buy",
+                "intent": "OPEN_LONG",
+                "entry_reason": "normal_entry",
+                "dominant_factor": "f3_vol_adj_ret",
+                "dominant_factor_contribution_pct": 0.70,
+                "swing_f3_dominant_blocked": True,
+                "swing_hold_position": False,
+                "f4_volume_expansion": 0.10,
+                "f5_rsi_trend_confirm": 0.20,
+                "swing_hold_block_reason": "swing_f3_dominant_not_qualified",
+                "factor_contribution_source": "signal.factor_contribution",
             }
         ],
         "strategy_signals": [
@@ -3583,6 +3599,8 @@ def main():
             with tarfile.open(bundle, "r:gz") as tf:
                 rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/factor_contribution_audit.csv")).read().decode().splitlines()))
                 by_factor = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/factor_contribution_outcomes_by_factor.csv")).read().decode().splitlines()))
+                guard_cases = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/f3_dominant_swing_guard_cases.csv")).read().decode().splitlines()))
+                guard_outcomes = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/f3_dominant_swing_guard_outcomes.csv")).read().decode().splitlines()))
                 issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
@@ -3598,13 +3616,28 @@ def main():
             f3 = next(row for row in by_factor if row["dominant_factor"] == "f3_vol_adj_ret")
             assert float(f3["avg_24h_net_bps"]) == -40.0, by_factor
             assert f3["win_rate_24h"] == "0.0", by_factor
+            assert len(guard_cases) == 1, guard_cases
+            guard = guard_cases[0]
+            assert guard["symbol"] == "BNB/USDT", guard
+            assert guard["dominant_factor"] == "f3_vol_adj_ret", guard
+            assert guard["dominant_factor_contribution_pct"] == "0.7", guard
+            assert guard["swing_f3_dominant_blocked"] == "true", guard
+            assert guard["swing_hold_position"] == "false", guard
+            assert guard["swing_hold_block_reason"] == "swing_f3_dominant_not_qualified", guard
+            assert len(guard_outcomes) == 1, guard_outcomes
+            assert guard_outcomes[0]["forward_4h_net_bps"] == "pending", guard_outcomes
             assert window["factor_contribution_audit_rows"] == 2, window
             assert window["f3_dominant_count"] == 1, window
             assert window["f3_dominant_negative_evidence"] is False, window
+            assert window["f3_dominant_swing_guard_candidate_count"] == 1, window
+            assert window["f3_dominant_swing_guard_blocked_count"] == 1, window
+            assert window["f3_dominant_swing_guard_still_swing_count"] == 0, window
             assert not any(item.get("code") == "f3_dominant_negative_evidence" for item in issues["issues"]), issues
             assert "## Alpha6 factor contribution audit" in readme, readme
             assert "## F3-dominant 风险检查" in readme, readme
             assert "f3_dominant_count: 1" in readme, readme
+            assert "f3_dominant_swing_guard_blocked_count: 1" in readme, readme
+            assert "f3_dominant_still_marked_swing: no (0)" in readme, readme
             assert "f3_dominant_negative_evidence: false" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
@@ -3627,6 +3660,9 @@ def main():
             assert float(f3["win_rate_24h"]) < 0.3, f3
             assert window["f3_dominant_count"] == 21, window
             assert window["f3_dominant_negative_evidence"] is True, window
+            assert window["f3_dominant_swing_guard_candidate_count"] == 1, window
+            assert window["f3_dominant_swing_guard_blocked_count"] == 1, window
+            assert window["f3_dominant_swing_guard_still_swing_count"] == 0, window
             f3_issues = [
                 item for item in issues["issues"]
                 if item.get("severity") == "medium" and item.get("code") == "f3_dominant_negative_evidence"
@@ -3635,6 +3671,8 @@ def main():
             assert f3_issues[0]["evidence"]["f3_dominant_count"] == 21, f3_issues
             assert "## F3-dominant 风险检查" in readme, readme
             assert "f3_dominant_count: 21" in readme, readme
+            assert "f3_dominant_swing_guard_blocked_count: 1" in readme, readme
+            assert "f3_dominant_still_marked_swing: no (0)" in readme, readme
             assert "f3_dominant_negative_evidence: true" in readme, readme
             assert "action: diagnostic_only_monitor_no_trade_block" in readme, readme
         finally:

@@ -1126,11 +1126,15 @@ class V5Pipeline:
         return {
             "swing_hold_position": False,
             "swing_f3_dominant_blocked": True,
-            "swing_hold_block_reason": "f3_dominant_weak_confirmation",
+            "swing_hold_block_reason": "swing_f3_dominant_not_qualified",
+            "swing_audit_reason": "swing_f3_dominant_not_qualified",
             "dominant_factor": dominant_factor,
             "contribution_pct": float(contribution_pct),
+            "dominant_factor_contribution_pct": float(contribution_pct),
             "f4": None if f4_value is None else float(f4_value),
             "f5": None if f5_value is None else float(f5_value),
+            "f4_volume_expansion": None if f4_value is None else float(f4_value),
+            "f5_rsi_trend_confirm": None if f5_value is None else float(f5_value),
             "swing_f3_dominant_max_contribution_pct": float(max_pct),
             "swing_f3_dominant_require_f4_min": float(min_f4),
             "swing_f3_dominant_require_f5_min": float(min_f5),
@@ -2410,6 +2414,41 @@ class V5Pipeline:
             "f5_rsi_trend_confirm": float(f5),
             "current_level": level,
         }
+
+    def _normal_entry_swing_audit_meta(
+        self,
+        *,
+        symbol: str,
+        strategy_signal_lookup: Mapping[str, Dict[str, Dict[str, Any]]],
+        current_auto_risk_level: Optional[str],
+        factor_weights: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        alpha6_signal = (strategy_signal_lookup.get("Alpha6Factor") or {}).get(symbol)
+        values = self._protect_entry_signal_values(alpha6_signal)
+        f4_value = _float_or_none(values.get("f4_volume_expansion"))
+        f5_value = _float_or_none(values.get("f5_rsi_trend_confirm"))
+        alpha6_score = _float_or_none(values.get("alpha6_score"))
+        context = self._alpha6_factor_contribution_context(alpha6_signal, factor_weights=factor_weights)
+        dominant_factor = self._canonical_factor_name(context.get("dominant_factor"))
+        contribution_pct = self._normalized_contribution_pct(context.get("contribution_pct"))
+        meta: Dict[str, Any] = {
+            "entry_reason": "normal_entry",
+            "swing_hold_position": False,
+            "swing_f3_dominant_blocked": False,
+            "current_level": str(current_auto_risk_level or "").strip().upper(),
+            "alpha6_side": values.get("alpha6_side"),
+            "alpha6_score": None if alpha6_score is None else float(alpha6_score),
+            "f4_volume_expansion": None if f4_value is None else float(f4_value),
+            "f5_rsi_trend_confirm": None if f5_value is None else float(f5_value),
+        }
+        if dominant_factor:
+            meta["dominant_factor"] = dominant_factor
+        if contribution_pct is not None:
+            meta["dominant_factor_contribution_pct"] = float(contribution_pct)
+            meta["contribution_pct"] = float(contribution_pct)
+        if context.get("factor_contribution_source"):
+            meta["factor_contribution_source"] = context.get("factor_contribution_source")
+        return meta
 
     def _swing_position_meta(
         self,
@@ -7422,6 +7461,7 @@ class V5Pipeline:
 
             # Build order metadata after all entry guards pass.
             swing_meta: Dict[str, Any] = {}
+            swing_decision_meta: Dict[str, Any] = {}
             if side == "buy" and intent == "OPEN_LONG" and btc_probe_meta is None:
                 if protect_recovery_meta is not None:
                     swing_candidate_meta = self._protect_recovery_swing_hold_meta(
@@ -7429,7 +7469,15 @@ class V5Pipeline:
                         candidate=protect_recovery_meta,
                         now_utc=now_utc,
                     )
+                    if swing_candidate_meta is not None:
+                        swing_decision_meta = dict(swing_candidate_meta)
                 else:
+                    swing_decision_meta = self._normal_entry_swing_audit_meta(
+                        symbol=sym,
+                        strategy_signal_lookup=strategy_signal_lookup,
+                        current_auto_risk_level=current_auto_risk_level,
+                        factor_weights=getattr(alpha, "effective_alpha6_weights", None),
+                    )
                     swing_candidate_meta = self._normal_entry_swing_hold_meta(
                         symbol=sym,
                         strategy_signal_lookup=strategy_signal_lookup,
@@ -7439,6 +7487,7 @@ class V5Pipeline:
                     )
                 if swing_candidate_meta is not None:
                     swing_meta = swing_candidate_meta
+                    swing_decision_meta.update(swing_candidate_meta)
                     if audit and bool(swing_meta.get("swing_hold_position", False)):
                         audit.record_count("swing_hold_position_count", symbol=sym)
                         audit.add_note(
@@ -7587,6 +7636,30 @@ class V5Pipeline:
                                 "swing_hold_block_reason": swing_meta.get("swing_hold_block_reason"),
                             }
                         )
+                if side == "buy" and swing_decision_meta:
+                    for key in (
+                        "entry_reason",
+                        "dominant_factor",
+                        "dominant_factor_contribution_pct",
+                        "contribution_pct",
+                        "swing_f3_dominant_blocked",
+                        "swing_hold_position",
+                        "swing_hold_block_reason",
+                        "swing_audit_reason",
+                        "f4_volume_expansion",
+                        "f5_rsi_trend_confirm",
+                        "f4",
+                        "f5",
+                        "alpha6_score",
+                        "alpha6_side",
+                        "factor_contribution_source",
+                        "swing_f3_dominant_max_contribution_pct",
+                        "swing_f3_dominant_require_f4_min",
+                        "swing_f3_dominant_require_f5_min",
+                        "current_level",
+                    ):
+                        if key in swing_decision_meta:
+                            decision[key] = swing_decision_meta.get(key)
                 router_decisions.append(decision)
 
         market_impulse_probe_context = self._market_impulse_probe_context(

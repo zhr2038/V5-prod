@@ -298,12 +298,19 @@ def test_f3_dominant_weak_confirmation_does_not_mark_swing_hold(tmp_path: Path) 
     assert order.meta["swing_f3_dominant_blocked"] is True
     assert order.meta["dominant_factor"] == "f3_vol_adj_ret"
     assert order.meta["contribution_pct"] == pytest.approx(0.70)
+    assert order.meta["dominant_factor_contribution_pct"] == pytest.approx(0.70)
     assert order.meta["f4"] == pytest.approx(0.10)
     assert order.meta["f5"] == pytest.approx(0.20)
+    assert order.meta["swing_hold_block_reason"] == "swing_f3_dominant_not_qualified"
     assert audit.counts["swing_hold_position_count"] == 0
     decision = next(d for d in audit.router_decisions if d.get("action") == "create" and d.get("symbol") == "BTC/USDT")
     assert decision["swing_hold_position"] is False
     assert decision["swing_f3_dominant_blocked"] is True
+    assert decision["dominant_factor"] == "f3_vol_adj_ret"
+    assert decision["dominant_factor_contribution_pct"] == pytest.approx(0.70)
+    assert decision["f4_volume_expansion"] == pytest.approx(0.10)
+    assert decision["f5_rsi_trend_confirm"] == pytest.approx(0.20)
+    assert decision["swing_hold_block_reason"] == "swing_f3_dominant_not_qualified"
 
 
 def test_f3_dominant_strong_f4_f5_allows_swing_hold(tmp_path: Path) -> None:
@@ -343,6 +350,14 @@ def test_f3_dominant_strong_f4_f5_allows_swing_hold(tmp_path: Path) -> None:
     assert out.orders[0].meta["swing_hold_position"] is True
     assert "swing_f3_dominant_blocked" not in out.orders[0].meta
     assert audit.counts["swing_hold_position_count"] == 1
+    decision = next(d for d in audit.router_decisions if d.get("action") == "create" and d.get("symbol") == "BTC/USDT")
+    assert decision["entry_reason"] == "normal_entry"
+    assert decision["swing_hold_position"] is True
+    assert decision["swing_f3_dominant_blocked"] is False
+    assert decision["dominant_factor"] == "f3_vol_adj_ret"
+    assert decision["dominant_factor_contribution_pct"] == pytest.approx(0.70)
+    assert decision["f4_volume_expansion"] == pytest.approx(0.80)
+    assert decision["f5_rsi_trend_confirm"] == pytest.approx(0.60)
 
 
 def test_non_f3_dominant_does_not_affect_swing_hold(tmp_path: Path) -> None:
@@ -382,6 +397,12 @@ def test_non_f3_dominant_does_not_affect_swing_hold(tmp_path: Path) -> None:
     assert out.orders[0].meta["swing_hold_position"] is True
     assert "swing_f3_dominant_blocked" not in out.orders[0].meta
     assert audit.counts["swing_hold_position_count"] == 1
+    decision = next(d for d in audit.router_decisions if d.get("action") == "create" and d.get("symbol") == "BTC/USDT")
+    assert decision["entry_reason"] == "normal_entry"
+    assert decision["swing_hold_position"] is True
+    assert decision["swing_f3_dominant_blocked"] is False
+    assert decision["dominant_factor"] == "f4_volume_expansion"
+    assert decision["dominant_factor_contribution_pct"] == pytest.approx(0.70)
 
 
 def test_same_symbol_reentry_blocks_normal_swing_entry_after_profit_lock(tmp_path: Path) -> None:
