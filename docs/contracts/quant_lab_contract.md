@@ -299,7 +299,8 @@ estimate is available. Any
 `global_default` source, `GLOBAL_DEFAULT` fallback level, or `global_default_v0`
 model version is marked with `degraded_cost_model=true` and
 `cost_source_quality=global_default_degraded`; those rows also carry
-`candidate_cost_trusted=false` and `cost_resolution_reason=symbol_cost_missing_global_default`.
+`candidate_cost_trusted=false` and a `cost_resolution_reason` that explicitly
+contains `symbol_missing`, `cache_missing`, or `cost_service_unavailable`.
 Every live run should include at least one row per current live universe symbol; symbols
 with no candidate and no order are emitted as `final_decision=no_order` with
 `no_signal_reason`. If no strategy edge is observable, `expected_edge_bps=0` and

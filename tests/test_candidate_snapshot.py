@@ -582,7 +582,7 @@ def test_candidate_snapshot_marks_global_default_cost_degraded() -> None:
     assert btc["cost_source_quality"] == "global_default_degraded"
     assert btc["degraded_cost_model"] is True
     assert btc["candidate_cost_trusted"] is False
-    assert btc["cost_resolution_reason"] == "symbol_cost_missing_global_default"
+    assert btc["cost_resolution_reason"] == "symbol_missing_cache_missing_global_default"
     assert btc["cost_reason"] == "global_default_cost"
 
 

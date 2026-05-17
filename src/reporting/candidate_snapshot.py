@@ -1047,7 +1047,7 @@ def _cost_resolution_reason(
     if explicit:
         return str(explicit)
     if degraded_cost_model:
-        return "symbol_cost_missing_global_default"
+        return _global_default_resolution_reason(qlab)
     if used_local_cost:
         return absence_reason
     source = str(cost_source or "").strip().lower()
@@ -1058,6 +1058,19 @@ def _cost_resolution_reason(
     if source:
         return "quant_lab_symbol_cost"
     return absence_reason
+
+
+def _global_default_resolution_reason(qlab: Mapping[str, Any]) -> str:
+    service_fields = (
+        _nested_get(qlab, ("error_type",)),
+        _nested_get(qlab, ("error_message_short",)),
+        _nested_get(qlab, ("warning",)),
+        _nested_get(qlab, ("status_code",)),
+    )
+    success = _first_bool(_nested_get(qlab, ("success",)))
+    if success is False or any(not _missing_value(value) for value in service_fields):
+        return "cost_service_unavailable_global_default"
+    return "symbol_missing_cache_missing_global_default"
 
 
 def _cost_absence_reason(*, order: Any, final_decision: str) -> str:
