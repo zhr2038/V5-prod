@@ -7,6 +7,7 @@ import io
 import json
 import re
 import shutil
+import subprocess
 import tarfile
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -1580,6 +1581,35 @@ def _hash_source_snapshot(root: Path) -> str:
     return digest.hexdigest() if seen else "not_observable"
 
 
+def _git_info(root: Path) -> Dict[str, Any]:
+    status = _git_command(root, ["status", "--porcelain"])
+    dirty = bool(status)
+    return {
+        "git_commit": _git_command(root, ["rev-parse", "--short", "HEAD"]) or "not_observable",
+        "git_branch": _git_command(root, ["branch", "--show-current"]) or "not_observable",
+        "git_dirty": dirty,
+        "dirty_worktree": dirty,
+        "provenance_status": "git_dirty" if dirty else "git_clean",
+        "code_provenance": "degraded" if dirty else "ok",
+    }
+
+
+def _git_command(root: Path, args: list[str]) -> str:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
 def _find_nested_value(obj: Any, names: Iterable[str]) -> Any:
     if isinstance(obj, Mapping):
         for name in names:
@@ -1711,6 +1741,7 @@ def _manifest_metadata(root: Path, reports: Path, usage_rows: list[Dict[str, Any
             CONTRACT_VERSION,
         )
 
+    git = _git_info(root)
     return {
         "schema_version": SCHEMA_VERSION,
         "contract_version": str(contract_version or CONTRACT_VERSION),
@@ -1723,6 +1754,7 @@ def _manifest_metadata(root: Path, reports: Path, usage_rows: list[Dict[str, Any
         "config_hash": _hash_file(config_path),
         "strategy_version": str(strategy_version or "not_observable"),
         "source_snapshot_hash": _hash_source_snapshot(root),
+        **git,
     }
 
 
@@ -1824,6 +1856,17 @@ def export_v5_bundle(
                         for row in mismatch_rows
                         if str(row.get("high_issue")) == "true"
                     ],
+                    *(
+                        [
+                            {
+                                "code": "dirty_worktree",
+                                "severity": "medium",
+                                "detail": "V5-prod worktree is dirty; code provenance is degraded.",
+                            }
+                        ]
+                        if manifest_meta.get("git_dirty")
+                        else []
+                    ),
                 ],
                 ensure_ascii=False,
                 indent=2,

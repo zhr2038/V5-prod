@@ -351,6 +351,10 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert manifest["summary_trade_count_mismatch_high_issue_count"] == 1
         assert manifest["trade_export_schema_version"] == "v5.trade_export.v1"
         assert manifest["summary_metrics_version"] == "v5.summary_metrics.v1"
+        assert manifest["git_dirty"] is False
+        assert manifest["dirty_worktree"] is False
+        assert manifest["provenance_status"] == "git_clean"
+        assert manifest["code_provenance"] == "ok"
         assert window["fill_metrics_rows"] == 1
         assert window["candidate_snapshot_rows"] == 1
         assert window["candidate_cost_source_coverage"] == 1.0
