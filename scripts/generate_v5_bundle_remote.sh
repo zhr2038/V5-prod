@@ -129,6 +129,40 @@ CANDIDATE_SNAPSHOT_FIELDS = (
     "no_signal_reason",
     "strategy_candidate",
 )
+ORDER_LIFECYCLE_FIELDS = (
+    "schema_version",
+    "lifecycle_id",
+    "run_id",
+    "ts_utc",
+    "symbol",
+    "normalized_symbol",
+    "side",
+    "intent",
+    "order_state",
+    "decision_ts",
+    "signal_price",
+    "arrival_bid",
+    "arrival_ask",
+    "arrival_mid",
+    "spread_bps_at_decision",
+    "submit_ts",
+    "order_type",
+    "order_px",
+    "cl_ord_id",
+    "exchange_order_id",
+    "first_fill_ts",
+    "last_fill_ts",
+    "fill_px",
+    "avg_fill_px",
+    "filled_qty",
+    "fee",
+    "fee_ccy",
+    "fee_usdt",
+    "notional_usdt",
+    "requested_notional_usdt",
+    "trade_ids",
+    "fill_count",
+)
 SOURCE_SNAPSHOT_PATHS = (
     "main.py",
     "event_driven_check.py",
@@ -1660,6 +1694,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     trade_file_stats_by_run = {}
     trade_metrics_rows = []
     fill_metrics_rows = []
+    order_lifecycle_rows = []
     summary_trade_count_mismatch_rows = []
     audit_high_score_but_not_executed_count = 0
     dust_residual_position_keys = set()
@@ -2895,6 +2930,56 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                     "summary_path": str(summary_path.relative_to(OUT)) if summary_path.exists() else not_obs,
                 },
             )
+
+    def load_order_lifecycle_rows():
+        rows = []
+        seen = set()
+        paths = []
+        reports_path = OUT / "raw" / "reports" / "order_lifecycle.csv"
+        if reports_path.is_file():
+            paths.append(reports_path)
+        paths.extend(sorted((OUT / "raw" / "recent_runs").glob("*/order_lifecycle.csv")))
+        for path in paths:
+            try:
+                with path.open("r", encoding="utf-8", newline="") as fh:
+                    for row in csv.DictReader(fh):
+                        if not row:
+                            continue
+                        run_id = str(row.get("run_id") or path.parent.name or "").strip()
+                        lifecycle_id = str(row.get("lifecycle_id") or "").strip()
+                        key = lifecycle_id or "|".join([
+                            run_id,
+                            str(row.get("cl_ord_id") or ""),
+                            str(row.get("symbol") or ""),
+                            str(row.get("decision_ts") or row.get("submit_ts") or ""),
+                        ])
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        item = {field: csv_null(row.get(field, "")) for field in ORDER_LIFECYCLE_FIELDS}
+                        item["run_id"] = item.get("run_id") or run_id
+                        item["schema_version"] = item.get("schema_version") or "v5.order_lifecycle.v1"
+                        rows.append(item)
+            except Exception as exc:
+                collection_errors.append({"source": str(path), "error": f"order_lifecycle_csv: {exc!r}"})
+        return rows
+
+    order_lifecycle_rows = load_order_lifecycle_rows()
+    order_lifecycle_trade_metric_fill_count = sum(
+        as_int(first_observed(row.get("trades_counted_rows"), row.get("num_trades"), row.get("fills_count_today"))) or 0
+        for row in trade_metrics_rows
+    )
+    order_lifecycle_missing_high_issue = (
+        order_lifecycle_trade_metric_fill_count > 0
+        and len(order_lifecycle_rows) == 0
+    )
+    if order_lifecycle_missing_high_issue:
+        add_issue(
+            "high",
+            "order_lifecycle_missing_for_trades",
+            "trade_metrics has counted trades but order_lifecycle.csv is empty.",
+            {"trade_metric_fill_count": order_lifecycle_trade_metric_fill_count},
+        )
 
     raw_trade_events.sort(key=lambda event: (
         event["symbol"],
@@ -6947,6 +7032,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         ["run_id", "ts_utc", "symbol", "normalized_symbol", "side", "action", "qty", "price", "notional_usdt", "fee", "fee_ccy", "fee_usdt", "slippage_usdt", "order_id", "trade_id", "strategy_id", "position_id", "trade_export_schema_version"],
     )
     write_csv(
+        "summaries/order_lifecycle.csv",
+        order_lifecycle_rows,
+        ORDER_LIFECYCLE_FIELDS,
+    )
+    write_csv(
         "summaries/config_runtime_consumption_audit.csv",
         config_runtime_consumption_rows,
         ["config_key", "defined_in_schema", "present_in_live_prod", "present_in_effective_config", "consumed_in_runtime_code", "consumer_category", "consumer_files", "diagnosis"],
@@ -7516,6 +7606,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     else:
         ml_live_overlay_status = "not_observable"
 
+    data_quality_warnings = []
+    if provenance_meta.get("code_provenance") == "degraded":
+        data_quality_warnings.append(f"dirty_worktree: {provenance_meta.get('provenance_status', not_obs)}")
+
     window_summary = {
         "sampled_at_utc": NOW.isoformat(),
         "window_hours": 72,
@@ -7557,6 +7651,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         ),
         "trade_metrics_rows": len(trade_metrics_rows),
         "fill_metrics_rows": len(fill_metrics_rows),
+        "order_lifecycle_rows": len(order_lifecycle_rows),
+        "order_lifecycle_trade_metric_fill_count": order_lifecycle_trade_metric_fill_count,
+        "order_lifecycle_missing_high_issue": order_lifecycle_missing_high_issue,
+        "data_quality_warnings": data_quality_warnings,
         "negative_expectancy_consistency_rows": len(negative_consistency_rows),
         "negative_expectancy_mismatch_count": negative_expectancy_mismatch_count,
         "config_runtime_consumption_rows": len(config_runtime_consumption_rows),
@@ -8381,6 +8479,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         ),
         "candidate_snapshot_rows": len(candidate_snapshot_rows),
         "candidate_cost_source_coverage": candidate_cost_source_coverage_value,
+        "order_lifecycle_rows": len(order_lifecycle_rows),
+        "order_lifecycle_trade_metric_fill_count": order_lifecycle_trade_metric_fill_count,
+        "order_lifecycle_missing_high_issue": order_lifecycle_missing_high_issue,
+        "data_quality_warnings": data_quality_warnings,
     }
 
 
@@ -8731,6 +8833,12 @@ manifest = {
     ),
     "candidate_snapshot_rows": int(summary_meta.get("candidate_snapshot_rows", 0) or 0),
     "candidate_cost_source_coverage": summary_meta.get("candidate_cost_source_coverage", 0.0),
+    "order_lifecycle_rows": int(summary_meta.get("order_lifecycle_rows", 0) or 0),
+    "order_lifecycle_trade_metric_fill_count": int(
+        summary_meta.get("order_lifecycle_trade_metric_fill_count", 0) or 0
+    ),
+    "order_lifecycle_missing_high_issue": bool(summary_meta.get("order_lifecycle_missing_high_issue", False)),
+    "data_quality_warnings": summary_meta.get("data_quality_warnings", []),
     "strategy_version": provenance_meta.get("strategy_version", "not_observable"),
     "strategy_hash": provenance_meta.get("strategy_hash", "not_observable"),
     "strategy_file_count": provenance_meta.get("strategy_file_count", 0),

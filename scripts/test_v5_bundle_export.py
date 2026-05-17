@@ -2990,6 +2990,7 @@ def main():
                 report_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "reports/summary_trade_count_mismatch.csv")).read().decode().splitlines()))
                 trade_metrics = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/trade_metrics.csv")).read().decode().splitlines()))
                 fill_metrics = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/fill_metrics.csv")).read().decode().splitlines()))
+                order_lifecycle = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/order_lifecycle.csv")).read().decode().splitlines()))
                 issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
@@ -3006,18 +3007,31 @@ def main():
             assert len(fill_metrics) == 2, fill_metrics
             assert {row["normalized_symbol"] for row in fill_metrics} == {"BNB-USDT"}, fill_metrics
             assert {row["trade_export_schema_version"] for row in trade_metrics} == {"v5.trade_export.v1"}, trade_metrics
+            assert order_lifecycle == [], order_lifecycle
             summary_issues = [
                 item for item in issues["issues"]
                 if item.get("severity") == "high" and item.get("code") == "summary_trade_count_mismatch"
             ]
             assert len(summary_issues) == 2, issues
+            lifecycle_issues = [
+                item for item in issues["issues"]
+                if item.get("severity") == "high" and item.get("code") == "order_lifecycle_missing_for_trades"
+            ]
+            assert len(lifecycle_issues) == 1, issues
+            assert lifecycle_issues[0]["evidence"]["trade_metric_fill_count"] == 2, lifecycle_issues
             assert window["summary_trade_count_mismatch_count"] == 2, window
             assert window["summary_trade_count_mismatch_high_issue_count"] == 2, window
             assert window["run_summary_invalid"] is True, window
             assert window["trade_metrics_rows"] == 2, window
             assert window["fill_metrics_rows"] == 2, window
+            assert window["order_lifecycle_rows"] == 0, window
+            assert window["order_lifecycle_trade_metric_fill_count"] == 2, window
+            assert window["order_lifecycle_missing_high_issue"] is True, window
             assert manifest["run_summary_invalid"] is True, manifest
             assert manifest["summary_trade_count_mismatch_high_issue_count"] == 2, manifest
+            assert manifest["order_lifecycle_rows"] == 0, manifest
+            assert manifest["order_lifecycle_trade_metric_fill_count"] == 2, manifest
+            assert manifest["order_lifecycle_missing_high_issue"] is True, manifest
             assert manifest["trade_export_schema_version"] == "v5.trade_export.v1", manifest
             assert manifest["summary_metrics_version"] == "v5.summary_metrics.v1", manifest
             assert "## Summary trade metrics check" in readme, readme
@@ -4060,7 +4074,12 @@ def main():
             assert lifecycle == [], lifecycle
             assert window["probe_trade_net_bps"]["avg"] == "not_observable", window
             high_issues = [item for item in issues["issues"] if item.get("severity") == "high"]
-            assert high_issues == [], high_issues
+            lifecycle_issues = [
+                item for item in high_issues
+                if item.get("code") == "order_lifecycle_missing_for_trades"
+            ]
+            assert len(lifecycle_issues) == 1, high_issues
+            assert [item for item in high_issues if item.get("code") != "order_lifecycle_missing_for_trades"] == [], high_issues
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

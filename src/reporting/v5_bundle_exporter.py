@@ -664,6 +664,17 @@ def _copy_order_lifecycle_files(staging: Path, reports: Path) -> None:
         )
 
 
+def _count_trade_metric_fills(rows: Iterable[Mapping[str, Any]]) -> int:
+    total = 0
+    for row in rows:
+        total += _to_int(
+            row.get("trades_counted_rows")
+            or row.get("num_trades")
+            or row.get("fills_count_today")
+        )
+    return total
+
+
 def _copy_sol_paper_strategy_files(staging: Path, reports: Path) -> None:
     summary_specs = (
         ("paper_strategy_runs.csv", PAPER_RUN_FIELDS),
@@ -1810,9 +1821,16 @@ def export_v5_bundle(
     candidate_rows = _read_candidate_snapshot_rows(reports)
     candidate_cost_source_coverage = _candidate_cost_source_coverage(candidate_rows)
     order_lifecycle_rows = _read_order_lifecycle_rows(reports)
+    trade_metric_fill_count = _count_trade_metric_fills(trade_metrics_rows)
+    order_lifecycle_missing_for_trades = trade_metric_fill_count > 0 and not order_lifecycle_rows
     summary_high_issue_count = len([row for row in mismatch_rows if str(row.get("high_issue")) == "true"])
     run_summary_invalid = summary_high_issue_count > 0
     manifest_meta = _manifest_metadata(root, reports, usage_rows)
+    data_quality_warnings = (
+        ["dirty_worktree: V5-prod code provenance is degraded"]
+        if manifest_meta.get("git_dirty")
+        else []
+    )
 
     stamp = _utc_stamp()
     bundle_name = f"v5_live_followup_bundle_{stamp}.tar.gz"
@@ -1857,6 +1875,9 @@ def export_v5_bundle(
                 "candidate_snapshot_rows": len(candidate_rows),
                 "candidate_cost_source_coverage": candidate_cost_source_coverage,
                 "order_lifecycle_rows": len(order_lifecycle_rows),
+                "order_lifecycle_trade_metric_fill_count": trade_metric_fill_count,
+                "order_lifecycle_missing_high_issue": order_lifecycle_missing_for_trades,
+                "data_quality_warnings": data_quality_warnings,
             }
         )
         _write_text(staging / "summaries/window_summary.json", json.dumps(window_summary, ensure_ascii=False, indent=2))
@@ -1883,6 +1904,18 @@ def export_v5_bundle(
                         for row in mismatch_rows
                         if str(row.get("high_issue")) == "true"
                     ],
+                    *(
+                        [
+                            {
+                                "code": "order_lifecycle_missing_for_trades",
+                                "severity": "high",
+                                "detail": "trade_metrics has counted trades but order_lifecycle.csv is empty.",
+                                "trade_metric_fill_count": trade_metric_fill_count,
+                            }
+                        ]
+                        if order_lifecycle_missing_for_trades
+                        else []
+                    ),
                     *(
                         [
                             {
@@ -1927,8 +1960,11 @@ def export_v5_bundle(
             "candidate_cost_source_coverage": candidate_cost_source_coverage,
             "order_lifecycle_schema_version": ORDER_LIFECYCLE_SCHEMA_VERSION,
             "order_lifecycle_rows": len(order_lifecycle_rows),
+            "order_lifecycle_trade_metric_fill_count": trade_metric_fill_count,
+            "order_lifecycle_missing_high_issue": order_lifecycle_missing_for_trades,
             "run_summary_invalid": run_summary_invalid,
             "summary_trade_count_mismatch_high_issue_count": summary_high_issue_count,
+            "data_quality_warnings": data_quality_warnings,
             "sanity_checks": {
                 "no_env_files": True,
                 "no_unredacted_secret_assignments": findings == 0,

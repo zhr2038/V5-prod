@@ -395,3 +395,43 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert window["cost_usage_legacy_rows"] == 0
         assert window["post_deployment_cost_usage_rows"] == 1
         assert window["post_deployment_global_default_cost_count"] == 0
+
+
+def test_bundle_export_flags_missing_order_lifecycle_when_trades_exist(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    reports = root / "reports"
+    out = tmp_path / "bundles"
+    run_dir = reports / "runs" / "r_trade"
+    run_dir.mkdir(parents=True)
+    (reports / "quant_lab_usage.jsonl").write_text("", encoding="utf-8")
+    (reports / "quant_lab_requests.jsonl").write_text("", encoding="utf-8")
+    (run_dir / "trades.csv").write_text(
+        "\n".join(
+            [
+                "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt",
+                "2026-05-15T02:00:01Z,r_trade,BTC/USDT,CLOSE_LONG,sell,0.0002,78000,15.6,0.0156,0.002",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "summary.json").write_text(json.dumps({"run_id": "r_trade", "num_trades": 1}), encoding="utf-8")
+
+    bundle = export_v5_bundle(reports_dir=reports, out_dir=out, window_hours=24 * 3650)
+
+    with tarfile.open(bundle, "r:gz") as tf:
+        names = tf.getnames()
+        assert "summaries/order_lifecycle.csv" in names
+        order_lifecycle = list(csv.DictReader(tf.extractfile("summaries/order_lifecycle.csv").read().decode("utf-8").splitlines()))
+        issues = json.loads(tf.extractfile("summaries/issues_to_fix.json").read().decode("utf-8"))
+        manifest = json.loads(tf.extractfile("manifest.json").read().decode("utf-8"))
+        window = json.loads(tf.extractfile("summaries/window_summary.json").read().decode("utf-8"))
+
+    assert order_lifecycle == []
+    issue = next(item for item in issues if item["code"] == "order_lifecycle_missing_for_trades")
+    assert issue["severity"] == "high"
+    assert issue["trade_metric_fill_count"] == 1
+    assert manifest["order_lifecycle_rows"] == 0
+    assert manifest["order_lifecycle_trade_metric_fill_count"] == 1
+    assert manifest["order_lifecycle_missing_high_issue"] is True
+    assert window["order_lifecycle_missing_high_issue"] is True
