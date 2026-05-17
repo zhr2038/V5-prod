@@ -242,6 +242,30 @@ diagnostics:
   protect_sol_exception_min_complete_samples_warning: 5
   protect_sol_exception_f3_weight_candidates: [0.20, 0.25]
   protect_sol_exception_f4_weight_candidates: [0.25, 0.30]
+  paper_strategy_tracking_enabled: true
+  paper_strategy_enabled_shadow_only: true
+  paper_strategy_enable_live_experiment: false
+  paper_strategy_required_paper_days: 14
+  paper_strategy_required_slippage_coverage: 0.8
+  paper_strategy_horizons_hours: [4, 8, 12, 24, 48, 72]
+  paper_strategy_rt_cost_bps: 30
+  paper_strategy_live_ready_cost_sources: ["actual_fills", "mixed_actual_proxy"]
+  paper_strategy_configs:
+    - strategy_id: SOL_PROTECT_ALPHA6_LOW_EXCEPTION_PAPER_V1
+      experiment_name: v5.sol_protect_alpha6_low_exception
+      source_strategy_candidates:
+        - sol_protect_alpha6_low_exception
+        - sol_protect_rsi_weak_exception
+      allowed_block_reasons:
+        - protect_entry_alpha6_score_too_low
+        - protect_entry_rsi_confirm_too_weak
+      min_f4_volume_expansion: 0.0
+    - strategy_id: SOL_F4_VOLUME_EXPANSION_PAPER_V1
+      experiment_name: v5.f4_volume_expansion_entry
+      source_strategy_candidates:
+        - f4_volume_swing
+      allowed_block_reasons: []
+      min_f4_volume_expansion: 0.0
 
 execution:
   mode: live

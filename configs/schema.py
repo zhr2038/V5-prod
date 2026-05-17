@@ -1444,12 +1444,76 @@ class DiagnosticsConfig(BaseModel):
         default_factory=lambda: [0.25, 0.30],
         description="Read-only f4_volume_expansion weight candidates for SOL exception shadow attribution",
     )
+    paper_strategy_tracking_enabled: bool = Field(
+        default=True,
+        description="Enable read-only SOL paper strategy tracking; never places live orders",
+    )
+    paper_strategy_enabled_shadow_only: bool = Field(
+        default=True,
+        description="Keep paper strategy experiments in diagnostic shadow-only mode",
+    )
+    paper_strategy_enable_live_experiment: bool = Field(
+        default=False,
+        description="Explicit opt-in for future live paper strategy promotion; default false",
+    )
+    paper_strategy_required_paper_days: int = Field(
+        default=14,
+        ge=1,
+        le=365,
+        description="Minimum observed paper days before LIVE_SMALL_READY can be considered",
+    )
+    paper_strategy_required_slippage_coverage: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description="Minimum mixed/actual cost-source coverage before LIVE_SMALL_READY can be considered",
+    )
+    paper_strategy_horizons_hours: List[int] = Field(
+        default_factory=lambda: [4, 8, 12, 24, 48, 72],
+        description="Forward-label horizons (hours) for SOL paper strategy outcomes",
+    )
+    paper_strategy_rt_cost_bps: float = Field(
+        default=30.0,
+        ge=0.0,
+        le=10000.0,
+        description="Round-trip cost used when labeling SOL paper strategy outcomes",
+    )
+    paper_strategy_live_ready_cost_sources: List[str] = Field(
+        default_factory=lambda: ["actual_fills", "mixed_actual_proxy"],
+        description="Cost sources accepted for paper strategy LIVE_SMALL_READY diagnostics",
+    )
+    paper_strategy_configs: List[Dict[str, Any]] = Field(
+        default_factory=lambda: [
+            {
+                "strategy_id": "SOL_PROTECT_ALPHA6_LOW_EXCEPTION_PAPER_V1",
+                "experiment_name": "v5.sol_protect_alpha6_low_exception",
+                "source_strategy_candidates": [
+                    "sol_protect_alpha6_low_exception",
+                    "sol_protect_rsi_weak_exception",
+                ],
+                "allowed_block_reasons": [
+                    "protect_entry_alpha6_score_too_low",
+                    "protect_entry_rsi_confirm_too_weak",
+                ],
+                "min_f4_volume_expansion": 0.0,
+            },
+            {
+                "strategy_id": "SOL_F4_VOLUME_EXPANSION_PAPER_V1",
+                "experiment_name": "v5.f4_volume_expansion_entry",
+                "source_strategy_candidates": ["f4_volume_swing"],
+                "allowed_block_reasons": [],
+                "min_f4_volume_expansion": 0.0,
+            },
+        ],
+        description="Read-only paper strategy definitions for SOL diagnostics",
+    )
 
     @field_validator(
         "skipped_candidate_horizons_hours",
         "extended_label_horizons_hours",
         "multi_position_swing_shadow_horizons_hours",
         "protect_sol_exception_horizons_hours",
+        "paper_strategy_horizons_hours",
     )
     @classmethod
     def _validate_label_horizons_hours(cls, v: List[int]) -> List[int]:

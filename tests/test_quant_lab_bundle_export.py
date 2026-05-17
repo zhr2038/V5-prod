@@ -237,6 +237,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "summaries/candidate_snapshot.csv" in names
         assert "raw/reports/candidate_snapshot.csv" in names
         assert "summaries/order_lifecycle.csv" in names
+        assert "summaries/paper_strategy_runs.csv" in names
+        assert "summaries/paper_strategy_daily.csv" in names
+        assert "summaries/paper_slippage_coverage.csv" in names
         assert "raw/recent_runs/r1/candidate_snapshot.csv" in names
         assert "raw/recent_runs/r1/order_lifecycle.csv" in names
         assert "reports/summary_trade_count_mismatch.csv" in names

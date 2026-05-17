@@ -29,6 +29,11 @@ from src.reporting.order_lifecycle import (
     ORDER_LIFECYCLE_FIELDS,
     ORDER_LIFECYCLE_SCHEMA_VERSION,
 )
+from src.reporting.sol_paper_strategy_tracker import (
+    PAPER_DAILY_FIELDS,
+    PAPER_RUN_FIELDS,
+    PAPER_SLIPPAGE_FIELDS,
+)
 from src.reporting.quant_lab_audit import (
     CONTRACT_VERSION,
     EVENT_ID_GENERATION_VERSION,
@@ -656,6 +661,27 @@ def _copy_order_lifecycle_files(staging: Path, reports: Path) -> None:
         _write_text(
             staging / "raw/recent_runs" / run_id / "order_lifecycle.csv",
             _redact_text(path.read_text(encoding="utf-8", errors="replace")),
+        )
+
+
+def _copy_sol_paper_strategy_files(staging: Path, reports: Path) -> None:
+    summary_specs = (
+        ("paper_strategy_runs.csv", PAPER_RUN_FIELDS),
+        ("paper_strategy_daily.csv", PAPER_DAILY_FIELDS),
+        ("paper_slippage_coverage.csv", PAPER_SLIPPAGE_FIELDS),
+    )
+    for filename, fields in summary_specs:
+        src = reports / "summaries" / filename
+        dest = staging / "summaries" / filename
+        if src.is_file():
+            _write_text(dest, _redact_text(src.read_text(encoding="utf-8", errors="replace")))
+        else:
+            _write_csv(dest, fields, [])
+    labels = reports / "sol_paper_strategy_labels.jsonl"
+    if labels.is_file():
+        _write_text(
+            staging / "raw/reports/sol_paper_strategy_labels.jsonl",
+            _redact_text(labels.read_text(encoding="utf-8", errors="replace")),
         )
 
 
@@ -1807,6 +1833,7 @@ def export_v5_bundle(
         _write_csv(staging / "summaries/order_lifecycle.csv", ORDER_LIFECYCLE_FIELDS, order_lifecycle_rows)
         _copy_candidate_snapshot_files(staging, reports, candidate_rows)
         _copy_order_lifecycle_files(staging, reports)
+        _copy_sol_paper_strategy_files(staging, reports)
         _write_csv(
             staging / "reports/summary_trade_count_mismatch.csv",
             SUMMARY_TRADE_COUNT_MISMATCH_FIELDS,

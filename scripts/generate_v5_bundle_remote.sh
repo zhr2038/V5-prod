@@ -56,8 +56,12 @@ CURRENT_REPORT_FILES = [
     ("reports/alt_impulse_shadow_labels.jsonl", "raw/reports/alt_impulse_shadow_labels.jsonl", False),
     ("reports/multi_position_swing_shadow_labels.jsonl", "raw/reports/multi_position_swing_shadow_labels.jsonl", False),
     ("reports/protect_sol_exception_shadow_labels.jsonl", "raw/reports/protect_sol_exception_shadow_labels.jsonl", False),
+    ("reports/sol_paper_strategy_labels.jsonl", "raw/reports/sol_paper_strategy_labels.jsonl", False),
     ("reports/candidate_snapshot.csv", "raw/reports/candidate_snapshot.csv", False),
     ("reports/order_lifecycle.csv", "raw/reports/order_lifecycle.csv", False),
+    ("reports/summaries/paper_strategy_runs.csv", "summaries/paper_strategy_runs.csv", False),
+    ("reports/summaries/paper_strategy_daily.csv", "summaries/paper_strategy_daily.csv", False),
+    ("reports/summaries/paper_slippage_coverage.csv", "summaries/paper_slippage_coverage.csv", False),
     ("reports/quant_lab_usage.jsonl", "raw/reports/quant_lab_usage.jsonl", False),
     ("reports/quant_lab_requests.jsonl", "raw/reports/quant_lab_requests.jsonl", False),
 ]
@@ -911,6 +915,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "open_long_entry_guard_fail_open_",
         "multi_position_swing_shadow_",
         "alt_impulse_shadow_",
+        "paper_strategy_",
         "protect_profit_lock_",
         "same_symbol_reentry_",
         "swing_min_hold_",
@@ -919,6 +924,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "multi_position_swing_shadow_",
         "alt_impulse_shadow_",
         "protect_sol_exception_",
+        "paper_strategy_",
     )
 
     def key_pattern(key):

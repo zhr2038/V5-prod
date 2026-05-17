@@ -2893,6 +2893,26 @@ def main() -> None:
         log_obj=log,
     )
 
+    # Read-only SOL paper strategy tracker. It records hypothetical entries only.
+    try:
+        from src.reporting.sol_paper_strategy_tracker import update_sol_paper_strategy_tracker
+
+        paper_result = update_sol_paper_strategy_tracker(
+            run_dir=str(runtime_run_dir),
+            audit=audit,
+            market_data_1h=md_1h,
+            cfg=cfg,
+            cache_dir=PROJECT_ROOT / "data" / "cache",
+        )
+        if paper_result.get("enabled"):
+            log.info(
+                "SOL_PAPER_STRATEGY_TRACKER new_records=%s total_records=%s",
+                int(paper_result.get("new_records", 0) or 0),
+                int(paper_result.get("total_records", 0) or 0),
+            )
+    except Exception as e:
+        log.warning(f"SOL paper strategy tracker failed: {e}")
+
     try:
         from src.reporting.order_lifecycle import annotate_orders_with_arrival, write_order_lifecycle
 
