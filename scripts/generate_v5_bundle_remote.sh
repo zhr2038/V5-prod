@@ -113,6 +113,8 @@ CANDIDATE_SNAPSHOT_FIELDS = (
     "cost_source",
     "cost_source_quality",
     "degraded_cost_model",
+    "candidate_cost_trusted",
+    "cost_resolution_reason",
     "cost_model_version",
     "cost_gate_verified",
     "would_block_by_cost",

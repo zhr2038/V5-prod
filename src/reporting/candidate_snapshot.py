@@ -52,6 +52,8 @@ CANDIDATE_SNAPSHOT_FIELDS = (
     "cost_source",
     "cost_source_quality",
     "degraded_cost_model",
+    "candidate_cost_trusted",
+    "cost_resolution_reason",
     "cost_model_version",
     "cost_gate_verified",
     "would_block_by_cost",
@@ -141,7 +143,7 @@ def load_quant_lab_cost_cache(path: str | Path | None, *, max_rows: int = 5000) 
         if not _row_has_cost_fields(obj):
             continue
         rows.append(dict(obj))
-    return _cost_lookup_from_rows(rows, force_cached=True)
+    return _cost_lookup_from_rows(rows, force_cached=True, source_label="quant_lab_cached")
 
 
 def candidate_snapshot_symbol_cost_table_paths(reports_dir: str | Path | None) -> list[Path]:
@@ -166,7 +168,7 @@ def load_latest_symbol_cost_table(
     rows: list[dict[str, Any]] = []
     for path in candidate_paths:
         rows.extend(_read_symbol_cost_rows(path, max_rows=max_rows_per_file))
-    return _cost_lookup_from_rows(rows, force_cached=True)
+    return _cost_lookup_from_rows(rows, force_cached=True, source_label="latest_symbol_cost_table")
 
 
 def build_candidate_snapshot_rows(
@@ -234,13 +236,24 @@ def build_candidate_snapshot_rows(
         alpha6 = strategy_signals.get("Alpha6Factor", {})
         mean_reversion = strategy_signals.get("MeanReversion", {})
         order = order_lookup.get(symbol)
-        qlab = _merge_mappings(
-            _lookup_symbol_mapping(symbol_cost_table, symbol),
-            _lookup_symbol_mapping(quant_lab_cost_cache, symbol),
-            _lookup_symbol_mapping(quant_lab_costs, symbol),
+        cached_symbol_cost = _lookup_symbol_mapping(quant_lab_cost_cache, symbol)
+        table_symbol_cost = _lookup_symbol_mapping(symbol_cost_table, symbol)
+        current_run_symbol_cost = _lookup_symbol_mapping(quant_lab_costs, symbol)
+        candidate_cost_meta = _merge_mappings(
             _first_mapping(top.get("quant_lab"), top.get("cost_estimate"), top.get("cost")),
             _first_mapping(explain.get("quant_lab"), explain.get("cost_estimate"), explain.get("cost")),
-            _order_quant_lab_meta(order),
+        )
+        order_cost_meta = _order_quant_lab_meta(order)
+        symbol_level_cost = _preferred_cost_mapping(
+            cached_symbol_cost,
+            table_symbol_cost,
+            current_run_symbol_cost,
+            candidate_cost_meta,
+        )
+        qlab = (
+            _merge_mappings(symbol_level_cost, candidate_cost_meta, order_cost_meta)
+            if order is not None
+            else symbol_level_cost
         )
         position = position_lookup.get(symbol)
         current_position = _float_or_none(getattr(position, "qty", None))
@@ -388,6 +401,12 @@ def build_candidate_snapshot_rows(
         if not cost_model_version and used_local_cost:
             cost_model_version = local_cost_model_version or "v5_local_cost_estimate"
         degraded_cost_model = _is_degraded_cost_model(cost_source, qlab=qlab, cost_model_version=cost_model_version)
+        candidate_cost_trusted = _candidate_cost_trusted(
+            cost_source=cost_source,
+            degraded_cost_model=degraded_cost_model,
+            used_local_cost=used_local_cost,
+            qlab=qlab,
+        )
         cost_gate_verified = _first_bool(
             _nested_get(qlab, ("cost_gate_verified",)),
             _nested_get(qlab, ("cost_gate_passed",)),
@@ -419,6 +438,13 @@ def build_candidate_snapshot_rows(
             )
         if degraded_cost_model:
             cost_reason = "global_default_cost"
+        cost_resolution_reason = _cost_resolution_reason(
+            qlab=qlab,
+            cost_source=cost_source,
+            used_local_cost=used_local_cost,
+            degraded_cost_model=degraded_cost_model,
+            absence_reason=cost_absence_reason,
+        )
         no_signal_reason = _no_signal_reason(
             symbol=symbol,
             final_decision=final_decision,
@@ -467,6 +493,8 @@ def build_candidate_snapshot_rows(
             "cost_source": cost_source,
             "cost_source_quality": cost_source_quality,
             "degraded_cost_model": bool(degraded_cost_model),
+            "candidate_cost_trusted": bool(candidate_cost_trusted),
+            "cost_resolution_reason": cost_resolution_reason,
             "cost_model_version": cost_model_version,
             "cost_gate_verified": bool(cost_gate_verified),
             "would_block_by_cost": bool(would_block_by_cost),
@@ -584,6 +612,8 @@ def _backfill_legacy_cost_fields(
     out["expected_edge_source"] = _first(out.get("expected_edge_source"), "not_available")
     out["cost_source_quality"] = _first(out.get("cost_source_quality"), "local_estimate")
     out["degraded_cost_model"] = _first(out.get("degraded_cost_model"), False)
+    out["candidate_cost_trusted"] = _first(out.get("candidate_cost_trusted"), False)
+    out["cost_resolution_reason"] = _first(out.get("cost_resolution_reason"), "legacy_candidate_snapshot_schema_backfilled_local_estimate")
     out["cost_gate_verified"] = False
     out["would_block_by_cost"] = False
     out["cost_reason"] = _first(out.get("cost_reason"), "legacy_candidate_snapshot_schema_backfilled_local_estimate")
@@ -708,11 +738,17 @@ def _quant_lab_cost_lookup(quant_lab: Any) -> dict[str, dict[str, Any]]:
             if event_type in {"cost_estimate", "quant_lab_cost_estimate"}:
                 rows.append(event)
 
-    return _cost_lookup_from_rows(rows, force_cached=False)
+    return _cost_lookup_from_rows(rows, force_cached=False, source_label="current_run_quant_lab_cost")
 
 
-def _cost_lookup_from_rows(rows: Iterable[Mapping[str, Any]], *, force_cached: bool) -> dict[str, dict[str, Any]]:
+def _cost_lookup_from_rows(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    force_cached: bool,
+    source_label: str | None = None,
+) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
+    priority_by_alias: dict[str, int] = {}
     for row in rows:
         if not isinstance(row, Mapping) or not _row_has_cost_fields(row):
             continue
@@ -732,9 +768,39 @@ def _cost_lookup_from_rows(rows: Iterable[Mapping[str, Any]], *, force_cached: b
             normalized_row.setdefault("cached_cost_estimate", True)
             if _missing_value(normalized_row.get("cost_source")) and _missing_value(normalized_row.get("source")):
                 normalized_row["cost_source"] = "quant_lab_cached"
+        if source_label and _missing_value(normalized_row.get("cost_resolution_reason")):
+            normalized_row["cost_resolution_reason"] = f"{source_label}_symbol_cost"
+        row_priority = _cost_mapping_priority(normalized_row)
         for alias in aliases:
+            current_priority = priority_by_alias.get(alias, -1)
+            if row_priority < current_priority:
+                continue
+            priority_by_alias[alias] = row_priority
             out[alias] = _merge_mappings(out.get(alias, {}), normalized_row)
     return out
+
+
+def _preferred_cost_mapping(*items: Mapping[str, Any]) -> dict[str, Any]:
+    best: dict[str, Any] = {}
+    best_priority = -1
+    for item in items:
+        if not isinstance(item, Mapping) or not _row_has_cost_fields(item):
+            continue
+        priority = _cost_mapping_priority(item)
+        if priority < best_priority:
+            continue
+        if priority > best_priority:
+            best_priority = priority
+            best = dict(item)
+    return best
+
+
+def _cost_mapping_priority(item: Mapping[str, Any]) -> int:
+    if not _row_has_cost_fields(item):
+        return 0
+    if _mapping_is_degraded_cost_model(item):
+        return 1
+    return 2
 
 
 def _read_symbol_cost_rows(path: Path, *, max_rows: int) -> list[dict[str, Any]]:
@@ -927,6 +993,14 @@ def _cost_source_quality(cost_source: Any, *, qlab: Mapping[str, Any], used_loca
     return "local_estimate"
 
 
+def _mapping_is_degraded_cost_model(item: Mapping[str, Any]) -> bool:
+    return _is_degraded_cost_model(
+        _first(item.get("cost_source"), item.get("source")),
+        qlab=item,
+        cost_model_version=_first(item.get("cost_model_version"), item.get("cost_contract_version")),
+    )
+
+
 def _is_degraded_cost_model(cost_source: Any, *, qlab: Mapping[str, Any], cost_model_version: Any) -> bool:
     source = str(cost_source or _nested_get(qlab, ("source",)) or _nested_get(qlab, ("cost_source",)) or "").strip().lower()
     fallback_level = str(_nested_get(qlab, ("fallback_level",)) or "").strip().upper()
@@ -937,6 +1011,53 @@ def _is_degraded_cost_model(cost_source: Any, *, qlab: Mapping[str, Any], cost_m
         or fallback_level == "GLOBAL_DEFAULT"
         or version == "global_default_v0"
     )
+
+
+def _candidate_cost_trusted(
+    *,
+    cost_source: Any,
+    degraded_cost_model: bool,
+    used_local_cost: bool,
+    qlab: Mapping[str, Any],
+) -> bool:
+    if degraded_cost_model or used_local_cost:
+        return False
+    source = str(cost_source or "").strip().lower()
+    if source in {"", "local_estimate", "cost_not_requested_no_order", "global_default"}:
+        return False
+    return bool(
+        source in {"quant_lab_cached", "mixed_actual_proxy", "public_spread_proxy", "public_proxy"}
+        or _first_bool(_nested_get(qlab, ("cached_cost_estimate",)), _nested_get(qlab, ("from_cache",)))
+        or bool(str(_nested_get(qlab, ("cost_model_version",)) or "").strip())
+    )
+
+
+def _cost_resolution_reason(
+    *,
+    qlab: Mapping[str, Any],
+    cost_source: Any,
+    used_local_cost: bool,
+    degraded_cost_model: bool,
+    absence_reason: str,
+) -> str:
+    explicit = _first(
+        _nested_get(qlab, ("cost_resolution_reason",)),
+        _nested_get(qlab, ("resolution_reason",)),
+    )
+    if explicit:
+        return str(explicit)
+    if degraded_cost_model:
+        return "symbol_cost_missing_global_default"
+    if used_local_cost:
+        return absence_reason
+    source = str(cost_source or "").strip().lower()
+    if source == "quant_lab_cached" or bool(_first_bool(_nested_get(qlab, ("cached_cost_estimate",)), _nested_get(qlab, ("from_cache",)))):
+        return "quant_lab_cached_symbol_cost"
+    if source in {"mixed_actual_proxy", "public_spread_proxy", "public_proxy"}:
+        return "symbol_level_cost_estimate"
+    if source:
+        return "quant_lab_symbol_cost"
+    return absence_reason
 
 
 def _cost_absence_reason(*, order: Any, final_decision: str) -> str:
