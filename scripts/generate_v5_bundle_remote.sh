@@ -3410,6 +3410,23 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             })
         return out
 
+    def aggregate_rows_by_symbol_regime_horizon(rows, horizons):
+        grouped = defaultdict(list)
+        for row in rows:
+            key = (
+                flatten_value(first_value(row, ("symbol",), not_obs)) or not_obs,
+                flatten_value(first_value(row, ("regime_state", "regime"), not_obs)) or not_obs,
+            )
+            grouped[key].append(row)
+        out = []
+        for (symbol, regime_state), group_rows in sorted(grouped.items(), key=lambda item: item[0]):
+            for horizon_row in aggregate_rows_by_horizon(group_rows, horizons):
+                payload = dict(horizon_row)
+                payload["symbol"] = symbol
+                payload["regime_state"] = regime_state
+                out.append(payload)
+        return out
+
     high_score_outcome_fields = [
         "ts_utc",
         "run_id",
@@ -3953,6 +3970,22 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             field: first_observed(first_value(row, (field,), not_obs))
             for field in alt_impulse_shadow_fields
         }
+        if out.get("regime_state") in (None, "", not_obs):
+            out["regime_state"] = first_observed(first_value(row, ("regime",), not_obs))
+        if out.get("risk_level") in (None, "", not_obs):
+            out["risk_level"] = first_observed(first_value(row, ("current_level",), not_obs))
+        if out.get("broad_market_positive_count") in (None, "", not_obs):
+            out["broad_market_positive_count"] = first_observed(first_value(row, ("whitelist_positive_4h_count",), not_obs))
+        if out.get("btc_trend_state") in (None, "", not_obs):
+            btc_ret = as_float(first_value(row, ("btc_4h_ret_bps",), not_obs))
+            if btc_ret is None:
+                out["btc_trend_state"] = not_obs
+            elif btc_ret > 0:
+                out["btc_trend_state"] = "positive_4h"
+            elif btc_ret < 0:
+                out["btc_trend_state"] = "negative_4h"
+            else:
+                out["btc_trend_state"] = "flat_4h"
         entry_px, entry_reason, _entry_source = resolve_alt_shadow_entry_px(row)
         entry_dt = parse_dt_utc(first_observed(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs)))
         rt_cost_bps = as_float(first_value(row, ("rt_cost_bps",), not_obs))
@@ -4198,9 +4231,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "f5_rsi_trend_confirm",
         "skip_reason",
         "btc_4h_ret_bps",
+        "btc_trend_state",
         "whitelist_positive_4h_count",
+        "broad_market_positive_count",
         "regime",
+        "regime_state",
         "current_level",
+        "risk_level",
+        "funding_state",
+        "volatility_bucket",
         "rt_cost_bps",
         *label_horizon_fields(label_horizons),
         *future_price_debug_fields(label_horizons),
@@ -4262,6 +4301,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     alt_impulse_shadow_by_reason = aggregate_high_score_outcomes(
         alt_impulse_shadow_rows,
         ["skip_reason"],
+    )
+    alt_impulse_shadow_by_regime = aggregate_high_score_outcomes(
+        alt_impulse_shadow_rows,
+        ["regime_state"],
+    )
+    alt_impulse_shadow_by_symbol_regime_horizon = aggregate_rows_by_symbol_regime_horizon(
+        alt_impulse_shadow_rows,
+        label_horizons,
     )
     high_score_blocked_outcomes_by_horizon = aggregate_rows_by_horizon(high_score_blocked_outcome_rows, label_horizons)
     alt_impulse_shadow_by_horizon = aggregate_rows_by_horizon(alt_impulse_shadow_rows, label_horizons)
@@ -7285,6 +7332,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "summaries/alt_impulse_shadow_outcomes_by_horizon.csv",
         alt_impulse_shadow_by_horizon,
         ["horizon_hours", "count", "pending_count", "not_observable_count", "complete_count", "avg_net_bps", "win_rate"],
+    )
+    write_csv(
+        "summaries/alt_impulse_shadow_by_regime.csv",
+        alt_impulse_shadow_by_regime,
+        ["regime_state", "count", *[f"avg_{int(h)}h_net_bps" for h in label_horizons], *[f"win_rate_{int(h)}h" for h in label_horizons]],
+    )
+    write_csv(
+        "summaries/alt_impulse_shadow_by_symbol_regime_horizon.csv",
+        alt_impulse_shadow_by_symbol_regime_horizon,
+        ["symbol", "regime_state", "horizon_hours", "count", "pending_count", "not_observable_count", "complete_count", "avg_net_bps", "win_rate"],
     )
     multi_position_swing_fields = [
         "ts_utc",

@@ -133,6 +133,51 @@ def _bool_config(value: Any, default: bool) -> bool:
     return bool(default if parsed is None else parsed)
 
 
+def _text_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if hasattr(value, "value"):
+        value = getattr(value, "value")
+    if hasattr(value, "name") and not isinstance(value, str):
+        value = getattr(value, "name")
+    return str(value or "").strip()
+
+
+def _audit_text(audit: DecisionAudit, names: tuple[str, ...]) -> str:
+    for name in names:
+        value = getattr(audit, name, None)
+        if value is None:
+            continue
+        if name in {"regime", "market_regime"} and hasattr(value, "state"):
+            text = _text_value(getattr(value, "state", None))
+        else:
+            text = _text_value(value)
+        if text:
+            return text
+    return ""
+
+
+def _first_text(*values: Any, default: str = "") -> str:
+    for value in values:
+        text = _text_value(value)
+        if text:
+            return text
+    return default
+
+
+def _btc_trend_state(item: Mapping[str, Any], btc_4h_ret_bps: Optional[float]) -> str:
+    explicit = _first_text(item.get("btc_trend_state"), item.get("btc_state"))
+    if explicit:
+        return explicit
+    if btc_4h_ret_bps is None:
+        return "not_observable"
+    if float(btc_4h_ret_bps) > 0.0:
+        return "positive_4h"
+    if float(btc_4h_ret_bps) < 0.0:
+        return "negative_4h"
+    return "flat_4h"
+
+
 def _shadow_symbols(diagnostics: DiagnosticsConfig) -> set[str]:
     return {
         str(symbol or "").strip().upper()
@@ -221,6 +266,32 @@ def _collect_shadow_candidates(
         if require_positive_count > 0 and positive_count < require_positive_count:
             continue
 
+        regime_state = _first_text(
+            item.get("regime_state"),
+            item.get("regime"),
+            _audit_text(audit, ("regime_state", "regime", "market_regime")),
+            default="UNKNOWN",
+        )
+        risk_level = _first_text(
+            item.get("risk_level"),
+            item.get("current_level"),
+            current_level,
+            _audit_text(audit, ("risk_level", "current_level")),
+            default=level,
+        )
+        funding_state = _first_text(
+            item.get("funding_state"),
+            item.get("funding_state_hint"),
+            _audit_text(audit, ("funding_state", "funding_state_hint")),
+            default="not_observable",
+        )
+        volatility_bucket = _first_text(
+            item.get("volatility_bucket"),
+            item.get("vol_bucket"),
+            item.get("volatility_state"),
+            _audit_text(audit, ("volatility_bucket", "vol_bucket", "volatility_state")),
+            default="not_observable",
+        )
         px = _entry_px(
             item=item,
             symbol=symbol,
@@ -244,9 +315,15 @@ def _collect_shadow_candidates(
             "f5_rsi_trend_confirm": _normalize_float(item.get("f5_rsi_trend_confirm")),
             "skip_reason": reason,
             "btc_4h_ret_bps": round(float(btc_4h_ret_bps), 6) if btc_4h_ret_bps is not None else None,
+            "btc_trend_state": _btc_trend_state(item, btc_4h_ret_bps),
             "whitelist_positive_4h_count": positive_count,
-            "regime": str(item.get("regime") or getattr(audit, "regime", "") or ""),
+            "broad_market_positive_count": positive_count,
+            "regime": regime_state,
+            "regime_state": regime_state,
             "current_level": level,
+            "risk_level": risk_level,
+            "funding_state": funding_state,
+            "volatility_bucket": volatility_bucket,
             "rt_cost_bps": rt_cost_bps,
             "label_status": "pending",
         }
@@ -285,9 +362,15 @@ def _summary_fields(horizons: list[int]) -> list[str]:
         "f5_rsi_trend_confirm",
         "skip_reason",
         "btc_4h_ret_bps",
+        "btc_trend_state",
         "whitelist_positive_4h_count",
+        "broad_market_positive_count",
         "regime",
+        "regime_state",
         "current_level",
+        "risk_level",
+        "funding_state",
+        "volatility_bucket",
         "rt_cost_bps",
         *horizon_fields,
         "label_status",
@@ -350,6 +433,28 @@ def _normalize_label_status_reason(record: dict[str, Any], horizons: list[int]) 
         record["label_not_observable_reason"] = ""
 
 
+def _aggregate_records_by_symbol_regime_horizon(
+    records: list[dict[str, Any]],
+    *,
+    horizons: list[int],
+) -> list[dict[str, Any]]:
+    buckets: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for record in records:
+        key = (
+            str(record.get("symbol") or "unknown"),
+            str(record.get("regime_state") or record.get("regime") or "UNKNOWN"),
+        )
+        buckets.setdefault(key, []).append(record)
+    out: list[dict[str, Any]] = []
+    for (symbol, regime_state), rows in sorted(buckets.items(), key=lambda item: item[0]):
+        for horizon_row in _aggregate_records_by_horizon(rows, horizons=horizons):
+            payload = dict(horizon_row)
+            payload["symbol"] = symbol
+            payload["regime_state"] = regime_state
+            out.append(payload)
+    return out
+
+
 def update_alt_impulse_shadow_evaluator(
     *,
     run_dir: str | Path,
@@ -396,9 +501,15 @@ def update_alt_impulse_shadow_evaluator(
                 "f4_volume_expansion",
                 "f5_rsi_trend_confirm",
                 "btc_4h_ret_bps",
+                "btc_trend_state",
                 "whitelist_positive_4h_count",
+                "broad_market_positive_count",
                 "regime",
+                "regime_state",
                 "current_level",
+                "risk_level",
+                "funding_state",
+                "volatility_bucket",
                 "rt_cost_bps",
             ):
                 if existing.get(preserve_key) in (None, "") and record.get(preserve_key) not in (None, ""):
@@ -454,6 +565,34 @@ def update_alt_impulse_shadow_evaluator(
             "complete_count",
             *[f"avg_{int(h)}h_net_bps" for h in horizons],
             *[f"win_rate_{int(h)}h" for h in horizons],
+        ],
+    )
+    _write_csv(
+        summaries_dir / "alt_impulse_shadow_by_regime.csv",
+        _aggregate_records_by_fields(records, key_fields=["regime_state"], horizons=horizons),
+        [
+            "regime_state",
+            "count",
+            "pending_count",
+            "not_observable_count",
+            "complete_count",
+            *[f"avg_{int(h)}h_net_bps" for h in horizons],
+            *[f"win_rate_{int(h)}h" for h in horizons],
+        ],
+    )
+    _write_csv(
+        summaries_dir / "alt_impulse_shadow_by_symbol_regime_horizon.csv",
+        _aggregate_records_by_symbol_regime_horizon(records, horizons=horizons),
+        [
+            "symbol",
+            "regime_state",
+            "horizon_hours",
+            "count",
+            "pending_count",
+            "not_observable_count",
+            "complete_count",
+            "avg_net_bps",
+            "win_rate",
         ],
     )
     _write_csv(

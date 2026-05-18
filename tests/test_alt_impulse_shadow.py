@@ -81,6 +81,8 @@ def _eth_trend_only_explain() -> list[dict]:
             "router_reason": "protect_entry_trend_only",
             "current_level": "PROTECT",
             "regime": "Trending",
+            "funding_state": "neutral",
+            "volatility_bucket": "medium",
         }
     ]
 
@@ -114,7 +116,13 @@ def test_alt_impulse_shadow_writes_eth_label_when_btc_4h_positive(tmp_path: Path
     assert row["skip_reason"] == "protect_entry_trend_only"
     assert row["entry_px"] == 100.0
     assert row["btc_4h_ret_bps"] == 100.0
+    assert row["btc_trend_state"] == "positive_4h"
     assert row["whitelist_positive_4h_count"] == 3
+    assert row["broad_market_positive_count"] == 3
+    assert row["regime_state"] == "Trending"
+    assert row["risk_level"] == "PROTECT"
+    assert row["funding_state"] == "neutral"
+    assert row["volatility_bucket"] == "medium"
     assert row["label_status"] == "pending"
 
 
@@ -218,6 +226,23 @@ def test_alt_impulse_shadow_matures_forward_labels(tmp_path: Path) -> None:
     assert by_horizon["48"]["avg_net_bps"] == "470.0"
     assert by_horizon["48"]["complete_count"] == "1"
     assert by_horizon["72"]["pending_count"] == "1"
+
+    by_regime_path = tmp_path / "reports" / "summaries" / "alt_impulse_shadow_by_regime.csv"
+    with by_regime_path.open("r", encoding="utf-8") as handle:
+        by_regime = {row["regime_state"]: row for row in csv.DictReader(handle)}
+    assert by_regime["Trending"]["avg_48h_net_bps"] == "470.0"
+    assert by_regime["Trending"]["win_rate_48h"] == "1.0"
+
+    by_symbol_regime_horizon_path = (
+        tmp_path / "reports" / "summaries" / "alt_impulse_shadow_by_symbol_regime_horizon.csv"
+    )
+    with by_symbol_regime_horizon_path.open("r", encoding="utf-8") as handle:
+        by_symbol_regime_horizon = {
+            (row["symbol"], row["regime_state"], row["horizon_hours"]): row
+            for row in csv.DictReader(handle)
+        }
+    assert by_symbol_regime_horizon[("ETH/USDT", "Trending", "48")]["avg_net_bps"] == "470.0"
+    assert by_symbol_regime_horizon[("ETH/USDT", "Trending", "48")]["complete_count"] == "1"
 
 
 def test_alt_impulse_shadow_missing_entry_keeps_global_reason_when_all_not_observable(tmp_path: Path) -> None:
