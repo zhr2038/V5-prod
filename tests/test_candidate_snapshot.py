@@ -12,6 +12,7 @@ from src.reporting.candidate_snapshot import (
     load_latest_symbol_cost_table,
     load_quant_lab_cost_cache,
     write_candidate_snapshot,
+    write_latest_symbol_cost_table,
 )
 
 
@@ -407,6 +408,43 @@ def test_bnb_global_default_cache_falls_back_to_latest_symbol_cost_table() -> No
     assert bnb["cost_model_version"] != "global_default_v0"
 
 
+def test_bnb_global_default_cache_missing_without_symbol_table_uses_local_not_global_default() -> None:
+    audit = SimpleNamespace(
+        top_scores=[{"symbol": "BNB/USDT", "score": 0.59, "rank": 3, "f3_vol_adj_ret": 1.8}],
+        targets_pre_risk={"BNB/USDT": 0.0},
+        targets_post_risk={"BNB/USDT": 0.0},
+        router_decisions=[],
+        target_execution_explain=[],
+        strategy_signals=[],
+        quant_lab={},
+    )
+
+    rows = build_candidate_snapshot_rows(
+        run_id="run_bnb_cache_missing",
+        ts_utc="2026-05-15T00:00:00Z",
+        symbols=["BNB/USDT"],
+        audit=audit,
+        local_cost_bps=30.0,
+        local_cost_model_version="v5_local_execution.cost_aware_roundtrip_cost_bps",
+        quant_lab_cost_cache={
+            "BNB/USDT": {
+                "cost_source": "global_default",
+                "effective_total_cost_bps": 25.0,
+                "cost_model_version": "global_default_v0",
+                "fallback_level": "GLOBAL_DEFAULT",
+            }
+        },
+    )
+
+    bnb = rows[0]
+    assert bnb["strategy_candidate"] == "f3_dominant_entry"
+    assert bnb["cost_source"] == "local_estimate"
+    assert bnb["cost_model_version"] == "v5_local_execution.cost_aware_roundtrip_cost_bps"
+    assert bnb["degraded_cost_model"] is False
+    assert bnb["candidate_cost_trusted"] is False
+    assert bnb["cost_bps"] == 30.0
+
+
 def test_blocked_bnb_candidate_uses_symbol_level_cost_over_global_candidate_meta() -> None:
     audit = SimpleNamespace(
         top_scores=[
@@ -582,6 +620,20 @@ def test_quant_lab_cost_cache_loader_does_not_let_global_default_override_symbol
     assert bnb["cost_model_version"] == "cost_bucket_daily:2026-05-14"
 
 
+def test_quant_lab_cost_cache_loader_ignores_cache_missing_global_default(tmp_path: Path) -> None:
+    usage_path = tmp_path / "quant_lab_usage.jsonl"
+    usage_path.write_text(
+        '{"symbol":"BNB/USDT","cost_source":"global_default","effective_total_cost_bps":25,'
+        '"cost_model_version":"global_default_v0","fallback_level":"GLOBAL_DEFAULT"}\n',
+        encoding="utf-8",
+    )
+
+    cache = load_quant_lab_cost_cache(usage_path)
+
+    assert "BNB/USDT" not in cache
+    assert "BNB-USDT" not in cache
+
+
 def test_latest_symbol_cost_table_loader_reads_csv_and_keeps_latest(tmp_path: Path) -> None:
     table_path = tmp_path / "latest_symbol_costs.csv"
     table_path.write_text(
@@ -603,6 +655,81 @@ def test_latest_symbol_cost_table_loader_reads_csv_and_keeps_latest(tmp_path: Pa
     assert sol["effective_total_cost_bps"] == "22"
     assert sol["selected_total_cost_bps"] == "21"
     assert sol["cost_model_version"] == "new"
+
+
+def test_write_latest_symbol_cost_table_skips_cache_missing_global_default(tmp_path: Path) -> None:
+    table_path = tmp_path / "latest_symbol_costs.csv"
+
+    write_latest_symbol_cost_table(
+        table_path,
+        [
+            {
+                "symbol": "BNB/USDT",
+                "cost_source": "global_default",
+                "effective_total_cost_bps": 25.0,
+                "cost_model_version": "global_default_v0",
+                "fallback_level": "GLOBAL_DEFAULT",
+            },
+            {
+                "symbol": "BNB/USDT",
+                "cost_source": "public_spread_proxy",
+                "effective_total_cost_bps": 16.0,
+                "selected_total_cost_bps": 15.5,
+                "cost_model_version": "cost_bucket_daily:2026-05-18",
+            },
+        ],
+    )
+
+    table = load_latest_symbol_cost_table(table_path)
+
+    assert table["BNB/USDT"]["cost_source"] == "public_spread_proxy"
+    assert table["BNB/USDT"]["cost_model_version"] == "cost_bucket_daily:2026-05-18"
+
+
+def test_latest_symbol_cost_table_keeps_mixed_proxy_with_degraded_sample_flag(tmp_path: Path) -> None:
+    table_path = tmp_path / "latest_symbol_costs.csv"
+
+    write_latest_symbol_cost_table(
+        table_path,
+        [
+            {
+                "symbol": "BNB/USDT",
+                "cost_source": "mixed_actual_proxy",
+                "effective_total_cost_bps": 12.3,
+                "selected_total_cost_bps": 12.3,
+                "cost_model_version": "cost_bucket_daily.v0.1",
+                "degraded_cost_model": True,
+                "fallback_level": "REGIME_FALLBACK;SAMPLE_TOO_SMALL;SLIPPAGE_UNKNOWN;SPREAD_PROXY",
+            }
+        ],
+    )
+
+    table = load_latest_symbol_cost_table(table_path)
+    audit = SimpleNamespace(
+        top_scores=[{"symbol": "BNB/USDT", "score": 0.59, "rank": 3, "f3_vol_adj_ret": 1.8}],
+        targets_pre_risk={"BNB/USDT": 0.0},
+        targets_post_risk={"BNB/USDT": 0.0},
+        router_decisions=[],
+        target_execution_explain=[],
+        strategy_signals=[],
+        quant_lab={},
+    )
+    rows = build_candidate_snapshot_rows(
+        run_id="run_bnb_mixed_degraded_flag",
+        ts_utc="2026-05-18T00:00:00Z",
+        symbols=["BNB/USDT"],
+        audit=audit,
+        local_cost_bps=30.0,
+        local_cost_model_version="v5_local_execution.cost_aware_roundtrip_cost_bps",
+        symbol_cost_table=table,
+    )
+
+    bnb = rows[0]
+    assert bnb["cost_source"] == "mixed_actual_proxy"
+    assert bnb["cost_source_quality"] == "mixed_actual_proxy"
+    assert bnb["degraded_cost_model"] is False
+    assert bnb["candidate_cost_trusted"] is True
+    assert bnb["cost_bps"] == 12.3
 
 
 def test_candidate_snapshot_marks_global_default_cost_degraded() -> None:
@@ -630,6 +757,8 @@ def test_candidate_snapshot_marks_global_default_cost_degraded() -> None:
                 "selected_total_cost_bps": 30.0,
                 "cost_model_version": "global_default_v0",
                 "cached_cost_estimate": True,
+                "success": False,
+                "error_type": "TimeoutError",
             }
         },
     )
@@ -639,7 +768,7 @@ def test_candidate_snapshot_marks_global_default_cost_degraded() -> None:
     assert btc["cost_source_quality"] == "global_default_degraded"
     assert btc["degraded_cost_model"] is True
     assert btc["candidate_cost_trusted"] is False
-    assert btc["cost_resolution_reason"] == "cache_missing"
+    assert btc["cost_resolution_reason"] == "service_unavailable"
     assert btc["cost_reason"] == "global_default_cost"
 
 

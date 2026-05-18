@@ -171,6 +171,53 @@ def load_latest_symbol_cost_table(
     return _cost_lookup_from_rows(rows, force_cached=True, source_label="latest_symbol_cost_table")
 
 
+def write_latest_symbol_cost_table(path: str | Path, rows: Sequence[Mapping[str, Any]]) -> None:
+    """Persist the latest usable symbol-level cost rows for candidate snapshot fallback."""
+    usable_rows = [dict(row) for row in rows if candidate_snapshot_accepts_symbol_cost(row)]
+    fields = [
+        "symbol",
+        "request_symbol",
+        "normalized_symbol",
+        "response_symbol",
+        "cost_source",
+        "source",
+        "effective_total_cost_bps",
+        "selected_total_cost_bps",
+        "total_cost_bps",
+        "cost_bps",
+        "fee_bps",
+        "slippage_bps",
+        "spread_bps",
+        "cost_model_version",
+        "cost_contract_version",
+        "fallback_level",
+        "cost_resolution_reason",
+        "matched_regime",
+        "regime",
+        "quantile",
+        "notional_usdt",
+        "as_of_ts",
+        "ts_utc",
+        "cached_cost_estimate",
+        "candidate_snapshot_symbol_cost_refresh",
+    ]
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        for row in usable_rows:
+            writer.writerow({field: _csv_value(row.get(field)) for field in fields})
+
+
+def candidate_snapshot_accepts_symbol_cost(row: Mapping[str, Any]) -> bool:
+    if not isinstance(row, Mapping) or not _row_has_cost_fields(row):
+        return False
+    if not _mapping_is_degraded_cost_model(row):
+        return True
+    return _global_default_resolution_reason(row) in {"symbol_missing", "service_unavailable"}
+
+
 def build_candidate_snapshot_rows(
     *,
     run_id: str,
@@ -779,6 +826,8 @@ def _cost_lookup_from_rows(
                 else f"{source_label}_symbol_cost"
             )
         row_priority = _cost_mapping_priority(normalized_row)
+        if row_priority <= 0:
+            continue
         for alias in aliases:
             current_priority = priority_by_alias.get(alias, -1)
             if row_priority < current_priority:
@@ -795,6 +844,8 @@ def _preferred_cost_mapping(*items: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(item, Mapping) or not _row_has_cost_fields(item):
             continue
         priority = _cost_mapping_priority(item)
+        if priority <= 0:
+            continue
         if priority <= best_priority:
             continue
         best_priority = priority
@@ -806,12 +857,19 @@ def _cost_mapping_priority(item: Mapping[str, Any]) -> int:
     if not _row_has_cost_fields(item):
         return 0
     if _mapping_is_degraded_cost_model(item):
-        return 1
+        if _global_default_resolution_reason(item) in {"symbol_missing", "service_unavailable"}:
+            return 1
+        return 0
     return 2
 
 
 def _merge_cost_context(preferred_cost: Mapping[str, Any], *items: Mapping[str, Any]) -> dict[str, Any]:
-    merged = _merge_mappings(*items)
+    merge_items = [
+        item
+        for item in items
+        if not (_row_has_cost_fields(item) and _cost_mapping_priority(item) <= 0)
+    ]
+    merged = _merge_mappings(*merge_items)
     if preferred_cost:
         merged = _merge_mappings(merged, preferred_cost)
     if preferred_cost and not _mapping_is_degraded_cost_model(preferred_cost):
@@ -1030,8 +1088,7 @@ def _is_degraded_cost_model(cost_source: Any, *, qlab: Mapping[str, Any], cost_m
     fallback_level = str(_nested_get(qlab, ("fallback_level",)) or "").strip().upper()
     version = str(cost_model_version or "").strip().lower()
     return bool(
-        _first_bool(_nested_get(qlab, ("degraded_cost_model",)))
-        or source == "global_default"
+        source == "global_default"
         or fallback_level == "GLOBAL_DEFAULT"
         or version == "global_default_v0"
     )

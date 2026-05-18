@@ -1677,9 +1677,7 @@ def _write_candidate_snapshot_for_run(
     symbol_cost_table = {}
     quant_lab_cost_cache = {}
     try:
-        symbol_cost_table = load_latest_symbol_cost_table(
-            candidate_snapshot_symbol_cost_table_paths(runtime_reports_dir)
-        )
+        symbol_cost_table = load_latest_symbol_cost_table(candidate_snapshot_symbol_cost_table_paths(runtime_reports_dir))
     except Exception:
         symbol_cost_table = {}
     try:
@@ -1688,6 +1686,20 @@ def _write_candidate_snapshot_for_run(
         )
     except Exception:
         quant_lab_cost_cache = {}
+    symbol_cost_table = _refresh_candidate_snapshot_symbol_cost_table_best_effort(
+        cfg=cfg,
+        runtime_reports_dir=runtime_reports_dir,
+        run_id=run_id,
+        ts_utc=ts_utc,
+        symbols=symbols,
+        regime_state=regime_state,
+        equity_usdt=equity_usdt,
+        target_weights_raw=dict(getattr(audit, "targets_pre_risk", {}) or {}),
+        target_weights_after_risk=dict(getattr(audit, "targets_post_risk", {}) or {}),
+        symbol_cost_table=symbol_cost_table,
+        quant_lab_cost_cache=quant_lab_cost_cache,
+        audit=audit,
+    )
 
     rows = build_candidate_snapshot_rows(
         run_id=run_id,
@@ -1726,6 +1738,319 @@ def _write_candidate_snapshot_for_run(
     except Exception:
         pass
     return len(rows)
+
+
+def _refresh_candidate_snapshot_symbol_cost_table_best_effort(
+    *,
+    cfg: AppConfig,
+    runtime_reports_dir: Path,
+    run_id: str,
+    ts_utc: str,
+    symbols: Iterable[str],
+    regime_state: Any,
+    equity_usdt: Any,
+    target_weights_raw: Mapping[str, Any],
+    target_weights_after_risk: Mapping[str, Any],
+    symbol_cost_table: Mapping[str, Mapping[str, Any]],
+    quant_lab_cost_cache: Mapping[str, Mapping[str, Any]],
+    audit: Any = None,
+) -> dict[str, dict[str, Any]]:
+    qcfg = _get_quant_lab_cfg(cfg)
+    if qcfg is None or not bool(getattr(qcfg, "enabled", False)) or not bool(getattr(qcfg, "cost_enabled", True)):
+        return dict(symbol_cost_table or {})
+    execution = getattr(cfg, "execution", None)
+    if str(getattr(execution, "mode", "") or "").strip().lower() != "live":
+        return dict(symbol_cost_table or {})
+
+    from copy import copy
+
+    from src.quant_lab_client.client import QuantLabClient
+    from src.quant_lab_client.models import symbol_to_quant_lab_symbol
+    from src.reporting.candidate_snapshot import (
+        candidate_snapshot_accepts_symbol_cost,
+        candidate_snapshot_symbol_cost_table_paths,
+        load_latest_symbol_cost_table,
+        write_latest_symbol_cost_table,
+    )
+
+    existing_table = dict(symbol_cost_table or {})
+    existing_cache = dict(quant_lab_cost_cache or {})
+    missing_symbols: list[str] = []
+    for symbol in _candidate_snapshot_unique_symbols(symbols):
+        if _candidate_snapshot_lookup_symbol_cost(existing_table, symbol):
+            continue
+        if _candidate_snapshot_lookup_symbol_cost(existing_cache, symbol):
+            continue
+        missing_symbols.append(symbol)
+    if not missing_symbols:
+        return existing_table
+
+    try:
+        client_cfg = copy(qcfg)
+        if hasattr(client_cfg, "request_log_path"):
+            client_cfg.request_log_path = str(_resolve_quant_lab_artifact_path(cfg, "quant_lab_requests_path", "quant_lab_requests"))
+        client = QuantLabClient.from_config(client_cfg, run_id=run_id, phase="candidate_snapshot_symbol_cost")
+    except Exception as exc:
+        _candidate_snapshot_symbol_cost_refresh_note(
+            audit,
+            "candidate_snapshot_symbol_cost_refresh_unavailable",
+            error_type=type(exc).__name__,
+        )
+        return existing_table
+
+    quantile = str(getattr(qcfg, "cost_quantile", "p75") or "p75")
+    strategy_id = str(getattr(qcfg, "strategy_name", "v5") or "v5")
+    regime_text = str(regime_state or getattr(execution, "quant_lab_cost_regime_default", "normal") or "normal")
+    refreshed_rows: list[dict[str, Any]] = []
+    skipped_global_default = 0
+    error_count = 0
+    for idx, symbol in enumerate(missing_symbols):
+        normalized_symbol = symbol_to_quant_lab_symbol(symbol)
+        notional = _candidate_snapshot_cost_notional(
+            symbol=symbol,
+            equity_usdt=equity_usdt,
+            target_weights_raw=target_weights_raw,
+            target_weights_after_risk=target_weights_after_risk,
+            execution=execution,
+        )
+        request_id = f"{run_id}:candidate_symbol_cost:{idx}:{normalized_symbol}"
+        try:
+            estimate = client.estimate_cost(
+                symbol=symbol,
+                regime=regime_text,
+                notional_usdt=notional,
+                quantile=quantile,
+                side="buy",
+                strategy_id=strategy_id,
+                expected_edge_bps=None,
+                request_id=request_id,
+                ts_utc=ts_utc,
+                venue="OKX",
+                instrument_type="spot",
+            )
+        except Exception:
+            error_count += 1
+            continue
+        row = _candidate_snapshot_symbol_cost_row(
+            symbol=symbol,
+            normalized_symbol=normalized_symbol,
+            estimate=estimate,
+            ts_utc=ts_utc,
+            quantile=quantile,
+            notional_usdt=notional,
+        )
+        if candidate_snapshot_accepts_symbol_cost(row):
+            refreshed_rows.append(row)
+        else:
+            skipped_global_default += 1
+
+    if not refreshed_rows:
+        _candidate_snapshot_symbol_cost_refresh_note(
+            audit,
+            "candidate_snapshot_symbol_cost_refresh_no_usable_rows",
+            requested_count=len(missing_symbols),
+            skipped_global_default_count=skipped_global_default,
+            error_count=error_count,
+        )
+        return existing_table
+
+    merged_by_symbol: dict[str, dict[str, Any]] = {}
+    for row in existing_table.values():
+        key = _candidate_snapshot_symbol_key(row.get("symbol") or row.get("request_symbol") or row.get("normalized_symbol"))
+        if key:
+            merged_by_symbol[key] = dict(row)
+    for row in refreshed_rows:
+        key = _candidate_snapshot_symbol_key(row.get("symbol") or row.get("request_symbol") or row.get("normalized_symbol"))
+        if key:
+            merged_by_symbol[key] = dict(row)
+
+    table_path = runtime_reports_dir / "latest_symbol_costs.csv"
+    try:
+        write_latest_symbol_cost_table(table_path, list(merged_by_symbol.values()))
+        refreshed_table = load_latest_symbol_cost_table(candidate_snapshot_symbol_cost_table_paths(runtime_reports_dir))
+        _candidate_snapshot_symbol_cost_refresh_note(
+            audit,
+            "candidate_snapshot_symbol_cost_refresh_ok",
+            requested_count=len(missing_symbols),
+            written_count=len(refreshed_rows),
+            skipped_global_default_count=skipped_global_default,
+            error_count=error_count,
+        )
+        return refreshed_table
+    except Exception as exc:
+        _candidate_snapshot_symbol_cost_refresh_note(
+            audit,
+            "candidate_snapshot_symbol_cost_refresh_write_failed",
+            error_type=type(exc).__name__,
+            written_count=len(refreshed_rows),
+        )
+        return existing_table
+
+
+def _candidate_snapshot_symbol_cost_row(
+    *,
+    symbol: str,
+    normalized_symbol: str,
+    estimate: Any,
+    ts_utc: str,
+    quantile: str,
+    notional_usdt: float,
+) -> dict[str, Any]:
+    raw = dict(getattr(estimate, "raw_response", {}) or {})
+    total_cost = _first_present(
+        raw.get("effective_total_cost_bps"),
+        raw.get("selected_total_cost_bps"),
+        raw.get("total_cost_bps"),
+        raw.get("cost_bps"),
+        getattr(estimate, "total_cost_bps", None),
+        getattr(estimate, "cost_bps", None),
+    )
+    source = _first_present(raw.get("cost_source"), raw.get("source"), getattr(estimate, "source", None))
+    row = dict(raw)
+    row.setdefault("symbol", symbol)
+    row.setdefault("request_symbol", symbol)
+    row.setdefault("normalized_symbol", normalized_symbol)
+    row.setdefault("response_symbol", getattr(estimate, "symbol", None) or normalized_symbol)
+    row["cost_source"] = source
+    row.setdefault("source", source)
+    row["effective_total_cost_bps"] = total_cost
+    row.setdefault("selected_total_cost_bps", total_cost)
+    row.setdefault("total_cost_bps", total_cost)
+    row.setdefault("cost_bps", total_cost)
+    row.setdefault("fee_bps", getattr(estimate, "fee_bps", None))
+    row.setdefault("slippage_bps", getattr(estimate, "slippage_bps", None))
+    row.setdefault("spread_bps", getattr(estimate, "spread_bps", None))
+    row.setdefault("fallback_level", getattr(estimate, "fallback_level", None))
+    row.setdefault("cost_model_version", getattr(estimate, "cost_model_version", None))
+    row.setdefault("matched_regime", getattr(estimate, "matched_regime", None) or getattr(estimate, "regime", None))
+    row.setdefault("regime", getattr(estimate, "regime", None))
+    row.setdefault("as_of_ts", getattr(estimate, "as_of_ts", None))
+    row.setdefault("quantile", quantile)
+    row.setdefault("notional_usdt", notional_usdt)
+    row.setdefault("ts_utc", ts_utc)
+    row["cached_cost_estimate"] = True
+    row["candidate_snapshot_symbol_cost_refresh"] = True
+    if str(source or "").strip().lower() != "global_default":
+        row.setdefault("cost_resolution_reason", "quant_lab_symbol_cost_refresh")
+    return row
+
+
+def _candidate_snapshot_unique_symbols(symbols: Iterable[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for symbol in symbols or []:
+        text = str(symbol or "").strip()
+        key = _candidate_snapshot_symbol_key(text)
+        if not text or not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+    return out
+
+
+def _candidate_snapshot_lookup_symbol_cost(
+    rows: Mapping[str, Mapping[str, Any]],
+    symbol: Any,
+) -> dict[str, Any]:
+    for alias in _candidate_snapshot_symbol_aliases(symbol):
+        row = rows.get(alias)
+        if isinstance(row, Mapping):
+            return dict(row)
+    return {}
+
+
+def _candidate_snapshot_symbol_aliases(symbol: Any) -> set[str]:
+    text = str(symbol or "").strip()
+    if not text:
+        return set()
+    upper = text.upper()
+    aliases = {text, upper}
+    aliases.add(upper.replace("-", "/"))
+    aliases.add(upper.replace("/", "-"))
+    aliases.add(upper.replace("_", "/"))
+    return {alias for alias in aliases if alias}
+
+
+def _candidate_snapshot_symbol_key(symbol: Any) -> str:
+    aliases = _candidate_snapshot_symbol_aliases(symbol)
+    if not aliases:
+        return ""
+    return sorted(aliases, key=lambda item: ("/" not in item, item))[0]
+
+
+def _candidate_snapshot_cost_notional(
+    *,
+    symbol: str,
+    equity_usdt: Any,
+    target_weights_raw: Mapping[str, Any],
+    target_weights_after_risk: Mapping[str, Any],
+    execution: Any,
+) -> float:
+    equity = _safe_float(equity_usdt)
+    target_w = _first_numeric(
+        _lookup_mapping_value(target_weights_after_risk, symbol),
+        _lookup_mapping_value(target_weights_raw, symbol),
+    )
+    if equity is not None and target_w is not None and abs(float(target_w)) > 0:
+        return max(abs(float(equity) * float(target_w)), _candidate_snapshot_min_trade_notional(execution))
+    return _candidate_snapshot_min_trade_notional(execution)
+
+
+def _candidate_snapshot_min_trade_notional(execution: Any) -> float:
+    for value in (
+        getattr(execution, "min_trade_value_usdt", None),
+        getattr(execution, "min_notional_usdt", None),
+        getattr(execution, "target_notional_usdt", None),
+    ):
+        number = _safe_float(value)
+        if number is not None and number > 0:
+            return float(number)
+    return 16.0
+
+
+def _lookup_mapping_value(mapping: Mapping[str, Any], symbol: Any) -> Any:
+    for alias in _candidate_snapshot_symbol_aliases(symbol):
+        if alias in mapping:
+            return mapping.get(alias)
+    return None
+
+
+def _first_numeric(*values: Any) -> Optional[float]:
+    for value in values:
+        number = _safe_float(value)
+        if number is not None:
+            return number
+    return None
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        if value in (None, ""):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _candidate_snapshot_symbol_cost_refresh_note(audit: Any, message: str, **counts: Any) -> None:
+    if audit is None:
+        return
+    try:
+        if hasattr(audit, "add_note"):
+            detail = " ".join(f"{key}={value}" for key, value in counts.items() if value not in (None, ""))
+            audit.add_note(f"{message} {detail}".strip())
+        if hasattr(audit, "counts"):
+            for key, value in counts.items():
+                audit.counts[f"{message}_{key}"] = value
+    except Exception:
+        pass
 
 
 def _latest_prices_from_market_data(market_data: Mapping[str, Any] | None) -> dict[str, float]:
