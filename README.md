@@ -90,6 +90,10 @@ The ML research scripts remain in the repository for offline experiments only:
 
 Do not enable the ML training, promotion, or tuned XGBoost shadow timers in `live_prod` unless ML live overlay is explicitly re-approved.
 
+### Split Order Status
+
+`split_order_runtime_active=false` in `live_prod`. `split_orders` and `split_interval_sec` are intentionally inactive/not consumed; split order execution is not implemented for the current small-account production path.
+
 这意味着生产策略默认只在明确配置的主流交易对上工作。
 
 ---
@@ -555,7 +559,7 @@ trades_roundtrips.csv
 配置里写了，但运行时代码没消费
 ```
 
-例如 `split_orders` 这类潜在死配置。
+例如 runtime inactive / intentionally_inactive 配置；`split_orders` / `split_interval_sec` 在 `live_prod` 中不启用分单，bundle 不再把它们作为 live issue。
 
 ---
 

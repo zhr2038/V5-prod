@@ -3826,9 +3826,10 @@ def main():
             assert by_key["split_orders"]["present_in_live_prod"] == "true", by_key["split_orders"]
             assert by_key["split_orders"]["present_in_effective_config"] == "true", by_key["split_orders"]
             assert by_key["split_orders"]["consumed_in_runtime_code"] == "false", by_key["split_orders"]
-            assert by_key["split_orders"]["consumer_category"] == "not_consumed", by_key["split_orders"]
-            assert by_key["split_orders"]["diagnosis"] == "configured_not_consumed", by_key["split_orders"]
-            assert by_key["split_interval_sec"]["diagnosis"] == "configured_not_consumed", by_key["split_interval_sec"]
+            assert by_key["split_orders"]["consumer_category"] == "intentionally_inactive", by_key["split_orders"]
+            assert by_key["split_orders"]["diagnosis"] == "intentionally_inactive", by_key["split_orders"]
+            assert by_key["split_interval_sec"]["consumer_category"] == "intentionally_inactive", by_key["split_interval_sec"]
+            assert by_key["split_interval_sec"]["diagnosis"] == "intentionally_inactive", by_key["split_interval_sec"]
             assert by_key["same_symbol_reentry_enabled"]["consumed_in_runtime_code"] == "true", by_key["same_symbol_reentry_enabled"]
             assert by_key["same_symbol_reentry_enabled"]["consumer_category"] == "live_runtime", by_key["same_symbol_reentry_enabled"]
             assert by_key["same_symbol_reentry_enabled"]["consumer_files"] == "src/core/pipeline.py", by_key["same_symbol_reentry_enabled"]
@@ -3854,10 +3855,12 @@ def main():
                 item for item in issues["issues"]
                 if item.get("severity") == "low" and item.get("code") == "config_key_not_consumed"
             ]
-            assert {item["evidence"]["config_key"] for item in low_issues} == {"split_orders", "split_interval_sec"}, issues
-            assert window["config_runtime_not_consumed_count"] == 2, window
+            assert {item["evidence"]["config_key"] for item in low_issues} == set(), issues
+            assert window["config_runtime_not_consumed_count"] == 0, window
+            assert window["split_order_runtime_active"] is False, window
             assert "## 配置消费审计" in readme, readme
-            assert "live config keys not consumed in runtime: 2" in readme, readme
+            assert "live config keys not consumed in runtime: 0" in readme, readme
+            assert "split_order_runtime_active: false" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

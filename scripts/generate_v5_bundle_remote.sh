@@ -922,6 +922,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "market_impulse_probe_time_stop_hours",
         "probe_exit_enabled",
     }
+    INTENTIONALLY_INACTIVE_CONFIG_KEYS = {
+        "split_orders",
+        "split_interval_sec",
+    }
     LEGACY_EXECUTION_QUANT_LAB_KEYS = {
         "quant_lab_enabled",
         "quant_lab_base_url",
@@ -1079,7 +1083,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 if config_consumer_file_category(rel) == "diagnostics"
             ]
             diagnostics_key = config_key_is_diagnostics(key)
-            if live_consumer_files:
+            intentionally_inactive = key in INTENTIONALLY_INACTIVE_CONFIG_KEYS
+            if intentionally_inactive:
+                consumer_category = "intentionally_inactive"
+                consumer_files = []
+            elif live_consumer_files:
                 consumer_category = "live_runtime"
                 consumer_files = live_consumer_files
             elif diagnostics_key and diagnostics_consumer_files:
@@ -1093,7 +1101,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 consumer_files = []
             consumed = bool(consumer_files)
             legacy_quant_lab_inactive = bool(key in LEGACY_EXECUTION_QUANT_LAB_KEYS and top_level_quant_lab_authoritative)
-            if legacy_quant_lab_inactive:
+            if intentionally_inactive:
+                consumer_category = "intentionally_inactive"
+                consumer_files = []
+                consumed = False
+                diagnosis = "intentionally_inactive"
+            elif legacy_quant_lab_inactive:
                 consumer_category = "legacy_inactive"
                 consumer_files = []
                 consumed = False
@@ -6954,6 +6967,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     config_runtime_not_consumed_count = sum(
         1 for row in config_runtime_consumption_rows
         if row.get("present_in_live_prod") == "true" and row.get("consumed_in_runtime_code") != "true"
+        and row.get("diagnosis") not in {"intentionally_inactive", "legacy_execution_quant_lab_inactive_top_level_authoritative"}
     )
 
     write_csv(
@@ -7659,6 +7673,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "negative_expectancy_mismatch_count": negative_expectancy_mismatch_count,
         "config_runtime_consumption_rows": len(config_runtime_consumption_rows),
         "config_runtime_not_consumed_count": config_runtime_not_consumed_count,
+        "split_order_runtime_active": False,
         "quant_lab_compliance_rows": len(quant_lab_compliance_rows),
         "quant_lab_permission_audit_rows": len(quant_lab_permission_audit_rows),
         "quant_lab_mode_audit_rows": len(quant_lab_mode_audit_rows),
@@ -8372,6 +8387,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "## 配置消费审计",
         f"- audited config keys: {len(config_runtime_consumption_rows)}",
         f"- live config keys not consumed in runtime: {config_runtime_not_consumed_count}",
+        "- split_order_runtime_active: false",
         f"- low issue present: {'yes' if config_runtime_not_consumed_count else 'no'}",
         "",
         "## Rank exit 一致性检查",

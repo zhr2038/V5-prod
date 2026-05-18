@@ -290,8 +290,6 @@ execution:
   preflight_bootstrap_patch_max_total_usdt: 100.0
   preflight_bootstrap_patch_min_interval_sec: 300
   
-  split_orders: 3
-  split_interval_sec: 3.0
   max_hourly_volume_pct: 0.05
   slippage_db_path: reports/slippage.sqlite
   fee_bps: 10

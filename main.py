@@ -1392,6 +1392,7 @@ def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
             "collect_ml_training_data": collect_ml_training_data,
             "ml_research_use_stable_universe": ml_research_use_stable_universe,
             "fee_bps": float(getattr(cfg.execution, "fee_bps", 0.0) or 0.0),
+            "split_order_runtime_active": False,
             "cost_aware_roundtrip_cost_bps": (
                 None
                 if getattr(cfg.execution, "cost_aware_roundtrip_cost_bps", None) is None
