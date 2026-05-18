@@ -1466,7 +1466,13 @@ class DiagnosticsConfig(BaseModel):
         default=0.8,
         ge=0.0,
         le=1.0,
-        description="Minimum mixed/actual cost-source coverage before LIVE_SMALL_READY can be considered",
+        description="Minimum arrival-mid/spread observation coverage before LIVE_SMALL_READY can be considered",
+    )
+    paper_strategy_required_entry_days: int = Field(
+        default=3,
+        ge=1,
+        le=365,
+        description="Minimum days with would-enter paper samples before LIVE_SMALL_READY can be considered",
     )
     paper_strategy_horizons_hours: List[int] = Field(
         default_factory=lambda: [4, 8, 12, 24, 48, 72],

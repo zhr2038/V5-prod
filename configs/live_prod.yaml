@@ -247,6 +247,7 @@ diagnostics:
   paper_strategy_enable_live_experiment: false
   paper_strategy_required_paper_days: 14
   paper_strategy_required_slippage_coverage: 0.8
+  paper_strategy_required_entry_days: 3
   paper_strategy_horizons_hours: [4, 8, 12, 24, 48, 72]
   paper_strategy_rt_cost_bps: 30
   paper_strategy_live_ready_cost_sources: ["actual_fills", "mixed_actual_proxy"]

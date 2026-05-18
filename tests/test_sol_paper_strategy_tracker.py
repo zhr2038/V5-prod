@@ -9,7 +9,10 @@ import pytest
 from configs.schema import AppConfig
 from src.core.models import MarketSeries
 from src.reporting.decision_audit import DecisionAudit
-from src.reporting.sol_paper_strategy_tracker import update_sol_paper_strategy_tracker
+from src.reporting.sol_paper_strategy_tracker import (
+    _readiness_for_rows,
+    update_sol_paper_strategy_tracker,
+)
 
 
 def _series(symbol: str, start_s: int, prices: dict[int, float]) -> MarketSeries:
@@ -106,6 +109,7 @@ def _cfg() -> AppConfig:
     cfg.diagnostics.paper_strategy_enable_live_experiment = False
     cfg.diagnostics.paper_strategy_required_paper_days = 14
     cfg.diagnostics.paper_strategy_required_slippage_coverage = 0.8
+    cfg.diagnostics.paper_strategy_required_entry_days = 3
     cfg.diagnostics.paper_strategy_horizons_hours = [4, 8, 12, 24, 48, 72]
     cfg.diagnostics.paper_strategy_rt_cost_bps = 30.0
     return cfg
@@ -162,6 +166,7 @@ def test_sol_paper_strategy_tracker_writes_runs_daily_and_slippage(tmp_path: Pat
         market_data_1h=market,
         cfg=cfg,
         cache_dir=tmp_path / "cache",
+        top_of_book={"SOL/USDT": {"bid": 99.9, "ask": 100.1}},
     )
     assert result["enabled"] is True
     assert result["new_records"] == 2
@@ -189,6 +194,12 @@ def test_sol_paper_strategy_tracker_writes_runs_daily_and_slippage(tmp_path: Pat
     assert {row["would_size_notional"] for row in entered_runs} == {"12.0"}
     assert {row["paper_pnl_bps_24h"] for row in entered_runs} == {"970.0"}
     assert {row["paper_pnl_usdt_24h"] for row in entered_runs} == {"1.164"}
+    assert {row["arrival_bid"] for row in entered_runs} == {"99.9"}
+    assert {row["arrival_ask"] for row in entered_runs} == {"100.1"}
+    assert {row["arrival_mid"] for row in entered_runs} == {"100.0"}
+    assert {row["estimated_spread_bps"] for row in entered_runs} == {"20.0"}
+    assert {row["expected_order_type"] for row in entered_runs} == {"paper_market_buy"}
+    assert {row["estimated_fill_px"] for row in entered_runs} == {"100.1"}
     assert "cand_sol_live" not in {row["candidate_id"] for row in runs}
 
     daily = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_daily.csv")
@@ -207,9 +218,14 @@ def test_sol_paper_strategy_tracker_writes_runs_daily_and_slippage(tmp_path: Pat
     assert f4["paper_days"] == "2"
     assert f4["required_paper_days"] == "14"
     assert f4["slippage_coverage"] == "0.5"
+    assert f4["arrival_mid_coverage"] == "0.5"
+    assert f4["spread_observation_coverage"] == "0.5"
+    assert '"mixed_actual_proxy": 1' in f4["cost_source_mix"]
     assert f4["readiness_status"] == "PAPER_READY"
     assert f4["live_small_ready"] == "False"
     assert "no_paper_days" in f4["live_block_reason"]
+    assert "insufficient_entry_days" in f4["live_block_reason"]
+    assert "arrival_mid_coverage_insufficient" in f4["live_block_reason"]
     assert "no_live_slippage_coverage" in f4["live_block_reason"]
 
     alpha6_low = by_strategy["SOL_PROTECT_ALPHA6_LOW_EXCEPTION_PAPER_V1"]
@@ -290,6 +306,31 @@ def test_sol_paper_strategy_tracker_writes_strategy_heartbeats_without_candidate
     coverage = _read_csv(tmp_path / "reports" / "summaries" / "paper_slippage_coverage.csv")
     assert {row["total_rows"] for row in coverage} == {"1"}
     assert {row["slippage_coverage"] for row in coverage} == {"0.0"}
+
+
+def test_sol_paper_public_spread_does_not_become_live_without_arrival_coverage() -> None:
+    rows = [
+        {
+            "paper_date": f"2026-05-{day:02d}",
+            "would_enter": True,
+            "cost_source": "public_spread_proxy",
+        }
+        for day in range(1, 15)
+    ]
+
+    readiness = _readiness_for_rows(
+        rows,
+        required_days=14,
+        required_entry_days=3,
+        required_coverage=0.8,
+        enable_live_experiment=True,
+        allowed_cost_sources={"actual_fills", "mixed_actual_proxy"},
+    )
+
+    assert readiness["live_small_ready"] is False
+    assert "cost_source_not_actual_or_mixed" in readiness["live_block_reason"]
+    assert "arrival_mid_coverage_insufficient" in readiness["live_block_reason"]
+    assert "no_live_slippage_coverage" in readiness["live_block_reason"]
 
 
 def test_sol_paper_strategy_tracker_heartbeat_explains_alpha6_not_buy(tmp_path: Path) -> None:

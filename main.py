@@ -3229,6 +3229,7 @@ def main() -> None:
             market_data_1h=md_1h,
             cfg=cfg,
             cache_dir=PROJECT_ROOT / "data" / "cache",
+            top_of_book=latest_top_of_book,
         )
         if paper_result.get("enabled"):
             log.info(

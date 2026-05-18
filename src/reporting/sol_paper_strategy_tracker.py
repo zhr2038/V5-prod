@@ -90,6 +90,12 @@ PAPER_RUN_FIELDS = [
     "paper_pnl_bps",
     "paper_pnl_usdt",
     "entry_px",
+    "arrival_bid",
+    "arrival_ask",
+    "arrival_mid",
+    "estimated_spread_bps",
+    "expected_order_type",
+    "estimated_fill_px",
     "final_score",
     "alpha6_score",
     "alpha6_side",
@@ -102,6 +108,7 @@ PAPER_RUN_FIELDS = [
     "cost_source_live_ready",
     "slippage_covered",
     "required_paper_days",
+    "required_entry_days",
     "required_slippage_coverage",
     "live_small_ready",
     "readiness_status",
@@ -140,9 +147,13 @@ PAPER_SLIPPAGE_FIELDS = [
     "symbol",
     "paper_days",
     "required_paper_days",
+    "required_entry_days",
     "total_rows",
     "slippage_covered_rows",
     "slippage_coverage",
+    "arrival_mid_coverage",
+    "spread_observation_coverage",
+    "cost_source_mix",
     "required_slippage_coverage",
     "latest_cost_source",
     "allowed_live_cost_sources",
@@ -323,6 +334,69 @@ def _estimated_cost_bps(row: Mapping[str, Any], fallback_bps: float) -> float:
 def _cost_source_live_ready(row: Mapping[str, Any], allowed: set[str]) -> bool:
     source = str(row.get("cost_source") or "").strip().lower()
     return source in allowed
+
+
+def _lookup_top_of_book(top_of_book: Mapping[str, Any] | None, symbol: str) -> Mapping[str, Any]:
+    book = top_of_book or {}
+    variants = {
+        symbol,
+        symbol.upper(),
+        symbol.replace("/", "-"),
+        symbol.replace("/", "-").upper(),
+        symbol.replace("-", "/"),
+        symbol.replace("-", "/").upper(),
+    }
+    for key in variants:
+        value = book.get(key)
+        if isinstance(value, Mapping):
+            return value
+    return {}
+
+
+def _quote_context(
+    *,
+    symbol: str,
+    row: Mapping[str, Any],
+    top_of_book: Mapping[str, Any] | None,
+    entry_px: Optional[float],
+) -> dict[str, Any]:
+    quote = _lookup_top_of_book(top_of_book, symbol)
+    bid = _normalize_float(row.get("arrival_bid") or row.get("bid") or quote.get("bid"))
+    ask = _normalize_float(row.get("arrival_ask") or row.get("ask") or quote.get("ask"))
+    mid = _normalize_float(row.get("arrival_mid") or row.get("mid") or quote.get("mid"))
+    if mid is None and bid is not None and ask is not None and bid > 0 and ask > 0:
+        mid = (float(bid) + float(ask)) / 2.0
+    spread_bps = _normalize_float(
+        row.get("estimated_spread_bps")
+        or row.get("spread_bps_at_decision")
+        or row.get("spread_bps")
+        or quote.get("spread_bps")
+    )
+    if spread_bps is None and bid is not None and ask is not None and mid and mid > 0:
+        spread_bps = (float(ask) - float(bid)) / float(mid) * 10_000.0
+    expected_order_type = str(
+        row.get("expected_order_type")
+        or row.get("order_type")
+        or "paper_market_buy"
+    )
+    estimated_fill_px = _normalize_float(row.get("estimated_fill_px"))
+    if estimated_fill_px is None:
+        estimated_fill_px = ask if ask is not None and ask > 0 else entry_px
+    return {
+        "arrival_bid": bid,
+        "arrival_ask": ask,
+        "arrival_mid": mid,
+        "estimated_spread_bps": round(float(spread_bps), 8) if spread_bps is not None else None,
+        "expected_order_type": expected_order_type,
+        "estimated_fill_px": estimated_fill_px,
+    }
+
+
+def _slippage_observed(row: Mapping[str, Any]) -> bool:
+    return (
+        (_normalize_float(row.get("arrival_mid")) or 0.0) > 0.0
+        and _normalize_float(row.get("estimated_spread_bps")) is not None
+    )
 
 
 def _risk_level_for_row(row: Mapping[str, Any], audit: DecisionAudit) -> str:
@@ -570,13 +644,16 @@ def _heartbeat_record(
     asof_ts_ms: int,
     rt_cost_bps: float,
     required_days: int,
+    required_entry_days: int,
     required_coverage: float,
     cost_context: Mapping[str, Any],
     allowed_cost_sources: set[str],
     condition_diagnostics: Mapping[str, Any] | None = None,
     no_sample_reason: str = "no_qualifying_candidate",
+    quote_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     condition_diagnostics = dict(condition_diagnostics or {})
+    quote_context = dict(quote_context or {})
     cost_source = str(cost_context.get("cost_source") or "local_estimate")
     diagnostic_cost_source = str(condition_diagnostics.get("cost_source") or "")
     if diagnostic_cost_source:
@@ -617,6 +694,12 @@ def _heartbeat_record(
         "would_size_notional": None,
         "would_size_usdt": None,
         "entry_px": None,
+        "arrival_bid": quote_context.get("arrival_bid"),
+        "arrival_ask": quote_context.get("arrival_ask"),
+        "arrival_mid": quote_context.get("arrival_mid"),
+        "estimated_spread_bps": quote_context.get("estimated_spread_bps"),
+        "expected_order_type": quote_context.get("expected_order_type") or "paper_market_buy",
+        "estimated_fill_px": quote_context.get("estimated_fill_px"),
         "final_score": None,
         "alpha6_score": condition_diagnostics.get("alpha6_score"),
         "alpha6_side": str(condition_diagnostics.get("alpha6_side") or ""),
@@ -635,8 +718,9 @@ def _heartbeat_record(
         ),
         "cost_model_version": str(condition_diagnostics.get("cost_model_version") or cost_context.get("cost_model_version") or ""),
         "cost_source_live_ready": live_ready,
-        "slippage_covered": live_ready,
+        "slippage_covered": _slippage_observed(quote_context),
         "required_paper_days": required_days,
+        "required_entry_days": required_entry_days,
         "required_slippage_coverage": required_coverage,
         "rt_cost_bps": rt_cost_bps,
         "label_status": "heartbeat",
@@ -651,6 +735,7 @@ def _collect_candidates(
     cfg: AppConfig,
     market_data_1h: Dict[str, MarketSeries],
     cache_dir: Path,
+    top_of_book: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     diagnostics = _diagnostics_cfg(cfg)
     enabled_shadow_only = bool(getattr(diagnostics, "paper_strategy_enabled_shadow_only", True))
@@ -660,6 +745,7 @@ def _collect_candidates(
     horizons = _horizons(diagnostics)
     rt_cost_bps = float(getattr(diagnostics, "paper_strategy_rt_cost_bps", 30.0) or 30.0)
     required_days = int(getattr(diagnostics, "paper_strategy_required_paper_days", 14) or 14)
+    required_entry_days = int(getattr(diagnostics, "paper_strategy_required_entry_days", 3) or 3)
     required_coverage = float(getattr(diagnostics, "paper_strategy_required_slippage_coverage", 0.8) or 0.8)
     allowed_cost_sources = {
         str(item or "").strip().lower()
@@ -702,6 +788,12 @@ def _collect_candidates(
             cost_source = str(row.get("cost_source") or "")
             live_ready = _cost_source_live_ready(row, allowed_cost_sources)
             estimated_cost = _estimated_cost_bps(row, rt_cost_bps)
+            quote_context = _quote_context(
+                symbol=symbol,
+                row=row,
+                top_of_book=top_of_book,
+                entry_px=entry_px,
+            )
             records.append(
                 {
                     "strategy_id": str(spec.get("strategy_id") or ""),
@@ -732,6 +824,12 @@ def _collect_candidates(
                     "would_size_notional": would_size,
                     "would_size_usdt": would_size,
                     "entry_px": entry_px,
+                    "arrival_bid": quote_context.get("arrival_bid"),
+                    "arrival_ask": quote_context.get("arrival_ask"),
+                    "arrival_mid": quote_context.get("arrival_mid"),
+                    "estimated_spread_bps": quote_context.get("estimated_spread_bps"),
+                    "expected_order_type": quote_context.get("expected_order_type"),
+                    "estimated_fill_px": quote_context.get("estimated_fill_px"),
                     "final_score": _normalize_float(row.get("final_score")),
                     "alpha6_score": _normalize_float(row.get("alpha6_score")),
                     "alpha6_side": str(condition_diagnostics.get("alpha6_side") or row.get("alpha6_side") or ""),
@@ -742,8 +840,9 @@ def _collect_candidates(
                     "estimated_cost_bps": estimated_cost,
                     "cost_model_version": str(row.get("cost_model_version") or ""),
                     "cost_source_live_ready": live_ready,
-                    "slippage_covered": live_ready,
+                    "slippage_covered": _slippage_observed(quote_context),
                     "required_paper_days": required_days,
+                    "required_entry_days": required_entry_days,
                     "required_slippage_coverage": required_coverage,
                     "rt_cost_bps": rt_cost_bps,
                     "label_status": "pending",
@@ -759,11 +858,17 @@ def _collect_candidates(
         strategy_id = str(spec.get("strategy_id") or "")
         if strategy_id in matched_strategy_ids:
             continue
-        _best_row, condition_diagnostics, no_sample_reason = _best_sol_candidate_for_strategy(
+        best_row, condition_diagnostics, no_sample_reason = _best_sol_candidate_for_strategy(
             candidate_rows=candidate_rows,
             spec=spec,
             audit=audit,
             asof_ts_ms=asof_ts_ms,
+        )
+        quote_context = _quote_context(
+            symbol=SOL_SYMBOL,
+            row=best_row or {},
+            top_of_book=top_of_book,
+            entry_px=None,
         )
         heartbeat = _heartbeat_record(
             spec=spec,
@@ -772,11 +877,13 @@ def _collect_candidates(
             asof_ts_ms=asof_ts_ms,
             rt_cost_bps=rt_cost_bps,
             required_days=required_days,
+            required_entry_days=required_entry_days,
             required_coverage=required_coverage,
             cost_context=cost_context,
             allowed_cost_sources=allowed_cost_sources,
             condition_diagnostics=condition_diagnostics,
             no_sample_reason=no_sample_reason,
+            quote_context=quote_context,
         )
         heartbeat["enabled_shadow_only"] = enabled_shadow_only
         heartbeat["enable_live_experiment"] = enable_live_experiment
@@ -840,22 +947,65 @@ def _row_for_csv(record: Mapping[str, Any], horizons: Iterable[int]) -> dict[str
     return {field: record.get(field) for field in fields}
 
 
+def _cost_source_mix(rows: Iterable[Mapping[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = defaultdict(int)
+    for row in rows:
+        source = str(row.get("cost_source") or "missing").strip().lower() or "missing"
+        counts[source] += 1
+    return dict(sorted(counts.items()))
+
+
+def _coverage_ratio(rows: list[dict[str, Any]], predicate: Any) -> float:
+    return round(
+        float(sum(1 for row in rows if predicate(row))) / float(len(rows)),
+        6,
+    ) if rows else 0.0
+
+
 def _readiness_for_rows(
     rows: list[dict[str, Any]],
     *,
     required_days: int,
+    required_entry_days: int,
     required_coverage: float,
     enable_live_experiment: bool,
     allowed_cost_sources: set[str],
-) -> tuple[bool, str, str, int, float, int]:
+) -> dict[str, Any]:
     paper_days = len({str(row.get("paper_date") or "") for row in rows if str(row.get("paper_date") or "")})
-    covered = [row for row in rows if _cost_source_live_ready(row, allowed_cost_sources)]
-    coverage = float(len(covered)) / float(len(rows)) if rows else 0.0
+    entry_days = len(
+        {
+            str(row.get("paper_date") or "")
+            for row in rows
+            if str(row.get("paper_date") or "") and bool(row.get("would_enter"))
+        }
+    )
+    cost_mix = _cost_source_mix(rows)
+    has_live_ready_cost = any(source in allowed_cost_sources for source in cost_mix)
+    has_global_default = "global_default" in cost_mix
+    slippage_covered = [row for row in rows if _slippage_observed(row)]
+    coverage = float(len(slippage_covered)) / float(len(rows)) if rows else 0.0
+    coverage = round(coverage, 6)
+    arrival_mid_coverage = _coverage_ratio(
+        rows,
+        lambda row: (_normalize_float(row.get("arrival_mid")) or 0.0) > 0.0,
+    )
+    spread_observation_coverage = _coverage_ratio(
+        rows,
+        lambda row: _normalize_float(row.get("estimated_spread_bps")) is not None,
+    )
     reasons: list[str] = []
     if paper_days < int(required_days):
         reasons.append("no_paper_days")
-    if not covered:
+    if entry_days < int(required_entry_days):
+        reasons.append("insufficient_entry_days")
+    if has_global_default:
+        reasons.append("cost_source_global_default")
+    if not has_live_ready_cost and coverage < float(required_coverage):
         reasons.append("cost_source_not_actual_or_mixed")
+    if arrival_mid_coverage < float(required_coverage):
+        reasons.append("arrival_mid_coverage_insufficient")
+    if spread_observation_coverage < float(required_coverage):
+        reasons.append("spread_observation_coverage_insufficient")
     if coverage < float(required_coverage):
         reasons.append("no_live_slippage_coverage")
     rules_pass = not reasons
@@ -863,7 +1013,18 @@ def _readiness_for_rows(
         reasons.append("live_experiment_disabled")
     live_small_ready = bool(rules_pass and enable_live_experiment)
     status = "LIVE_SMALL_READY" if live_small_ready else "PAPER_READY"
-    return live_small_ready, status, ";".join(reasons), paper_days, round(coverage, 6), len(covered)
+    return {
+        "live_small_ready": live_small_ready,
+        "readiness_status": status,
+        "live_block_reason": ";".join(reasons),
+        "paper_days": paper_days,
+        "entry_day_count": entry_days,
+        "slippage_coverage": coverage,
+        "slippage_covered_rows": len(slippage_covered),
+        "arrival_mid_coverage": arrival_mid_coverage,
+        "spread_observation_coverage": spread_observation_coverage,
+        "cost_source_mix": json.dumps(cost_mix, sort_keys=True),
+    }
 
 
 def _annotate_readiness(
@@ -872,6 +1033,7 @@ def _annotate_readiness(
     diagnostics: DiagnosticsConfig,
 ) -> list[dict[str, Any]]:
     required_days = int(getattr(diagnostics, "paper_strategy_required_paper_days", 14) or 14)
+    required_entry_days = int(getattr(diagnostics, "paper_strategy_required_entry_days", 3) or 3)
     required_coverage = float(getattr(diagnostics, "paper_strategy_required_slippage_coverage", 0.8) or 0.8)
     enable_live_experiment = bool(getattr(diagnostics, "paper_strategy_enable_live_experiment", False))
     allowed_cost_sources = {
@@ -886,17 +1048,19 @@ def _annotate_readiness(
     for record in records:
         grouped[(str(record.get("strategy_id") or ""), str(record.get("symbol") or ""))].append(record)
     for rows in grouped.values():
-        live_small_ready, status, reason, _days, _coverage, _covered = _readiness_for_rows(
+        readiness = _readiness_for_rows(
             rows,
             required_days=required_days,
+            required_entry_days=required_entry_days,
             required_coverage=required_coverage,
             enable_live_experiment=enable_live_experiment,
             allowed_cost_sources=allowed_cost_sources,
         )
         for row in rows:
-            row["live_small_ready"] = live_small_ready
-            row["readiness_status"] = status
-            row["live_block_reason"] = reason
+            row["live_small_ready"] = readiness["live_small_ready"]
+            row["readiness_status"] = readiness["readiness_status"]
+            row["live_block_reason"] = readiness["live_block_reason"]
+            row["required_entry_days"] = row.get("required_entry_days") or required_entry_days
     return records
 
 
@@ -945,6 +1109,7 @@ def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _slippage_rows(records: list[dict[str, Any]], diagnostics: DiagnosticsConfig) -> list[dict[str, Any]]:
     required_days = int(getattr(diagnostics, "paper_strategy_required_paper_days", 14) or 14)
+    required_entry_days = int(getattr(diagnostics, "paper_strategy_required_entry_days", 3) or 3)
     required_coverage = float(getattr(diagnostics, "paper_strategy_required_slippage_coverage", 0.8) or 0.8)
     enable_live_experiment = bool(getattr(diagnostics, "paper_strategy_enable_live_experiment", False))
     allowed_cost_sources = {
@@ -960,9 +1125,10 @@ def _slippage_rows(records: list[dict[str, Any]], diagnostics: DiagnosticsConfig
         buckets[(str(record.get("strategy_id") or ""), str(record.get("symbol") or ""))].append(record)
     out: list[dict[str, Any]] = []
     for (strategy_id, symbol), rows in sorted(buckets.items()):
-        live_small_ready, status, reason, paper_days, coverage, covered_count = _readiness_for_rows(
+        readiness = _readiness_for_rows(
             rows,
             required_days=required_days,
+            required_entry_days=required_entry_days,
             required_coverage=required_coverage,
             enable_live_experiment=enable_live_experiment,
             allowed_cost_sources=allowed_cost_sources,
@@ -973,17 +1139,21 @@ def _slippage_rows(records: list[dict[str, Any]], diagnostics: DiagnosticsConfig
                 "strategy_id": strategy_id,
                 "experiment_name": latest.get("experiment_name"),
                 "symbol": symbol,
-                "paper_days": paper_days,
+                "paper_days": readiness["paper_days"],
                 "required_paper_days": required_days,
+                "required_entry_days": required_entry_days,
                 "total_rows": len(rows),
-                "slippage_covered_rows": covered_count,
-                "slippage_coverage": coverage,
+                "slippage_covered_rows": readiness["slippage_covered_rows"],
+                "slippage_coverage": readiness["slippage_coverage"],
+                "arrival_mid_coverage": readiness["arrival_mid_coverage"],
+                "spread_observation_coverage": readiness["spread_observation_coverage"],
+                "cost_source_mix": readiness["cost_source_mix"],
                 "required_slippage_coverage": required_coverage,
                 "latest_cost_source": latest.get("cost_source"),
                 "allowed_live_cost_sources": ",".join(sorted(allowed_cost_sources)),
-                "live_small_ready": live_small_ready,
-                "readiness_status": status,
-                "live_block_reason": reason,
+                "live_small_ready": readiness["live_small_ready"],
+                "readiness_status": readiness["readiness_status"],
+                "live_block_reason": readiness["live_block_reason"],
             }
         )
     return out
@@ -997,6 +1167,7 @@ def update_sol_paper_strategy_tracker(
     cfg: AppConfig,
     cache_dir: str | Path | None = None,
     ohlcv_provider: Any = None,
+    top_of_book: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     diagnostics = _diagnostics_cfg(cfg)
     enabled = bool(getattr(diagnostics, "paper_strategy_tracking_enabled", True))
@@ -1017,6 +1188,7 @@ def update_sol_paper_strategy_tracker(
         cfg=cfg,
         market_data_1h=market_data_1h,
         cache_dir=cache_root,
+        top_of_book=top_of_book,
     )
     inserted = 0
     for record in new_records:
