@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 from configs.schema import AppConfig
@@ -25,6 +26,10 @@ def _series(symbol: str, start_s: int, prices: dict[int, float]) -> MarketSeries
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
     return list(csv.DictReader(path.read_text(encoding="utf-8").splitlines()))
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def _write_candidate_snapshot(run_dir: Path) -> None:
@@ -135,39 +140,120 @@ def test_sol_paper_strategy_tracker_writes_runs_daily_and_slippage(tmp_path: Pat
         cfg=cfg,
         cache_dir=tmp_path / "cache",
     )
-    assert mature_result["new_records"] == 0
-    assert mature_result["total_records"] == 2
+    assert mature_result["new_records"] == 2
+    assert mature_result["total_records"] == 4
 
     runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
     assert {row["strategy_id"] for row in runs} == {
         "SOL_PROTECT_ALPHA6_LOW_EXCEPTION_PAPER_V1",
         "SOL_F4_VOLUME_EXPANSION_PAPER_V1",
     }
-    assert {row["would_enter"] for row in runs} == {"True"}
-    assert {row["would_size_notional"] for row in runs} == {"12.0"}
-    assert {row["paper_pnl_bps_24h"] for row in runs} == {"970.0"}
-    assert {row["paper_pnl_usdt_24h"] for row in runs} == {"1.164"}
+    entered_runs = [row for row in runs if row["would_enter"] == "True"]
+    heartbeat_runs = [row for row in runs if row["would_enter"] == "False"]
+    assert len(entered_runs) == 2
+    assert len(heartbeat_runs) == 2
+    assert {row["would_size_notional"] for row in entered_runs} == {"12.0"}
+    assert {row["paper_pnl_bps_24h"] for row in entered_runs} == {"970.0"}
+    assert {row["paper_pnl_usdt_24h"] for row in entered_runs} == {"1.164"}
     assert "cand_sol_live" not in {row["candidate_id"] for row in runs}
 
     daily = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_daily.csv")
-    assert len(daily) == 2
-    assert {row["paper_days_to_date"] for row in daily} == {"1"}
-    assert {row["avg_paper_pnl_bps"] for row in daily} == {"970.0"}
+    assert len(daily) == 4
+    entry_daily = [row for row in daily if row["entry_count"] == "1"]
+    heartbeat_daily = [row for row in daily if row["entry_count"] == "0"]
+    assert len(entry_daily) == 2
+    assert len(heartbeat_daily) == 2
+    assert {row["paper_days_to_date"] for row in entry_daily} == {"1"}
+    assert {row["paper_days_to_date"] for row in heartbeat_daily} == {"2"}
+    assert {row["avg_paper_pnl_bps"] for row in entry_daily} == {"970.0"}
 
     coverage = _read_csv(tmp_path / "reports" / "summaries" / "paper_slippage_coverage.csv")
     by_strategy = {row["strategy_id"]: row for row in coverage}
     f4 = by_strategy["SOL_F4_VOLUME_EXPANSION_PAPER_V1"]
-    assert f4["paper_days"] == "1"
+    assert f4["paper_days"] == "2"
     assert f4["required_paper_days"] == "14"
-    assert f4["slippage_coverage"] == "1.0"
+    assert f4["slippage_coverage"] == "0.5"
     assert f4["readiness_status"] == "PAPER_READY"
     assert f4["live_small_ready"] == "False"
-    assert f4["live_block_reason"] == "no_paper_days"
+    assert "no_paper_days" in f4["live_block_reason"]
+    assert "no_live_slippage_coverage" in f4["live_block_reason"]
 
     alpha6_low = by_strategy["SOL_PROTECT_ALPHA6_LOW_EXCEPTION_PAPER_V1"]
-    assert alpha6_low["latest_cost_source"] == "public_spread_proxy"
+    assert alpha6_low["latest_cost_source"] == "local_estimate"
     assert "cost_source_not_actual_or_mixed" in alpha6_low["live_block_reason"]
     assert "no_live_slippage_coverage" in alpha6_low["live_block_reason"]
+
+
+def test_sol_paper_strategy_tracker_writes_strategy_heartbeats_without_candidate(tmp_path: Path) -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_heartbeat"
+    run_dir.mkdir(parents=True)
+    with (run_dir / "candidate_snapshot.csv").open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(
+            fh,
+            fieldnames=[
+                "candidate_id",
+                "run_id",
+                "ts_utc",
+                "symbol",
+                "final_decision",
+                "strategy_candidate",
+                "cost_source",
+                "cost_source_quality",
+                "cost_bps",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "candidate_id": "eth_no_order",
+                "run_id": "r_heartbeat",
+                "ts_utc": "2026-05-15T00:00:00Z",
+                "symbol": "ETH/USDT",
+                "final_decision": "no_order",
+                "strategy_candidate": "f4_volume_swing",
+                "cost_source": "mixed_actual_proxy",
+                "cost_source_quality": "mixed_actual_proxy",
+                "cost_bps": "12",
+            }
+        )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_heartbeat", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["enabled"] is True
+    assert result["new_records"] == 2
+    assert result["total_records"] == 2
+    labels = _read_jsonl(tmp_path / "reports" / "sol_paper_strategy_labels.jsonl")
+    assert {row["strategy_id"] for row in labels} == {
+        "SOL_PROTECT_ALPHA6_LOW_EXCEPTION_PAPER_V1",
+        "SOL_F4_VOLUME_EXPANSION_PAPER_V1",
+    }
+    assert {row["would_enter"] for row in labels} == {False}
+    assert {row["label_status"] for row in labels} == {"heartbeat"}
+    assert {row["cost_source"] for row in labels} == {"local_estimate"}
+
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    assert len(runs) == 2
+    assert {row["would_enter"] for row in runs} == {"False"}
+    assert {row["entry_reason"] for row in runs} == {"paper_strategy_heartbeat"}
+    assert {row["would_size_usdt"] for row in runs} == {""}
+    assert {row["estimated_cost_bps"] for row in runs} == {"30.0"}
+    assert {row["label_status"] for row in runs} == {"heartbeat"}
+
+    daily = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_daily.csv")
+    assert {row["entry_count"] for row in daily} == {"0"}
+    assert {row["paper_days_to_date"] for row in daily} == {"1"}
+
+    coverage = _read_csv(tmp_path / "reports" / "summaries" / "paper_slippage_coverage.csv")
+    assert {row["total_rows"] for row in coverage} == {"1"}
+    assert {row["slippage_coverage"] for row in coverage} == {"0.0"}
 
 
 def test_sol_paper_strategy_tracker_disabled_writes_no_files(tmp_path: Path) -> None:

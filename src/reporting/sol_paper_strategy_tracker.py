@@ -49,7 +49,12 @@ DEFAULT_PAPER_STRATEGY_CONFIGS = [
     {
         "strategy_id": "SOL_F4_VOLUME_EXPANSION_PAPER_V1",
         "experiment_name": "v5.f4_volume_expansion_entry",
-        "source_strategy_candidates": ["f4_volume_swing"],
+        "source_strategy_candidates": [
+            "f4_volume_swing",
+            "f4_volume_expansion_entry",
+            "v5.f4_volume_expansion_entry",
+            "f4_volume_expansion",
+        ],
         "allowed_block_reasons": [],
         "min_f4_volume_expansion": 0.0,
     },
@@ -68,12 +73,14 @@ PAPER_RUN_FIELDS = [
     "candidate_id",
     "final_decision",
     "original_block_reason",
+    "entry_reason",
     "experiment_reason",
     "would_enter",
     "would_exit",
     "would_exit_time",
     "would_exit_rule",
     "would_size_notional",
+    "would_size_usdt",
     "paper_pnl_bps",
     "paper_pnl_usdt",
     "entry_px",
@@ -83,8 +90,10 @@ PAPER_RUN_FIELDS = [
     "f5_rsi_trend_confirm",
     "cost_source",
     "cost_source_quality",
+    "estimated_cost_bps",
     "cost_model_version",
     "cost_source_live_ready",
+    "slippage_covered",
     "required_paper_days",
     "required_slippage_coverage",
     "live_small_ready",
@@ -284,9 +293,55 @@ def _would_size_notional(row: Mapping[str, Any], audit: DecisionAudit) -> Option
     return None
 
 
+def _estimated_cost_bps(row: Mapping[str, Any], fallback_bps: float) -> float:
+    for key in ("cost_bps", "selected_total_cost_bps", "estimated_cost_bps"):
+        value = _normalize_float(row.get(key))
+        if value is not None and value >= 0:
+            return float(value)
+    return float(fallback_bps)
+
+
 def _cost_source_live_ready(row: Mapping[str, Any], allowed: set[str]) -> bool:
     source = str(row.get("cost_source") or "").strip().lower()
     return source in allowed
+
+
+def _cost_context_for_symbol(
+    *,
+    symbol: str,
+    candidate_rows: Iterable[Mapping[str, Any]],
+    fallback_bps: float,
+) -> dict[str, Any]:
+    best: Mapping[str, Any] | None = None
+    best_rank = -1
+    quality_rank = {
+        "actual_fills": 5,
+        "mixed_actual_proxy": 4,
+        "quant_lab_cached": 3,
+        "public_spread_proxy": 2,
+        "local_estimate": 1,
+    }
+    for row in candidate_rows:
+        if not isinstance(row, Mapping) or _symbol_text(row.get("symbol")) != symbol:
+            continue
+        source = str(row.get("cost_source") or "").strip().lower()
+        rank = quality_rank.get(source, 0)
+        if rank > best_rank:
+            best = row
+            best_rank = rank
+    if best is None:
+        return {
+            "cost_source": "local_estimate",
+            "cost_source_quality": "local_estimate",
+            "cost_model_version": "v5_local_paper_fallback",
+            "estimated_cost_bps": float(fallback_bps),
+        }
+    return {
+        "cost_source": str(best.get("cost_source") or "local_estimate"),
+        "cost_source_quality": str(best.get("cost_source_quality") or best.get("cost_source") or "local_estimate"),
+        "cost_model_version": str(best.get("cost_model_version") or ""),
+        "estimated_cost_bps": _estimated_cost_bps(best, fallback_bps),
+    }
 
 
 def _matches_strategy(row: Mapping[str, Any], spec: Mapping[str, Any]) -> bool:
@@ -296,17 +351,79 @@ def _matches_strategy(row: Mapping[str, Any], spec: Mapping[str, Any]) -> bool:
     if decision in {"OPEN_LONG", "REBALANCE"}:
         return False
     strategy = str(row.get("strategy_candidate") or "").strip()
-    if strategy not in set(spec.get("source_strategy_candidates") or set()):
-        return False
     block_reason = str(row.get("block_reason") or "").strip()
+    source_candidates = set(spec.get("source_strategy_candidates") or set())
     allowed_reasons = set(spec.get("allowed_block_reasons") or set())
-    if allowed_reasons and block_reason not in allowed_reasons:
+    strategy_matches = bool(strategy and strategy in source_candidates)
+    reason_matches = bool(allowed_reasons and block_reason in allowed_reasons)
+    if source_candidates and allowed_reasons and not (strategy_matches or reason_matches):
+        return False
+    if source_candidates and not allowed_reasons and not strategy_matches:
+        return False
+    if allowed_reasons and not source_candidates and not reason_matches:
         return False
     min_f4 = _normalize_float(spec.get("min_f4_volume_expansion"))
     f4 = _normalize_float(row.get("f4_volume_expansion"))
     if min_f4 is not None and (f4 is None or f4 < min_f4):
         return False
     return True
+
+
+def _heartbeat_record(
+    *,
+    spec: Mapping[str, Any],
+    audit: DecisionAudit,
+    ts_utc: str,
+    asof_ts_ms: int,
+    rt_cost_bps: float,
+    required_days: int,
+    required_coverage: float,
+    cost_context: Mapping[str, Any],
+    allowed_cost_sources: set[str],
+) -> dict[str, Any]:
+    cost_source = str(cost_context.get("cost_source") or "local_estimate")
+    row_for_cost = {"cost_source": cost_source}
+    live_ready = _cost_source_live_ready(row_for_cost, allowed_cost_sources)
+    return {
+        "strategy_id": str(spec.get("strategy_id") or ""),
+        "experiment_name": str(spec.get("experiment_name") or ""),
+        "enabled_shadow_only": True,
+        "enable_live_experiment": False,
+        "run_id": str(getattr(audit, "run_id", "") or ""),
+        "ts_utc": ts_utc,
+        "entry_ts_ms": asof_ts_ms,
+        "paper_date": ts_utc[:10],
+        "symbol": SOL_SYMBOL,
+        "source_strategy_candidate": "heartbeat",
+        "candidate_id": f"heartbeat_{spec.get('strategy_id')}_{getattr(audit, 'run_id', '')}",
+        "final_decision": "heartbeat",
+        "original_block_reason": "no_qualifying_candidate",
+        "skip_reason": "no_qualifying_candidate",
+        "entry_reason": "paper_strategy_heartbeat",
+        "experiment_reason": "sol_paper_strategy_heartbeat",
+        "would_enter": False,
+        "would_exit": False,
+        "would_exit_time": "",
+        "would_exit_rule": "",
+        "would_size_notional": None,
+        "would_size_usdt": None,
+        "entry_px": None,
+        "final_score": None,
+        "alpha6_score": None,
+        "f4_volume_expansion": None,
+        "f5_rsi_trend_confirm": None,
+        "cost_source": cost_source,
+        "cost_source_quality": str(cost_context.get("cost_source_quality") or cost_source),
+        "estimated_cost_bps": float(cost_context.get("estimated_cost_bps") or rt_cost_bps),
+        "cost_model_version": str(cost_context.get("cost_model_version") or ""),
+        "cost_source_live_ready": live_ready,
+        "slippage_covered": live_ready,
+        "required_paper_days": required_days,
+        "required_slippage_coverage": required_coverage,
+        "rt_cost_bps": rt_cost_bps,
+        "label_status": "heartbeat",
+        "label_not_observable_reason": "",
+    }
 
 
 def _collect_candidates(
@@ -338,12 +455,15 @@ def _collect_candidates(
     ts_utc = _iso_from_ms(asof_ts_ms) if asof_ts_ms > 0 else ""
     cached: dict[str, list[dict[str, float | int]]] = {}
     records: list[dict[str, Any]] = []
+    matched_strategy_ids: set[str] = set()
+    specs = _strategy_configs(diagnostics)
     for row in candidate_rows:
         if not isinstance(row, Mapping):
             continue
-        for spec in _strategy_configs(diagnostics):
+        for spec in specs:
             if not _matches_strategy(row, spec):
                 continue
+            matched_strategy_ids.add(str(spec.get("strategy_id") or ""))
             symbol = _symbol_text(row.get("symbol"))
             entry_px = _entry_px(
                 symbol=symbol,
@@ -354,6 +474,10 @@ def _collect_candidates(
             )
             source_strategy = str(row.get("strategy_candidate") or "").strip()
             primary_horizon = PRIMARY_HORIZON if PRIMARY_HORIZON in horizons else max(horizons)
+            would_size = _would_size_notional(row, audit)
+            cost_source = str(row.get("cost_source") or "")
+            live_ready = _cost_source_live_ready(row, allowed_cost_sources)
+            estimated_cost = _estimated_cost_bps(row, rt_cost_bps)
             records.append(
                 {
                     "strategy_id": str(spec.get("strategy_id") or ""),
@@ -370,21 +494,25 @@ def _collect_candidates(
                     "final_decision": str(row.get("final_decision") or ""),
                     "original_block_reason": str(row.get("block_reason") or row.get("no_signal_reason") or ""),
                     "skip_reason": str(row.get("block_reason") or row.get("no_signal_reason") or ""),
+                    "entry_reason": str(spec.get("experiment_name") or source_strategy or "sol_paper_strategy"),
                     "experiment_reason": "sol_paper_strategy_tracking",
                     "would_enter": True,
                     "would_exit": False,
                     "would_exit_time": _iso_from_ms(asof_ts_ms + primary_horizon * 3600 * 1000) if asof_ts_ms > 0 else "",
                     "would_exit_rule": f"paper_time_horizon_{primary_horizon}h",
-                    "would_size_notional": _would_size_notional(row, audit),
+                    "would_size_notional": would_size,
+                    "would_size_usdt": would_size,
                     "entry_px": entry_px,
                     "final_score": _normalize_float(row.get("final_score")),
                     "alpha6_score": _normalize_float(row.get("alpha6_score")),
                     "f4_volume_expansion": _normalize_float(row.get("f4_volume_expansion")),
                     "f5_rsi_trend_confirm": _normalize_float(row.get("f5_rsi_trend_confirm")),
-                    "cost_source": str(row.get("cost_source") or ""),
+                    "cost_source": cost_source,
                     "cost_source_quality": str(row.get("cost_source_quality") or ""),
+                    "estimated_cost_bps": estimated_cost,
                     "cost_model_version": str(row.get("cost_model_version") or ""),
-                    "cost_source_live_ready": _cost_source_live_ready(row, allowed_cost_sources),
+                    "cost_source_live_ready": live_ready,
+                    "slippage_covered": live_ready,
                     "required_paper_days": required_days,
                     "required_slippage_coverage": required_coverage,
                     "rt_cost_bps": rt_cost_bps,
@@ -392,10 +520,47 @@ def _collect_candidates(
                     "label_not_observable_reason": "",
                 }
             )
+    cost_context = _cost_context_for_symbol(
+        symbol=SOL_SYMBOL,
+        candidate_rows=candidate_rows,
+        fallback_bps=rt_cost_bps,
+    )
+    for spec in specs:
+        strategy_id = str(spec.get("strategy_id") or "")
+        if strategy_id in matched_strategy_ids:
+            continue
+        heartbeat = _heartbeat_record(
+            spec=spec,
+            audit=audit,
+            ts_utc=ts_utc,
+            asof_ts_ms=asof_ts_ms,
+            rt_cost_bps=rt_cost_bps,
+            required_days=required_days,
+            required_coverage=required_coverage,
+            cost_context=cost_context,
+            allowed_cost_sources=allowed_cost_sources,
+        )
+        heartbeat["enabled_shadow_only"] = enabled_shadow_only
+        heartbeat["enable_live_experiment"] = enable_live_experiment
+        records.append(heartbeat)
     return records
 
 
 def _sync_paper_fields(record: dict[str, Any], horizons: Iterable[int]) -> None:
+    if not bool(record.get("would_enter")):
+        for horizon in horizons:
+            h = int(horizon)
+            record[f"paper_pnl_bps_{h}h"] = None
+            record[f"paper_pnl_usdt_{h}h"] = None
+            record[f"{HORIZON_PREFIX}{h}h_status"] = "heartbeat"
+            record[f"{HORIZON_PREFIX}{h}h_reason"] = "no_qualifying_candidate"
+        record["paper_pnl_bps"] = None
+        record["paper_pnl_usdt"] = None
+        record["would_exit"] = False
+        record["label_status"] = "heartbeat"
+        record["label_not_observable_reason"] = ""
+        return
+
     size = _normalize_float(record.get("would_size_notional"))
     primary = PRIMARY_HORIZON if PRIMARY_HORIZON in set(int(h) for h in horizons) else max(int(h) for h in horizons)
     for horizon in horizons:
@@ -513,9 +678,10 @@ def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ].append(record)
     out: list[dict[str, Any]] = []
     for (paper_date, strategy_id, symbol), rows in sorted(buckets.items()):
-        values = [_normalize_float(row.get("paper_pnl_bps")) for row in rows]
+        entry_rows = [row for row in rows if bool(row.get("would_enter"))]
+        values = [_normalize_float(row.get("paper_pnl_bps")) for row in entry_rows]
         usable = [value for value in values if value is not None]
-        pnl_usdt = [_normalize_float(row.get("paper_pnl_usdt")) for row in rows]
+        pnl_usdt = [_normalize_float(row.get("paper_pnl_usdt")) for row in entry_rows]
         pnl_usdt_usable = [value for value in pnl_usdt if value is not None]
         out.append(
             {
@@ -523,10 +689,10 @@ def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "strategy_id": strategy_id,
                 "experiment_name": rows[0].get("experiment_name"),
                 "symbol": symbol,
-                "entry_count": len(rows),
-                "complete_count": sum(1 for row in rows if str(row.get("label_status") or "") == "complete"),
-                "pending_count": sum(1 for row in rows if str(row.get("label_status") or "") == "pending"),
-                "not_observable_count": sum(1 for row in rows if str(row.get("label_status") or "") == "not_observable"),
+                "entry_count": len(entry_rows),
+                "complete_count": sum(1 for row in entry_rows if str(row.get("label_status") or "") == "complete"),
+                "pending_count": sum(1 for row in entry_rows if str(row.get("label_status") or "") == "pending"),
+                "not_observable_count": sum(1 for row in entry_rows if str(row.get("label_status") or "") == "not_observable"),
                 "avg_paper_pnl_bps": round(sum(usable) / len(usable), 6) if usable else None,
                 "paper_pnl_usdt_sum": round(sum(pnl_usdt_usable), 8) if pnl_usdt_usable else None,
                 "win_rate": round(sum(1 for value in usable if float(value) > 0.0) / len(usable), 6) if usable else None,
@@ -630,8 +796,9 @@ def update_sol_paper_strategy_tracker(
     if ohlcv_provider is None:
         ohlcv_provider = _default_ohlcv_provider_for_cfg(cfg)
     if records:
+        labelable_records = [record for record in records if bool(record.get("would_enter"))]
         _update_labels(
-            records=records,
+            records=labelable_records,
             cache_dir=cache_root,
             horizons=horizons,
             market_data_1h=market_data_1h,

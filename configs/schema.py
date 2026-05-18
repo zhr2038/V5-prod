@@ -1500,7 +1500,12 @@ class DiagnosticsConfig(BaseModel):
             {
                 "strategy_id": "SOL_F4_VOLUME_EXPANSION_PAPER_V1",
                 "experiment_name": "v5.f4_volume_expansion_entry",
-                "source_strategy_candidates": ["f4_volume_swing"],
+                "source_strategy_candidates": [
+                    "f4_volume_swing",
+                    "f4_volume_expansion_entry",
+                    "v5.f4_volume_expansion_entry",
+                    "f4_volume_expansion",
+                ],
                 "allowed_block_reasons": [],
                 "min_f4_volume_expansion": 0.0,
             },
