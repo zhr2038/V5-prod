@@ -15,6 +15,7 @@ from src.reporting.skipped_candidate_tracker import (
     _default_ohlcv_provider_for_cfg,
     _find_close_at_or_after,
     _iso_from_ms,
+    _normalize_bool,
     _normalize_float,
     _normalize_horizons,
     _record_entry_ts_ms,
@@ -72,7 +73,12 @@ PAPER_RUN_FIELDS = [
     "source_strategy_candidate",
     "candidate_id",
     "final_decision",
+    "no_sample_reason",
+    "sol_candidate_present",
+    "risk_level",
     "original_block_reason",
+    "cooldown_active",
+    "risk_off",
     "entry_reason",
     "experiment_reason",
     "would_enter",
@@ -86,6 +92,7 @@ PAPER_RUN_FIELDS = [
     "entry_px",
     "final_score",
     "alpha6_score",
+    "alpha6_side",
     "f4_volume_expansion",
     "f5_rsi_trend_confirm",
     "cost_source",
@@ -156,6 +163,18 @@ def _labels_path(reports_dir: Path) -> Path:
 
 def _symbol_text(value: Any) -> str:
     return str(value or "").strip().upper().replace("-", "/")
+
+
+def _truthy(value: Any) -> bool:
+    parsed = _normalize_bool(value)
+    if parsed is not None:
+        return bool(parsed)
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _risk_off_text(value: Any) -> bool:
+    text = str(value or "").strip().lower().replace("_", "-")
+    return text in {"risk-off", "riskoff"} or text.startswith("risk-off")
 
 
 def _horizons(diagnostics: DiagnosticsConfig) -> list[int]:
@@ -306,6 +325,65 @@ def _cost_source_live_ready(row: Mapping[str, Any], allowed: set[str]) -> bool:
     return source in allowed
 
 
+def _risk_level_for_row(row: Mapping[str, Any], audit: DecisionAudit) -> str:
+    for value in (
+        row.get("risk_level"),
+        row.get("current_level"),
+        getattr(audit, "risk_level", None),
+        getattr(audit, "current_level", None),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _is_protect_level(value: Any) -> bool:
+    return str(value or "").strip().upper().replace("-", "_") == "PROTECT"
+
+
+def _is_alpha6_buy(value: Any) -> bool:
+    return str(value or "").strip().lower().replace("_", "-") in {"buy", "long", "trend-buy", "trend_buy"}
+
+
+def _is_risk_off_context(audit: DecisionAudit, row: Mapping[str, Any], risk_level: Any) -> bool:
+    for key in ("risk_off", "is_risk_off", "risk_off_close_only"):
+        if _truthy(row.get(key)):
+            return True
+    for value in (
+        getattr(audit, "regime", None),
+        getattr(audit, "regime_state", None),
+        row.get("regime_state"),
+        row.get("regime"),
+        row.get("market_regime"),
+        row.get("target_zero_reason"),
+        risk_level,
+    ):
+        if _risk_off_text(value):
+            return True
+    return False
+
+
+def _has_active_cooldown(row: Mapping[str, Any], *, asof_ts_ms: int) -> bool:
+    for key in (
+        "active_cooldown",
+        "cooldown_active",
+        "negative_expectancy_cooldown_active",
+        "same_symbol_reentry_cooldown_active",
+    ):
+        if _truthy(row.get(key)):
+            return True
+    for key in ("remain_seconds", "cooldown_remaining_seconds", "cooldown_remain_seconds"):
+        value = _normalize_float(row.get(key))
+        if value is not None and value > 0.0:
+            return True
+    for key in ("cooldown_until_ms", "cooldown_until_ts_ms", "cooldown_until"):
+        until_ms = _coerce_epoch_ms(row.get(key))
+        if until_ms is not None and until_ms > int(asof_ts_ms or 0):
+            return True
+    return False
+
+
 def _cost_context_for_symbol(
     *,
     symbol: str,
@@ -344,29 +422,144 @@ def _cost_context_for_symbol(
     }
 
 
-def _matches_strategy(row: Mapping[str, Any], spec: Mapping[str, Any]) -> bool:
-    if _symbol_text(row.get("symbol")) != SOL_SYMBOL:
-        return False
-    decision = str(row.get("final_decision") or "").strip().upper()
-    if decision in {"OPEN_LONG", "REBALANCE"}:
-        return False
+def _strategy_source_or_reason_matches(row: Mapping[str, Any], spec: Mapping[str, Any]) -> bool:
     strategy = str(row.get("strategy_candidate") or "").strip()
     block_reason = str(row.get("block_reason") or "").strip()
     source_candidates = set(spec.get("source_strategy_candidates") or set())
     allowed_reasons = set(spec.get("allowed_block_reasons") or set())
     strategy_matches = bool(strategy and strategy in source_candidates)
     reason_matches = bool(allowed_reasons and block_reason in allowed_reasons)
-    if source_candidates and allowed_reasons and not (strategy_matches or reason_matches):
-        return False
-    if source_candidates and not allowed_reasons and not strategy_matches:
-        return False
-    if allowed_reasons and not source_candidates and not reason_matches:
-        return False
-    min_f4 = _normalize_float(spec.get("min_f4_volume_expansion"))
-    f4 = _normalize_float(row.get("f4_volume_expansion"))
-    if min_f4 is not None and (f4 is None or f4 < min_f4):
-        return False
+    if source_candidates and allowed_reasons:
+        return bool(strategy_matches or reason_matches)
+    if source_candidates:
+        return strategy_matches
+    if allowed_reasons:
+        return reason_matches
     return True
+
+
+def _row_condition_diagnostics(
+    row: Mapping[str, Any],
+    *,
+    spec: Mapping[str, Any],
+    audit: DecisionAudit,
+    asof_ts_ms: int,
+    sol_candidate_present: bool = True,
+) -> dict[str, Any]:
+    risk_level = _risk_level_for_row(row, audit)
+    alpha6_side = str(row.get("alpha6_side") or "").strip()
+    f4 = _normalize_float(row.get("f4_volume_expansion"))
+    cooldown_active = _has_active_cooldown(row, asof_ts_ms=asof_ts_ms)
+    risk_off = _is_risk_off_context(audit, row, risk_level)
+    original_block_reason = str(row.get("block_reason") or row.get("no_signal_reason") or "")
+    return {
+        "sol_candidate_present": bool(sol_candidate_present),
+        "risk_level": risk_level,
+        "alpha6_score": _normalize_float(row.get("alpha6_score")),
+        "alpha6_side": alpha6_side,
+        "f4_volume_expansion": f4,
+        "f5_rsi_trend_confirm": _normalize_float(row.get("f5_rsi_trend_confirm")),
+        "original_block_reason": original_block_reason,
+        "cooldown_active": bool(cooldown_active),
+        "risk_off": bool(risk_off),
+        "cost_source": str(row.get("cost_source") or ""),
+        "cost_source_quality": str(row.get("cost_source_quality") or ""),
+        "cost_model_version": str(row.get("cost_model_version") or ""),
+        "estimated_cost_bps": _estimated_cost_bps(row, 0.0),
+    }
+
+
+def _condition_block_reason(
+    diagnostics: Mapping[str, Any],
+    *,
+    spec: Mapping[str, Any],
+    source_or_reason_matched: bool,
+) -> str:
+    if not bool(diagnostics.get("sol_candidate_present")):
+        return "no_sol_candidate"
+    if bool(diagnostics.get("risk_off")):
+        return "risk_off"
+    risk_level = str(diagnostics.get("risk_level") or "").strip()
+    if risk_level and not _is_protect_level(risk_level):
+        return "risk_not_protect"
+    if bool(diagnostics.get("cooldown_active")):
+        return "cooldown_active"
+    if not _is_alpha6_buy(diagnostics.get("alpha6_side")):
+        return "alpha6_not_buy"
+    min_f4 = _normalize_float(spec.get("min_f4_volume_expansion"))
+    f4 = _normalize_float(diagnostics.get("f4_volume_expansion"))
+    if min_f4 is not None and (f4 is None or f4 < min_f4):
+        return "f4_below_threshold"
+    if not source_or_reason_matched:
+        return "no_qualifying_candidate"
+    return ""
+
+
+def _row_qualifies(
+    row: Mapping[str, Any],
+    *,
+    spec: Mapping[str, Any],
+    audit: DecisionAudit,
+    asof_ts_ms: int,
+) -> tuple[bool, str, dict[str, Any]]:
+    diagnostics = _row_condition_diagnostics(row, spec=spec, audit=audit, asof_ts_ms=asof_ts_ms)
+    source_or_reason_matched = _strategy_source_or_reason_matches(row, spec)
+    reason = _condition_block_reason(
+        diagnostics,
+        spec=spec,
+        source_or_reason_matched=source_or_reason_matched,
+    )
+    return bool(source_or_reason_matched and not reason), reason, diagnostics
+
+
+def _matches_strategy(
+    row: Mapping[str, Any],
+    spec: Mapping[str, Any],
+    *,
+    audit: DecisionAudit,
+    asof_ts_ms: int,
+) -> tuple[bool, str, dict[str, Any]]:
+    if _symbol_text(row.get("symbol")) != SOL_SYMBOL:
+        return False, "no_sol_candidate", {}
+    decision = str(row.get("final_decision") or "").strip().upper()
+    if decision in {"OPEN_LONG", "REBALANCE"}:
+        diagnostics = _row_condition_diagnostics(row, spec=spec, audit=audit, asof_ts_ms=asof_ts_ms)
+        return False, "no_qualifying_candidate", diagnostics
+    qualifies, reason, diagnostics = _row_qualifies(row, spec=spec, audit=audit, asof_ts_ms=asof_ts_ms)
+    risk_level = str(diagnostics.get("risk_level") or "").strip()
+    if risk_level and not _is_protect_level(risk_level):
+        qualifies = False
+    if diagnostics.get("risk_off") or diagnostics.get("cooldown_active"):
+        qualifies = False
+    min_f4 = _normalize_float(spec.get("min_f4_volume_expansion"))
+    f4 = _normalize_float(diagnostics.get("f4_volume_expansion"))
+    if min_f4 is not None and (f4 is None or f4 < min_f4):
+        qualifies = False
+    return bool(qualifies), reason, diagnostics
+
+
+def _best_sol_candidate_for_strategy(
+    *,
+    candidate_rows: Iterable[Mapping[str, Any]],
+    spec: Mapping[str, Any],
+    audit: DecisionAudit,
+    asof_ts_ms: int,
+) -> tuple[Optional[Mapping[str, Any]], dict[str, Any], str]:
+    sol_rows = [row for row in candidate_rows if isinstance(row, Mapping) and _symbol_text(row.get("symbol")) == SOL_SYMBOL]
+    if not sol_rows:
+        return None, {"sol_candidate_present": False}, "no_sol_candidate"
+    ranked: list[tuple[int, float, Mapping[str, Any], dict[str, Any], str]] = []
+    for row in sol_rows:
+        diagnostics = _row_condition_diagnostics(row, spec=spec, audit=audit, asof_ts_ms=asof_ts_ms)
+        source_match = _strategy_source_or_reason_matches(row, spec)
+        reason = _condition_block_reason(diagnostics, spec=spec, source_or_reason_matched=source_match)
+        if not reason:
+            reason = "no_qualifying_candidate"
+        score = _normalize_float(row.get("final_score"))
+        ranked.append((1 if source_match else 0, float(score or 0.0), row, diagnostics, reason))
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    _match_rank, _score, row, diagnostics, reason = ranked[0]
+    return row, diagnostics, reason
 
 
 def _heartbeat_record(
@@ -380,10 +573,21 @@ def _heartbeat_record(
     required_coverage: float,
     cost_context: Mapping[str, Any],
     allowed_cost_sources: set[str],
+    condition_diagnostics: Mapping[str, Any] | None = None,
+    no_sample_reason: str = "no_qualifying_candidate",
 ) -> dict[str, Any]:
+    condition_diagnostics = dict(condition_diagnostics or {})
     cost_source = str(cost_context.get("cost_source") or "local_estimate")
+    diagnostic_cost_source = str(condition_diagnostics.get("cost_source") or "")
+    if diagnostic_cost_source:
+        cost_source = diagnostic_cost_source
     row_for_cost = {"cost_source": cost_source}
     live_ready = _cost_source_live_ready(row_for_cost, allowed_cost_sources)
+    original_block_reason = str(
+        condition_diagnostics.get("original_block_reason")
+        or no_sample_reason
+        or "no_qualifying_candidate"
+    )
     return {
         "strategy_id": str(spec.get("strategy_id") or ""),
         "experiment_name": str(spec.get("experiment_name") or ""),
@@ -397,8 +601,13 @@ def _heartbeat_record(
         "source_strategy_candidate": "heartbeat",
         "candidate_id": f"heartbeat_{spec.get('strategy_id')}_{getattr(audit, 'run_id', '')}",
         "final_decision": "heartbeat",
-        "original_block_reason": "no_qualifying_candidate",
-        "skip_reason": "no_qualifying_candidate",
+        "no_sample_reason": no_sample_reason,
+        "sol_candidate_present": bool(condition_diagnostics.get("sol_candidate_present", False)),
+        "risk_level": str(condition_diagnostics.get("risk_level") or ""),
+        "original_block_reason": original_block_reason,
+        "cooldown_active": bool(condition_diagnostics.get("cooldown_active", False)),
+        "risk_off": bool(condition_diagnostics.get("risk_off", False)),
+        "skip_reason": no_sample_reason,
         "entry_reason": "paper_strategy_heartbeat",
         "experiment_reason": "sol_paper_strategy_heartbeat",
         "would_enter": False,
@@ -409,13 +618,22 @@ def _heartbeat_record(
         "would_size_usdt": None,
         "entry_px": None,
         "final_score": None,
-        "alpha6_score": None,
-        "f4_volume_expansion": None,
-        "f5_rsi_trend_confirm": None,
+        "alpha6_score": condition_diagnostics.get("alpha6_score"),
+        "alpha6_side": str(condition_diagnostics.get("alpha6_side") or ""),
+        "f4_volume_expansion": condition_diagnostics.get("f4_volume_expansion"),
+        "f5_rsi_trend_confirm": condition_diagnostics.get("f5_rsi_trend_confirm"),
         "cost_source": cost_source,
-        "cost_source_quality": str(cost_context.get("cost_source_quality") or cost_source),
-        "estimated_cost_bps": float(cost_context.get("estimated_cost_bps") or rt_cost_bps),
-        "cost_model_version": str(cost_context.get("cost_model_version") or ""),
+        "cost_source_quality": str(
+            condition_diagnostics.get("cost_source_quality")
+            or cost_context.get("cost_source_quality")
+            or cost_source
+        ),
+        "estimated_cost_bps": float(
+            condition_diagnostics.get("estimated_cost_bps")
+            or cost_context.get("estimated_cost_bps")
+            or rt_cost_bps
+        ),
+        "cost_model_version": str(condition_diagnostics.get("cost_model_version") or cost_context.get("cost_model_version") or ""),
         "cost_source_live_ready": live_ready,
         "slippage_covered": live_ready,
         "required_paper_days": required_days,
@@ -461,7 +679,13 @@ def _collect_candidates(
         if not isinstance(row, Mapping):
             continue
         for spec in specs:
-            if not _matches_strategy(row, spec):
+            matched, _no_sample_reason, condition_diagnostics = _matches_strategy(
+                row,
+                spec,
+                audit=audit,
+                asof_ts_ms=asof_ts_ms,
+            )
+            if not matched:
                 continue
             matched_strategy_ids.add(str(spec.get("strategy_id") or ""))
             symbol = _symbol_text(row.get("symbol"))
@@ -492,7 +716,12 @@ def _collect_candidates(
                     "source_strategy_candidate": source_strategy,
                     "candidate_id": str(row.get("candidate_id") or ""),
                     "final_decision": str(row.get("final_decision") or ""),
+                    "no_sample_reason": "",
+                    "sol_candidate_present": bool(condition_diagnostics.get("sol_candidate_present", True)),
+                    "risk_level": str(condition_diagnostics.get("risk_level") or ""),
                     "original_block_reason": str(row.get("block_reason") or row.get("no_signal_reason") or ""),
+                    "cooldown_active": bool(condition_diagnostics.get("cooldown_active", False)),
+                    "risk_off": bool(condition_diagnostics.get("risk_off", False)),
                     "skip_reason": str(row.get("block_reason") or row.get("no_signal_reason") or ""),
                     "entry_reason": str(spec.get("experiment_name") or source_strategy or "sol_paper_strategy"),
                     "experiment_reason": "sol_paper_strategy_tracking",
@@ -505,6 +734,7 @@ def _collect_candidates(
                     "entry_px": entry_px,
                     "final_score": _normalize_float(row.get("final_score")),
                     "alpha6_score": _normalize_float(row.get("alpha6_score")),
+                    "alpha6_side": str(condition_diagnostics.get("alpha6_side") or row.get("alpha6_side") or ""),
                     "f4_volume_expansion": _normalize_float(row.get("f4_volume_expansion")),
                     "f5_rsi_trend_confirm": _normalize_float(row.get("f5_rsi_trend_confirm")),
                     "cost_source": cost_source,
@@ -529,6 +759,12 @@ def _collect_candidates(
         strategy_id = str(spec.get("strategy_id") or "")
         if strategy_id in matched_strategy_ids:
             continue
+        _best_row, condition_diagnostics, no_sample_reason = _best_sol_candidate_for_strategy(
+            candidate_rows=candidate_rows,
+            spec=spec,
+            audit=audit,
+            asof_ts_ms=asof_ts_ms,
+        )
         heartbeat = _heartbeat_record(
             spec=spec,
             audit=audit,
@@ -539,6 +775,8 @@ def _collect_candidates(
             required_coverage=required_coverage,
             cost_context=cost_context,
             allowed_cost_sources=allowed_cost_sources,
+            condition_diagnostics=condition_diagnostics,
+            no_sample_reason=no_sample_reason,
         )
         heartbeat["enabled_shadow_only"] = enabled_shadow_only
         heartbeat["enable_live_experiment"] = enable_live_experiment
@@ -548,12 +786,13 @@ def _collect_candidates(
 
 def _sync_paper_fields(record: dict[str, Any], horizons: Iterable[int]) -> None:
     if not bool(record.get("would_enter")):
+        reason = str(record.get("no_sample_reason") or record.get("skip_reason") or "no_qualifying_candidate")
         for horizon in horizons:
             h = int(horizon)
             record[f"paper_pnl_bps_{h}h"] = None
             record[f"paper_pnl_usdt_{h}h"] = None
             record[f"{HORIZON_PREFIX}{h}h_status"] = "heartbeat"
-            record[f"{HORIZON_PREFIX}{h}h_reason"] = "no_qualifying_candidate"
+            record[f"{HORIZON_PREFIX}{h}h_reason"] = reason
         record["paper_pnl_bps"] = None
         record["paper_pnl_usdt"] = None
         record["would_exit"] = False

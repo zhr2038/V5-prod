@@ -4,6 +4,8 @@ import csv
 import json
 from pathlib import Path
 
+import pytest
+
 from configs.schema import AppConfig
 from src.core.models import MarketSeries
 from src.reporting.decision_audit import DecisionAudit
@@ -47,8 +49,10 @@ def _write_candidate_snapshot(run_dir: Path) -> None:
             "target_weight_after_risk": "0",
             "final_score": "0.88",
             "alpha6_score": "0.26",
+            "alpha6_side": "buy",
             "f4_volume_expansion": "0.2",
             "f5_rsi_trend_confirm": "0.25",
+            "risk_level": "PROTECT",
             "cost_source": "public_spread_proxy",
             "cost_source_quality": "public_proxy",
             "cost_model_version": "public_proxy_v1",
@@ -65,8 +69,10 @@ def _write_candidate_snapshot(run_dir: Path) -> None:
             "target_weight_after_risk": "0",
             "final_score": "0.82",
             "alpha6_score": "0.34",
+            "alpha6_side": "buy",
             "f4_volume_expansion": "1.2",
             "f5_rsi_trend_confirm": "0.40",
+            "risk_level": "PROTECT",
             "cost_source": "mixed_actual_proxy",
             "cost_source_quality": "mixed_actual_proxy",
             "cost_model_version": "mixed_actual_proxy_v1",
@@ -80,7 +86,9 @@ def _write_candidate_snapshot(run_dir: Path) -> None:
             "block_reason": "",
             "strategy_candidate": "f4_volume_swing",
             "target_weight_raw": "0.12",
+            "alpha6_side": "buy",
             "f4_volume_expansion": "1.4",
+            "risk_level": "PROTECT",
             "cost_source": "mixed_actual_proxy",
         },
     ]
@@ -107,6 +115,32 @@ def _audit(run_id: str, ts_s: int) -> DecisionAudit:
     audit = DecisionAudit(run_id=run_id, now_ts=ts_s, window_end_ts=ts_s)
     audit.budget = {"current_equity_usdt": 100.0}
     return audit
+
+
+def _write_single_sol_candidate(run_dir: Path, *, run_id: str, overrides: dict[str, str]) -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    row = {
+        "candidate_id": "sol_candidate",
+        "run_id": run_id,
+        "ts_utc": "2026-05-15T00:00:00Z",
+        "symbol": "SOL/USDT",
+        "final_decision": "no_order",
+        "strategy_candidate": "f4_volume_swing",
+        "final_score": "0.91",
+        "alpha6_score": "0.45",
+        "alpha6_side": "buy",
+        "f4_volume_expansion": "1.1",
+        "f5_rsi_trend_confirm": "0.35",
+        "risk_level": "PROTECT",
+        "cost_source": "mixed_actual_proxy",
+        "cost_source_quality": "mixed_actual_proxy",
+        "cost_bps": "14",
+    }
+    row.update(overrides)
+    with (run_dir / "candidate_snapshot.csv").open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=sorted(row))
+        writer.writeheader()
+        writer.writerow(row)
 
 
 def test_sol_paper_strategy_tracker_writes_runs_daily_and_slippage(tmp_path: Path) -> None:
@@ -246,6 +280,8 @@ def test_sol_paper_strategy_tracker_writes_strategy_heartbeats_without_candidate
     assert {row["would_size_usdt"] for row in runs} == {""}
     assert {row["estimated_cost_bps"] for row in runs} == {"30.0"}
     assert {row["label_status"] for row in runs} == {"heartbeat"}
+    assert {row["no_sample_reason"] for row in runs} == {"no_sol_candidate"}
+    assert {row["sol_candidate_present"] for row in runs} == {"False"}
 
     daily = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_daily.csv")
     assert {row["entry_count"] for row in daily} == {"0"}
@@ -254,6 +290,67 @@ def test_sol_paper_strategy_tracker_writes_strategy_heartbeats_without_candidate
     coverage = _read_csv(tmp_path / "reports" / "summaries" / "paper_slippage_coverage.csv")
     assert {row["total_rows"] for row in coverage} == {"1"}
     assert {row["slippage_coverage"] for row in coverage} == {"0.0"}
+
+
+def test_sol_paper_strategy_tracker_heartbeat_explains_alpha6_not_buy(tmp_path: Path) -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_alpha6_not_buy"
+    _write_single_sol_candidate(run_dir, run_id="r_alpha6_not_buy", overrides={"alpha6_side": "sell"})
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_alpha6_not_buy", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["new_records"] == 2
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    assert {row["would_enter"] for row in runs} == {"False"}
+    assert {row["no_sample_reason"] for row in runs} == {"alpha6_not_buy"}
+    assert {row["sol_candidate_present"] for row in runs} == {"True"}
+    assert {row["alpha6_side"] for row in runs} == {"sell"}
+    assert {row["risk_level"] for row in runs} == {"PROTECT"}
+    assert {row["cost_source"] for row in runs} == {"mixed_actual_proxy"}
+    assert {row["label_24h_reason"] for row in runs} == {"alpha6_not_buy"}
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected_reason"),
+    [
+        ({"risk_level": "NORMAL"}, "risk_not_protect"),
+        ({"cooldown_active": "true"}, "cooldown_active"),
+        ({"regime_state": "Risk-Off"}, "risk_off"),
+        ({"f4_volume_expansion": "-0.1"}, "f4_below_threshold"),
+    ],
+)
+def test_sol_paper_strategy_tracker_heartbeat_explains_blocking_conditions(
+    tmp_path: Path,
+    overrides: dict[str, str],
+    expected_reason: str,
+) -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    run_id = f"r_{expected_reason}"
+    run_dir = tmp_path / "reports" / "runs" / run_id
+    _write_single_sol_candidate(run_dir, run_id=run_id, overrides=overrides)
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit(run_id, start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["new_records"] == 2
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    assert {row["would_enter"] for row in runs} == {"False"}
+    assert {row["no_sample_reason"] for row in runs} == {expected_reason}
+    assert {row["sol_candidate_present"] for row in runs} == {"True"}
+    assert {row["label_24h_reason"] for row in runs} == {expected_reason}
 
 
 def test_sol_paper_strategy_tracker_disabled_writes_no_files(tmp_path: Path) -> None:
