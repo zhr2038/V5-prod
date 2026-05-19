@@ -675,9 +675,38 @@ def _read_strategy_opportunity_advisory(
             if not path.is_file():
                 continue
             rows.extend(_read_advisory_path(path))
+    rows = _dedupe_rows(
+        rows,
+        [
+            "strategy_id",
+            "strategy_candidate",
+            "experiment_name",
+            "symbol",
+            "decision",
+            "recommended_mode",
+            "advisory_status",
+            "advisory_reason",
+            "max_paper_notional_usdt",
+            "max_live_notional_usdt",
+            "live_block_reasons",
+        ],
+    )
     if not rows:
         rows.extend(_read_strategy_opportunity_advisory_api(cfg=cfg, diagnostics=diagnostics, run_id=run_id))
     return rows
+
+
+def _dedupe_rows(rows: Iterable[Mapping[str, Any]], keys: Iterable[str]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, ...]] = set()
+    key_list = list(keys)
+    for row in rows:
+        fingerprint = tuple(str(row.get(key) or "") for key in key_list)
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        out.append(dict(row))
+    return out
 
 
 def _read_paper_strategy_proposals(
@@ -702,7 +731,18 @@ def _read_paper_strategy_proposals(
             if not path.is_file():
                 continue
             rows.extend(_read_raw_csv_path(path, target_filename="paper_strategy_proposals.csv"))
-    return rows
+    return _dedupe_rows(
+        rows,
+        [
+            "proposal_id",
+            "strategy_id",
+            "strategy_candidate",
+            "symbol",
+            "recommended_mode",
+            "suggested_horizon",
+            "entry_conditions",
+        ],
+    )
 
 
 def _proposal_horizon_hours(row: Mapping[str, Any]) -> Optional[int]:
