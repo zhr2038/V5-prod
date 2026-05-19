@@ -1,35 +1,45 @@
-# V5 量化交易系统
+# V5-prod 量化交易系统
 
-> 一个面向 OKX 现货市场的实盘量化交易系统。V5 以“信号质量优先、风险控制优先、可观测性优先”为设计原则，围绕 Alpha 因子、多策略融合、市场状态识别、自动风控、实盘执行、订单审计和诊断打包构建。
+V5-prod 是一个面向 OKX 现货市场的实盘量化交易系统。当前生产版本的核心原则是：信号质量优先、风险控制优先、执行可追踪优先、诊断可复盘优先。
+
+本仓库包含实盘主链路、风控与执行、状态清理、诊断打包、Web Dashboard、shadow/paper 研究闭环以及配套测试。V5 是唯一会连接交易所并提交真实订单的组件；研究、shadow、paper 与打包逻辑只能提供诊断证据，不应绕过 V5 的实盘风控。
 
 ---
 
 ## 目录
 
-- [项目定位](#项目定位)
-- [核心特性](#核心特性)
-- [系统架构](#系统架构)
+- [当前生产定位](#当前生产定位)
+- [核心链路](#核心链路)
+- [生产配置基线](#生产配置基线)
 - [策略与信号](#策略与信号)
-- [风险控制](#风险控制)
-- [执行与订单管理](#执行与订单管理)
-- [诊断与可观测性](#诊断与可观测性)
+- [PROTECT 风控体系](#protect-风控体系)
+- [Probe 小仓试探机制](#probe-小仓试探机制)
+- [普通仓退出与浮盈保护](#普通仓退出与浮盈保护)
+- [Swing 持仓保护](#swing-持仓保护)
+- [Dust 与状态清理](#dust-与状态清理)
+- [Negative Expectancy](#negative-expectancy)
+- [Same-symbol Re-entry Guard](#same-symbol-re-entry-guard)
+- [Candidate Snapshot](#candidate-snapshot)
+- [SOL Paper Strategy Tracking](#sol-paper-strategy-tracking)
+- [Alt Impulse Regime Shadow](#alt-impulse-regime-shadow)
+- [Order Lifecycle](#order-lifecycle)
+- [Quant-lab 接入边界](#quant-lab-接入边界)
+- [ML 生产状态](#ml-生产状态)
+- [诊断与打包](#诊断与打包)
 - [Web Dashboard](#web-dashboard)
 - [目录结构](#目录结构)
-- [环境准备](#环境准备)
-- [配置说明](#配置说明)
-- [运行方式](#运行方式)
-- [测试与验证](#测试与验证)
-- [常见问题](#常见问题)
+- [依赖与环境](#依赖与环境)
+- [常用命令](#常用命令)
+- [测试](#测试)
+- [生产部署注意事项](#生产部署注意事项)
+- [回滚与排障](#回滚与排障)
 - [安全说明](#安全说明)
-- [免责声明](#免责声明)
 
 ---
 
-## 项目定位
+## 当前生产定位
 
-V5 是一个以数字资产现货交易为目标的量化交易系统，当前主要用于白名单主流币种的实盘策略验证和自动化执行。
-
-当前生产配置采用小范围白名单 universe，聚焦：
+当前 V5-prod 是小账户、白名单、低频实盘系统，不是高频系统，也不是无限扩 universe 的实验框架。生产默认只关注明确白名单中的主流现货交易对：
 
 ```text
 BTC/USDT
@@ -38,39 +48,557 @@ SOL/USDT
 BNB/USDT
 ```
 
-系统设计重点不是高频交易，也不是无限扩展币池，而是在实盘环境中解决以下问题：
+生产目标不是“尽可能多交易”，而是回答以下问题：
 
-- 信号是否有足够 alpha；
-- 成本、滑点和手续费是否吃掉收益；
-- 弱信号是否被风控及时拦截；
-- 已有浮盈是否能被保护；
-- 低质量追涨是否能被避免；
-- 每一次“为什么买 / 为什么不买 / 为什么卖 / 为什么没卖”是否可复盘；
-- 实盘状态、订单、成交、账务和诊断数据是否能离线打包分析。
+- 当前 signal 是否足够强；
+- 交易成本、滑点、手续费是否会吞掉 edge；
+- 在 PROTECT 风险档位下，普通 entry 是否应该更严格；
+- probe 小仓是否能在可控风险下捕捉突破初段；
+- 已有利润是否能被及时保护；
+- dust 残仓是否会污染持仓判断；
+- negative expectancy 是否会阻止同一 symbol 连续试错；
+- 每次买、卖、不买、不卖是否能在 bundle 中复盘；
+- shadow/paper 策略是否有足够样本和成本质量，避免过早进入 live。
 
 ---
 
-## 核心特性
+## 核心链路
 
-### 1. 白名单实盘 universe
+V5 主链路可以概括为：
 
-生产环境使用显式白名单，避免动态 universe 把低流动性、小币种或高噪声标的带入实盘路径。
-
-```yaml
-symbols:
-  - BTC/USDT
-  - ETH/USDT
-  - SOL/USDT
-  - BNB/USDT
-
-universe:
-  enabled: false
-  use_universe_symbols: false
+```text
+market data
+  -> alpha / trend / factor signals
+  -> regime / risk level
+  -> portfolio target
+  -> entry gate / risk guard / cost guard
+  -> router decision
+  -> live execution engine
+  -> order / fill / ledger / reconcile
+  -> reports / bundle / dashboard
 ```
 
-### Live ML overlay status
+实盘订单必须经过 router decision 和 execution safety。任何 shadow、paper、diagnostic、bundle 输出都不能直接生成真实订单。
 
-In `configs/live_prod.yaml`, the ML factor overlay and production ML data collection are disabled:
+关键产物包括：
+
+- `reports/runs/**/decision_audit.json`
+- `reports/runs/**/trades.csv`
+- `reports/runs/**/summary.json`
+- `reports/runs/**/candidate_snapshot.csv`
+- `reports/runs/**/order_lifecycle.csv`
+- `reports/candidate_snapshot.csv`
+- `reports/order_lifecycle.csv`
+- `reports/alt_impulse_shadow_labels.jsonl`
+- `reports/sol_paper_strategy_labels.jsonl`
+- `reports/skipped_candidate_labels.jsonl`
+- `reports/negative_expectancy_cooldown.json`
+
+---
+
+## 生产配置基线
+
+主要生产配置在：
+
+```text
+configs/live_prod.yaml
+```
+
+重要基线：
+
+- 显式白名单 universe；
+- PROTECT 下普通 entry 更严格；
+- `fee_bps` 和 `slippage_bps` 使用生产成本；
+- backtest 默认成本不低于 live 成本；
+- ML live overlay 关闭；
+- split order runtime inactive；
+- quant-lab 可以作为 shadow/cost/permission 诊断来源，但 V5 仍是唯一执行方。
+
+当前 split order 状态：
+
+```text
+split_order_runtime_active=false
+```
+
+`split_orders` / `split_interval_sec` 不应被理解为生产已启用分单。当前账户订单较小，生产暂不实现 split order，避免引入 min-notional、dust 和执行复杂度。
+
+---
+
+## 策略与信号
+
+V5 生产主链路使用多种信号，但每类信号的权限不同。
+
+### Alpha6
+
+Alpha6 是当前生产最重要的确认信号之一。PROTECT 下普通开多通常要求 Alpha6 同向 buy，并且 score、f4、f5 等确认项达到门槛。
+
+常见字段：
+
+- `alpha6_score`
+- `alpha6_side`
+- `f4_volume_expansion`
+- `f5_rsi_trend_confirm`
+
+### TrendFollowing
+
+TrendFollowing 可以参与排序、候选解释和 shadow 研究，但在 PROTECT 下不能单独放松普通 entry gate。Trend-only 被拦截的样本会进入 high-score blocked / alt impulse shadow 等诊断路径。
+
+### MeanReversion
+
+MeanReversion 属于辅助信号，不应绕过 PROTECT entry gate。
+
+### Cost-aware score
+
+OPEN_LONG / REBALANCE buy order 会带上：
+
+- `final_score`
+- `alpha6_score`
+- `trend_score`
+- `expected_edge_bps`
+- `expected_edge_source`
+
+如果没有直接的 `expected_net_bps`，系统会用 score proxy 估算 `expected_edge_bps`，用于 quant-lab cost shadow 和本地诊断。
+
+---
+
+## PROTECT 风控体系
+
+PROTECT 是当前小账户实盘最重要的保护档位。在 PROTECT 下，系统更保守：
+
+- 普通 OPEN_LONG 必须经过 Alpha6 / f4 / f5 / cost-aware / negative expectancy 等 gate；
+- Trend-only 不直接触发普通买入；
+- short-cycle negative expectancy 可以在样本数较少但亏损明显时阻断普通开仓；
+- re-entry guard 会阻止刚止盈或止损后的同 symbol 过早追高；
+- profit-lock 会在普通仓浮盈后抬高止损或触发 trailing exit；
+- probe 仍可以存在，但必须走专用 probe policy，不得放松普通 gate。
+
+典型保护原因会写入：
+
+```text
+router_decisions
+target_execution_explain
+counts
+skipped_candidate_labels.jsonl
+candidate_snapshot.csv
+```
+
+---
+
+## Probe 小仓试探机制
+
+Probe 是小仓试探，不是普通趋势仓。probe 的目标是在风险可控前提下捕捉突破初段，如果没有兑现，应快速退出。
+
+当前支持：
+
+```text
+market_impulse_probe
+btc_leadership_probe
+```
+
+### market_impulse_probe
+
+用于 broad market impulse：多个白名单 symbol 同时出现趋势买入，BTC 背景也偏正时，小仓试探。
+
+### btc_leadership_probe
+
+用于 BTC 率先突破场景。典型条件：
+
+- 仅 BTC/USDT；
+- 通常仅 PROTECT；
+- 当前必须 flat 或只有 dust；
+- regime 不得 Risk-Off；
+- BTC 突破 lookback high 加 buffer；
+- Alpha6 buy 存在；
+- `alpha6_score`、`f4_volume_expansion`、`f5_rsi_trend_confirm` 达标；
+- 可在严格限制下 bypass 单次 negative expectancy；
+- 不能绕过 active cooldown。
+
+### probe exit policy
+
+当 `probe_exit_enabled=true` 时，probe 仓位统一走专用 exit policy，旧 `market_impulse_probe_time_stop` 只能作为 fallback。
+
+优先级：
+
+```text
+probe_stop_loss
+probe_take_profit
+probe_trailing_stop
+probe_time_stop
+```
+
+所有 probe exit 必须 bypass turnover cap，并写入 audit/counts。CLOSE_LONG 成交后会触发 position lifecycle cleanup。
+
+### active probe 免疫普通 zero_target_close
+
+active probe 由 probe exit policy 管理。普通 target rebalance、target_w=0 或 replacement target 被 gate 拦住，不应直接通过 `zero_target_close` 平掉 active probe。
+
+如果跳过普通 zero-target close，会写入：
+
+```text
+active_probe_ignore_zero_target_close
+```
+
+---
+
+## 普通仓退出与浮盈保护
+
+普通非-probe 仓不走 probe exit policy。PROTECT 下新增 profit-lock trailing，用于保护已形成的净浮盈。
+
+典型逻辑：
+
+- `net_bps` 达到 `protect_profit_lock_min_net_bps` 后，有效 stop 至少抬到 breakeven plus；
+- `highest_net_bps` 达到 trailing start 后，若回撤超过 gap，触发 `protect_profit_lock_trailing`；
+- 更高浮盈可使用 strong trailing gap；
+- profit-lock exit bypass turnover cap。
+
+audit 字段包括：
+
+- `protect_profit_lock_active`
+- `entry_px`
+- `current_px`
+- `net_bps`
+- `highest_net_bps`
+- `effective_stop_px`
+- `exit_reason`
+
+---
+
+## Swing 持仓保护
+
+Swing 持仓用于避免优质中短周期信号被普通软退出过早打掉。
+
+### min-hold exit guard
+
+当 `swing_hold_position=true` 且未达到 `swing_min_hold_hours` 时：
+
+允许 min-hold 前退出的硬原因：
+
+- hard stop loss；
+- kill switch；
+- reconcile failure；
+- exchange/account anomaly；
+- Risk-Off 强制退出；
+- 明确 hard risk close。
+
+min-hold 前不应直接退出的软原因：
+
+- `atr_trailing`
+- `rank_exit`
+- `normal_zero_target_close`
+- `weak_signal_exit`
+- `soft_stop`
+
+soft exit 被拦截时会写：
+
+- `hold_hours`
+- `min_hold_hours`
+- `exit_priority`
+- `exit_allowed_before_min_hold`
+- `exit_blocked_by_min_hold`
+- `min_hold_block_reason`
+
+### swing ATR trailing early-exit soft guard
+
+对于 min-hold 前的 `atr_trailing`，如果亏损没有达到硬阈值、regime 非 Risk-Off、f5 未明显转坏，则先拦截，继续持有到 min-hold 或等待硬 exit。
+
+典型 blocked reason：
+
+```text
+swing_atr_early_exit_guard
+```
+
+### f3-dominant swing qualification guard
+
+f3_vol_adj_ret 主导且 f4/f5 确认弱的候选，仍可作为普通 entry 继续评估，但不能被标记为 `swing_hold_position=true`。
+
+这不是禁止交易，而是不让 f3-dominant 弱确认候选享受 swing min-hold 保护。
+
+输出：
+
+- `dominant_factor`
+- `dominant_factor_contribution_pct`
+- `swing_f3_dominant_blocked`
+- `swing_hold_position`
+- `f4_volume_expansion`
+- `f5_rsi_trend_confirm`
+
+---
+
+## Dust 与状态清理
+
+小账户平仓后经常留下极小 dust。V5 对 dust 做统一处理：
+
+- dust 不参与 anti-chase add-size；
+- dust 不被视为有效持仓；
+- dust 不反复生成低于 min-notional 的 close order；
+- CLOSE_LONG 成交后，如果剩余价值低于 dust threshold，清理 position/profit/stop/highest/probe active state；
+- 保留 dust 余额本身，不强卖 dust。
+
+关键 audit：
+
+- `dust_position_ignored_for_add_size=true`
+- `raw_held_value_usdt`
+- `effective_held_value_usdt=0`
+- `dust_threshold_usdt`
+- `dust_residual_no_close_order`
+- `position_state_cleared_after_close`
+
+---
+
+## Negative Expectancy
+
+Negative expectancy 用于根据近期真实 closed roundtrip 表现对 symbol 做 penalty、cooldown 或 open block。
+
+当前口径：
+
+- closed cycle 过滤按 `close_ts`，不是按 entry_ts；
+- 如果 close leg 在 lookback/release window 内，即使 entry leg 在窗口前，也要回溯纳入；
+- 如果找不到 entry leg，标记 degraded，不把该 close cycle 当负样本；
+- `release_start_ts` 必须对应当前 `config_fingerprint`；
+- fingerprint 改变时重置 release-scoped 统计起点。
+
+输出字段包括：
+
+- `closed_cycles`
+- `net_pnl_sum_usdt`
+- `net_expectancy_bps`
+- `fast_fail_net_expectancy_bps`
+- `last_close_ts`
+- `closed_cycles_included_by_close_ts`
+- `closed_cycles_with_entry_before_window`
+- `missing_entry_leg_count`
+- `lookback_filter_mode=close_ts`
+
+PROTECT 下还包含 short-cycle guard：如果 closed cycles 少但亏损明显，例如 2 个 closed cycles 后净期望低于阈值，可以阻断普通非-probe OPEN_LONG。
+
+---
+
+## Same-symbol Re-entry Guard
+
+同一 symbol 刚刚通过 profit-lock、probe stop、probe take-profit 或 trailing stop 退出后，不应马上在相近价格重新追高。
+
+每次 CLOSE_LONG 成交后记录：
+
+- `symbol`
+- `exit_ts`
+- `exit_px`
+- `exit_reason`
+- `highest_px_before_exit`
+- `net_bps`
+
+冷却期内准备 OPEN_LONG 时检查：
+
+- normal entry；
+- market impulse probe；
+- btc leadership probe。
+
+冷却期内允许 breakout exception，但必须满足明显突破上一高点或 exit price 的条件，并且原 entry/probe 条件本身仍然通过。
+
+blocked reason：
+
+```text
+same_symbol_reentry_cooldown
+```
+
+---
+
+## Candidate Snapshot
+
+`candidate_snapshot.csv` 是 V5 给诊断、bundle 和后续研究使用的候选快照。当前要求每个 live run 都输出 candidate snapshot，每个 universe symbol 至少一行，即使没有订单也要记录 `final_decision=no_order` 和具体原因。
+
+关键字段：
+
+- `run_id`
+- `ts_utc`
+- `symbol`
+- `strategy_candidate`
+- `final_score`
+- `rank`
+- `alpha6_score`
+- `alpha6_side`
+- `f1` 到 `f5`
+- `regime_state`
+- `risk_level`
+- `final_decision`
+- `block_reason`
+
+成本字段也必须覆盖 blocked/no_order candidate：
+
+- `cost_source`
+- `cost_bps`
+- `selected_total_cost_bps`
+- `cost_model_version`
+- `expected_edge_bps`
+- `required_edge_bps`
+- `cost_gate_verified`
+- `would_block_by_cost`
+- `cost_source_quality`
+- `expected_edge_source`
+- `candidate_cost_trusted`
+- `degraded_cost_model`
+- `cost_resolution_reason`
+
+成本优先级：
+
+1. 请求级 Quant Lab cost cache；
+2. latest symbol cost table；
+3. public spread proxy / mixed actual proxy；
+4. local estimate；
+5. 只有 symbol missing 或 service unavailable 时才允许 global default，并必须 degraded。
+
+---
+
+## SOL Paper Strategy Tracking
+
+V5 内置 SOL paper tracking，用于跟踪 quant-style 研究候选，但不生成真实订单。
+
+当前跟踪策略：
+
+```text
+SOL_PROTECT_ALPHA6_LOW_EXCEPTION_PAPER_V1
+SOL_F4_VOLUME_EXPANSION_PAPER_V1
+```
+
+每轮都会输出 heartbeat，即使没有 qualifying candidate。heartbeat 的目的不是交易，而是解释为什么没有入场。
+
+heartbeat 诊断字段：
+
+- `sol_candidate_present`
+- `risk_level`
+- `risk_off`
+- `cooldown_active`
+- `alpha6_score`
+- `alpha6_side`
+- `f4_volume_expansion`
+- `f4_threshold`
+- `f5_rsi_trend_confirm`
+- `original_block_reason`
+- `cost_source`
+- `no_sample_reason`
+
+`no_sample_reason` 使用标准枚举：
+
+```text
+no_sol_candidate
+f4_below_threshold
+alpha6_not_buy
+risk_not_protect
+cooldown_active
+risk_off
+```
+
+如果 `would_enter=true`，还会输出：
+
+- `would_size_usdt`
+- `expected_exit_horizon`
+- `arrival_bid`
+- `arrival_ask`
+- `arrival_mid`
+- `estimated_spread_bps`
+- `expected_order_type`
+- `estimated_fill_px`
+
+汇总输出：
+
+- `reports/sol_paper_strategy_labels.jsonl`
+- `summaries/paper_strategy_runs.csv`
+- `summaries/paper_strategy_daily.csv`
+- `summaries/paper_slippage_coverage.csv`
+
+Live small ready 前必须满足 paper days、entry day count、arrival mid coverage、spread observation coverage 和成本质量要求。public spread proxy 本身不能直接让策略晋级 live。
+
+---
+
+## Alt Impulse Regime Shadow
+
+ALT impulse 历史表现明显 regime-dependent，因此当前只能进入 regime shadow，不得进入 PAPER_READY 或 LIVE。
+
+V5 输出以下上下文字段：
+
+- `regime_state`
+- `risk_level`
+- `btc_trend_state`
+- `broad_market_positive_count`
+- `volatility_bucket`
+- `funding_state` 如可用
+
+状态字段：
+
+- `shadow_decision=REGIME_SHADOW` 或 `KEEP_SHADOW`
+- `alpha_discovery_board_status=REGIME_SHADOW` 或 `KEEP_SHADOW`
+- `paper_ready_allowed=false`
+- `live_ready_allowed=false`
+- `shadow_decision_reason=alt_impulse_regime_dependent_shadow_only`
+
+输出文件：
+
+- `reports/alt_impulse_shadow_labels.jsonl`
+- `summaries/alt_impulse_shadow_outcomes.csv`
+- `summaries/alt_impulse_shadow_outcomes_by_symbol.csv`
+- `summaries/alt_impulse_shadow_outcomes_by_reason.csv`
+- `summaries/alt_impulse_shadow_outcomes_by_horizon.csv`
+- `summaries/alt_impulse_shadow_by_regime.csv`
+- `summaries/alt_impulse_shadow_by_symbol_regime_horizon.csv`
+
+验收重点是：下一包能回答“ALT impulse 到底在哪种 regime、哪个 symbol、哪个 horizon 下有效”，而不是只给出整体平均表现。
+
+---
+
+## Order Lifecycle
+
+`order_lifecycle.csv` 用于把订单从 decision 到 submit 到 fill 串起来，帮助成本模型从 proxy 升级到 actual fills。
+
+订单生成时记录：
+
+- `decision_ts`
+- `signal_price`
+- `arrival_bid`
+- `arrival_ask`
+- `arrival_mid`
+- `spread_bps_at_decision`
+
+提交订单时记录：
+
+- `submit_ts`
+- `cl_ord_id`
+- `order_px`
+- `order_type`
+
+成交后记录：
+
+- `first_fill_ts`
+- `last_fill_ts`
+- `avg_fill_px`
+- `filled_qty`
+- `fee_usdt`
+
+如果 `trade_metrics` 有成交但 `order_lifecycle.csv` 为空，bundle 会标记 high issue。
+
+---
+
+## Quant-lab 接入边界
+
+V5 可以读取 quant-lab 的 permission/cost 结果，也可以输出 bundle 供 quant-lab ingest。但边界必须清楚：
+
+- V5 是唯一实盘执行方；
+- quant-lab 不放置、撤销、修改真实订单；
+- V5 不向 quant-lab 写 lake；
+- quant-lab shadow 不应影响真实订单；
+- enforce/cost_only/permission_only 只有在配置明确启用时才可影响订单；
+- 如果 quant-lab 不可用，V5 必须按配置 fail-open/fail-closed，并写入 telemetry。
+
+常见 telemetry：
+
+- `quant_lab_permission_audit`
+- `quant_lab_cost_usage.csv`
+- `quant_lab_shadow_outcomes.csv`
+- `quant_lab_shadow_outcomes_by_permission.csv`
+
+---
+
+## ML 生产状态
+
+当前 `live_prod` 明确关闭 ML live overlay：
 
 ```yaml
 alpha:
@@ -82,1153 +610,257 @@ execution:
   ml_research_use_stable_universe: false
 ```
 
-The ML research scripts remain in the repository for offline experiments only:
+生产路径不应：
+
+- 加载 ML 模型；
+- 读取 active model pointer；
+- 写 ML overlay score；
+- 把 `promotion_not_passed` 当生产 health 红色事故。
+
+保留的脚本仅用于离线研究：
 
 - `scripts/daily_ml_training.py`
 - `scripts/model_promotion_gate.py`
 - `scripts/run_shadow_tuned_xgboost.py`
 
-Do not enable the ML training, promotion, or tuned XGBoost shadow timers in `live_prod` unless ML live overlay is explicitly re-approved.
+研究依赖放在：
 
-### Split Order Status
+```text
+requirements-research.txt
+```
 
-`split_order_runtime_active=false` in `live_prod`. `split_orders` and `split_interval_sec` are intentionally inactive/not consumed; split order execution is not implemented for the current small-account production path.
+生产依赖放在：
 
-这意味着生产策略默认只在明确配置的主流交易对上工作。
+```text
+requirements.txt
+```
+
+没有安装 xgboost / scikit-learn 时，生产 pipeline 仍应可启动。
 
 ---
 
-### 2. 多策略信号融合
+## 诊断与打包
 
-系统支持多类信号：
+V5 的诊断打包用于导出最近 runs、交易、状态、候选、shadow、paper、issues 和 README 摘要。
 
-- Alpha6 多因子信号；
-- TrendFollowing 趋势跟踪信号；
-- MeanReversion 均值回归信号；
-- 可选 ML overlay；
-- 可选 Alpha158 风格 overlay；
-- 市场脉冲 probe；
-- BTC leadership breakout probe；
-- ALT impulse shadow evaluator。
-
-当前生产侧更重视 Alpha6 的确认作用。TrendFollowing 可以参与排序和观察，但在 PROTECT 风险档位下，通常不能单独触发实盘买入。
-
----
-
-### 3. PROTECT 风险档位下的强 gate
-
-当账户处于较大回撤或保护状态时，系统会进入 `PROTECT` 档位。
-
-在 PROTECT 下，普通多头开仓需要满足更严格条件：
-
-- 需要 Alpha6Factor 同向 buy；
-- 不允许 TrendFollowing-only 直接买入；
-- Alpha6 score 需要达到阈值；
-- RSI 趋势确认需要达标；
-- 成交量确认需要达标；
-- 信号需要经过多轮确认或强单轮信号确认；
-- 成本感知 gate 需要确认收益空间足够覆盖交易成本。
-
-该机制用于防止系统在弱趋势、震荡或假突破中频繁追高。
-
----
-
-### 4. 成本感知开仓
-
-系统不会只看分数高低，还会估算 round-trip 交易成本。
-
-典型生产参数：
-
-```yaml
-execution:
-  fee_bps: 10
-  slippage_bps: 5
-  cost_aware_entry_enabled: true
-  cost_aware_roundtrip_cost_bps: 30
-```
-
-如果信号分数不足以覆盖真实双边成本，系统会跳过开仓。
-
----
-
-### 5. Negative Expectancy 自动冷却
-
-系统持续统计各 symbol 的闭环交易表现。如果某个 symbol 在近期真实成交中呈现负期望，会触发：
-
-- score penalty；
-- open block；
-- fast-fail open block；
-- cooldown；
-- market impulse 条件下的有限 softening。
-
-该机制用于防止系统在同一标的上连续试错。
-
----
-
-### 6. Probe 小仓试探机制
-
-V5 不会轻易放松普通交易 gate。对于特殊行情，使用小仓 probe 机制做受控试探。
-
-当前主要 probe 类型：
+常见输出：
 
 ```text
-market_impulse_probe
-btc_leadership_probe
+summaries/window_summary.json
+summaries/issues_to_fix.json
+summaries/trade_metrics.csv
+summaries/fill_metrics.csv
+summaries/trades_roundtrips.csv
+summaries/probe_lifecycle_audit.csv
+summaries/candidate_snapshot.csv
+summaries/order_lifecycle.csv
+summaries/paper_strategy_runs.csv
+summaries/alt_impulse_shadow_by_regime.csv
+raw/recent_runs/<run_id>/*
+raw/reports/*
+README.md
 ```
 
-#### market_impulse_probe
-
-用于识别 BTC 带动、多个白名单币同时出现趋势买入的 broad market impulse。
-
-特点：
-
-- 仅小仓；
-- 支持动态 sizing，确保不低于交易所最小成交额；
-- 可绕过单次 fast-fail，但不能绕过 active cooldown；
-- 使用专用 probe exit policy；
-- 不应被普通 zero-target rebalance 过早平掉。
-
-#### btc_leadership_probe
-
-用于识别 BTC 率先突破时的 BTC-only 小仓试探。
-
-特点：
-
-- 只针对 BTC；
-- 需要突破 rolling high；
-- 需要 Alpha6 / f4 / f5 基本确认；
-- 受 PROTECT、Risk-Off、cooldown 和 same-symbol re-entry guard 约束。
-
----
-
-### 7. Profit Lock 浮盈保护
-
-系统在 PROTECT 下支持普通仓位的浮盈保护：
-
-- 达到一定净浮盈后，把 stop 抬到保本上方；
-- 达到更高浮盈后启动 trailing；
-- 在阻力区或行情回撤时尽量锁住已经获得的收益。
-
-该机制用于解决“入场是对的，但盈利回吐”的问题。
-
----
-
-### 8. Same-symbol Re-entry Guard
-
-系统会记录同一 symbol 最近一次退出原因和价格，避免出现：
-
-```text
-刚刚 profit-lock 卖出 BTC
-几小时内又在同一区间买回 BTC
-随后止损
-```
-
-冷却期内允许突破例外，但必须满足明显突破上一次高点或 exit price 的条件。
-
----
-
-### 9. Dust-aware 状态清理
-
-小账户实盘常见问题是平仓后留下极小残仓 dust。V5 对 dust 做了专门处理：
-
-- dust 不再触发 anti-chase add-size；
-- dust 不再被当成有效 open position；
-- dust-only 不反复生成无意义 close order；
-- 平仓后清理 stale profit / stop / highest / probe state；
-- 打包诊断中区分真实持仓和 dust residual。
-
----
-
-## 系统架构
-
-整体流程可以概括为：
-
-```text
-Market Data
-   │
-   ▼
-Alpha Engine
-   ├─ Alpha6 factors
-   ├─ TrendFollowing
-   ├─ MeanReversion
-   ├─ ML overlay, optional
-   └─ Alpha158 overlay, optional
-   │
-   ▼
-Regime Engine
-   ├─ Trending
-   ├─ Sideways
-   └─ Risk-Off
-   │
-   ▼
-Portfolio Engine
-   ├─ ranking
-   ├─ target weights
-   ├─ optimizer
-   └─ TopK / dropout control
-   │
-   ▼
-Risk & Gate Layer
-   ├─ PROTECT entry gate
-   ├─ cost-aware gate
-   ├─ negative expectancy gate
-   ├─ same-symbol re-entry guard
-   ├─ whitelist guard
-   └─ dust-aware state hygiene
-   │
-   ▼
-Execution Router
-   ├─ OPEN_LONG
-   ├─ CLOSE_LONG
-   ├─ rebalance
-   ├─ probe order
-   └─ exit order
-   │
-   ▼
-Live Execution Engine
-   ├─ OKX spot API
-   ├─ order store
-   ├─ fill store
-   ├─ bills / ledger
-   └─ reconcile / kill switch
-   │
-   ▼
-Reports & Diagnostics
-   ├─ decision_audit.json
-   ├─ trades.csv
-   ├─ equity.jsonl
-   ├─ skipped candidate labels
-   ├─ probe lifecycle audit
-   ├─ high-score blocked targets
-   └─ follow-up bundle
-```
-
----
-
-## 策略与信号
-
-### Alpha6 因子
-
-当前核心 Alpha6 因子包括：
-
-```text
-f1_mom_5d
-f2_mom_20d
-f3_vol_adj_ret
-f4_volume_expansion
-f5_rsi_trend_confirm
-```
-
-生产配置中，系统支持：
-
-- 静态权重；
-- regime 权重覆盖；
-- dynamic IC weighting；
-- regime + dynamic IC 组合；
-- factor contribution audit。
-
-### TrendFollowing
-
-趋势跟踪策略使用 MA 和 ADX 逻辑，并对趋势做二次确认。它可以发现市场趋势，但在 PROTECT 下不能单独触发普通开仓。
-
-### MeanReversion
-
-均值回归策略用于识别 RSI 超买超卖、布林带偏离和成交量萎缩等反转场景。它在不同 regime 下可以有不同 allocation multiplier。
-
-### ML Factor
-
-当前 `live_prod` 不启用 ML overlay。ML 训练、promotion gate 和 shadow tuned XGBoost 脚本仅保留为离线研究能力，不参与生产下单、健康判定或主链路异常统计。未来只有在独立 promotion gate 重新通过、并显式批准 live overlay 后，才考虑重新接入生产。
-
-### Alpha158 Overlay
-
-系统保留 Alpha158 风格 overlay 配置，但生产中默认关闭：
-
-```yaml
-alpha158_overlay:
-  enabled: false
-```
-
----
-
-## 风险控制
-
-V5 的风险控制分多层。
-
-### 1. AutoRisk
-
-根据 drawdown 自动调整仓位数量和仓位大小。
-
-典型规则：
-
-```yaml
-dd_0_5:    max_positions: 8, position_size_pct: 1.0
-dd_5_10:   max_positions: 5, position_size_pct: 0.7
-dd_10_15:  max_positions: 3, position_size_pct: 0.5
-dd_15_plus: max_positions: 1, position_size_pct: 0.15
-```
-
-当系统处于较大回撤时，会自动进入更防守的交易状态。
-
-### 2. Regime Risk-Off
-
-当 regime 判定为 Risk-Off，生产配置中可以直接将目标仓位归零：
-
-```yaml
-pos_mult_risk_off: 0.0
-```
-
-### 3. Cost-aware Entry
-
-如果预期 edge 不足以覆盖 round-trip cost，开仓会被跳过。
-
-### 4. Negative Expectancy
-
-对近期闭环交易持续亏损的标的自动降权、阻断或冷却。
-
-### 5. Profit Lock
-
-普通非 probe 仓位达到一定净浮盈后，自动提高止损或启动 trailing。
-
-### 6. Probe Exit Policy
-
-probe 仓位由专用出场策略管理：
-
-```text
-probe_take_profit
-probe_stop_loss
-probe_trailing_stop
-probe_time_stop
-```
-
-### 7. Kill Switch / Reconcile / Ledger
-
-实盘交易前需要通过：
-
-- kill switch 检查；
-- reconcile 检查；
-- ledger 检查；
-- live arm 检查；
-- 账户配置检查；
-- 借币 / 负债保护。
-
----
-
-## 执行与订单管理
-
-### 订单路径
-
-V5 会把策略目标转化为订单意图：
-
-```text
-OPEN_LONG
-CLOSE_LONG
-REBALANCE
-```
-
-然后经由 live execution engine 提交到 OKX。
-
-### 订单和成交存储
-
-常见运行文件包括：
-
-```text
-reports/orders.sqlite
-reports/fills.sqlite
-reports/bills.sqlite
-reports/positions.sqlite
-reports/ledger_state.json
-reports/reconcile_status.json
-reports/kill_switch.json
-```
-
-### Dust 处理
-
-对于低于最小成交额或系统定义 dust threshold 的极小残仓：
-
-- 不视为有效持仓；
-- 不触发 anti-chase；
-- 不触发无意义 close；
-- 在诊断中作为 dust residual 独立记录。
-
----
-
-## 诊断与可观测性
-
-V5 的一个重点是“每次交易和每次未交易都要能解释”。
-
-### 1. Decision Audit
-
-每个 run 会生成 `decision_audit.json`，包含：
-
-- top scores；
-- targets pre/post risk；
-- router decisions；
-- rejects / counts；
-- PROTECT gate 状态；
-- strategy signals；
-- negative expectancy state；
-- target execution explanation；
-- market impulse / BTC leadership probe 信息。
-
-### 2. 高分但未成交解释
-
-系统会记录：
-
-```text
-target_execution_explain
-high_score_blocked_targets.csv
-```
-
-用于回答：
-
-```text
-为什么 ETH 分数高但没买？
-为什么 target 里有这个币，但 router 没下单？
-```
-
-典型原因：
-
-```text
-trend_only
-no_alpha6_confirmation
-alpha6_sell
-alpha6_score_too_low
-volume_confirm_negative
-rsi_confirm_too_weak
-cost_aware
-negative_expectancy
-risk_off
-```
-
-### 3. Skipped Candidate Labeler
-
-被 gate 拦住的候选会记录下来，并在 4h / 8h / 12h / 24h 后补标签：
-
-```text
-如果当时买入，扣除 round-trip cost 后是否赚钱？
-```
-
-这让系统可以量化：
-
-- gate 是拦对了；
-- 还是错过了机会。
-
-### 4. ALT Impulse Shadow
-
-ETH/SOL/BNB 高分但因 PROTECT gate 被挡时，系统可以只做 shadow，不交易。
-
-输出包括：
-
-```text
-alt_impulse_shadow_labels.jsonl
-alt_impulse_shadow_outcomes.csv
-alt_impulse_shadow_outcomes_by_symbol.csv
-```
-
-等 shadow 数据证明有效后，才考虑未来的 live probe。
-
-### 5. Probe Lifecycle Audit
-
-用于检查 probe：
-
-- 是否触发；
-- 是否成交；
-- gross/net bps；
-- 出场 reason；
-- 是否使用 probe exit policy；
-- 平仓后 state 是否清理；
-- 是否有 dust residual。
-
-### 6. Negative Expectancy Consistency
-
-系统会检查：
-
-```text
-negative_expectancy_cooldown.json
-vs
-trades_roundtrips.csv
-```
-
-防止出现真实闭环赚钱，但 negative expectancy 错误判定为负的情况。
-
-### 7. Config Runtime Consumption Audit
-
-用于识别：
-
-```text
-配置里写了，但运行时代码没消费
-```
-
-例如 runtime inactive / intentionally_inactive 配置；`split_orders` / `split_interval_sec` 在 `live_prod` 中不启用分单，bundle 不再把它们作为 live issue。
+典型 high/medium issue 会覆盖：
+
+- trades.csv 与 summary.json count mismatch；
+- order lifecycle 缺失；
+- candidate snapshot 缺失或成本降级；
+- negative expectancy state 与 roundtrip summary 不一致；
+- swing soft exit 违反 min-hold；
+- alt impulse / skipped label 缺 entry_px 或 future_px；
+- dirty worktree / provenance degraded。
 
 ---
 
 ## Web Dashboard
 
-V5 内置 Web Dashboard，用于把实盘运行状态、账户、成交、评分、K 线、系统健康和诊断信息集中展示。它不是独立交易系统，而是运行在 V5 工作区之上的可视化与观测入口。
+Dashboard 是观察入口，不是交易入口。它读取 V5 workspace 下的 reports、state、sqlite 和运行日志，提供：
 
-### 功能概览
+- 健康状态；
+- 当前风险档位；
+- 持仓和 ledger；
+- 最近成交；
+- router decisions；
+- candidate snapshot；
+- skipped labels；
+- probe / paper / shadow 诊断；
+- bundle 和 issue 摘要。
 
-Dashboard 的主要目标是让运维和策略分析人员快速回答：
+ML overlay 已在 live_prod 关闭，因此 Dashboard 不应把 ML promotion failure 当作红色生产事故。
 
-```text
-系统现在是否健康？
-账户和 ledger 是否正常？
-当前是否有持仓？
-最近是否有成交？
-哪些币分数最高？
-哪些候选被 gate 拦住？
-当前 regime 是什么？
-风控是否处于 PROTECT / Risk-Off？
-probe 是否触发？
-ML / shadow / skipped label 是否有异常？
-```
-
-当前 Dashboard 覆盖：
-
-- 账户总览；
-- 交易历史；
-- 币种评分；
-- K 线图表；
-- 系统状态；
-- regime / vote history；
-- HMM 概率和衍生投票；
-- ML signal / shadow ML 面板；
-- 持仓聚焦 K 线；
-- Prometheus metrics；
-- health / ready / liveness 检查；
-- React SPA 或 legacy Jinja template 渲染模式。
-
-### 工作区与渲染模式
-
-Dashboard 会自动识别工作区：
-
-```text
-V5_WORKSPACE
-脚本所在仓库目录
-当前工作目录
-```
-
-它优先查找：
-
-```text
-web/templates/monitor_v2.html
-```
-
-并将工作区内的 `reports/`、`data/cache/`、`web/` 作为数据和前端资源来源。
-
-Dashboard 支持两种渲染模式：
-
-```text
-template / jinja / legacy
-react / spa / dist
-```
-
-可以通过环境变量切换：
-
-```bash
-export V5_DASHBOARD_RENDERER=template
-# 或
-export V5_DASHBOARD_RENDERER=react
-```
-
-React build 路径也可以通过环境变量指定：
-
-```bash
-export V5_DASHBOARD_DIST=/path/to/web/dist
-```
-
-如果没有指定，系统会尝试：
-
-```text
-web/dist
-dist
-frontend/dist
-```
-
-### Flask 后端
-
-Dashboard 使用 Flask 提供 HTTP 服务。后端会注册模板目录和静态文件目录：
-
-```text
-web/templates
-web/static
-```
-
-同时会给响应增加 no-cache header，避免移动端或浏览器缓存旧前端脚本，导致样式和图表不同步。
-
-### API 与页面能力
-
-Dashboard 页面和前端 JS 会读取多个 API 数据源，典型能力包括：
-
-- `GET /`：主监控页面；
-- `GET /metrics`：Prometheus 格式指标；
-- `/health`：健康检查；
-- `/ready`：ready check；
-- `/liveness`：liveness check；
-- `/api/...`：账户、持仓、评分、成交、K 线、ML、shadow、regime 等 JSON 数据接口；
-- 静态资源：`/static/...`；
-- React SPA fallback：非 API 路径可回退到 `index.html`。
-
-Dashboard 的测试覆盖了主页面关键 DOM 元素，例如：
-
-```text
-update-time
-health-content
-vote-history
-history-tooltip
-position-kline-chart
-position-kline-symbols
-position-kline-timeframes
-ml-impact-headline
-ml-impact-content
-```
-
-这说明 Dashboard 不只是简单静态页面，而是围绕实盘监控场景构建的交互式监控前端。
-
-### Prometheus 指标
-
-Dashboard 暴露：
-
-```text
-/metrics
-```
-
-用于输出 Prometheus 文本格式指标。若 metrics exporter 正常，返回类似：
-
-```text
-v5_metrics_exporter_up 1
-```
-
-如果 exporter 导入或执行失败，会返回：
-
-```text
-v5_metrics_exporter_up 0
-```
-
-这可以被 Prometheus、Grafana 或其他监控系统采集。
-
-### 健康检查
-
-Dashboard 会尝试注册健康检查蓝图：
-
-```text
-/health
-/ready
-/liveness
-```
-
-这些接口用于区分：
-
-- 服务是否存活；
-- 是否可以对外提供服务；
-- 是否满足部署或探针条件。
-
-### 缓存策略
-
-Dashboard 后端有两层缓存：
-
-1. **请求内缓存**  
-   同一个请求上下文中，多次调用同一个 API 函数会复用结果。
-
-2. **路由级短 TTL 缓存**  
-   例如 Dashboard 视图会根据 `view` 参数使用不同 TTL：
-
-   ```text
-   primary: 8 秒
-   deferred: 20 秒
-   full: 10 秒
-   ```
-
-这能减少 Dashboard 刷新时对 sqlite、reports、OKX public ticker 和系统状态文件的重复读取。
-
-### 安全设计
-
-Dashboard 有几项安全/稳健性设计：
-
-- 错误响应会隐藏 traceback；
-- 错误响应会避免泄露本地路径；
-- API 未知路径不会被 SPA fallback 吞掉；
-- 静态文件路径会防止 path traversal；
-- 响应中启用 no-cache，减少旧资源缓存造成的误判；
-- 敏感环境变量不应通过 Dashboard 暴露；
-- Dashboard 只应部署在可信网络、VPN、内网或受控反向代理后。
-
-### 建议部署方式
-
-开发或本地查看可以直接运行：
+启动示例：
 
 ```bash
 python scripts/web_dashboard.py
 ```
 
-生产建议使用 systemd、反向代理或内网访问控制。例如：
-
-```text
-v5-dashboard.service
-nginx / caddy reverse proxy
-VPN / Tailscale / WireGuard
-basic auth 或内网白名单
-```
-
-建议不要将 Dashboard 裸露在公网，尤其是在系统连接真实交易所账户时。
-
-### 运维检查清单
-
-打开 Dashboard 后，建议优先检查：
-
-```text
-1. health / ready / liveness 是否正常；
-2. kill_switch 是否 false；
-3. reconcile_status 是否 ok；
-4. ledger_status 是否 ok；
-5. 当前是否有非 dust 持仓；
-6. 最近 24h 是否有成交；
-7. 最新 selected / router decision 是什么；
-8. 当前是否处于 PROTECT / Risk-Off；
-9. 当前 high-score blocked target 是否集中在某个 symbol；
-10. probe 是否触发、是否成交、是否被 stop-loss / time-stop；
-11. skipped label 是否正常补 4h / 8h / 12h / 24h；
-12. negative expectancy 是否与 roundtrip summary 一致；
-13. config runtime consumption audit 是否出现 configured_not_consumed。
-```
-
-### Dashboard 与 follow-up bundle 的关系
-
-Dashboard 适合实时查看；follow-up bundle 适合离线分析。
-
-两者的关系可以理解为：
-
-```text
-Dashboard = 当前状态和近期运行的在线视图
-follow-up bundle = 可审计、可复盘、可交给专家分析的离线证据包
-```
-
-如果 Dashboard 和 follow-up bundle 结论不一致，应优先检查：
-
-- 采样窗口是否一致；
-- Dashboard 缓存是否过期；
-- runtime config path 是否一致；
-- reports path 是否一致；
-- service 是否读取同一个工作区；
-- 是否存在 stale state 或旧 run 混入。
+生产建议放在内网、VPN 或带鉴权的反向代理之后。
 
 ---
 
 ## 目录结构
-
-典型结构如下：
 
 ```text
 .
 ├── main.py
 ├── configs/
 │   ├── live_prod.yaml
-│   ├── schema.py
-│   └── ...
+│   └── schema.py
 ├── src/
 │   ├── alpha/
-│   │   └── alpha_engine.py
 │   ├── core/
-│   │   └── pipeline.py
 │   ├── execution/
-│   │   ├── live_execution_engine.py
-│   │   ├── order_store.py
-│   │   ├── fill_store.py
-│   │   └── same_symbol_reentry_guard.py
 │   ├── portfolio/
 │   ├── regime/
 │   ├── reporting/
-│   │   ├── decision_audit.py
-│   │   ├── skipped_candidate_tracker.py
-│   │   └── alt_impulse_shadow.py
+│   │   ├── alt_impulse_shadow.py
+│   │   ├── candidate_snapshot.py
+│   │   ├── order_lifecycle.py
+│   │   ├── sol_paper_strategy_tracker.py
+│   │   └── skipped_candidate_tracker.py
 │   ├── research/
 │   └── risk/
 ├── scripts/
-│   ├── web_dashboard.py
 │   ├── generate_v5_bundle_remote.sh
-│   ├── health_check.py
-│   ├── reconcile_with_retry.py
-│   ├── fill_sync.py
-│   └── ...
-├── web/
-│   ├── templates/
-│   ├── static/
-│   └── dist/        # 可选 React build 输出
+│   ├── test_v5_bundle_export.py
+│   └── web_dashboard.py
 ├── tests/
-│   ├── test_probe_exit_policy.py
-│   ├── test_market_impulse_probe.py
-│   ├── test_negative_expectancy_market_aware.py
 │   ├── test_alt_impulse_shadow.py
+│   ├── test_sol_paper_strategy_tracker.py
+│   ├── test_candidate_snapshot.py
+│   ├── test_probe_exit_policy.py
 │   └── ...
-└── reports/
-    ├── runs/
-    ├── orders.sqlite
-    ├── fills.sqlite
-    ├── ledger_state.json
-    ├── decision artifacts
-    └── summaries
+├── docs/
+├── reports/
+├── requirements.txt
+└── requirements-research.txt
 ```
 
 ---
 
-## 环境准备
+## 依赖与环境
 
-### Python 依赖
-
-项目使用 Python 生态，主要依赖包括：
-
-```text
-pydantic
-python-dotenv
-numpy
-pandas
-requests
-httpx
-pyyaml
-scipy
-ccxt
-flask
-waitress
-paramiko
-```
-
-生产安装示例：
+生产依赖：
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-ML / research-only scripts use optional dependencies:
+研究依赖：
 
 ```bash
 pip install -r requirements-research.txt
 ```
 
-`scikit-learn` and `xgboost` are intentionally not required by `live_prod`.
+生产环境不应强制依赖 xgboost / heavy ML research dependencies。
 
 ---
 
-## 配置说明
+## 常用命令
 
-### 生产配置
-
-当前生产配置文件：
-
-```text
-configs/live_prod.yaml
-```
-
-关键配置包括：
-
-- 交易白名单；
-- OKX exchange；
-- Alpha 权重；
-- regime；
-- AutoRisk；
-- PROTECT entry gate；
-- market impulse probe；
-- BTC leadership probe；
-- probe exit policy；
-- same-symbol re-entry guard；
-- negative expectancy；
-- diagnostics；
-- backtest cost。
-
-### 环境变量
-
-敏感信息不应写入 GitHub。建议通过 `.env` 或系统环境变量注入：
+运行主程序：
 
 ```bash
-EXCHANGE_API_KEY=...
-EXCHANGE_API_SECRET=...
-EXCHANGE_PASSPHRASE=...
-V5_LIVE_ARM=YES
+python main.py --config configs/live_prod.yaml
 ```
 
-`.env` 必须加入 `.gitignore`，不得提交到仓库。
-
----
-
-## 运行方式
-
-### 本地检查
-
-建议先运行测试：
-
-```bash
-pytest
-```
-
-或者只运行关键测试：
-
-```bash
-pytest tests/test_probe_exit_policy.py
-pytest tests/test_market_impulse_probe.py
-pytest tests/test_negative_expectancy_market_aware.py
-pytest tests/test_alt_impulse_shadow.py
-pytest tests/test_live_contract_guards.py
-```
-
-### 生产运行
-
-生产运行应使用明确的配置文件和受控服务。典型生产配置为：
-
-```text
-configs/live_prod.yaml
-```
-
-实盘前必须确认：
-
-```text
-kill_switch = false
-reconcile_status.ok = true
-ledger_status.ok = true
-V5_LIVE_ARM = YES
-.env 未提交
-账户无借币 / 负债风险
-```
-
-### Web Dashboard
-
-可以通过 Flask Dashboard 查看账户、评分、K 线、系统状态和诊断信息：
+运行 Dashboard：
 
 ```bash
 python scripts/web_dashboard.py
 ```
 
-常见环境变量：
-
-```bash
-export V5_WORKSPACE=/home/ubuntu/clawd/v5-prod
-export V5_DASHBOARD_RENDERER=template   # 或 react
-export V5_DASHBOARD_DIST=/home/ubuntu/clawd/v5-prod/web/dist
-```
-
-Prometheus 指标入口：
-
-```text
-/metrics
-```
-
-健康检查入口：
-
-```text
-/health
-/ready
-/liveness
-```
-
-生产环境建议放在内网、VPN 或反向代理鉴权之后，不建议直接暴露公网。
-
-### 诊断打包
-
-项目提供 follow-up bundle 打包脚本，用于把最近运行证据打包成可离线分析的压缩包：
+生成 V5 bundle：
 
 ```bash
 bash scripts/generate_v5_bundle_remote.sh
 ```
 
-输出通常包含：
-
-```text
-raw/state/
-raw/recent_runs/
-raw/logs/
-raw/reports/
-summaries/
-README.md
-manifest.json
-commands.log
-```
-
-该包用于分析：
-
-- 今天是否该交易；
-- 是否有真实成交；
-- 成交 gross/net bps；
-- gate 是否拦对；
-- probe 是否触发；
-- dust 是否污染状态；
-- negative expectancy 是否与 roundtrip 一致；
-- 高分目标为什么没成交；
-- shadow 样本是否支持未来优化。
-
----
-
-## 测试与验证
-
-建议在每次改动后至少跑：
+检查 bundle exporter：
 
 ```bash
-pytest tests/test_probe_exit_policy.py
-pytest tests/test_market_impulse_probe.py
-pytest tests/test_protect_entry_gate.py
-pytest tests/test_skipped_candidate_tracker.py
-pytest tests/test_alt_impulse_shadow.py
-pytest tests/test_backtest_cost_alignment.py
-pytest tests/test_web_dashboard.py
-```
-
-如果改动 live execution 或风控逻辑，还应补充：
-
-```bash
-pytest tests/test_live_contract_guards.py
-pytest tests/test_dust_aware_router.py
-pytest tests/test_negative_expectancy_market_aware.py
+python scripts/test_v5_bundle_export.py
 ```
 
 ---
 
-## 常见问题
+## 测试
 
-### Q1：为什么 ETH 分数很高，但系统没有买？
+常用最小回归：
 
-因为 `final_score` 高不等于最终可执行。  
-在 PROTECT 下，普通买入需要 Alpha6 同向确认。如果 ETH 高分主要来自 TrendFollowing，而 Alpha6 没有 buy，或者 Alpha6 是 sell，系统会跳过。
-
-常见原因：
-
-```text
-protect_entry_trend_only
-protect_entry_no_alpha6_confirmation
-protect_entry_alpha6_score_too_low
-protect_entry_volume_confirm_negative
-protect_entry_rsi_confirm_too_weak
+```bash
+python -m pytest tests/test_alt_impulse_shadow.py -q
+python -m pytest tests/test_sol_paper_strategy_tracker.py -q
+python -m pytest tests/test_candidate_snapshot.py -q
+python -m pytest tests/test_probe_exit_policy.py -q
+python scripts/test_v5_bundle_export.py
 ```
 
-这些都会写入 `target_execution_explain` 和 high-score blocked 诊断文件。
+针对最近改动的重点测试：
 
-### Q2：为什么 BTC 分数不最高，系统却买了 BTC？
+- `tests/test_alt_impulse_shadow.py`：regime shadow、by-regime 聚合、REGIME_SHADOW 状态；
+- `tests/test_sol_paper_strategy_tracker.py`：SOL paper heartbeat、no_sample_reason、成本和报价诊断；
+- `tests/test_candidate_snapshot.py`：每 run 候选覆盖、成本字段、symbol-level fallback；
+- `tests/test_probe_exit_policy.py`：probe exit 接管、time stop、stop loss、take profit、trailing；
+- `scripts/test_v5_bundle_export.py`：bundle 输出、README 摘要、issues 口径。
 
-BTC 可能通过 `market_impulse_probe` 或 `btc_leadership_probe` 专用通道小仓买入。  
-probe 是特殊行情下的小仓试探，不等同于普通 top-score 选币。
+---
 
-### Q3：为什么系统经常不交易？
+## 生产部署注意事项
 
-在 PROTECT 下，系统宁可少交易，也不允许低质量信号反复试错。  
-不交易可能是合理防守，也可能是 gate 过严。需要看：
+生产部署应保证：
 
-```text
-skipped_candidate_outcomes
-high_score_blocked_outcomes
-alt_impulse_shadow_outcomes
-```
+- git worktree clean；
+- `main` 与 GitHub 远端一致；
+- `reports/` 和运行时 state 不混入源码提交；
+- 配置改动必须显式；
+- runtime consumption audit 不应出现未解释的 configured_not_consumed；
+- dirty worktree 应进入 data quality warning；
+- 修改后需要推送 GitHub，并同步 qyun 生产目录。
 
-### Q4：系统是否支持动态 universe？
+生产目录建议以 git repo 方式部署，使用 fast-forward 更新，避免手工覆盖文件造成 provenance degraded。
 
-支持，但生产配置默认关闭动态 universe，并使用显式白名单。  
-这是为了降低噪声、滑点、min notional、dust 和小币种不稳定性。
+---
 
-### Q5：ML 会直接参与实盘吗？
+## 回滚与排障
 
-不会。当前 `live_prod` 显式关闭 ML overlay，相关脚本只用于离线研究；`promotion_not_passed` 代表研究链路未通过，不应作为生产 health 红色事故。未来若要启用，必须先通过 promotion gate，并显式打开 live 配置。
+常见排障顺序：
 
-### Q6：如何判断 gate 是否太严格？
+1. 看 `git status --short`，确认是否 dirty；
+2. 看最近 commit；
+3. 看 `reports/runs/**/decision_audit.json`；
+4. 看 `reports/runs/**/trades.csv` 与 `summary.json` 是否一致；
+5. 看 `summaries/issues_to_fix.json`；
+6. 看 `negative_expectancy_cooldown.json` 与 `trades_roundtrips.csv`；
+7. 看 `candidate_snapshot.csv` 是否每个 run / symbol 都覆盖；
+8. 看 `order_lifecycle.csv` 是否在有成交时非空；
+9. 看 probe / swing / profit-lock / re-entry guard 的 router reason；
+10. 必要时回滚到上一个 clean commit。
 
-看 skipped candidate label：
+回滚原则：
 
-```text
-4h / 8h / 12h / 24h net bps
-win rate
-by reason
-by symbol
-```
-
-如果某类被挡样本长期净正，才考虑放松或新增 probe。  
-如果长期净负，继续拦截是正确的。
+- 优先 git revert 或 fast-forward 到已知 good commit；
+- 不要手工删除 state 来掩盖问题；
+- 不要在未确认 dust / ledger / fills 前强制清仓；
+- 不要启用 shadow/paper 策略为 live，除非已有明确配置和足够后验样本。
 
 ---
 
 ## 安全说明
 
-请不要在仓库中提交：
+本仓库用于真实交易系统。请遵守以下边界：
 
-```text
-.env
-API key
-API secret
-passphrase
-token
-cookie
-私钥
-账户截图
-未脱敏交易所响应
-```
-
-生产环境建议：
-
-- 使用最小权限 API key；
-- 关闭不必要权限；
-- 禁止借币；
-- 保留 kill switch；
-- 每次 live 前检查 reconcile / ledger；
-- 保持日志脱敏；
-- 定期备份 reports / sqlite / state；
-- 只通过受控脚本生成诊断包。
-
----
-
-## 当前设计原则
-
-V5 当前遵循以下原则：
-
-```text
-1. 不为交易而交易。
-2. 先保护本金，再追求收益。
-3. 普通仓要有 Alpha6 确认。
-4. Trend-only 先 shadow，不直接 live。
-5. Probe 只能小仓、可止损、可追踪、可复盘。
-6. 有浮盈要保护。
-7. 每次不交易也要能解释。
-8. 配置必须被运行时代码消费，否则标记为 inactive。
-9. 实盘成本必须优先于回测假设。
-10. 所有策略改动必须由诊断数据支持。
-```
+- 不在 README 或代码中提交 API key、密码、cookie、token；
+- 不把生产 Dashboard 裸露到公网；
+- 不在 dirty worktree 状态下依赖策略 evidence 做 live 决策；
+- 不让 research-only ML 依赖进入生产必需路径；
+- 不让 paper/shadow 输出直接生成实盘订单；
+- 不绕过 kill switch、reconcile、ledger、dust 和 negative expectancy guard；
+- 对生产配置相关改动，优先 fail-fast 或显式 warning，不要静默忽略。
 
 ---
 
 ## 免责声明
 
-本项目仅用于量化交易系统研究、工程验证和个人实盘实验，不构成任何投资建议。
-
-数字资产价格波动剧烈，自动化交易可能产生亏损。使用者应自行承担所有交易风险，包括但不限于：
-
-- 市场风险；
-- 策略失效；
-- 滑点和手续费；
-- API 故障；
-- 网络延迟；
-- 交易所异常；
-- 配置错误；
-- 状态文件污染；
-- 程序 bug；
-- 账户安全风险。
-
-在任何实盘部署前，请务必使用小资金、dry-run、shadow、回测和严格风控逐步验证。
-
----
-
-## License
-
-请根据实际情况补充许可证。例如：
-
-```text
-MIT License
-Apache-2.0
-Private / All rights reserved
-```
-
-如果该仓库用于个人研究或生产系统，建议明确写明使用范围和责任边界。
-## Quant-lab 中台检查
-
-每日 follow-up bundle 会输出 `summaries/quant_lab_config_audit.json`、`summaries/window_summary.json`、`summaries/quant_lab_compliance.csv`、`summaries/quant_lab_cost_usage.csv` 和 `summaries/quant_lab_fallbacks.csv`。
-
-- `quant_lab_mode` / `quant_lab_mode_source`：确认模式来自配置还是 `state/quant_lab_mode.json`。
-- `permission_gate_enforced` / `cost_gate_enforced`：确认中台门禁是否真正生效。
-- `quant_lab_actual_filter_count` / `quant_lab_hypothetical_filter_count`：区分真实拦单和 shadow 观察。
-- `quant_lab_request_success_count` / `quant_lab_request_error_count`：确认 API 请求是否成功。
-- `quant_lab_fallback_count`：只统计真实 fallback。
-- `allow_insecure_http_with_token` / `api_token_env` / `api_env_path_present`：确认公网 token 配置是否显式开启。
+V5-prod 是真实交易系统代码，不构成投资建议。任何策略、配置、风控、执行或部署改动都可能造成真实资金损失。使用者需要自行理解风险、验证配置、控制仓位，并对最终交易结果负责。
