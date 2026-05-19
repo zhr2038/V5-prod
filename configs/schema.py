@@ -1523,6 +1523,29 @@ class DiagnosticsConfig(BaseModel):
         ],
         description="Quant-lab API endpoints to try for strategy opportunity advisory JSON",
     )
+    quant_lab_paper_strategy_proposals_enabled: bool = Field(
+        default=True,
+        description="Read quant-lab paper strategy proposals as paper-only strategy definitions",
+    )
+    quant_lab_paper_strategy_proposals_paths: List[str] = Field(
+        default_factory=lambda: [
+            "/var/lib/v5-prod/paper_strategy_proposals.csv",
+            "/var/lib/v5-prod/quant_lab_latest_bundle.zip",
+            "/var/lib/v5-prod/quant_lab_latest_bundle.tar.gz",
+            "paper_strategy_proposals.csv",
+            "quant_lab/paper_strategy_proposals.csv",
+            "quant_lab_latest/paper_strategy_proposals.csv",
+            "quant_lab/latest/reports/paper_strategy_proposals.csv",
+            "reports/paper_strategy_proposals.csv",
+            "reports/quant_lab_latest/paper_strategy_proposals.csv",
+            "reports/quant_lab/latest/reports/paper_strategy_proposals.csv",
+            "reports/quant_lab_latest_bundle.zip",
+            "reports/quant_lab_latest_bundle.tar.gz",
+            "reports/quant_lab/latest_bundle.zip",
+            "reports/quant_lab/latest_bundle.tar.gz",
+        ],
+        description="Candidate CSV or expert-pack archive paths for quant-lab paper strategy proposals",
+    )
     enable_live_small_from_quant_lab: bool = Field(
         default=False,
         description="Explicit opt-in before V5 can consume quant-lab LIVE_SMALL_READY notional advice; default false",

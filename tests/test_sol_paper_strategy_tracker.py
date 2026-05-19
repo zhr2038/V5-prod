@@ -160,6 +160,15 @@ def _write_strategy_advisory(reports_dir: Path, rows: list[dict[str, str]]) -> N
         writer.writerows(rows)
 
 
+def _write_paper_strategy_proposals(reports_dir: Path, rows: list[dict[str, str]]) -> None:
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    fields = sorted({field for row in rows for field in row})
+    with (reports_dir / "paper_strategy_proposals.csv").open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def _write_strategy_advisory_bundle(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fields = sorted({field for row in rows for field in row})
@@ -468,6 +477,169 @@ def test_sol_paper_strategy_tracker_uses_standard_no_sample_reason_for_source_mi
     assert {row["no_sample_reason"] for row in runs} == {"no_sol_candidate"}
     assert "no_qualifying_candidate" not in {row["no_sample_reason"] for row in runs}
     assert {row["sol_candidate_present"] for row in runs} == {"True"}
+
+
+def test_paper_strategy_tracker_adds_eth_f3_heartbeat_from_proposal(tmp_path: Path) -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_eth_heartbeat"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate_snapshot.csv").write_text(
+        "run_id,ts_utc,symbol,final_decision,strategy_candidate\n",
+        encoding="utf-8",
+    )
+    _write_paper_strategy_proposals(
+        tmp_path / "reports",
+        [
+            {
+                "proposal_id": "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+                "strategy_candidate": "v5.f3_dominant_entry",
+                "symbol": "ETH-USDT",
+                "recommended_mode": "paper",
+                "suggested_horizon": "48h",
+                "live_block_reason": '["cost_source_not_actual_or_mixed"]',
+            }
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_eth_heartbeat", start_s),
+        market_data_1h={"ETH/USDT": _series("ETH/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["proposal_rows"] == 1
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    eth = next(row for row in runs if row["strategy_id"] == "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1")
+    assert eth["symbol"] == "ETH/USDT"
+    assert eth["would_enter"] == "False"
+    assert eth["no_sample_reason"] == "no_eth_candidate"
+    assert eth["proposal_present"] == "True"
+    assert eth["proposal_source"].endswith("paper_strategy_proposals.csv")
+    assert "cost_source_not_actual_or_mixed" in eth["live_block_reason"]
+    assert "f3_global_evidence_negative" in eth["live_block_reason"]
+    assert "no_paper_pnl_observations" in eth["live_block_reason"]
+
+    daily = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_daily.csv")
+    assert any(row["strategy_id"] == "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1" for row in daily)
+    coverage = _read_csv(tmp_path / "reports" / "summaries" / "paper_slippage_coverage.csv")
+    assert any(row["strategy_id"] == "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1" for row in coverage)
+
+
+def test_paper_strategy_tracker_tracks_eth_f3_dominant_48h_candidate(tmp_path: Path) -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_eth_f3"
+    _write_single_sol_candidate(
+        run_dir,
+        run_id="r_eth_f3",
+        overrides={
+            "candidate_id": "eth_f3",
+            "symbol": "ETH/USDT",
+            "strategy_candidate": "f3_dominant_entry",
+            "target_weight_raw": "0.10",
+            "risk_level": "NORMAL",
+            "alpha6_side": "sell",
+            "f4_volume_expansion": "-0.2",
+            "regime_state": "Trending",
+        },
+    )
+    _write_paper_strategy_proposals(
+        tmp_path / "reports",
+        [
+            {
+                "proposal_id": "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+                "strategy_candidate": "v5.f3_dominant_entry",
+                "symbol": "ETH-USDT",
+                "recommended_mode": "paper",
+                "suggested_horizon": "48h",
+            }
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_eth_f3", start_s),
+        market_data_1h={
+            "ETH/USDT": _series("ETH/USDT", start_s, {0: 100.0, 24: 104.0, 48: 106.0}),
+        },
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["proposal_rows"] == 1
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    eth = next(row for row in runs if row["strategy_id"] == "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1")
+    assert eth["symbol"] == "ETH/USDT"
+    assert eth["would_enter"] == "True"
+    assert eth["source_strategy_candidate"] == "f3_dominant_entry"
+    assert eth["expected_exit_horizon"] == "48h"
+    assert eth["label_status"] == "pending"
+
+    update_sol_paper_strategy_tracker(
+        run_dir=tmp_path / "reports" / "runs" / "r_eth_f3_mature",
+        audit=_audit("r_eth_f3_mature", start_s + 48 * 3600),
+        market_data_1h={
+            "ETH/USDT": _series("ETH/USDT", start_s, {0: 100.0, 24: 104.0, 48: 106.0}),
+        },
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    eth = next(
+        row
+        for row in runs
+        if row["strategy_id"] == "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1" and row["would_enter"] == "True"
+    )
+    assert eth["paper_pnl_bps_48h"] == "570.0"
+    assert eth["paper_pnl_bps"] == "570.0"
+    assert "f3_global_evidence_negative" in eth["live_block_reason"]
+
+
+def test_paper_strategy_tracker_blocks_eth_f3_when_risk_off(tmp_path: Path) -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_eth_f3_risk_off"
+    _write_single_sol_candidate(
+        run_dir,
+        run_id="r_eth_f3_risk_off",
+        overrides={
+            "candidate_id": "eth_f3",
+            "symbol": "ETH/USDT",
+            "strategy_candidate": "f3_dominant_entry",
+            "risk_level": "PROTECT",
+            "regime_state": "Risk-Off",
+        },
+    )
+    _write_paper_strategy_proposals(
+        tmp_path / "reports",
+        [
+            {
+                "proposal_id": "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+                "strategy_candidate": "v5.f3_dominant_entry",
+                "symbol": "ETH-USDT",
+                "recommended_mode": "paper",
+                "suggested_horizon": "48h",
+            }
+        ],
+    )
+
+    update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_eth_f3_risk_off", start_s),
+        market_data_1h={"ETH/USDT": _series("ETH/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    eth = next(row for row in runs if row["strategy_id"] == "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1")
+    assert eth["would_enter"] == "False"
+    assert eth["no_sample_reason"] == "risk_off"
+    assert eth["risk_off"] == "True"
 
 
 def test_sol_paper_strategy_tracker_reads_paper_ready_advisory(tmp_path: Path) -> None:

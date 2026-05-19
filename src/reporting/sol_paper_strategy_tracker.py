@@ -32,6 +32,13 @@ from src.reporting.skipped_candidate_tracker import (
 
 
 SOL_SYMBOL = "SOL/USDT"
+ETH_SYMBOL = "ETH/USDT"
+ETH_F3_DOMINANT_STRATEGY_ID = "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1"
+ETH_F3_DOMINANT_LIVE_BLOCK_REASONS = [
+    "cost_source_not_actual_or_mixed",
+    "f3_global_evidence_negative",
+    "no_paper_pnl_observations",
+]
 DEFAULT_HORIZONS = [4, 8, 12, 24, 48, 72]
 PRIMARY_HORIZON = 24
 LIVE_SMALL_READY_COST_SOURCES = {"actual_fills", "mixed_actual_proxy"}
@@ -132,6 +139,8 @@ PAPER_RUN_FIELDS = [
     "advisory_max_live_notional_usdt_ignored",
     "advisory_live_block_reasons",
     "enable_live_small_from_quant_lab",
+    "proposal_present",
+    "proposal_source",
     "label_status",
     "label_not_observable_reason",
 ]
@@ -258,6 +267,60 @@ def _strategy_configs(diagnostics: DiagnosticsConfig) -> list[dict[str, Any]]:
     return out or [dict(item) for item in DEFAULT_PAPER_STRATEGY_CONFIGS]
 
 
+def _strategy_symbol(spec: Mapping[str, Any]) -> str:
+    symbol = _symbol_text(spec.get("symbol"))
+    return symbol or SOL_SYMBOL
+
+
+def _no_candidate_reason(spec: Mapping[str, Any]) -> str:
+    configured = str(spec.get("no_candidate_reason") or "").strip()
+    if configured:
+        return configured
+    base = _strategy_symbol(spec).split("/", 1)[0].strip().lower()
+    return f"no_{base}_candidate" if base else "no_strategy_candidate"
+
+
+def _spec_bool(spec: Mapping[str, Any], key: str, default: bool) -> bool:
+    if key not in spec:
+        return bool(default)
+    parsed = _normalize_bool(spec.get(key))
+    if parsed is not None:
+        return bool(parsed)
+    return bool(spec.get(key))
+
+
+def _parse_horizon_hours(value: Any) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    text = str(value).strip().lower()
+    if text.endswith("h"):
+        text = text[:-1]
+    parsed = _normalize_float(text)
+    if parsed is None or parsed <= 0:
+        return None
+    return int(parsed)
+
+
+def _primary_horizon_for_spec(spec: Mapping[str, Any], horizons: Iterable[int]) -> int:
+    available = {int(h) for h in horizons}
+    configured = (
+        _parse_horizon_hours(spec.get("primary_horizon_hours"))
+        or _parse_horizon_hours(spec.get("suggested_horizon"))
+    )
+    if configured and configured in available:
+        return configured
+    if PRIMARY_HORIZON in available:
+        return PRIMARY_HORIZON
+    return max(available)
+
+
+def _record_primary_horizon(record: Mapping[str, Any], horizons: Iterable[int]) -> int:
+    configured = _parse_horizon_hours(record.get("primary_horizon_hours"))
+    if configured and configured in {int(h) for h in horizons}:
+        return configured
+    return _primary_horizon_for_spec(record, horizons)
+
+
 def _load_existing_records(path: Path) -> dict[str, dict[str, Any]]:
     records: dict[str, dict[str, Any]] = {}
     if not path.exists():
@@ -313,6 +376,25 @@ def _default_advisory_api_paths() -> list[str]:
         "/v1/strategy-opportunity-advisory",
         "/v1/strategy_opportunity_advisory",
         "/v1/reports/strategy-opportunity-advisory",
+    ]
+
+
+def _default_proposal_paths() -> list[str]:
+    return [
+        "/var/lib/v5-prod/paper_strategy_proposals.csv",
+        "/var/lib/v5-prod/quant_lab_latest_bundle.zip",
+        "/var/lib/v5-prod/quant_lab_latest_bundle.tar.gz",
+        "paper_strategy_proposals.csv",
+        "quant_lab/paper_strategy_proposals.csv",
+        "quant_lab_latest/paper_strategy_proposals.csv",
+        "quant_lab/latest/reports/paper_strategy_proposals.csv",
+        "reports/paper_strategy_proposals.csv",
+        "reports/quant_lab_latest/paper_strategy_proposals.csv",
+        "reports/quant_lab/latest/reports/paper_strategy_proposals.csv",
+        "reports/quant_lab_latest_bundle.zip",
+        "reports/quant_lab_latest_bundle.tar.gz",
+        "reports/quant_lab/latest_bundle.zip",
+        "reports/quant_lab/latest_bundle.tar.gz",
     ]
 
 
@@ -386,30 +468,31 @@ def _normalize_advisory_csv_rows(handle: Any, *, source_path: str) -> list[dict[
     return rows
 
 
-def _archive_advisory_members(names: Iterable[str]) -> list[str]:
+def _archive_csv_members(names: Iterable[str], target_filename: str) -> list[str]:
     normalized = [(name, str(name).replace("\\", "/")) for name in names]
+    report_target = f"reports/{target_filename}"
     primary = [
         name
         for name, clean_name in normalized
-        if clean_name.endswith("reports/strategy_opportunity_advisory.csv")
+        if clean_name.endswith(report_target)
     ]
     if primary:
         return primary
     return [
         name
         for name, clean_name in normalized
-        if clean_name.endswith("strategy_opportunity_advisory.csv")
+        if clean_name.endswith(target_filename)
     ]
 
 
-def _read_advisory_path(path: Path) -> list[dict[str, Any]]:
+def _read_csv_path(path: Path, *, target_filename: str) -> list[dict[str, Any]]:
     lower_name = path.name.lower()
     if lower_name.endswith((".tar", ".tar.gz", ".tgz")):
         rows: list[dict[str, Any]] = []
         try:
             with tarfile.open(path, "r:*") as archive:
                 members = {member.name: member for member in archive.getmembers() if member.isfile()}
-                for member_name in _archive_advisory_members(members):
+                for member_name in _archive_csv_members(members, target_filename):
                     member = members.get(member_name)
                     if member is None:
                         continue
@@ -432,7 +515,7 @@ def _read_advisory_path(path: Path) -> list[dict[str, Any]]:
         try:
             with zipfile.ZipFile(path) as archive:
                 members = [name for name in archive.namelist() if not name.endswith("/")]
-                for member_name in _archive_advisory_members(members):
+                for member_name in _archive_csv_members(members, target_filename):
                     with archive.open(member_name) as extracted:
                         with io.TextIOWrapper(extracted, encoding="utf-8", newline="") as handle:
                             rows.extend(
@@ -447,6 +530,60 @@ def _read_advisory_path(path: Path) -> list[dict[str, Any]]:
     try:
         with path.open("r", encoding="utf-8", newline="") as handle:
             return _normalize_advisory_csv_rows(handle, source_path=str(path))
+    except Exception:
+        return []
+
+
+def _read_advisory_path(path: Path) -> list[dict[str, Any]]:
+    return _read_csv_path(path, target_filename="strategy_opportunity_advisory.csv")
+
+
+def _raw_csv_rows(handle: Any, *, source_path: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in csv.DictReader(handle):
+        if not row:
+            continue
+        payload = dict(row)
+        payload["source_path"] = source_path
+        rows.append(payload)
+    return rows
+
+
+def _read_raw_csv_path(path: Path, *, target_filename: str) -> list[dict[str, Any]]:
+    lower_name = path.name.lower()
+    if lower_name.endswith((".tar", ".tar.gz", ".tgz")):
+        rows: list[dict[str, Any]] = []
+        try:
+            with tarfile.open(path, "r:*") as archive:
+                members = {member.name: member for member in archive.getmembers() if member.isfile()}
+                for member_name in _archive_csv_members(members, target_filename):
+                    member = members.get(member_name)
+                    if member is None:
+                        continue
+                    extracted = archive.extractfile(member)
+                    if extracted is None:
+                        continue
+                    with extracted:
+                        with io.TextIOWrapper(extracted, encoding="utf-8", newline="") as handle:
+                            rows.extend(_raw_csv_rows(handle, source_path=f"{path}:{member_name}"))
+            return rows
+        except Exception:
+            return []
+    if lower_name.endswith(".zip"):
+        rows = []
+        try:
+            with zipfile.ZipFile(path) as archive:
+                members = [name for name in archive.namelist() if not name.endswith("/")]
+                for member_name in _archive_csv_members(members, target_filename):
+                    with archive.open(member_name) as extracted:
+                        with io.TextIOWrapper(extracted, encoding="utf-8", newline="") as handle:
+                            rows.extend(_raw_csv_rows(handle, source_path=f"{path}:{member_name}"))
+            return rows
+        except Exception:
+            return []
+    try:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            return _raw_csv_rows(handle, source_path=str(path))
     except Exception:
         return []
 
@@ -543,6 +680,128 @@ def _read_strategy_opportunity_advisory(
     return rows
 
 
+def _read_paper_strategy_proposals(
+    *,
+    run_path: Path,
+    reports_dir: Path,
+    diagnostics: DiagnosticsConfig,
+) -> list[dict[str, Any]]:
+    if not bool(getattr(diagnostics, "quant_lab_paper_strategy_proposals_enabled", True)):
+        return []
+    configured = (
+        getattr(diagnostics, "quant_lab_paper_strategy_proposals_paths", None)
+        or _default_proposal_paths()
+    )
+    rows: list[dict[str, Any]] = []
+    seen_paths: set[Path] = set()
+    for raw_path in configured:
+        for path in _candidate_advisory_paths(str(raw_path), run_path=run_path, reports_dir=reports_dir):
+            if path in seen_paths:
+                continue
+            seen_paths.add(path)
+            if not path.is_file():
+                continue
+            rows.extend(_read_raw_csv_path(path, target_filename="paper_strategy_proposals.csv"))
+    return rows
+
+
+def _proposal_horizon_hours(row: Mapping[str, Any]) -> Optional[int]:
+    direct = _parse_horizon_hours(row.get("horizon_hours")) or _parse_horizon_hours(row.get("suggested_horizon"))
+    if direct:
+        return direct
+    raw_conditions = str(row.get("entry_conditions") or "").strip()
+    if not raw_conditions:
+        return None
+    try:
+        conditions = json.loads(raw_conditions)
+    except Exception:
+        return None
+    if isinstance(conditions, Mapping):
+        return _parse_horizon_hours(conditions.get("horizon_hours"))
+    return None
+
+
+def _proposal_strategy_candidate(row: Mapping[str, Any]) -> str:
+    candidate = str(row.get("strategy_candidate") or "").strip()
+    if candidate:
+        return candidate
+    raw_conditions = str(row.get("entry_conditions") or "").strip()
+    if not raw_conditions:
+        return ""
+    try:
+        conditions = json.loads(raw_conditions)
+    except Exception:
+        return ""
+    if isinstance(conditions, Mapping):
+        return str(conditions.get("strategy_candidate") or "").strip()
+    return ""
+
+
+def _proposal_symbol(row: Mapping[str, Any]) -> str:
+    symbol = _symbol_text(row.get("symbol") or row.get("v5_symbol"))
+    if symbol:
+        return symbol
+    raw_conditions = str(row.get("entry_conditions") or "").strip()
+    if not raw_conditions:
+        return ""
+    try:
+        conditions = json.loads(raw_conditions)
+    except Exception:
+        return ""
+    if isinstance(conditions, Mapping):
+        return _symbol_text(conditions.get("symbol") or conditions.get("v5_symbol"))
+    return ""
+
+
+def _eth_f3_proposal_to_spec(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    proposal_id = str(row.get("proposal_id") or row.get("strategy_id") or "").strip()
+    candidate = _proposal_strategy_candidate(row)
+    symbol = _proposal_symbol(row)
+    mode = str(row.get("recommended_mode") or "").strip().lower().replace("-", "_")
+    candidate_key = _strategy_key(candidate)
+    if proposal_id != ETH_F3_DOMINANT_STRATEGY_ID and not (
+        symbol == ETH_SYMBOL and candidate_key in {"f3_dominant_entry", "v5.f3_dominant_entry"}
+    ):
+        return None
+    if mode and mode != "paper":
+        return None
+    return {
+        "strategy_id": ETH_F3_DOMINANT_STRATEGY_ID,
+        "experiment_name": "v5.eth_f3_dominant_entry",
+        "source_strategy_candidates": {"f3_dominant_entry", "v5.f3_dominant_entry"},
+        "allowed_block_reasons": set(),
+        "symbol": ETH_SYMBOL,
+        "primary_horizon_hours": _proposal_horizon_hours(row) or 48,
+        "require_protect_level": False,
+        "require_alpha6_buy": False,
+        "require_no_cooldown": False,
+        "min_f4_volume_expansion": None,
+        "extra_live_block_reasons": list(ETH_F3_DOMINANT_LIVE_BLOCK_REASONS),
+        "proposal_present": True,
+        "proposal_source": str(row.get("source_path") or ""),
+        "ignore_strategy_opportunity_advisory": True,
+    }
+
+
+def _strategy_configs_with_proposals(
+    diagnostics: DiagnosticsConfig,
+    proposal_rows: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    specs = _strategy_configs(diagnostics)
+    by_id = {str(spec.get("strategy_id") or ""): spec for spec in specs}
+    for row in proposal_rows:
+        spec = _eth_f3_proposal_to_spec(row)
+        if not spec:
+            continue
+        existing = by_id.get(ETH_F3_DOMINANT_STRATEGY_ID)
+        if existing is None:
+            specs.append(spec)
+            by_id[ETH_F3_DOMINANT_STRATEGY_ID] = spec
+        else:
+            existing.update(spec)
+    return specs
+
+
 def _advisory_keys(row: Mapping[str, Any]) -> set[str]:
     return {
         key
@@ -567,6 +826,8 @@ def _advisory_for_spec(
     spec: Mapping[str, Any],
     advisory_by_strategy: Mapping[str, Mapping[str, Any]] | None,
 ) -> Mapping[str, Any]:
+    if _spec_bool(spec, "ignore_strategy_opportunity_advisory", False):
+        return {}
     if not advisory_by_strategy:
         return {}
     for key in (
@@ -953,23 +1214,24 @@ def _condition_block_reason(
     spec: Mapping[str, Any],
     source_or_reason_matched: bool,
 ) -> str:
+    no_candidate_reason = _no_candidate_reason(spec)
     if not bool(diagnostics.get("sol_candidate_present")):
-        return "no_sol_candidate"
+        return no_candidate_reason
     if bool(diagnostics.get("risk_off")):
         return "risk_off"
     risk_level = str(diagnostics.get("risk_level") or "").strip()
-    if risk_level and not _is_protect_level(risk_level):
+    if _spec_bool(spec, "require_protect_level", True) and risk_level and not _is_protect_level(risk_level):
         return "risk_not_protect"
-    if bool(diagnostics.get("cooldown_active")):
+    if _spec_bool(spec, "require_no_cooldown", True) and bool(diagnostics.get("cooldown_active")):
         return "cooldown_active"
-    if not _is_alpha6_buy(diagnostics.get("alpha6_side")):
+    if _spec_bool(spec, "require_alpha6_buy", True) and not _is_alpha6_buy(diagnostics.get("alpha6_side")):
         return "alpha6_not_buy"
     min_f4 = _normalize_float(spec.get("min_f4_volume_expansion"))
     f4 = _normalize_float(diagnostics.get("f4_volume_expansion"))
     if min_f4 is not None and (f4 is None or f4 < min_f4):
         return "f4_below_threshold"
     if not source_or_reason_matched:
-        return "no_sol_candidate"
+        return no_candidate_reason
     return ""
 
 
@@ -997,17 +1259,20 @@ def _matches_strategy(
     audit: DecisionAudit,
     asof_ts_ms: int,
 ) -> tuple[bool, str, dict[str, Any]]:
-    if _symbol_text(row.get("symbol")) != SOL_SYMBOL:
-        return False, "no_sol_candidate", {}
+    strategy_symbol = _strategy_symbol(spec)
+    if _symbol_text(row.get("symbol")) != strategy_symbol:
+        return False, _no_candidate_reason(spec), {}
     decision = str(row.get("final_decision") or "").strip().upper()
     if decision in {"OPEN_LONG", "REBALANCE"}:
         diagnostics = _row_condition_diagnostics(row, spec=spec, audit=audit, asof_ts_ms=asof_ts_ms)
-        return False, "no_sol_candidate", diagnostics
+        return False, _no_candidate_reason(spec), diagnostics
     qualifies, reason, diagnostics = _row_qualifies(row, spec=spec, audit=audit, asof_ts_ms=asof_ts_ms)
     risk_level = str(diagnostics.get("risk_level") or "").strip()
-    if risk_level and not _is_protect_level(risk_level):
+    if _spec_bool(spec, "require_protect_level", True) and risk_level and not _is_protect_level(risk_level):
         qualifies = False
-    if diagnostics.get("risk_off") or diagnostics.get("cooldown_active"):
+    if diagnostics.get("risk_off"):
+        qualifies = False
+    if _spec_bool(spec, "require_no_cooldown", True) and diagnostics.get("cooldown_active"):
         qualifies = False
     min_f4 = _normalize_float(spec.get("min_f4_volume_expansion"))
     f4 = _normalize_float(diagnostics.get("f4_volume_expansion"))
@@ -1016,23 +1281,25 @@ def _matches_strategy(
     return bool(qualifies), reason, diagnostics
 
 
-def _best_sol_candidate_for_strategy(
+def _best_candidate_for_strategy(
     *,
     candidate_rows: Iterable[Mapping[str, Any]],
     spec: Mapping[str, Any],
     audit: DecisionAudit,
     asof_ts_ms: int,
 ) -> tuple[Optional[Mapping[str, Any]], dict[str, Any], str]:
-    sol_rows = [row for row in candidate_rows if isinstance(row, Mapping) and _symbol_text(row.get("symbol")) == SOL_SYMBOL]
-    if not sol_rows:
-        return None, {"sol_candidate_present": False}, "no_sol_candidate"
+    strategy_symbol = _strategy_symbol(spec)
+    strategy_rows = [row for row in candidate_rows if isinstance(row, Mapping) and _symbol_text(row.get("symbol")) == strategy_symbol]
+    no_candidate_reason = _no_candidate_reason(spec)
+    if not strategy_rows:
+        return None, {"sol_candidate_present": False}, no_candidate_reason
     ranked: list[tuple[int, float, Mapping[str, Any], dict[str, Any], str]] = []
-    for row in sol_rows:
+    for row in strategy_rows:
         diagnostics = _row_condition_diagnostics(row, spec=spec, audit=audit, asof_ts_ms=asof_ts_ms)
         source_match = _strategy_source_or_reason_matches(row, spec)
         reason = _condition_block_reason(diagnostics, spec=spec, source_or_reason_matched=source_match)
         if not reason:
-            reason = "no_sol_candidate"
+            reason = no_candidate_reason
         score = _normalize_float(row.get("final_score"))
         ranked.append((1 if source_match else 0, float(score or 0.0), row, diagnostics, reason))
     ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
@@ -1060,6 +1327,7 @@ def _heartbeat_record(
     condition_diagnostics = dict(condition_diagnostics or {})
     quote_context = dict(quote_context or {})
     advisory_fields = dict(advisory_fields or {})
+    symbol = _strategy_symbol(spec)
     cost_source = str(cost_context.get("cost_source") or "local_estimate")
     diagnostic_cost_source = str(condition_diagnostics.get("cost_source") or "")
     if diagnostic_cost_source:
@@ -1080,7 +1348,7 @@ def _heartbeat_record(
         "ts_utc": ts_utc,
         "entry_ts_ms": asof_ts_ms,
         "paper_date": ts_utc[:10],
-        "symbol": SOL_SYMBOL,
+        "symbol": symbol,
         "source_strategy_candidate": "heartbeat",
         "candidate_id": f"heartbeat_{spec.get('strategy_id')}_{getattr(audit, 'run_id', '')}",
         "final_decision": "heartbeat",
@@ -1092,7 +1360,7 @@ def _heartbeat_record(
         "risk_off": bool(condition_diagnostics.get("risk_off", False)),
         "skip_reason": no_sample_reason,
         "entry_reason": "paper_strategy_heartbeat",
-        "experiment_reason": "sol_paper_strategy_heartbeat",
+        "experiment_reason": "paper_strategy_heartbeat",
         "would_enter": False,
         "would_exit": False,
         "would_exit_time": "",
@@ -1131,6 +1399,10 @@ def _heartbeat_record(
         "required_entry_days": required_entry_days,
         "required_slippage_coverage": required_coverage,
         "rt_cost_bps": rt_cost_bps,
+        "primary_horizon_hours": _parse_horizon_hours(spec.get("primary_horizon_hours")),
+        "extra_live_block_reasons": list(spec.get("extra_live_block_reasons") or []),
+        "proposal_present": bool(spec.get("proposal_present", False)),
+        "proposal_source": str(spec.get("proposal_source") or ""),
         **advisory_fields,
         "label_status": "heartbeat",
         "label_not_observable_reason": "",
@@ -1146,6 +1418,7 @@ def _collect_candidates(
     cache_dir: Path,
     top_of_book: Mapping[str, Any] | None = None,
     advisory_by_strategy: Mapping[str, Mapping[str, Any]] | None = None,
+    proposal_rows: Iterable[Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     diagnostics = _diagnostics_cfg(cfg)
     enabled_shadow_only = bool(getattr(diagnostics, "paper_strategy_enabled_shadow_only", True))
@@ -1170,7 +1443,7 @@ def _collect_candidates(
     cached: dict[str, list[dict[str, float | int]]] = {}
     records: list[dict[str, Any]] = []
     matched_strategy_ids: set[str] = set()
-    specs = _strategy_configs(diagnostics)
+    specs = _strategy_configs_with_proposals(diagnostics, proposal_rows or [])
     for row in candidate_rows:
         if not isinstance(row, Mapping):
             continue
@@ -1197,7 +1470,7 @@ def _collect_candidates(
                 cached=cached,
             )
             source_strategy = str(row.get("strategy_candidate") or "").strip()
-            primary_horizon = PRIMARY_HORIZON if PRIMARY_HORIZON in horizons else max(horizons)
+            primary_horizon = _primary_horizon_for_spec(spec, horizons)
             would_size = _would_size_notional(row, audit)
             cost_source = str(row.get("cost_source") or "")
             live_ready = _cost_source_live_ready(row, allowed_cost_sources)
@@ -1261,23 +1534,28 @@ def _collect_candidates(
                     "required_entry_days": required_entry_days,
                     "required_slippage_coverage": required_coverage,
                     "rt_cost_bps": rt_cost_bps,
+                    "primary_horizon_hours": primary_horizon,
+                    "extra_live_block_reasons": list(spec.get("extra_live_block_reasons") or []),
+                    "proposal_present": bool(spec.get("proposal_present", False)),
+                    "proposal_source": str(spec.get("proposal_source") or ""),
                     **advisory_fields,
                     "label_status": "pending",
                     "label_not_observable_reason": "",
                 }
             )
-    cost_context = _cost_context_for_symbol(
-        symbol=SOL_SYMBOL,
-        candidate_rows=candidate_rows,
-        fallback_bps=rt_cost_bps,
-    )
     for spec in specs:
         strategy_id = str(spec.get("strategy_id") or "")
         if strategy_id in matched_strategy_ids:
             continue
+        strategy_symbol = _strategy_symbol(spec)
+        cost_context = _cost_context_for_symbol(
+            symbol=strategy_symbol,
+            candidate_rows=candidate_rows,
+            fallback_bps=rt_cost_bps,
+        )
         advisory = _advisory_for_spec(spec, advisory_by_strategy)
         advisory_fields = _advisory_response_fields(advisory, diagnostics)
-        best_row, condition_diagnostics, no_sample_reason = _best_sol_candidate_for_strategy(
+        best_row, condition_diagnostics, no_sample_reason = _best_candidate_for_strategy(
             candidate_rows=candidate_rows,
             spec=spec,
             audit=audit,
@@ -1286,7 +1564,7 @@ def _collect_candidates(
         if bool(advisory_fields.get("advisory_negative")):
             no_sample_reason = "quant_lab_advisory_kill"
         quote_context = _quote_context(
-            symbol=SOL_SYMBOL,
+            symbol=strategy_symbol,
             row=best_row or {},
             top_of_book=top_of_book,
             entry_px=None,
@@ -1330,7 +1608,7 @@ def _sync_paper_fields(record: dict[str, Any], horizons: Iterable[int]) -> None:
         return
 
     size = _normalize_float(record.get("would_size_notional"))
-    primary = PRIMARY_HORIZON if PRIMARY_HORIZON in set(int(h) for h in horizons) else max(int(h) for h in horizons)
+    primary = _record_primary_horizon(record, horizons)
     for horizon in horizons:
         h = int(horizon)
         net_key = f"{HORIZON_PREFIX}{h}h_net_bps"
@@ -1384,6 +1662,24 @@ def _coverage_ratio(rows: list[dict[str, Any]], predicate: Any) -> float:
     ) if rows else 0.0
 
 
+def _reason_items(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item or "").strip() for item in value if str(item or "").strip()]
+    text = str(value).strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, list):
+            return [str(item or "").strip() for item in parsed if str(item or "").strip()]
+    return [item.strip() for item in text.replace(",", ";").split(";") if item.strip()]
+
+
 def _readiness_for_rows(
     rows: list[dict[str, Any]],
     *,
@@ -1430,6 +1726,10 @@ def _readiness_for_rows(
         reasons.append("spread_observation_coverage_insufficient")
     if coverage < float(required_coverage):
         reasons.append("no_live_slippage_coverage")
+    for row in rows:
+        for reason in _reason_items(row.get("extra_live_block_reasons")):
+            if reason not in reasons:
+                reasons.append(reason)
     rules_pass = not reasons
     if rules_pass and not enable_live_experiment:
         reasons.append("live_experiment_disabled")
@@ -1610,6 +1910,11 @@ def update_sol_paper_strategy_tracker(
         cfg=cfg,
         run_id=str(getattr(audit, "run_id", "") or ""),
     )
+    proposal_rows = _read_paper_strategy_proposals(
+        run_path=run_path,
+        reports_dir=reports_dir,
+        diagnostics=diagnostics,
+    )
     advisory_index = _advisory_by_strategy(advisory_rows)
     records_by_key = _load_existing_records(labels_path)
     new_records = _collect_candidates(
@@ -1620,6 +1925,7 @@ def update_sol_paper_strategy_tracker(
         cache_dir=cache_root,
         top_of_book=top_of_book,
         advisory_by_strategy=advisory_index,
+        proposal_rows=proposal_rows,
     )
     inserted = 0
     for record in new_records:
@@ -1687,6 +1993,7 @@ def update_sol_paper_strategy_tracker(
         "new_records": int(inserted),
         "total_records": int(len(records)),
         "advisory_rows": int(len(advisory_rows)),
+        "proposal_rows": int(len(proposal_rows)),
         "labels_path": str(labels_path),
         "summaries_dir": str(summaries_dir),
     }

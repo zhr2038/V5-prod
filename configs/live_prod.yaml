@@ -272,6 +272,22 @@ diagnostics:
     - /v1/strategy-opportunity-advisory
     - /v1/strategy_opportunity_advisory
     - /v1/reports/strategy-opportunity-advisory
+  quant_lab_paper_strategy_proposals_enabled: true
+  quant_lab_paper_strategy_proposals_paths:
+    - /var/lib/v5-prod/paper_strategy_proposals.csv
+    - /var/lib/v5-prod/quant_lab_latest_bundle.zip
+    - /var/lib/v5-prod/quant_lab_latest_bundle.tar.gz
+    - paper_strategy_proposals.csv
+    - quant_lab/paper_strategy_proposals.csv
+    - quant_lab_latest/paper_strategy_proposals.csv
+    - quant_lab/latest/reports/paper_strategy_proposals.csv
+    - reports/paper_strategy_proposals.csv
+    - reports/quant_lab_latest/paper_strategy_proposals.csv
+    - reports/quant_lab/latest/reports/paper_strategy_proposals.csv
+    - reports/quant_lab_latest_bundle.zip
+    - reports/quant_lab_latest_bundle.tar.gz
+    - reports/quant_lab/latest_bundle.zip
+    - reports/quant_lab/latest_bundle.tar.gz
   enable_live_small_from_quant_lab: false
   paper_strategy_configs:
     - strategy_id: SOL_PROTECT_ALPHA6_LOW_EXCEPTION_PAPER_V1
