@@ -251,6 +251,12 @@ diagnostics:
   paper_strategy_horizons_hours: [4, 8, 12, 24, 48, 72]
   paper_strategy_rt_cost_bps: 30
   paper_strategy_live_ready_cost_sources: ["actual_fills", "mixed_actual_proxy"]
+  quant_lab_strategy_opportunity_advisory_enabled: true
+  quant_lab_strategy_opportunity_advisory_paths:
+    - strategy_opportunity_advisory.csv
+    - quant_lab/strategy_opportunity_advisory.csv
+    - reports/strategy_opportunity_advisory.csv
+  enable_live_small_from_quant_lab: false
   paper_strategy_configs:
     - strategy_id: SOL_PROTECT_ALPHA6_LOW_EXCEPTION_PAPER_V1
       experiment_name: v5.sol_protect_alpha6_low_exception

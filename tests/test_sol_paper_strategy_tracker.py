@@ -147,6 +147,15 @@ def _write_single_sol_candidate(run_dir: Path, *, run_id: str, overrides: dict[s
         writer.writerow(row)
 
 
+def _write_strategy_advisory(reports_dir: Path, rows: list[dict[str, str]]) -> None:
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    fields = sorted({field for row in rows for field in row})
+    with (reports_dir / "strategy_opportunity_advisory.csv").open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def test_sol_paper_strategy_tracker_writes_runs_daily_and_slippage(tmp_path: Path) -> None:
     cfg = _cfg()
     start_s = 1_779_000_000
@@ -430,6 +439,122 @@ def test_sol_paper_strategy_tracker_uses_standard_no_sample_reason_for_source_mi
     assert {row["no_sample_reason"] for row in runs} == {"no_sol_candidate"}
     assert "no_qualifying_candidate" not in {row["no_sample_reason"] for row in runs}
     assert {row["sol_candidate_present"] for row in runs} == {"True"}
+
+
+def test_sol_paper_strategy_tracker_reads_paper_ready_advisory(tmp_path: Path) -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_advisory_paper"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "strategy_id": "SOL_F4_VOLUME_EXPANSION_PAPER_V1",
+                "experiment_name": "v5.f4_volume_expansion_entry",
+                "symbol": "SOL/USDT",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "reason": "paper_only",
+                "max_live_notional_usdt": "50",
+            }
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_advisory_paper", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["advisory_rows"] == 1
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    f4 = next(row for row in runs if row["strategy_id"] == "SOL_F4_VOLUME_EXPANSION_PAPER_V1")
+    assert f4["would_enter"] == "False"
+    assert f4["advisory_present"] == "True"
+    assert f4["advisory_decision"] == "PAPER_READY"
+    assert f4["advisory_recommended_mode"] == "paper"
+    assert f4["advisory_response_action"] == "paper_tracking"
+    assert f4["advisory_max_live_notional_usdt_ignored"] == "True"
+
+    advisory = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_reader.csv")
+    assert advisory[0]["response_action"] == "paper_tracking"
+    assert advisory[0]["negative_advisory"] == "False"
+
+
+def test_sol_paper_strategy_tracker_records_kill_advisory_without_paper_entry(tmp_path: Path) -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_advisory_kill"
+    _write_single_sol_candidate(run_dir, run_id="r_advisory_kill", overrides={})
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "strategy_id": "SOL_F4_VOLUME_EXPANSION_PAPER_V1",
+                "experiment_name": "v5.f4_volume_expansion_entry",
+                "symbol": "SOL/USDT",
+                "decision": "KILL",
+                "recommended_mode": "shadow",
+                "reason": "negative_evidence",
+            }
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_advisory_kill", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["advisory_rows"] == 1
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    f4 = next(row for row in runs if row["strategy_id"] == "SOL_F4_VOLUME_EXPANSION_PAPER_V1")
+    assert f4["would_enter"] == "False"
+    assert f4["no_sample_reason"] == "quant_lab_advisory_kill"
+    assert f4["advisory_negative"] == "True"
+    assert f4["advisory_response_action"] == "negative_advisory"
+    assert f4["advisory_decision"] == "KILL"
+
+
+def test_sol_paper_strategy_tracker_ignores_live_small_notional_by_default(tmp_path: Path) -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_advisory_live_small"
+    _write_single_sol_candidate(run_dir, run_id="r_advisory_live_small", overrides={})
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "strategy_id": "SOL_F4_VOLUME_EXPANSION_PAPER_V1",
+                "experiment_name": "v5.f4_volume_expansion_entry",
+                "symbol": "SOL/USDT",
+                "decision": "LIVE_SMALL_READY",
+                "recommended_mode": "live",
+                "max_live_notional_usdt": "25",
+            }
+        ],
+    )
+
+    update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_advisory_live_small", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    f4 = next(row for row in runs if row["strategy_id"] == "SOL_F4_VOLUME_EXPANSION_PAPER_V1")
+    assert f4["would_enter"] == "True"
+    assert f4["enable_live_small_from_quant_lab"] == "False"
+    assert f4["advisory_response_action"] == "ignored_live_small_disabled"
+    assert f4["advisory_max_live_notional_usdt"] == "25.0"
+    assert f4["advisory_max_live_notional_usdt_ignored"] == "True"
 
 
 def test_sol_paper_strategy_tracker_disabled_writes_no_files(tmp_path: Path) -> None:

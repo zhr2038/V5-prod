@@ -1488,6 +1488,22 @@ class DiagnosticsConfig(BaseModel):
         default_factory=lambda: ["actual_fills", "mixed_actual_proxy"],
         description="Cost sources accepted for paper strategy LIVE_SMALL_READY diagnostics",
     )
+    quant_lab_strategy_opportunity_advisory_enabled: bool = Field(
+        default=True,
+        description="Read quant-lab strategy opportunity advisory as paper/shadow-only diagnostics",
+    )
+    quant_lab_strategy_opportunity_advisory_paths: List[str] = Field(
+        default_factory=lambda: [
+            "strategy_opportunity_advisory.csv",
+            "quant_lab/strategy_opportunity_advisory.csv",
+            "reports/strategy_opportunity_advisory.csv",
+        ],
+        description="Candidate CSV paths for quant-lab strategy opportunity advisory",
+    )
+    enable_live_small_from_quant_lab: bool = Field(
+        default=False,
+        description="Explicit opt-in before V5 can consume quant-lab LIVE_SMALL_READY notional advice; default false",
+    )
     paper_strategy_configs: List[Dict[str, Any]] = Field(
         default_factory=lambda: [
             {

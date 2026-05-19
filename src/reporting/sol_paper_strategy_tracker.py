@@ -32,6 +32,7 @@ SOL_SYMBOL = "SOL/USDT"
 DEFAULT_HORIZONS = [4, 8, 12, 24, 48, 72]
 PRIMARY_HORIZON = 24
 LIVE_SMALL_READY_COST_SOURCES = {"actual_fills", "mixed_actual_proxy"}
+ADVISORY_ALLOWED_RECOMMENDED_MODES = {"paper", "shadow"}
 
 DEFAULT_PAPER_STRATEGY_CONFIGS = [
     {
@@ -115,6 +116,16 @@ PAPER_RUN_FIELDS = [
     "live_small_ready",
     "readiness_status",
     "live_block_reason",
+    "advisory_present",
+    "advisory_source",
+    "advisory_strategy_id",
+    "advisory_decision",
+    "advisory_recommended_mode",
+    "advisory_negative",
+    "advisory_response_action",
+    "advisory_max_live_notional_usdt",
+    "advisory_max_live_notional_usdt_ignored",
+    "enable_live_small_from_quant_lab",
     "label_status",
     "label_not_observable_reason",
 ]
@@ -162,6 +173,22 @@ PAPER_SLIPPAGE_FIELDS = [
     "live_small_ready",
     "readiness_status",
     "live_block_reason",
+]
+
+STRATEGY_ADVISORY_FIELDS = [
+    "source_path",
+    "strategy_id",
+    "experiment_name",
+    "symbol",
+    "decision",
+    "recommended_mode",
+    "advisory_status",
+    "advisory_reason",
+    "max_live_notional_usdt",
+    "enable_live_small_from_quant_lab",
+    "response_action",
+    "negative_advisory",
+    "max_live_notional_usdt_ignored",
 ]
 
 
@@ -247,6 +274,203 @@ def _read_candidate_snapshot(path: Path) -> list[dict[str, Any]]:
             return [dict(row) for row in csv.DictReader(fh) if row]
     except Exception:
         return []
+
+
+def _strategy_key(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _default_advisory_paths() -> list[str]:
+    return [
+        "strategy_opportunity_advisory.csv",
+        "quant_lab/strategy_opportunity_advisory.csv",
+        "reports/strategy_opportunity_advisory.csv",
+    ]
+
+
+def _candidate_advisory_paths(raw_path: str, *, run_path: Path, reports_dir: Path) -> list[Path]:
+    path = Path(str(raw_path or "").strip())
+    if not str(path):
+        return []
+    if path.is_absolute():
+        return [path]
+    candidates = [reports_dir / path, run_path / path, Path.cwd() / path]
+    parts = path.parts
+    if parts and parts[0].lower() == "reports":
+        candidates.append(reports_dir.parent / path)
+        candidates.append(reports_dir / Path(*parts[1:]) if len(parts) > 1 else reports_dir)
+    return list(dict.fromkeys(candidates))
+
+
+def _advisory_first(row: Mapping[str, Any], names: Iterable[str]) -> Any:
+    for name in names:
+        value = row.get(name)
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict[str, Any]:
+    strategy_id = str(
+        _advisory_first(row, ("strategy_id", "strategy", "strategy_name", "alpha_id", "proposal_id"))
+        or ""
+    ).strip()
+    experiment_name = str(
+        _advisory_first(row, ("experiment_name", "alpha_name", "strategy_family"))
+        or ""
+    ).strip()
+    decision = str(
+        _advisory_first(row, ("decision", "readiness_status", "board_decision", "status"))
+        or ""
+    ).strip().upper()
+    recommended_mode = str(
+        _advisory_first(row, ("recommended_mode", "mode", "target_mode"))
+        or ""
+    ).strip().lower().replace("-", "_")
+    return {
+        "source_path": source_path,
+        "strategy_id": strategy_id,
+        "experiment_name": experiment_name,
+        "symbol": _symbol_text(_advisory_first(row, ("symbol", "instId", "instrument", "normalized_symbol"))),
+        "decision": decision,
+        "recommended_mode": recommended_mode,
+        "advisory_status": str(_advisory_first(row, ("status", "readiness_status", "decision")) or "").strip(),
+        "advisory_reason": str(_advisory_first(row, ("reason", "block_reason", "live_block_reason", "notes")) or "").strip(),
+        "max_live_notional_usdt": _normalize_float(row.get("max_live_notional_usdt")),
+    }
+
+
+def _read_strategy_opportunity_advisory(
+    *,
+    run_path: Path,
+    reports_dir: Path,
+    diagnostics: DiagnosticsConfig,
+) -> list[dict[str, Any]]:
+    if not bool(getattr(diagnostics, "quant_lab_strategy_opportunity_advisory_enabled", True)):
+        return []
+    configured = (
+        getattr(diagnostics, "quant_lab_strategy_opportunity_advisory_paths", None)
+        or _default_advisory_paths()
+    )
+    rows: list[dict[str, Any]] = []
+    seen_paths: set[Path] = set()
+    for raw_path in configured:
+        for path in _candidate_advisory_paths(str(raw_path), run_path=run_path, reports_dir=reports_dir):
+            if path in seen_paths:
+                continue
+            seen_paths.add(path)
+            if not path.is_file():
+                continue
+            try:
+                with path.open("r", encoding="utf-8", newline="") as handle:
+                    for row in csv.DictReader(handle):
+                        if not row:
+                            continue
+                        normalized = _normalize_advisory_row(row, source_path=str(path))
+                        if normalized.get("strategy_id") or normalized.get("experiment_name"):
+                            rows.append(normalized)
+            except Exception:
+                continue
+    return rows
+
+
+def _advisory_keys(row: Mapping[str, Any]) -> set[str]:
+    return {
+        key
+        for key in (
+            _strategy_key(row.get("strategy_id")),
+            _strategy_key(row.get("experiment_name")),
+        )
+        if key
+    }
+
+
+def _advisory_by_strategy(rows: Iterable[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
+    out: dict[str, Mapping[str, Any]] = {}
+    for row in rows:
+        for key in _advisory_keys(row):
+            out.setdefault(key, row)
+    return out
+
+
+def _advisory_for_spec(
+    spec: Mapping[str, Any],
+    advisory_by_strategy: Mapping[str, Mapping[str, Any]] | None,
+) -> Mapping[str, Any]:
+    if not advisory_by_strategy:
+        return {}
+    for key in (
+        _strategy_key(spec.get("strategy_id")),
+        _strategy_key(spec.get("experiment_name")),
+    ):
+        if key and key in advisory_by_strategy:
+            return advisory_by_strategy[key]
+    return {}
+
+
+def _advisory_response_fields(
+    advisory: Mapping[str, Any] | None,
+    diagnostics: DiagnosticsConfig,
+) -> dict[str, Any]:
+    advisory = dict(advisory or {})
+    enable_live_small = bool(getattr(diagnostics, "enable_live_small_from_quant_lab", False))
+    decision = str(advisory.get("decision") or "").strip().upper()
+    recommended_mode = str(advisory.get("recommended_mode") or "").strip().lower().replace("-", "_")
+    max_notional = _normalize_float(advisory.get("max_live_notional_usdt"))
+    present = bool(advisory)
+    negative = decision == "KILL"
+    live_small = decision == "LIVE_SMALL_READY"
+    mode_allowed = recommended_mode in ADVISORY_ALLOWED_RECOMMENDED_MODES
+    max_ignored = bool(max_notional is not None and not (live_small and enable_live_small))
+    if not present:
+        response_action = "no_advisory"
+    elif negative:
+        response_action = "negative_advisory"
+    elif mode_allowed:
+        response_action = "paper_tracking"
+    elif live_small and not enable_live_small:
+        response_action = "ignored_live_small_disabled"
+    else:
+        response_action = "ignored_recommended_mode_not_paper_or_shadow"
+    return {
+        "advisory_present": present,
+        "advisory_source": str(advisory.get("source_path") or ""),
+        "advisory_strategy_id": str(advisory.get("strategy_id") or ""),
+        "advisory_decision": decision,
+        "advisory_recommended_mode": recommended_mode,
+        "advisory_negative": negative,
+        "advisory_response_action": response_action,
+        "advisory_max_live_notional_usdt": max_notional,
+        "advisory_max_live_notional_usdt_ignored": max_ignored,
+        "enable_live_small_from_quant_lab": enable_live_small,
+    }
+
+
+def _advisory_summary_rows(
+    advisory_rows: Iterable[Mapping[str, Any]],
+    diagnostics: DiagnosticsConfig,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in advisory_rows:
+        fields = _advisory_response_fields(row, diagnostics)
+        out.append(
+            {
+                "source_path": row.get("source_path"),
+                "strategy_id": row.get("strategy_id"),
+                "experiment_name": row.get("experiment_name"),
+                "symbol": row.get("symbol"),
+                "decision": row.get("decision"),
+                "recommended_mode": row.get("recommended_mode"),
+                "advisory_status": row.get("advisory_status"),
+                "advisory_reason": row.get("advisory_reason"),
+                "max_live_notional_usdt": row.get("max_live_notional_usdt"),
+                "enable_live_small_from_quant_lab": fields["enable_live_small_from_quant_lab"],
+                "response_action": fields["advisory_response_action"],
+                "negative_advisory": fields["advisory_negative"],
+                "max_live_notional_usdt_ignored": fields["advisory_max_live_notional_usdt_ignored"],
+            }
+        )
+    return out
 
 
 def _record_key(record: Mapping[str, Any]) -> str:
@@ -654,9 +878,11 @@ def _heartbeat_record(
     condition_diagnostics: Mapping[str, Any] | None = None,
     no_sample_reason: str = "no_sol_candidate",
     quote_context: Mapping[str, Any] | None = None,
+    advisory_fields: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     condition_diagnostics = dict(condition_diagnostics or {})
     quote_context = dict(quote_context or {})
+    advisory_fields = dict(advisory_fields or {})
     cost_source = str(cost_context.get("cost_source") or "local_estimate")
     diagnostic_cost_source = str(condition_diagnostics.get("cost_source") or "")
     if diagnostic_cost_source:
@@ -728,6 +954,7 @@ def _heartbeat_record(
         "required_entry_days": required_entry_days,
         "required_slippage_coverage": required_coverage,
         "rt_cost_bps": rt_cost_bps,
+        **advisory_fields,
         "label_status": "heartbeat",
         "label_not_observable_reason": "",
     }
@@ -741,6 +968,7 @@ def _collect_candidates(
     market_data_1h: Dict[str, MarketSeries],
     cache_dir: Path,
     top_of_book: Mapping[str, Any] | None = None,
+    advisory_by_strategy: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     diagnostics = _diagnostics_cfg(cfg)
     enabled_shadow_only = bool(getattr(diagnostics, "paper_strategy_enabled_shadow_only", True))
@@ -770,6 +998,10 @@ def _collect_candidates(
         if not isinstance(row, Mapping):
             continue
         for spec in specs:
+            advisory = _advisory_for_spec(spec, advisory_by_strategy)
+            advisory_fields = _advisory_response_fields(advisory, diagnostics)
+            if bool(advisory_fields.get("advisory_negative")):
+                continue
             matched, _no_sample_reason, condition_diagnostics = _matches_strategy(
                 row,
                 spec,
@@ -852,6 +1084,7 @@ def _collect_candidates(
                     "required_entry_days": required_entry_days,
                     "required_slippage_coverage": required_coverage,
                     "rt_cost_bps": rt_cost_bps,
+                    **advisory_fields,
                     "label_status": "pending",
                     "label_not_observable_reason": "",
                 }
@@ -865,12 +1098,16 @@ def _collect_candidates(
         strategy_id = str(spec.get("strategy_id") or "")
         if strategy_id in matched_strategy_ids:
             continue
+        advisory = _advisory_for_spec(spec, advisory_by_strategy)
+        advisory_fields = _advisory_response_fields(advisory, diagnostics)
         best_row, condition_diagnostics, no_sample_reason = _best_sol_candidate_for_strategy(
             candidate_rows=candidate_rows,
             spec=spec,
             audit=audit,
             asof_ts_ms=asof_ts_ms,
         )
+        if bool(advisory_fields.get("advisory_negative")):
+            no_sample_reason = "quant_lab_advisory_kill"
         quote_context = _quote_context(
             symbol=SOL_SYMBOL,
             row=best_row or {},
@@ -891,6 +1128,7 @@ def _collect_candidates(
             condition_diagnostics=condition_diagnostics,
             no_sample_reason=no_sample_reason,
             quote_context=quote_context,
+            advisory_fields=advisory_fields,
         )
         heartbeat["enabled_shadow_only"] = enabled_shadow_only
         heartbeat["enable_live_experiment"] = enable_live_experiment
@@ -1188,6 +1426,12 @@ def update_sol_paper_strategy_tracker(
     cache_root = Path(cache_dir) if cache_dir is not None else Path(__file__).resolve().parents[2] / "data" / "cache"
     horizons = _horizons(diagnostics)
     candidate_rows = _read_candidate_snapshot(run_path / "candidate_snapshot.csv")
+    advisory_rows = _read_strategy_opportunity_advisory(
+        run_path=run_path,
+        reports_dir=reports_dir,
+        diagnostics=diagnostics,
+    )
+    advisory_index = _advisory_by_strategy(advisory_rows)
     records_by_key = _load_existing_records(labels_path)
     new_records = _collect_candidates(
         candidate_rows=candidate_rows,
@@ -1196,6 +1440,7 @@ def update_sol_paper_strategy_tracker(
         market_data_1h=market_data_1h,
         cache_dir=cache_root,
         top_of_book=top_of_book,
+        advisory_by_strategy=advisory_index,
     )
     inserted = 0
     for record in new_records:
@@ -1252,11 +1497,17 @@ def update_sol_paper_strategy_tracker(
     _write_csv(summaries_dir / "paper_strategy_runs.csv", run_rows, fields)
     _write_csv(summaries_dir / "paper_strategy_daily.csv", _daily_rows(records), PAPER_DAILY_FIELDS)
     _write_csv(summaries_dir / "paper_slippage_coverage.csv", _slippage_rows(records, diagnostics), PAPER_SLIPPAGE_FIELDS)
+    _write_csv(
+        summaries_dir / "strategy_opportunity_advisory_reader.csv",
+        _advisory_summary_rows(advisory_rows, diagnostics),
+        STRATEGY_ADVISORY_FIELDS,
+    )
 
     return {
         "enabled": True,
         "new_records": int(inserted),
         "total_records": int(len(records)),
+        "advisory_rows": int(len(advisory_rows)),
         "labels_path": str(labels_path),
         "summaries_dir": str(summaries_dir),
     }

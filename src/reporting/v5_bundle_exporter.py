@@ -33,6 +33,7 @@ from src.reporting.sol_paper_strategy_tracker import (
     PAPER_DAILY_FIELDS,
     PAPER_RUN_FIELDS,
     PAPER_SLIPPAGE_FIELDS,
+    STRATEGY_ADVISORY_FIELDS,
 )
 from src.reporting.quant_lab_audit import (
     CONTRACT_VERSION,
@@ -680,6 +681,7 @@ def _copy_sol_paper_strategy_files(staging: Path, reports: Path) -> None:
         ("paper_strategy_runs.csv", PAPER_RUN_FIELDS),
         ("paper_strategy_daily.csv", PAPER_DAILY_FIELDS),
         ("paper_slippage_coverage.csv", PAPER_SLIPPAGE_FIELDS),
+        ("strategy_opportunity_advisory_reader.csv", STRATEGY_ADVISORY_FIELDS),
     )
     for filename, fields in summary_specs:
         src = reports / "summaries" / filename

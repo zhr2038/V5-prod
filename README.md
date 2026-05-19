@@ -485,6 +485,7 @@ alpha6_not_buy
 risk_not_protect
 cooldown_active
 risk_off
+quant_lab_advisory_kill
 ```
 
 如果 `would_enter=true`，还会输出：
@@ -504,8 +505,11 @@ risk_off
 - `summaries/paper_strategy_runs.csv`
 - `summaries/paper_strategy_daily.csv`
 - `summaries/paper_slippage_coverage.csv`
+- `summaries/strategy_opportunity_advisory_reader.csv`
 
 Live small ready 前必须满足 paper days、entry day count、arrival mid coverage、spread observation coverage 和成本质量要求。public spread proxy 本身不能直接让策略晋级 live。
+
+V5 也会只读 `strategy_opportunity_advisory.csv`。当前只响应 `recommended_mode=paper` 或 `recommended_mode=shadow` 的 advisory：SOL `PAPER_READY` 继续进入 paper tracking；`KILL` 会被记录为 negative advisory，不会生成 live order。`max_live_notional_usdt` 默认忽略，除非本地显式设置 `enable_live_small_from_quant_lab=true` 且 advisory 为 `LIVE_SMALL_READY`。生产默认值为 `false`。
 
 ---
 
