@@ -192,6 +192,9 @@ def test_sol_paper_strategy_tracker_writes_runs_daily_and_slippage(tmp_path: Pat
     assert len(entered_runs) == 2
     assert len(heartbeat_runs) == 2
     assert {row["would_size_notional"] for row in entered_runs} == {"12.0"}
+    assert {row["would_size_usdt"] for row in entered_runs} == {"12.0"}
+    assert {row["expected_exit_horizon"] for row in entered_runs} == {"24h"}
+    assert {row["f4_threshold"] for row in entered_runs} == {"0.0"}
     assert {row["paper_pnl_bps_24h"] for row in entered_runs} == {"970.0"}
     assert {row["paper_pnl_usdt_24h"] for row in entered_runs} == {"1.164"}
     assert {row["arrival_bid"] for row in entered_runs} == {"99.9"}
@@ -294,6 +297,8 @@ def test_sol_paper_strategy_tracker_writes_strategy_heartbeats_without_candidate
     assert {row["would_enter"] for row in runs} == {"False"}
     assert {row["entry_reason"] for row in runs} == {"paper_strategy_heartbeat"}
     assert {row["would_size_usdt"] for row in runs} == {""}
+    assert {row["expected_exit_horizon"] for row in runs} == {""}
+    assert {row["f4_threshold"] for row in runs} == {""}
     assert {row["estimated_cost_bps"] for row in runs} == {"30.0"}
     assert {row["label_status"] for row in runs} == {"heartbeat"}
     assert {row["no_sample_reason"] for row in runs} == {"no_sol_candidate"}
@@ -354,6 +359,11 @@ def test_sol_paper_strategy_tracker_heartbeat_explains_alpha6_not_buy(tmp_path: 
     assert {row["sol_candidate_present"] for row in runs} == {"True"}
     assert {row["alpha6_side"] for row in runs} == {"sell"}
     assert {row["risk_level"] for row in runs} == {"PROTECT"}
+    assert {row["risk_off"] for row in runs} == {"False"}
+    assert {row["cooldown_active"] for row in runs} == {"False"}
+    assert {row["f4_volume_expansion"] for row in runs} == {"1.1"}
+    assert {row["f4_threshold"] for row in runs} == {"0.0"}
+    assert {row["f5_rsi_trend_confirm"] for row in runs} == {"0.35"}
     assert {row["cost_source"] for row in runs} == {"mixed_actual_proxy"}
     assert {row["label_24h_reason"] for row in runs} == {"alpha6_not_buy"}
 
@@ -391,7 +401,35 @@ def test_sol_paper_strategy_tracker_heartbeat_explains_blocking_conditions(
     assert {row["would_enter"] for row in runs} == {"False"}
     assert {row["no_sample_reason"] for row in runs} == {expected_reason}
     assert {row["sol_candidate_present"] for row in runs} == {"True"}
+    assert {row["f4_threshold"] for row in runs} == {"0.0"}
     assert {row["label_24h_reason"] for row in runs} == {expected_reason}
+
+
+def test_sol_paper_strategy_tracker_uses_standard_no_sample_reason_for_source_mismatch(tmp_path: Path) -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    run_id = "r_source_mismatch"
+    run_dir = tmp_path / "reports" / "runs" / run_id
+    _write_single_sol_candidate(
+        run_dir,
+        run_id=run_id,
+        overrides={"strategy_candidate": "unrelated_sol_candidate", "block_reason": "unrelated_block"},
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit(run_id, start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["new_records"] == 2
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    assert {row["would_enter"] for row in runs} == {"False"}
+    assert {row["no_sample_reason"] for row in runs} == {"no_sol_candidate"}
+    assert "no_qualifying_candidate" not in {row["no_sample_reason"] for row in runs}
+    assert {row["sol_candidate_present"] for row in runs} == {"True"}
 
 
 def test_sol_paper_strategy_tracker_disabled_writes_no_files(tmp_path: Path) -> None:

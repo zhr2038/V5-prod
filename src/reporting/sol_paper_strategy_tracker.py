@@ -85,6 +85,7 @@ PAPER_RUN_FIELDS = [
     "would_exit",
     "would_exit_time",
     "would_exit_rule",
+    "expected_exit_horizon",
     "would_size_notional",
     "would_size_usdt",
     "paper_pnl_bps",
@@ -100,6 +101,7 @@ PAPER_RUN_FIELDS = [
     "alpha6_score",
     "alpha6_side",
     "f4_volume_expansion",
+    "f4_threshold",
     "f5_rsi_trend_confirm",
     "cost_source",
     "cost_source_quality",
@@ -532,6 +534,7 @@ def _row_condition_diagnostics(
         "alpha6_score": _normalize_float(row.get("alpha6_score")),
         "alpha6_side": alpha6_side,
         "f4_volume_expansion": f4,
+        "f4_threshold": _normalize_float(spec.get("min_f4_volume_expansion")),
         "f5_rsi_trend_confirm": _normalize_float(row.get("f5_rsi_trend_confirm")),
         "original_block_reason": original_block_reason,
         "cooldown_active": bool(cooldown_active),
@@ -565,7 +568,7 @@ def _condition_block_reason(
     if min_f4 is not None and (f4 is None or f4 < min_f4):
         return "f4_below_threshold"
     if not source_or_reason_matched:
-        return "no_qualifying_candidate"
+        return "no_sol_candidate"
     return ""
 
 
@@ -598,7 +601,7 @@ def _matches_strategy(
     decision = str(row.get("final_decision") or "").strip().upper()
     if decision in {"OPEN_LONG", "REBALANCE"}:
         diagnostics = _row_condition_diagnostics(row, spec=spec, audit=audit, asof_ts_ms=asof_ts_ms)
-        return False, "no_qualifying_candidate", diagnostics
+        return False, "no_sol_candidate", diagnostics
     qualifies, reason, diagnostics = _row_qualifies(row, spec=spec, audit=audit, asof_ts_ms=asof_ts_ms)
     risk_level = str(diagnostics.get("risk_level") or "").strip()
     if risk_level and not _is_protect_level(risk_level):
@@ -628,7 +631,7 @@ def _best_sol_candidate_for_strategy(
         source_match = _strategy_source_or_reason_matches(row, spec)
         reason = _condition_block_reason(diagnostics, spec=spec, source_or_reason_matched=source_match)
         if not reason:
-            reason = "no_qualifying_candidate"
+            reason = "no_sol_candidate"
         score = _normalize_float(row.get("final_score"))
         ranked.append((1 if source_match else 0, float(score or 0.0), row, diagnostics, reason))
     ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
@@ -649,7 +652,7 @@ def _heartbeat_record(
     cost_context: Mapping[str, Any],
     allowed_cost_sources: set[str],
     condition_diagnostics: Mapping[str, Any] | None = None,
-    no_sample_reason: str = "no_qualifying_candidate",
+    no_sample_reason: str = "no_sol_candidate",
     quote_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     condition_diagnostics = dict(condition_diagnostics or {})
@@ -663,7 +666,7 @@ def _heartbeat_record(
     original_block_reason = str(
         condition_diagnostics.get("original_block_reason")
         or no_sample_reason
-        or "no_qualifying_candidate"
+        or "no_sol_candidate"
     )
     return {
         "strategy_id": str(spec.get("strategy_id") or ""),
@@ -691,6 +694,7 @@ def _heartbeat_record(
         "would_exit": False,
         "would_exit_time": "",
         "would_exit_rule": "",
+        "expected_exit_horizon": "",
         "would_size_notional": None,
         "would_size_usdt": None,
         "entry_px": None,
@@ -704,6 +708,7 @@ def _heartbeat_record(
         "alpha6_score": condition_diagnostics.get("alpha6_score"),
         "alpha6_side": str(condition_diagnostics.get("alpha6_side") or ""),
         "f4_volume_expansion": condition_diagnostics.get("f4_volume_expansion"),
+        "f4_threshold": condition_diagnostics.get("f4_threshold"),
         "f5_rsi_trend_confirm": condition_diagnostics.get("f5_rsi_trend_confirm"),
         "cost_source": cost_source,
         "cost_source_quality": str(
@@ -821,6 +826,7 @@ def _collect_candidates(
                     "would_exit": False,
                     "would_exit_time": _iso_from_ms(asof_ts_ms + primary_horizon * 3600 * 1000) if asof_ts_ms > 0 else "",
                     "would_exit_rule": f"paper_time_horizon_{primary_horizon}h",
+                    "expected_exit_horizon": f"{primary_horizon}h",
                     "would_size_notional": would_size,
                     "would_size_usdt": would_size,
                     "entry_px": entry_px,
@@ -834,6 +840,7 @@ def _collect_candidates(
                     "alpha6_score": _normalize_float(row.get("alpha6_score")),
                     "alpha6_side": str(condition_diagnostics.get("alpha6_side") or row.get("alpha6_side") or ""),
                     "f4_volume_expansion": _normalize_float(row.get("f4_volume_expansion")),
+                    "f4_threshold": condition_diagnostics.get("f4_threshold"),
                     "f5_rsi_trend_confirm": _normalize_float(row.get("f5_rsi_trend_confirm")),
                     "cost_source": cost_source,
                     "cost_source_quality": str(row.get("cost_source_quality") or ""),
@@ -893,7 +900,7 @@ def _collect_candidates(
 
 def _sync_paper_fields(record: dict[str, Any], horizons: Iterable[int]) -> None:
     if not bool(record.get("would_enter")):
-        reason = str(record.get("no_sample_reason") or record.get("skip_reason") or "no_qualifying_candidate")
+        reason = str(record.get("no_sample_reason") or record.get("skip_reason") or "no_sol_candidate")
         for horizon in horizons:
             h = int(horizon)
             record[f"paper_pnl_bps_{h}h"] = None
