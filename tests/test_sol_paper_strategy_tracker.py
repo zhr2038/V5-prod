@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -450,13 +451,14 @@ def test_sol_paper_strategy_tracker_reads_paper_ready_advisory(tmp_path: Path) -
         tmp_path / "reports",
         [
             {
-                "strategy_id": "SOL_F4_VOLUME_EXPANSION_PAPER_V1",
-                "experiment_name": "v5.f4_volume_expansion_entry",
+                "strategy_candidate": "f4_volume_swing",
                 "symbol": "SOL/USDT",
                 "decision": "PAPER_READY",
                 "recommended_mode": "paper",
                 "reason": "paper_only",
+                "max_paper_notional_usdt": "12",
                 "max_live_notional_usdt": "50",
+                "live_block_reasons": "no_live_slippage_coverage",
             }
         ],
     )
@@ -476,12 +478,17 @@ def test_sol_paper_strategy_tracker_reads_paper_ready_advisory(tmp_path: Path) -
     assert f4["advisory_present"] == "True"
     assert f4["advisory_decision"] == "PAPER_READY"
     assert f4["advisory_recommended_mode"] == "paper"
+    assert f4["advisory_strategy_candidate"] == "f4_volume_swing"
     assert f4["advisory_response_action"] == "paper_tracking"
+    assert f4["advisory_max_paper_notional_usdt"] == "12.0"
     assert f4["advisory_max_live_notional_usdt_ignored"] == "True"
+    assert f4["advisory_live_block_reasons"] == "no_live_slippage_coverage"
 
     advisory = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_reader.csv")
+    assert advisory[0]["strategy_candidate"] == "f4_volume_swing"
     assert advisory[0]["response_action"] == "paper_tracking"
     assert advisory[0]["negative_advisory"] == "False"
+    assert advisory[0]["max_paper_notional_usdt"] == "12.0"
 
 
 def test_sol_paper_strategy_tracker_records_kill_advisory_without_paper_entry(tmp_path: Path) -> None:
@@ -555,6 +562,55 @@ def test_sol_paper_strategy_tracker_ignores_live_small_notional_by_default(tmp_p
     assert f4["advisory_response_action"] == "ignored_live_small_disabled"
     assert f4["advisory_max_live_notional_usdt"] == "25.0"
     assert f4["advisory_max_live_notional_usdt_ignored"] == "True"
+
+
+def test_sol_paper_strategy_tracker_reads_api_advisory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    cfg.quant_lab.base_url = "https://quant-lab.local"
+    cfg.diagnostics.quant_lab_strategy_opportunity_advisory_paths = [str(tmp_path / "missing.csv")]
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_advisory_api"
+    run_dir.mkdir(parents=True)
+
+    class FakeClient:
+        def get_json(self, endpoint: str, params: dict | None = None) -> SimpleNamespace:
+            return SimpleNamespace(
+                ok=True,
+                data={
+                    "rows": [
+                        {
+                            "strategy_candidate": "f4_volume_swing",
+                            "symbol": "SOL/USDT",
+                            "decision": "PAPER_READY",
+                            "recommended_mode": "paper",
+                            "max_paper_notional_usdt": 10,
+                        }
+                    ]
+                },
+            )
+
+    from src.quant_lab_client import client as client_mod
+
+    monkeypatch.setattr(
+        client_mod.QuantLabClient,
+        "from_config",
+        classmethod(lambda cls, *args, **kwargs: FakeClient()),
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_advisory_api", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["advisory_rows"] == 1
+    advisory = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_reader.csv")
+    assert advisory[0]["source_path"] == "api:/v1/strategy-opportunity-advisory"
+    assert advisory[0]["strategy_candidate"] == "f4_volume_swing"
+    assert advisory[0]["response_action"] == "paper_tracking"
 
 
 def test_sol_paper_strategy_tracker_disabled_writes_no_files(tmp_path: Path) -> None:

@@ -57,14 +57,11 @@ CURRENT_REPORT_FILES = [
     ("reports/multi_position_swing_shadow_labels.jsonl", "raw/reports/multi_position_swing_shadow_labels.jsonl", False),
     ("reports/protect_sol_exception_shadow_labels.jsonl", "raw/reports/protect_sol_exception_shadow_labels.jsonl", False),
     ("reports/sol_paper_strategy_labels.jsonl", "raw/reports/sol_paper_strategy_labels.jsonl", False),
-    ("reports/strategy_opportunity_advisory.csv", "raw/reports/strategy_opportunity_advisory.csv", False),
-    ("reports/quant_lab/strategy_opportunity_advisory.csv", "raw/reports/quant_lab/strategy_opportunity_advisory.csv", False),
     ("reports/candidate_snapshot.csv", "raw/reports/candidate_snapshot.csv", False),
     ("reports/order_lifecycle.csv", "raw/reports/order_lifecycle.csv", False),
     ("reports/summaries/paper_strategy_runs.csv", "summaries/paper_strategy_runs.csv", False),
     ("reports/summaries/paper_strategy_daily.csv", "summaries/paper_strategy_daily.csv", False),
     ("reports/summaries/paper_slippage_coverage.csv", "summaries/paper_slippage_coverage.csv", False),
-    ("reports/summaries/strategy_opportunity_advisory_reader.csv", "summaries/strategy_opportunity_advisory_reader.csv", False),
     ("reports/quant_lab_usage.jsonl", "raw/reports/quant_lab_usage.jsonl", False),
     ("reports/quant_lab_requests.jsonl", "raw/reports/quant_lab_requests.jsonl", False),
 ]
@@ -472,6 +469,13 @@ def copy_recent_runs():
 def copy_current_reports():
     for src_rel, dest_rel, required in CURRENT_REPORT_FILES:
         copy_sanitized(src_rel, dest_rel, required=required)
+    for src_rel, dest_rel in (
+        ("reports/strategy_opportunity_advisory.csv", "raw/reports/strategy_opportunity_advisory.csv"),
+        ("reports/quant_lab/strategy_opportunity_advisory.csv", "raw/reports/quant_lab/strategy_opportunity_advisory.csv"),
+        ("reports/summaries/strategy_opportunity_advisory_reader.csv", "summaries/strategy_opportunity_advisory_reader.csv"),
+    ):
+        if (ROOT / src_rel).is_file():
+            copy_sanitized(src_rel, dest_rel)
     for dest_rel in ("raw/reports/quant_lab_usage.jsonl", "raw/reports/quant_lab_requests.jsonl"):
         dest = OUT / dest_rel
         if not dest.is_file():

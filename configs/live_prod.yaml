@@ -256,6 +256,11 @@ diagnostics:
     - strategy_opportunity_advisory.csv
     - quant_lab/strategy_opportunity_advisory.csv
     - reports/strategy_opportunity_advisory.csv
+  quant_lab_strategy_opportunity_advisory_api_enabled: true
+  quant_lab_strategy_opportunity_advisory_api_paths:
+    - /v1/strategy-opportunity-advisory
+    - /v1/strategy_opportunity_advisory
+    - /v1/reports/strategy-opportunity-advisory
   enable_live_small_from_quant_lab: false
   paper_strategy_configs:
     - strategy_id: SOL_PROTECT_ALPHA6_LOW_EXCEPTION_PAPER_V1

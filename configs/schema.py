@@ -1500,6 +1500,18 @@ class DiagnosticsConfig(BaseModel):
         ],
         description="Candidate CSV paths for quant-lab strategy opportunity advisory",
     )
+    quant_lab_strategy_opportunity_advisory_api_enabled: bool = Field(
+        default=True,
+        description="Fallback to quant-lab API when local strategy opportunity advisory CSV is unavailable",
+    )
+    quant_lab_strategy_opportunity_advisory_api_paths: List[str] = Field(
+        default_factory=lambda: [
+            "/v1/strategy-opportunity-advisory",
+            "/v1/strategy_opportunity_advisory",
+            "/v1/reports/strategy-opportunity-advisory",
+        ],
+        description="Quant-lab API endpoints to try for strategy opportunity advisory JSON",
+    )
     enable_live_small_from_quant_lab: bool = Field(
         default=False,
         description="Explicit opt-in before V5 can consume quant-lab LIVE_SMALL_READY notional advice; default false",

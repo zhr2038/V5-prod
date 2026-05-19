@@ -119,12 +119,15 @@ PAPER_RUN_FIELDS = [
     "advisory_present",
     "advisory_source",
     "advisory_strategy_id",
+    "advisory_strategy_candidate",
     "advisory_decision",
     "advisory_recommended_mode",
     "advisory_negative",
     "advisory_response_action",
+    "advisory_max_paper_notional_usdt",
     "advisory_max_live_notional_usdt",
     "advisory_max_live_notional_usdt_ignored",
+    "advisory_live_block_reasons",
     "enable_live_small_from_quant_lab",
     "label_status",
     "label_not_observable_reason",
@@ -178,13 +181,16 @@ PAPER_SLIPPAGE_FIELDS = [
 STRATEGY_ADVISORY_FIELDS = [
     "source_path",
     "strategy_id",
+    "strategy_candidate",
     "experiment_name",
     "symbol",
     "decision",
     "recommended_mode",
     "advisory_status",
     "advisory_reason",
+    "max_paper_notional_usdt",
     "max_live_notional_usdt",
+    "live_block_reasons",
     "enable_live_small_from_quant_lab",
     "response_action",
     "negative_advisory",
@@ -288,6 +294,14 @@ def _default_advisory_paths() -> list[str]:
     ]
 
 
+def _default_advisory_api_paths() -> list[str]:
+    return [
+        "/v1/strategy-opportunity-advisory",
+        "/v1/strategy_opportunity_advisory",
+        "/v1/reports/strategy-opportunity-advisory",
+    ]
+
+
 def _candidate_advisory_paths(raw_path: str, *, run_path: Path, reports_dir: Path) -> list[Path]:
     path = Path(str(raw_path or "").strip())
     if not str(path):
@@ -315,6 +329,10 @@ def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict
         _advisory_first(row, ("strategy_id", "strategy", "strategy_name", "alpha_id", "proposal_id"))
         or ""
     ).strip()
+    strategy_candidate = str(
+        _advisory_first(row, ("strategy_candidate", "candidate", "candidate_name", "source_strategy_candidate"))
+        or ""
+    ).strip()
     experiment_name = str(
         _advisory_first(row, ("experiment_name", "alpha_name", "strategy_family"))
         or ""
@@ -330,14 +348,80 @@ def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict
     return {
         "source_path": source_path,
         "strategy_id": strategy_id,
+        "strategy_candidate": strategy_candidate,
         "experiment_name": experiment_name,
         "symbol": _symbol_text(_advisory_first(row, ("symbol", "instId", "instrument", "normalized_symbol"))),
         "decision": decision,
         "recommended_mode": recommended_mode,
         "advisory_status": str(_advisory_first(row, ("status", "readiness_status", "decision")) or "").strip(),
-        "advisory_reason": str(_advisory_first(row, ("reason", "block_reason", "live_block_reason", "notes")) or "").strip(),
+        "advisory_reason": str(_advisory_first(row, ("reason", "block_reason", "live_block_reason", "live_block_reasons", "notes")) or "").strip(),
+        "max_paper_notional_usdt": _normalize_float(row.get("max_paper_notional_usdt")),
         "max_live_notional_usdt": _normalize_float(row.get("max_live_notional_usdt")),
+        "live_block_reasons": str(_advisory_first(row, ("live_block_reasons", "live_block_reason")) or "").strip(),
     }
+
+
+def _extract_advisory_items(payload: Any) -> list[Mapping[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, Mapping)]
+    if not isinstance(payload, Mapping):
+        return []
+    for key in (
+        "strategy_opportunity_advisory",
+        "advisory",
+        "advisories",
+        "rows",
+        "items",
+        "data",
+    ):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, Mapping)]
+        if isinstance(value, Mapping):
+            nested = _extract_advisory_items(value)
+            if nested:
+                return nested
+    return []
+
+
+def _read_strategy_opportunity_advisory_api(
+    *,
+    cfg: AppConfig,
+    diagnostics: DiagnosticsConfig,
+    run_id: str,
+) -> list[dict[str, Any]]:
+    if not bool(getattr(diagnostics, "quant_lab_strategy_opportunity_advisory_api_enabled", True)):
+        return []
+    qcfg = getattr(cfg, "quant_lab", None)
+    if qcfg is None or not bool(getattr(qcfg, "enabled", False)):
+        return []
+    endpoints = (
+        getattr(diagnostics, "quant_lab_strategy_opportunity_advisory_api_paths", None)
+        or _default_advisory_api_paths()
+    )
+    try:
+        from src.quant_lab_client.client import QuantLabClient
+    except Exception:
+        return []
+    try:
+        client = QuantLabClient.from_config(qcfg, run_id=run_id, phase="strategy_advisory_reader")
+    except Exception:
+        return []
+    rows: list[dict[str, Any]] = []
+    for endpoint in endpoints:
+        try:
+            response = client.get_json(str(endpoint), params={"format": "json"})
+        except Exception:
+            continue
+        if not bool(getattr(response, "ok", False)):
+            continue
+        for item in _extract_advisory_items(getattr(response, "data", None)):
+            normalized = _normalize_advisory_row(item, source_path=f"api:{endpoint}")
+            if normalized.get("strategy_id") or normalized.get("strategy_candidate") or normalized.get("experiment_name"):
+                rows.append(normalized)
+        if rows:
+            break
+    return rows
 
 
 def _read_strategy_opportunity_advisory(
@@ -345,6 +429,8 @@ def _read_strategy_opportunity_advisory(
     run_path: Path,
     reports_dir: Path,
     diagnostics: DiagnosticsConfig,
+    cfg: AppConfig,
+    run_id: str,
 ) -> list[dict[str, Any]]:
     if not bool(getattr(diagnostics, "quant_lab_strategy_opportunity_advisory_enabled", True)):
         return []
@@ -367,10 +453,12 @@ def _read_strategy_opportunity_advisory(
                         if not row:
                             continue
                         normalized = _normalize_advisory_row(row, source_path=str(path))
-                        if normalized.get("strategy_id") or normalized.get("experiment_name"):
+                        if normalized.get("strategy_id") or normalized.get("strategy_candidate") or normalized.get("experiment_name"):
                             rows.append(normalized)
             except Exception:
                 continue
+    if not rows:
+        rows.extend(_read_strategy_opportunity_advisory_api(cfg=cfg, diagnostics=diagnostics, run_id=run_id))
     return rows
 
 
@@ -379,6 +467,7 @@ def _advisory_keys(row: Mapping[str, Any]) -> set[str]:
         key
         for key in (
             _strategy_key(row.get("strategy_id")),
+            _strategy_key(row.get("strategy_candidate")),
             _strategy_key(row.get("experiment_name")),
         )
         if key
@@ -402,6 +491,7 @@ def _advisory_for_spec(
     for key in (
         _strategy_key(spec.get("strategy_id")),
         _strategy_key(spec.get("experiment_name")),
+        *[_strategy_key(value) for value in (spec.get("source_strategy_candidates") or set())],
     ):
         if key and key in advisory_by_strategy:
             return advisory_by_strategy[key]
@@ -436,12 +526,15 @@ def _advisory_response_fields(
         "advisory_present": present,
         "advisory_source": str(advisory.get("source_path") or ""),
         "advisory_strategy_id": str(advisory.get("strategy_id") or ""),
+        "advisory_strategy_candidate": str(advisory.get("strategy_candidate") or ""),
         "advisory_decision": decision,
         "advisory_recommended_mode": recommended_mode,
         "advisory_negative": negative,
         "advisory_response_action": response_action,
+        "advisory_max_paper_notional_usdt": _normalize_float(advisory.get("max_paper_notional_usdt")),
         "advisory_max_live_notional_usdt": max_notional,
         "advisory_max_live_notional_usdt_ignored": max_ignored,
+        "advisory_live_block_reasons": str(advisory.get("live_block_reasons") or advisory.get("advisory_reason") or ""),
         "enable_live_small_from_quant_lab": enable_live_small,
     }
 
@@ -457,13 +550,16 @@ def _advisory_summary_rows(
             {
                 "source_path": row.get("source_path"),
                 "strategy_id": row.get("strategy_id"),
+                "strategy_candidate": row.get("strategy_candidate"),
                 "experiment_name": row.get("experiment_name"),
                 "symbol": row.get("symbol"),
                 "decision": row.get("decision"),
                 "recommended_mode": row.get("recommended_mode"),
                 "advisory_status": row.get("advisory_status"),
                 "advisory_reason": row.get("advisory_reason"),
+                "max_paper_notional_usdt": row.get("max_paper_notional_usdt"),
                 "max_live_notional_usdt": row.get("max_live_notional_usdt"),
+                "live_block_reasons": row.get("live_block_reasons"),
                 "enable_live_small_from_quant_lab": fields["enable_live_small_from_quant_lab"],
                 "response_action": fields["advisory_response_action"],
                 "negative_advisory": fields["advisory_negative"],
@@ -1430,6 +1526,8 @@ def update_sol_paper_strategy_tracker(
         run_path=run_path,
         reports_dir=reports_dir,
         diagnostics=diagnostics,
+        cfg=cfg,
+        run_id=str(getattr(audit, "run_id", "") or ""),
     )
     advisory_index = _advisory_by_strategy(advisory_rows)
     records_by_key = _load_existing_records(labels_path)

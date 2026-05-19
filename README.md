@@ -509,7 +509,7 @@ quant_lab_advisory_kill
 
 Live small ready 前必须满足 paper days、entry day count、arrival mid coverage、spread observation coverage 和成本质量要求。public spread proxy 本身不能直接让策略晋级 live。
 
-V5 也会只读 `strategy_opportunity_advisory.csv`。当前只响应 `recommended_mode=paper` 或 `recommended_mode=shadow` 的 advisory：SOL `PAPER_READY` 继续进入 paper tracking；`KILL` 会被记录为 negative advisory，不会生成 live order。`max_live_notional_usdt` 默认忽略，除非本地显式设置 `enable_live_small_from_quant_lab=true` 且 advisory 为 `LIVE_SMALL_READY`。生产默认值为 `false`。
+V5 也会只读 `strategy_opportunity_advisory.csv`，本地同步文件缺失时会尝试从 quant-lab API 读取 JSON advisory。支持字段包括 `strategy_candidate`、`symbol`、`decision`、`recommended_mode`、`max_paper_notional_usdt`、`max_live_notional_usdt` 和 `live_block_reasons`。当前只响应 `recommended_mode=paper` 或 `recommended_mode=shadow` 的 advisory：SOL `PAPER_READY` 继续进入 paper tracking；`KILL` 会被记录为 negative advisory，不会生成 live order。`max_live_notional_usdt` 默认忽略，除非本地显式设置 `enable_live_small_from_quant_lab=true` 且 advisory 为 `LIVE_SMALL_READY`。生产默认值为 `false`。
 
 ---
 
