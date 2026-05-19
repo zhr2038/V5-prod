@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
+import tarfile
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -155,6 +158,31 @@ def _write_strategy_advisory(reports_dir: Path, rows: list[dict[str, str]]) -> N
         writer = csv.DictWriter(fh, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _write_strategy_advisory_bundle(path: Path, rows: list[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fields = sorted({field for row in rows for field in row})
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fields)
+    writer.writeheader()
+    writer.writerows(rows)
+    payload = buffer.getvalue().encode("utf-8")
+    info = tarfile.TarInfo("quant-lab-pack/reports/strategy_opportunity_advisory.csv")
+    info.size = len(payload)
+    with tarfile.open(path, "w:gz") as archive:
+        archive.addfile(info, io.BytesIO(payload))
+
+
+def _write_strategy_advisory_zip(path: Path, rows: list[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fields = sorted({field for row in rows for field in row})
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fields)
+    writer.writeheader()
+    writer.writerows(rows)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("reports/strategy_opportunity_advisory.csv", buffer.getvalue())
 
 
 def test_sol_paper_strategy_tracker_writes_runs_daily_and_slippage(tmp_path: Path) -> None:
@@ -489,6 +517,85 @@ def test_sol_paper_strategy_tracker_reads_paper_ready_advisory(tmp_path: Path) -
     assert advisory[0]["response_action"] == "paper_tracking"
     assert advisory[0]["negative_advisory"] == "False"
     assert advisory[0]["max_paper_notional_usdt"] == "12.0"
+
+
+def test_sol_paper_strategy_tracker_reads_advisory_from_expert_pack_tar(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.diagnostics.quant_lab_strategy_opportunity_advisory_paths = [
+        "reports/quant_lab_latest_bundle.tar.gz"
+    ]
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_advisory_tar"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory_bundle(
+        tmp_path / "reports" / "quant_lab_latest_bundle.tar.gz",
+        [
+            {
+                "strategy_candidate": "f4_volume_swing",
+                "symbol": "SOL/USDT",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "max_paper_notional_usdt": "11",
+                "live_block_reasons": "no_paper_days",
+            }
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_advisory_tar", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["advisory_rows"] == 1
+    advisory = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_reader.csv")
+    assert advisory[0]["source_path"].endswith(
+        "quant_lab_latest_bundle.tar.gz:quant-lab-pack/reports/strategy_opportunity_advisory.csv"
+    )
+    assert advisory[0]["strategy_candidate"] == "f4_volume_swing"
+    assert advisory[0]["response_action"] == "paper_tracking"
+    assert advisory[0]["max_paper_notional_usdt"] == "11.0"
+
+
+def test_sol_paper_strategy_tracker_reads_advisory_from_expert_pack_zip(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.diagnostics.quant_lab_strategy_opportunity_advisory_paths = [
+        "reports/quant_lab_latest_bundle.zip"
+    ]
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_advisory_zip"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory_zip(
+        tmp_path / "reports" / "quant_lab_latest_bundle.zip",
+        [
+            {
+                "strategy_candidate": "f4_volume_swing",
+                "symbol": "SOL/USDT",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "max_paper_notional_usdt": "13",
+            }
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_advisory_zip", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["advisory_rows"] == 1
+    advisory = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_reader.csv")
+    assert advisory[0]["source_path"].endswith(
+        "quant_lab_latest_bundle.zip:reports/strategy_opportunity_advisory.csv"
+    )
+    assert advisory[0]["strategy_candidate"] == "f4_volume_swing"
+    assert advisory[0]["response_action"] == "paper_tracking"
+    assert advisory[0]["max_paper_notional_usdt"] == "13.0"
 
 
 def test_sol_paper_strategy_tracker_records_kill_advisory_without_paper_entry(tmp_path: Path) -> None:

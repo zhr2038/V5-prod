@@ -1496,9 +1496,17 @@ class DiagnosticsConfig(BaseModel):
         default_factory=lambda: [
             "strategy_opportunity_advisory.csv",
             "quant_lab/strategy_opportunity_advisory.csv",
+            "quant_lab_latest/strategy_opportunity_advisory.csv",
+            "quant_lab/latest/reports/strategy_opportunity_advisory.csv",
             "reports/strategy_opportunity_advisory.csv",
+            "reports/quant_lab_latest/strategy_opportunity_advisory.csv",
+            "reports/quant_lab/latest/reports/strategy_opportunity_advisory.csv",
+            "reports/quant_lab_latest_bundle.zip",
+            "reports/quant_lab_latest_bundle.tar.gz",
+            "reports/quant_lab/latest_bundle.zip",
+            "reports/quant_lab/latest_bundle.tar.gz",
         ],
-        description="Candidate CSV paths for quant-lab strategy opportunity advisory",
+        description="Candidate CSV or expert-pack archive paths for quant-lab strategy opportunity advisory",
     )
     quant_lab_strategy_opportunity_advisory_api_enabled: bool = Field(
         default=True,

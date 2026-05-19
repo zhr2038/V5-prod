@@ -255,7 +255,15 @@ diagnostics:
   quant_lab_strategy_opportunity_advisory_paths:
     - strategy_opportunity_advisory.csv
     - quant_lab/strategy_opportunity_advisory.csv
+    - quant_lab_latest/strategy_opportunity_advisory.csv
+    - quant_lab/latest/reports/strategy_opportunity_advisory.csv
     - reports/strategy_opportunity_advisory.csv
+    - reports/quant_lab_latest/strategy_opportunity_advisory.csv
+    - reports/quant_lab/latest/reports/strategy_opportunity_advisory.csv
+    - reports/quant_lab_latest_bundle.zip
+    - reports/quant_lab_latest_bundle.tar.gz
+    - reports/quant_lab/latest_bundle.zip
+    - reports/quant_lab/latest_bundle.tar.gz
   quant_lab_strategy_opportunity_advisory_api_enabled: true
   quant_lab_strategy_opportunity_advisory_api_paths:
     - /v1/strategy-opportunity-advisory

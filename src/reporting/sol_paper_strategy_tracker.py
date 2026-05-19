@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
+import tarfile
+import zipfile
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
@@ -290,7 +293,15 @@ def _default_advisory_paths() -> list[str]:
     return [
         "strategy_opportunity_advisory.csv",
         "quant_lab/strategy_opportunity_advisory.csv",
+        "quant_lab_latest/strategy_opportunity_advisory.csv",
+        "quant_lab/latest/reports/strategy_opportunity_advisory.csv",
         "reports/strategy_opportunity_advisory.csv",
+        "reports/quant_lab_latest/strategy_opportunity_advisory.csv",
+        "reports/quant_lab/latest/reports/strategy_opportunity_advisory.csv",
+        "reports/quant_lab_latest_bundle.zip",
+        "reports/quant_lab_latest_bundle.tar.gz",
+        "reports/quant_lab/latest_bundle.zip",
+        "reports/quant_lab/latest_bundle.tar.gz",
     ]
 
 
@@ -359,6 +370,82 @@ def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict
         "max_live_notional_usdt": _normalize_float(row.get("max_live_notional_usdt")),
         "live_block_reasons": str(_advisory_first(row, ("live_block_reasons", "live_block_reason")) or "").strip(),
     }
+
+
+def _normalize_advisory_csv_rows(handle: Any, *, source_path: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in csv.DictReader(handle):
+        if not row:
+            continue
+        normalized = _normalize_advisory_row(row, source_path=source_path)
+        if normalized.get("strategy_id") or normalized.get("strategy_candidate") or normalized.get("experiment_name"):
+            rows.append(normalized)
+    return rows
+
+
+def _archive_advisory_members(names: Iterable[str]) -> list[str]:
+    normalized = [(name, str(name).replace("\\", "/")) for name in names]
+    primary = [
+        name
+        for name, clean_name in normalized
+        if clean_name.endswith("reports/strategy_opportunity_advisory.csv")
+    ]
+    if primary:
+        return primary
+    return [
+        name
+        for name, clean_name in normalized
+        if clean_name.endswith("strategy_opportunity_advisory.csv")
+    ]
+
+
+def _read_advisory_path(path: Path) -> list[dict[str, Any]]:
+    lower_name = path.name.lower()
+    if lower_name.endswith((".tar", ".tar.gz", ".tgz")):
+        rows: list[dict[str, Any]] = []
+        try:
+            with tarfile.open(path, "r:*") as archive:
+                members = {member.name: member for member in archive.getmembers() if member.isfile()}
+                for member_name in _archive_advisory_members(members):
+                    member = members.get(member_name)
+                    if member is None:
+                        continue
+                    extracted = archive.extractfile(member)
+                    if extracted is None:
+                        continue
+                    with extracted:
+                        with io.TextIOWrapper(extracted, encoding="utf-8", newline="") as handle:
+                            rows.extend(
+                                _normalize_advisory_csv_rows(
+                                    handle,
+                                    source_path=f"{path}:{member_name}",
+                                )
+                            )
+            return rows
+        except Exception:
+            return []
+    if lower_name.endswith(".zip"):
+        rows = []
+        try:
+            with zipfile.ZipFile(path) as archive:
+                members = [name for name in archive.namelist() if not name.endswith("/")]
+                for member_name in _archive_advisory_members(members):
+                    with archive.open(member_name) as extracted:
+                        with io.TextIOWrapper(extracted, encoding="utf-8", newline="") as handle:
+                            rows.extend(
+                                _normalize_advisory_csv_rows(
+                                    handle,
+                                    source_path=f"{path}:{member_name}",
+                                )
+                            )
+            return rows
+        except Exception:
+            return []
+    try:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            return _normalize_advisory_csv_rows(handle, source_path=str(path))
+    except Exception:
+        return []
 
 
 def _extract_advisory_items(payload: Any) -> list[Mapping[str, Any]]:
@@ -447,16 +534,7 @@ def _read_strategy_opportunity_advisory(
             seen_paths.add(path)
             if not path.is_file():
                 continue
-            try:
-                with path.open("r", encoding="utf-8", newline="") as handle:
-                    for row in csv.DictReader(handle):
-                        if not row:
-                            continue
-                        normalized = _normalize_advisory_row(row, source_path=str(path))
-                        if normalized.get("strategy_id") or normalized.get("strategy_candidate") or normalized.get("experiment_name"):
-                            rows.append(normalized)
-            except Exception:
-                continue
+            rows.extend(_read_advisory_path(path))
     if not rows:
         rows.extend(_read_strategy_opportunity_advisory_api(cfg=cfg, diagnostics=diagnostics, run_id=run_id))
     return rows

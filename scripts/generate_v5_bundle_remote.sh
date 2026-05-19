@@ -472,6 +472,8 @@ def copy_current_reports():
     for src_rel, dest_rel in (
         ("reports/strategy_opportunity_advisory.csv", "raw/reports/strategy_opportunity_advisory.csv"),
         ("reports/quant_lab/strategy_opportunity_advisory.csv", "raw/reports/quant_lab/strategy_opportunity_advisory.csv"),
+        ("reports/quant_lab_latest/strategy_opportunity_advisory.csv", "raw/reports/quant_lab_latest/strategy_opportunity_advisory.csv"),
+        ("reports/quant_lab/latest/reports/strategy_opportunity_advisory.csv", "raw/reports/quant_lab/latest/reports/strategy_opportunity_advisory.csv"),
         ("reports/summaries/strategy_opportunity_advisory_reader.csv", "summaries/strategy_opportunity_advisory_reader.csv"),
     ):
         if (ROOT / src_rel).is_file():
