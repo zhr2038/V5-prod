@@ -291,6 +291,9 @@ def _strategy_key(value: Any) -> str:
 
 def _default_advisory_paths() -> list[str]:
     return [
+        "/var/lib/v5-prod/strategy_opportunity_advisory.csv",
+        "/var/lib/v5-prod/quant_lab_latest_bundle.zip",
+        "/var/lib/v5-prod/quant_lab_latest_bundle.tar.gz",
         "strategy_opportunity_advisory.csv",
         "quant_lab/strategy_opportunity_advisory.csv",
         "quant_lab_latest/strategy_opportunity_advisory.csv",

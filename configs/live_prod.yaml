@@ -253,6 +253,9 @@ diagnostics:
   paper_strategy_live_ready_cost_sources: ["actual_fills", "mixed_actual_proxy"]
   quant_lab_strategy_opportunity_advisory_enabled: true
   quant_lab_strategy_opportunity_advisory_paths:
+    - /var/lib/v5-prod/strategy_opportunity_advisory.csv
+    - /var/lib/v5-prod/quant_lab_latest_bundle.zip
+    - /var/lib/v5-prod/quant_lab_latest_bundle.tar.gz
     - strategy_opportunity_advisory.csv
     - quant_lab/strategy_opportunity_advisory.csv
     - quant_lab_latest/strategy_opportunity_advisory.csv
