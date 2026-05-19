@@ -539,8 +539,18 @@ V5 输出以下上下文字段：
 - `summaries/alt_impulse_shadow_outcomes_by_horizon.csv`
 - `summaries/alt_impulse_shadow_by_regime.csv`
 - `summaries/alt_impulse_shadow_by_symbol_regime_horizon.csv`
+- `summaries/alt_impulse_shadow_readiness.json`
+- `summaries/alt_impulse_shadow_readiness_by_symbol.csv`
 
 验收重点是：下一包能回答“ALT impulse 到底在哪种 regime、哪个 symbol、哪个 horizon 下有效”，而不是只给出整体平均表现。
+
+ALT impulse readiness 是只读诊断门，不会改变实盘交易逻辑。默认结论应为 `ready_for_live_probe=false`，直到每个 symbol 自己满足足够样本与收益稳定性后才允许进入未来 live probe 评估。当前规则包括：
+
+- 总样本数至少 30，最近 7 天样本数至少 10；
+- 24h 平均 net bps > 80，24h win rate > 0.60；
+- 48h 平均 net bps > 50；
+- 按 symbol 单独判定，不能用 ETH/SOL 的强样本证明 BNB；
+- BNB 还必须满足 high-score blocked 24h 平均 net bps > 0，且 negative expectancy >= 0。
 
 ---
 

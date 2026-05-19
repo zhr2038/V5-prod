@@ -4348,6 +4348,165 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     ))
     high_score_blocked_outcomes_by_horizon = aggregate_rows_by_horizon(high_score_blocked_outcome_rows, label_horizons)
     alt_impulse_shadow_by_horizon = decorate_alt_impulse_shadow_rows(aggregate_rows_by_horizon(alt_impulse_shadow_rows, label_horizons))
+
+    alt_impulse_readiness_fields = [
+        "symbol",
+        "ready_for_live_probe",
+        "blocking_reasons",
+        "sample_count",
+        "recent_sample_count",
+        "avg_24h_net_bps",
+        "avg_48h_net_bps",
+        "win_rate_24h",
+        "win_rate_48h",
+        "bnb_high_score_blocked_24h_avg_net_bps",
+        "bnb_negative_expectancy_bps",
+    ]
+    alt_impulse_readiness_thresholds = {
+        "min_sample_count": 30,
+        "min_recent_7d_sample_count": 10,
+        "min_avg_24h_net_bps": 80.0,
+        "min_win_rate_24h": 0.60,
+        "min_avg_48h_net_bps": 50.0,
+        "recent_window_days": 7,
+    }
+
+    def alt_impulse_readiness_values(rows, horizon):
+        values = []
+        key = f"label_{int(horizon)}h_net_bps"
+        for row in rows:
+            value = as_float(first_value(row, (key,), not_obs))
+            if value is not None:
+                values.append(value)
+        return values
+
+    def alt_impulse_readiness_avg(values):
+        return round(sum(values) / len(values), 6) if values else None
+
+    def alt_impulse_readiness_win_rate(values):
+        return round(sum(1 for value in values if value > 0.0) / len(values), 6) if values else None
+
+    def alt_impulse_readiness_entry_dt(row):
+        return parse_dt_utc(first_observed(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs)))
+
+    def alt_impulse_negative_expectancy_bps(symbol):
+        if not isinstance(negative_expectancy_state, dict):
+            return None
+        wanted = normalize_symbol_text(symbol)
+        for section_name in ("stats", "symbols"):
+            section = negative_expectancy_state.get(section_name)
+            if not isinstance(section, dict):
+                continue
+            for raw_symbol, entry in section.items():
+                if normalize_symbol_text(raw_symbol) == wanted and isinstance(entry, dict):
+                    return as_float(first_value(entry, ("net_expectancy_bps", "expectancy_bps"), not_obs))
+        for raw_symbol, entry in negative_expectancy_state.items():
+            if normalize_symbol_text(raw_symbol) == wanted and isinstance(entry, dict):
+                return as_float(first_value(entry, ("net_expectancy_bps", "expectancy_bps"), not_obs))
+        return None
+
+    def alt_impulse_high_score_24h_avg(symbol):
+        wanted = normalize_symbol_text(symbol)
+        values = [
+            as_float(first_value(row, ("label_24h_net_bps",), not_obs))
+            for row in high_score_blocked_outcome_rows
+            if normalize_symbol_text(first_value(row, ("symbol",), "")) == wanted
+        ]
+        usable = [value for value in values if value is not None]
+        return alt_impulse_readiness_avg(usable)
+
+    def build_alt_impulse_readiness(rows):
+        recent_cutoff = NOW - dt.timedelta(days=int(alt_impulse_readiness_thresholds["recent_window_days"]))
+        symbols = sorted({normalize_symbol_text(first_value(row, ("symbol",), "")) for row in rows if normalize_symbol_text(first_value(row, ("symbol",), ""))})
+        by_symbol = []
+        for symbol in symbols:
+            symbol_rows = [row for row in rows if normalize_symbol_text(first_value(row, ("symbol",), "")) == symbol]
+            recent_rows = [
+                row for row in symbol_rows
+                if (alt_impulse_readiness_entry_dt(row) is not None and alt_impulse_readiness_entry_dt(row) >= recent_cutoff)
+            ]
+            net_24h = alt_impulse_readiness_values(symbol_rows, 24)
+            net_48h = alt_impulse_readiness_values(symbol_rows, 48)
+            avg_24h = alt_impulse_readiness_avg(net_24h)
+            avg_48h = alt_impulse_readiness_avg(net_48h)
+            win_24h = alt_impulse_readiness_win_rate(net_24h)
+            win_48h = alt_impulse_readiness_win_rate(net_48h)
+            blocking = []
+            if len(symbol_rows) < int(alt_impulse_readiness_thresholds["min_sample_count"]):
+                blocking.append("sample_count_lt_30")
+            if len(recent_rows) < int(alt_impulse_readiness_thresholds["min_recent_7d_sample_count"]):
+                blocking.append("recent_7d_sample_count_lt_10")
+            if avg_24h is None:
+                blocking.append("avg_24h_not_observable")
+            elif avg_24h <= float(alt_impulse_readiness_thresholds["min_avg_24h_net_bps"]):
+                blocking.append("avg_24h_net_bps_lte_80")
+            if win_24h is None:
+                blocking.append("win_rate_24h_not_observable")
+            elif win_24h <= float(alt_impulse_readiness_thresholds["min_win_rate_24h"]):
+                blocking.append("win_rate_24h_lte_0_60")
+            if avg_48h is None:
+                blocking.append("avg_48h_not_observable")
+            elif avg_48h <= float(alt_impulse_readiness_thresholds["min_avg_48h_net_bps"]):
+                blocking.append("avg_48h_net_bps_lte_50")
+
+            bnb_high_score_avg = None
+            bnb_negexp = None
+            if symbol == "BNB/USDT":
+                bnb_high_score_avg = alt_impulse_high_score_24h_avg(symbol)
+                bnb_negexp = alt_impulse_negative_expectancy_bps(symbol)
+                if bnb_high_score_avg is None:
+                    blocking.append("bnb_high_score_blocked_24h_not_observable")
+                elif bnb_high_score_avg <= 0.0:
+                    blocking.append("bnb_high_score_blocked_24h_avg_lte_0")
+                if bnb_negexp is None:
+                    blocking.append("bnb_negative_expectancy_not_observable")
+                elif bnb_negexp < 0.0:
+                    blocking.append("bnb_negative_expectancy_lt_0")
+
+            by_symbol.append({
+                "symbol": symbol,
+                "ready_for_live_probe": not blocking,
+                "blocking_reasons": ",".join(blocking),
+                "sample_count": len(symbol_rows),
+                "recent_sample_count": len(recent_rows),
+                "avg_24h_net_bps": avg_24h if avg_24h is not None else not_obs,
+                "avg_48h_net_bps": avg_48h if avg_48h is not None else not_obs,
+                "win_rate_24h": win_24h if win_24h is not None else not_obs,
+                "win_rate_48h": win_48h if win_48h is not None else not_obs,
+                "bnb_high_score_blocked_24h_avg_net_bps": bnb_high_score_avg if bnb_high_score_avg is not None else not_obs,
+                "bnb_negative_expectancy_bps": bnb_negexp if bnb_negexp is not None else not_obs,
+            })
+
+        overall_recent = [
+            row for row in rows
+            if (alt_impulse_readiness_entry_dt(row) is not None and alt_impulse_readiness_entry_dt(row) >= recent_cutoff)
+        ]
+        overall_24h = alt_impulse_readiness_values(rows, 24)
+        overall_48h = alt_impulse_readiness_values(rows, 48)
+        ready_symbols = [row["symbol"] for row in by_symbol if bool(row.get("ready_for_live_probe"))]
+        overall_blocking = [] if ready_symbols else ["no_symbol_ready_for_live_probe"]
+        if len(rows) < int(alt_impulse_readiness_thresholds["min_sample_count"]):
+            overall_blocking.append("overall_sample_count_lt_30")
+        if len(overall_recent) < int(alt_impulse_readiness_thresholds["min_recent_7d_sample_count"]):
+            overall_blocking.append("overall_recent_7d_sample_count_lt_10")
+        summary = {
+            "schema_version": "v5.alt_impulse_shadow_readiness.v1",
+            "generated_ts_utc": NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "ready_for_live_probe": bool(ready_symbols),
+            "ready_symbols": ready_symbols,
+            "blocking_reasons": overall_blocking,
+            "sample_count": len(rows),
+            "recent_sample_count": len(overall_recent),
+            "avg_24h_net_bps": alt_impulse_readiness_avg(overall_24h) if overall_24h else not_obs,
+            "avg_48h_net_bps": alt_impulse_readiness_avg(overall_48h) if overall_48h else not_obs,
+            "win_rate_24h": alt_impulse_readiness_win_rate(overall_24h) if overall_24h else not_obs,
+            "win_rate_48h": alt_impulse_readiness_win_rate(overall_48h) if overall_48h else not_obs,
+            "thresholds": dict(alt_impulse_readiness_thresholds),
+            "by_symbol": by_symbol,
+        }
+        return summary, by_symbol
+
+    alt_impulse_shadow_readiness, alt_impulse_shadow_readiness_by_symbol = build_alt_impulse_readiness(alt_impulse_shadow_rows)
     skipped_candidate_outcomes_by_horizon = aggregate_rows_by_horizon(outcome_rows, label_horizons)
     skipped_candidate_outcomes_by_symbol = aggregate_high_score_outcomes(outcome_rows, ["symbol", "skip_reason"])
     skipped_candidate_outcomes_by_reason = aggregate_high_score_outcomes(outcome_rows, ["skip_reason"])
@@ -7379,6 +7538,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         alt_impulse_shadow_by_symbol_regime_horizon,
         ["symbol", "regime_state", "horizon_hours", "shadow_decision", "alpha_discovery_board_status", "paper_ready_allowed", "live_ready_allowed", "shadow_decision_reason", "count", "pending_count", "not_observable_count", "complete_count", "avg_net_bps", "win_rate"],
     )
+    write_text(
+        "summaries/alt_impulse_shadow_readiness.json",
+        json.dumps(alt_impulse_shadow_readiness, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    )
+    write_csv(
+        "summaries/alt_impulse_shadow_readiness_by_symbol.csv",
+        alt_impulse_shadow_readiness_by_symbol,
+        alt_impulse_readiness_fields,
+    )
     multi_position_swing_fields = [
         "ts_utc",
         "run_id",
@@ -7853,6 +8021,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "alt_impulse_shadow_entry_px_not_observable_count": alt_impulse_shadow_entry_px_not_observable_count,
         "alt_impulse_shadow_matured_horizon_count": alt_impulse_shadow_matured_horizon_count,
         "alt_impulse_shadow_missing_future_px_count": alt_impulse_shadow_missing_future_px_count,
+        "alt_impulse_shadow_ready_for_live_probe": bool(alt_impulse_shadow_readiness.get("ready_for_live_probe")),
+        "alt_impulse_shadow_ready_symbols": list(alt_impulse_shadow_readiness.get("ready_symbols") or []),
+        "alt_impulse_shadow_readiness_blocking_reasons": list(alt_impulse_shadow_readiness.get("blocking_reasons") or []),
+        "alt_impulse_shadow_recent_sample_count": alt_impulse_shadow_readiness.get("recent_sample_count", 0),
         "multi_position_swing_shadow_label_count": len(multi_position_swing_shadow_rows),
         "multi_position_swing_shadow_duplicate_count": multi_position_swing_shadow_duplicate_count,
         "multi_position_swing_shadow_debug_count": len(multi_position_swing_shadow_debug_rows),
@@ -8149,6 +8321,22 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if any(row.get("label_status") == "complete" for row in alt_impulse_shadow_rows)
         else ("KEEP_SHADOW_no_live_or_paper_ready" if alt_impulse_shadow_rows else "not_applicable_no_shadow_samples")
     )
+    alt_impulse_readiness_ready_text = "yes" if bool(alt_impulse_shadow_readiness.get("ready_for_live_probe")) else "no"
+    alt_impulse_readiness_ready_symbols_text = ", ".join(alt_impulse_shadow_readiness.get("ready_symbols") or []) or "none"
+    alt_impulse_readiness_blocking_text = ", ".join(alt_impulse_shadow_readiness.get("blocking_reasons") or []) or "none"
+
+    def alt_impulse_readiness_symbol_line(symbol):
+        wanted = normalize_symbol_text(symbol)
+        for row in alt_impulse_shadow_readiness_by_symbol:
+            if normalize_symbol_text(row.get("symbol")) != wanted:
+                continue
+            return (
+                f"{symbol}: ready={row.get('ready_for_live_probe')}, "
+                f"samples={row.get('sample_count')}, recent_7d={row.get('recent_sample_count')}, "
+                f"24h_avg={row.get('avg_24h_net_bps')}, 24h_win={row.get('win_rate_24h')}, "
+                f"48h_avg={row.get('avg_48h_net_bps')}, blocking={row.get('blocking_reasons') or 'none'}"
+            )
+        return f"{symbol}: ready=false, samples=0, recent_7d=0, blocking=no_symbol_samples"
 
     def multi_position_by_k_row(k, shadow_mode=MULTI_SHADOW_MODE_ALL):
         key = str(k)
@@ -8535,6 +8723,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- by_regime: {aggregate_summary_lines(alt_impulse_shadow_by_regime, ['regime_state'])}",
         f"- by_horizon: {by_horizon_summary_lines(alt_impulse_shadow_by_horizon)}",
         f"- 是否支持未来 live probe: {alt_impulse_future_probe_text}",
+        "",
+        "## ALT impulse readiness",
+        f"- ready_for_live_probe: {alt_impulse_readiness_ready_text}",
+        f"- ready_symbols: {alt_impulse_readiness_ready_symbols_text}",
+        f"- blocking_reasons: {alt_impulse_readiness_blocking_text}",
+        f"- sample_count: {alt_impulse_shadow_readiness.get('sample_count', 0)}",
+        f"- recent_7d_sample_count: {alt_impulse_shadow_readiness.get('recent_sample_count', 0)}",
+        f"- {alt_impulse_readiness_symbol_line('ETH/USDT')}",
+        f"- {alt_impulse_readiness_symbol_line('SOL/USDT')}",
+        f"- {alt_impulse_readiness_symbol_line('BNB/USDT')}",
+        "- default_live_alt_probe: no_until_readiness_true",
+        "- output: summaries/alt_impulse_shadow_readiness.json and summaries/alt_impulse_shadow_readiness_by_symbol.csv",
         "",
         "## SOL swing 观察",
         f"- 真实 SOL swing 是否赚钱: {sol_swing_real_profit_text()}",

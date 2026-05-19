@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
@@ -44,6 +46,28 @@ ALT_IMPULSE_SHADOW_STATUS_FIELDS = [
     "live_ready_allowed",
     "shadow_decision_reason",
 ]
+ALT_IMPULSE_READINESS_SCHEMA_VERSION = "v5.alt_impulse_shadow_readiness.v1"
+ALT_IMPULSE_READINESS_FIELDS = [
+    "symbol",
+    "ready_for_live_probe",
+    "blocking_reasons",
+    "sample_count",
+    "recent_sample_count",
+    "avg_24h_net_bps",
+    "avg_48h_net_bps",
+    "win_rate_24h",
+    "win_rate_48h",
+    "bnb_high_score_blocked_24h_avg_net_bps",
+    "bnb_negative_expectancy_bps",
+]
+ALT_IMPULSE_READINESS_THRESHOLDS = {
+    "min_sample_count": 30,
+    "min_recent_7d_sample_count": 10,
+    "min_avg_24h_net_bps": 80.0,
+    "min_win_rate_24h": 0.60,
+    "min_avg_48h_net_bps": 50.0,
+    "recent_window_days": 7,
+}
 
 
 def _diagnostics_cfg(cfg: Any) -> DiagnosticsConfig:
@@ -416,6 +440,186 @@ def _with_shadow_status_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
     return [_with_shadow_status(dict(row)) for row in rows]
 
 
+def _symbol_key(value: Any) -> str:
+    return str(value or "").strip().replace("-", "/").upper()
+
+
+def _net_values(records: list[Mapping[str, Any]], horizon: int) -> list[float]:
+    key = f"{HORIZON_PREFIX}{int(horizon)}h_net_bps"
+    values = [_normalize_float(row.get(key)) for row in records]
+    return [float(value) for value in values if value is not None]
+
+
+def _avg(values: list[float]) -> Optional[float]:
+    return round(sum(values) / len(values), 6) if values else None
+
+
+def _win_rate(values: list[float]) -> Optional[float]:
+    return round(sum(1 for value in values if float(value) > 0.0) / len(values), 6) if values else None
+
+
+def _readiness_ts_utc(asof_ts_ms: int) -> str:
+    if int(asof_ts_ms or 0) > 0:
+        return _iso_from_ms(int(asof_ts_ms))
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _symbol_negative_expectancy_bps(negative_expectancy_state: Mapping[str, Any] | None, symbol: str) -> Optional[float]:
+    if not isinstance(negative_expectancy_state, Mapping):
+        return None
+    wanted = _symbol_key(symbol)
+    sections: list[Any] = [
+        negative_expectancy_state.get("stats"),
+        negative_expectancy_state.get("symbols"),
+        negative_expectancy_state,
+    ]
+    for section in sections:
+        if not isinstance(section, Mapping):
+            continue
+        for raw_symbol, payload in section.items():
+            if _symbol_key(raw_symbol) != wanted or not isinstance(payload, Mapping):
+                continue
+            value = _normalize_float(payload.get("net_expectancy_bps"))
+            if value is None:
+                value = _normalize_float(payload.get("expectancy_bps"))
+            return value
+    return None
+
+
+def _high_score_24h_avg_for_symbol(high_score_blocked_rows: list[Mapping[str, Any]] | None, symbol: str) -> Optional[float]:
+    if not high_score_blocked_rows:
+        return None
+    wanted = _symbol_key(symbol)
+    values = [
+        _normalize_float(row.get(f"{HORIZON_PREFIX}24h_net_bps"))
+        for row in high_score_blocked_rows
+        if _symbol_key(row.get("symbol")) == wanted
+    ]
+    usable = [float(value) for value in values if value is not None]
+    return _avg(usable)
+
+
+def build_alt_impulse_shadow_readiness(
+    records: list[Mapping[str, Any]],
+    *,
+    asof_ts_ms: int,
+    high_score_blocked_rows: list[Mapping[str, Any]] | None = None,
+    negative_expectancy_state: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    thresholds = dict(ALT_IMPULSE_READINESS_THRESHOLDS)
+    recent_cutoff_ms = int(asof_ts_ms or 0) - int(thresholds["recent_window_days"]) * 24 * 3600 * 1000
+    symbols = sorted({_symbol_key(row.get("symbol")) for row in records if _symbol_key(row.get("symbol"))})
+    by_symbol: list[dict[str, Any]] = []
+
+    for symbol in symbols:
+        rows = [row for row in records if _symbol_key(row.get("symbol")) == symbol]
+        recent_rows = [
+            row
+            for row in rows
+            if int(_record_entry_ts_ms(row) or 0) >= recent_cutoff_ms
+        ] if int(asof_ts_ms or 0) > 0 else []
+        net_24h = _net_values(rows, 24)
+        net_48h = _net_values(rows, 48)
+        avg_24h = _avg(net_24h)
+        avg_48h = _avg(net_48h)
+        win_24h = _win_rate(net_24h)
+        win_48h = _win_rate(net_48h)
+        blocking: list[str] = []
+
+        if len(rows) < int(thresholds["min_sample_count"]):
+            blocking.append("sample_count_lt_30")
+        if len(recent_rows) < int(thresholds["min_recent_7d_sample_count"]):
+            blocking.append("recent_7d_sample_count_lt_10")
+        if avg_24h is None:
+            blocking.append("avg_24h_not_observable")
+        elif avg_24h <= float(thresholds["min_avg_24h_net_bps"]):
+            blocking.append("avg_24h_net_bps_lte_80")
+        if win_24h is None:
+            blocking.append("win_rate_24h_not_observable")
+        elif win_24h <= float(thresholds["min_win_rate_24h"]):
+            blocking.append("win_rate_24h_lte_0_60")
+        if avg_48h is None:
+            blocking.append("avg_48h_not_observable")
+        elif avg_48h <= float(thresholds["min_avg_48h_net_bps"]):
+            blocking.append("avg_48h_net_bps_lte_50")
+
+        bnb_high_score_avg = None
+        bnb_negexp = None
+        if symbol == "BNB/USDT":
+            bnb_high_score_avg = _high_score_24h_avg_for_symbol(high_score_blocked_rows, symbol)
+            bnb_negexp = _symbol_negative_expectancy_bps(negative_expectancy_state, symbol)
+            if bnb_high_score_avg is None:
+                blocking.append("bnb_high_score_blocked_24h_not_observable")
+            elif bnb_high_score_avg <= 0.0:
+                blocking.append("bnb_high_score_blocked_24h_avg_lte_0")
+            if bnb_negexp is None:
+                blocking.append("bnb_negative_expectancy_not_observable")
+            elif bnb_negexp < 0.0:
+                blocking.append("bnb_negative_expectancy_lt_0")
+
+        by_symbol.append(
+            {
+                "symbol": symbol,
+                "ready_for_live_probe": not blocking,
+                "blocking_reasons": ",".join(blocking),
+                "sample_count": len(rows),
+                "recent_sample_count": len(recent_rows),
+                "avg_24h_net_bps": avg_24h,
+                "avg_48h_net_bps": avg_48h,
+                "win_rate_24h": win_24h,
+                "win_rate_48h": win_48h,
+                "bnb_high_score_blocked_24h_avg_net_bps": bnb_high_score_avg,
+                "bnb_negative_expectancy_bps": bnb_negexp,
+            }
+        )
+
+    overall_24h = _net_values(records, 24)
+    overall_48h = _net_values(records, 48)
+    overall_recent = [
+        row
+        for row in records
+        if int(_record_entry_ts_ms(row) or 0) >= recent_cutoff_ms
+    ] if int(asof_ts_ms or 0) > 0 else []
+    ready_symbols = [row["symbol"] for row in by_symbol if bool(row.get("ready_for_live_probe"))]
+    overall_blocking = [] if ready_symbols else ["no_symbol_ready_for_live_probe"]
+    if len(records) < int(thresholds["min_sample_count"]):
+        overall_blocking.append("overall_sample_count_lt_30")
+    if len(overall_recent) < int(thresholds["min_recent_7d_sample_count"]):
+        overall_blocking.append("overall_recent_7d_sample_count_lt_10")
+
+    summary = {
+        "schema_version": ALT_IMPULSE_READINESS_SCHEMA_VERSION,
+        "generated_ts_utc": _readiness_ts_utc(asof_ts_ms),
+        "ready_for_live_probe": bool(ready_symbols),
+        "ready_symbols": ready_symbols,
+        "blocking_reasons": overall_blocking,
+        "sample_count": len(records),
+        "recent_sample_count": len(overall_recent),
+        "avg_24h_net_bps": _avg(overall_24h),
+        "avg_48h_net_bps": _avg(overall_48h),
+        "win_rate_24h": _win_rate(overall_24h),
+        "win_rate_48h": _win_rate(overall_48h),
+        "thresholds": thresholds,
+        "by_symbol": by_symbol,
+    }
+    return summary, by_symbol
+
+
+def _write_readiness_json(path: Path, payload: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _read_optional_csv_rows(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    try:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            return [dict(row) for row in csv.DictReader(handle)]
+    except (OSError, csv.Error):
+        return []
+
+
 def _alt_global_not_observable_reason(record: Mapping[str, Any], horizons: list[int]) -> str:
     reasons: list[str] = []
     for horizon in horizons:
@@ -559,8 +763,8 @@ def update_alt_impulse_shadow_evaluator(
                     existing[preserve_key] = record.get(preserve_key)
 
     records = list(records_by_key.values())
+    asof_ts_ms = _asof_ts_ms(audit, market_data_1h)
     if records:
-        asof_ts_ms = _asof_ts_ms(audit, market_data_1h)
         if ohlcv_provider is None:
             ohlcv_provider = _default_ohlcv_provider_for_cfg(cfg)
         _update_labels(
@@ -656,6 +860,18 @@ def update_alt_impulse_shadow_evaluator(
             "avg_net_bps",
             "win_rate",
         ],
+    )
+    readiness_summary, readiness_by_symbol = build_alt_impulse_shadow_readiness(
+        records,
+        asof_ts_ms=asof_ts_ms,
+        high_score_blocked_rows=_read_optional_csv_rows(summaries_dir / "high_score_blocked_outcomes.csv"),
+        negative_expectancy_state=getattr(audit, "negative_expectancy_state", None),
+    )
+    _write_readiness_json(summaries_dir / "alt_impulse_shadow_readiness.json", readiness_summary)
+    _write_csv(
+        summaries_dir / "alt_impulse_shadow_readiness_by_symbol.csv",
+        readiness_by_symbol,
+        ALT_IMPULSE_READINESS_FIELDS,
     )
     return {
         "enabled": True,

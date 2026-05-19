@@ -7,7 +7,10 @@ from pathlib import Path
 
 from configs.schema import AppConfig
 from src.core.models import MarketSeries
-from src.reporting.alt_impulse_shadow import update_alt_impulse_shadow_evaluator
+from src.reporting.alt_impulse_shadow import (
+    build_alt_impulse_shadow_readiness,
+    update_alt_impulse_shadow_evaluator,
+)
 from src.reporting.decision_audit import DecisionAudit
 
 
@@ -325,6 +328,70 @@ def test_alt_impulse_shadow_splits_outcomes_by_regime(tmp_path: Path) -> None:
     assert {row["risk_level"] for row in outcomes} == {"PROTECT"}
     assert {row["broad_market_positive_count"] for row in outcomes} == {"3"}
     assert {row["volatility_bucket"] for row in outcomes} == {"medium", "high"}
+
+    readiness_path = tmp_path / "reports" / "summaries" / "alt_impulse_shadow_readiness.json"
+    readiness = json.loads(readiness_path.read_text(encoding="utf-8"))
+    assert readiness["ready_for_live_probe"] is False
+    assert "no_symbol_ready_for_live_probe" in readiness["blocking_reasons"]
+    readiness_by_symbol_path = tmp_path / "reports" / "summaries" / "alt_impulse_shadow_readiness_by_symbol.csv"
+    with readiness_by_symbol_path.open("r", encoding="utf-8") as handle:
+        readiness_by_symbol = {row["symbol"]: row for row in csv.DictReader(handle)}
+    assert readiness_by_symbol["ETH/USDT"]["ready_for_live_probe"] == "False"
+    assert "sample_count_lt_30" in readiness_by_symbol["ETH/USDT"]["blocking_reasons"]
+
+
+def test_alt_impulse_shadow_readiness_requires_symbol_level_sample_and_quality() -> None:
+    asof_ts_ms = _ts_ms("2026-05-20T00:00:00Z")
+    base_ts_ms = _ts_ms("2026-05-18T00:00:00Z")
+    records = [
+        {
+            "symbol": "SOL/USDT",
+            "entry_ts_ms": base_ts_ms + i * 3600 * 1000,
+            "label_24h_net_bps": 100.0,
+            "label_48h_net_bps": 60.0,
+        }
+        for i in range(30)
+    ]
+
+    summary, by_symbol = build_alt_impulse_shadow_readiness(records, asof_ts_ms=asof_ts_ms)
+
+    sol = by_symbol[0]
+    assert summary["ready_for_live_probe"] is True
+    assert summary["ready_symbols"] == ["SOL/USDT"]
+    assert sol["ready_for_live_probe"] is True
+    assert sol["blocking_reasons"] == ""
+    assert sol["sample_count"] == 30
+    assert sol["recent_sample_count"] == 30
+    assert sol["avg_24h_net_bps"] == 100.0
+    assert sol["avg_48h_net_bps"] == 60.0
+    assert sol["win_rate_24h"] == 1.0
+
+
+def test_alt_impulse_shadow_readiness_applies_bnb_extra_guards() -> None:
+    asof_ts_ms = _ts_ms("2026-05-20T00:00:00Z")
+    base_ts_ms = _ts_ms("2026-05-18T00:00:00Z")
+    records = [
+        {
+            "symbol": "BNB/USDT",
+            "entry_ts_ms": base_ts_ms + i * 3600 * 1000,
+            "label_24h_net_bps": 100.0,
+            "label_48h_net_bps": 60.0,
+        }
+        for i in range(30)
+    ]
+
+    summary, by_symbol = build_alt_impulse_shadow_readiness(
+        records,
+        asof_ts_ms=asof_ts_ms,
+        high_score_blocked_rows=[{"symbol": "BNB/USDT", "label_24h_net_bps": -10.0}],
+        negative_expectancy_state={"stats": {"BNB/USDT": {"net_expectancy_bps": -1.0}}},
+    )
+
+    bnb = by_symbol[0]
+    assert summary["ready_for_live_probe"] is False
+    assert bnb["ready_for_live_probe"] is False
+    assert "bnb_high_score_blocked_24h_avg_lte_0" in bnb["blocking_reasons"]
+    assert "bnb_negative_expectancy_lt_0" in bnb["blocking_reasons"]
 
 
 def test_alt_impulse_shadow_missing_entry_keeps_global_reason_when_all_not_observable(tmp_path: Path) -> None:

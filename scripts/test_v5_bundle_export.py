@@ -3205,6 +3205,8 @@ def main():
                 by_reason = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_outcomes_by_reason.csv")).read().decode().splitlines()))
                 by_horizon = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_outcomes_by_horizon.csv")).read().decode().splitlines()))
                 by_regime = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_by_regime.csv")).read().decode().splitlines()))
+                readiness = json.loads(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_readiness.json")).read().decode())
+                readiness_by_symbol = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_readiness_by_symbol.csv")).read().decode().splitlines()))
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
             assert len(outcomes) == 2, outcomes
@@ -3225,13 +3227,20 @@ def main():
             assert any(row["skip_reason"] == "protect_entry_no_alpha6_confirmation" for row in by_reason), by_reason
             assert any(row["horizon_hours"] == "48" for row in by_horizon), by_horizon
             assert any(row["regime_state"] == "Trending" and row["alpha_discovery_board_status"] == "REGIME_SHADOW" for row in by_regime), by_regime
+            assert readiness["ready_for_live_probe"] is False, readiness
+            assert "no_symbol_ready_for_live_probe" in readiness["blocking_reasons"], readiness
+            readiness_by_symbol_map = {row["symbol"]: row for row in readiness_by_symbol}
+            assert "sample_count_lt_30" in readiness_by_symbol_map["ETH/USDT"]["blocking_reasons"], readiness_by_symbol
             assert window["alt_impulse_shadow_label_count"] == 2, window
+            assert window["alt_impulse_shadow_ready_for_live_probe"] is False, window
             assert "## ALT impulse shadow" in readme, readme
+            assert "## ALT impulse readiness" in readme, readme
             assert "ETH/USDT: count=1, 4h_avg=70.0" in readme, readme
             assert "SOL/USDT: count=1, 4h_avg=not_observable" in readme, readme
             assert "BNB/USDT: count=0" in readme, readme
             assert "by_regime:" in readme, readme
             assert "是否支持未来 live probe: REGIME_SHADOW_no_live_or_paper_ready" in readme, readme
+            assert "ready_for_live_probe: no" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
