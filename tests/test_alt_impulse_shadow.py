@@ -59,15 +59,15 @@ def _cfg() -> AppConfig:
     return cfg
 
 
-def _audit(run_id: str, entry_ts_ms: int, explain: list[dict]) -> DecisionAudit:
+def _audit(run_id: str, entry_ts_ms: int, explain: list[dict], *, regime: str = "Trending") -> DecisionAudit:
     audit = DecisionAudit(run_id=run_id)
     audit.now_ts = entry_ts_ms // 1000
-    audit.regime = "Trending"
+    audit.regime = regime
     audit.target_execution_explain = explain
     return audit
 
 
-def _eth_trend_only_explain() -> list[dict]:
+def _eth_trend_only_explain(*, regime: str = "Trending", volatility_bucket: str = "medium") -> list[dict]:
     return [
         {
             "symbol": "ETH/USDT",
@@ -80,9 +80,9 @@ def _eth_trend_only_explain() -> list[dict]:
             "router_action": "skip",
             "router_reason": "protect_entry_trend_only",
             "current_level": "PROTECT",
-            "regime": "Trending",
+            "regime": regime,
             "funding_state": "neutral",
-            "volatility_bucket": "medium",
+            "volatility_bucket": volatility_bucket,
         }
     ]
 
@@ -123,6 +123,10 @@ def test_alt_impulse_shadow_writes_eth_label_when_btc_4h_positive(tmp_path: Path
     assert row["risk_level"] == "PROTECT"
     assert row["funding_state"] == "neutral"
     assert row["volatility_bucket"] == "medium"
+    assert row["shadow_decision"] == "REGIME_SHADOW"
+    assert row["alpha_discovery_board_status"] == "REGIME_SHADOW"
+    assert row["paper_ready_allowed"] is False
+    assert row["live_ready_allowed"] is False
     assert row["label_status"] == "pending"
 
 
@@ -243,6 +247,84 @@ def test_alt_impulse_shadow_matures_forward_labels(tmp_path: Path) -> None:
         }
     assert by_symbol_regime_horizon[("ETH/USDT", "Trending", "48")]["avg_net_bps"] == "470.0"
     assert by_symbol_regime_horizon[("ETH/USDT", "Trending", "48")]["complete_count"] == "1"
+    assert by_symbol_regime_horizon[("ETH/USDT", "Trending", "48")]["shadow_decision"] == "REGIME_SHADOW"
+
+
+def test_alt_impulse_shadow_splits_outcomes_by_regime(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "data" / "cache"
+    cfg = _cfg()
+    cfg.diagnostics.extended_label_horizons_hours = [24]
+
+    trending_ts_ms = _ts_ms("2026-04-21T14:00:00Z")
+    sideways_ts_ms = _ts_ms("2026-04-23T14:00:00Z")
+
+    update_alt_impulse_shadow_evaluator(
+        run_dir=tmp_path / "reports" / "runs" / "r_trending",
+        audit=_audit("r_trending", trending_ts_ms, _eth_trend_only_explain(regime="Trending"), regime="Trending"),
+        market_data_1h={
+            "BTC/USDT": _series("BTC/USDT", [trending_ts_ms - 4 * 3600 * 1000, trending_ts_ms], [100.0, 101.0]),
+            "ETH/USDT": _series("ETH/USDT", [trending_ts_ms - 4 * 3600 * 1000, trending_ts_ms], [98.0, 100.0]),
+            "SOL/USDT": _series("SOL/USDT", [trending_ts_ms - 4 * 3600 * 1000, trending_ts_ms], [50.0, 51.0]),
+        },
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=cache_dir,
+        ohlcv_provider=None,
+    )
+    update_alt_impulse_shadow_evaluator(
+        run_dir=tmp_path / "reports" / "runs" / "r_sideways",
+        audit=_audit("r_sideways", sideways_ts_ms, _eth_trend_only_explain(regime="Sideways", volatility_bucket="high"), regime="Sideways"),
+        market_data_1h={
+            "BTC/USDT": _series("BTC/USDT", [sideways_ts_ms - 4 * 3600 * 1000, sideways_ts_ms], [101.0, 102.0]),
+            "ETH/USDT": _series("ETH/USDT", [sideways_ts_ms - 4 * 3600 * 1000, sideways_ts_ms], [196.0, 200.0]),
+            "SOL/USDT": _series("SOL/USDT", [sideways_ts_ms - 4 * 3600 * 1000, sideways_ts_ms], [51.0, 52.0]),
+        },
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=cache_dir,
+        ohlcv_provider=None,
+    )
+
+    _write_cache_csv(
+        cache_dir,
+        "ETH/USDT",
+        [
+            ("2026-04-21T14:00:00Z", 100.0),
+            ("2026-04-22T14:00:00Z", 102.0),
+            ("2026-04-23T14:00:00Z", 200.0),
+            ("2026-04-24T14:00:00Z", 198.0),
+        ],
+    )
+    result = update_alt_impulse_shadow_evaluator(
+        run_dir=tmp_path / "reports" / "runs" / "r_mature",
+        audit=_audit("r_mature", sideways_ts_ms + 30 * 3600 * 1000, [], regime="Sideways"),
+        market_data_1h={},
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=cache_dir,
+        ohlcv_provider=None,
+    )
+
+    assert result["total_records"] == 2
+    by_regime_path = tmp_path / "reports" / "summaries" / "alt_impulse_shadow_by_regime.csv"
+    with by_regime_path.open("r", encoding="utf-8") as handle:
+        by_regime = {row["regime_state"]: row for row in csv.DictReader(handle)}
+    assert by_regime["Trending"]["avg_24h_net_bps"] == "170.0"
+    assert by_regime["Trending"]["win_rate_24h"] == "1.0"
+    assert by_regime["Sideways"]["avg_24h_net_bps"] == "-130.0"
+    assert by_regime["Sideways"]["win_rate_24h"] == "0.0"
+    assert {row["shadow_decision"] for row in by_regime.values()} == {"REGIME_SHADOW"}
+    assert {row["alpha_discovery_board_status"] for row in by_regime.values()} == {"REGIME_SHADOW"}
+    assert {row["paper_ready_allowed"] for row in by_regime.values()} == {"False"}
+    assert {row["live_ready_allowed"] for row in by_regime.values()} == {"False"}
+
+    outcomes_path = tmp_path / "reports" / "summaries" / "alt_impulse_shadow_outcomes.csv"
+    with outcomes_path.open("r", encoding="utf-8") as handle:
+        outcomes = list(csv.DictReader(handle))
+    assert {row["btc_trend_state"] for row in outcomes} == {"positive_4h"}
+    assert {row["risk_level"] for row in outcomes} == {"PROTECT"}
+    assert {row["broad_market_positive_count"] for row in outcomes} == {"3"}
+    assert {row["volatility_bucket"] for row in outcomes} == {"medium", "high"}
 
 
 def test_alt_impulse_shadow_missing_entry_keeps_global_reason_when_all_not_observable(tmp_path: Path) -> None:

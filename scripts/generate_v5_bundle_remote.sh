@@ -3965,11 +3965,42 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 return preferred
         return first_observed(*reasons) if reasons else ""
 
+    def alt_impulse_shadow_decision_for_row(row):
+        explicit = flatten_value(first_value(row, ("shadow_decision", "alpha_discovery_board_status"), "")).strip().upper()
+        if explicit in {"REGIME_SHADOW", "KEEP_SHADOW"}:
+            return explicit
+        complete_count = as_float(first_value(row, ("complete_count",), not_obs))
+        if complete_count is not None:
+            return "REGIME_SHADOW" if complete_count > 0 else "KEEP_SHADOW"
+        label_status = flatten_value(first_value(row, ("label_status",), "")).strip().lower()
+        if label_status == "complete":
+            return "REGIME_SHADOW"
+        if label_status in {"pending", "not_observable", "heartbeat"}:
+            return "KEEP_SHADOW"
+        has_observable_avg = any(as_float(first_value(row, (f"avg_{int(h)}h_net_bps",), not_obs)) is not None for h in label_horizons)
+        if has_observable_avg:
+            return "REGIME_SHADOW"
+        return "KEEP_SHADOW"
+
+    def decorate_alt_impulse_shadow_status(row):
+        row = dict(row)
+        decision = alt_impulse_shadow_decision_for_row(row)
+        row["shadow_decision"] = decision
+        row["alpha_discovery_board_status"] = decision
+        row["paper_ready_allowed"] = "false"
+        row["live_ready_allowed"] = "false"
+        row["shadow_decision_reason"] = "alt_impulse_regime_dependent_shadow_only"
+        return row
+
+    def decorate_alt_impulse_shadow_rows(rows):
+        return [decorate_alt_impulse_shadow_status(row) for row in rows]
+
     def build_alt_impulse_shadow_row(row):
         out = {
             field: first_observed(first_value(row, (field,), not_obs))
             for field in alt_impulse_shadow_fields
         }
+        out = decorate_alt_impulse_shadow_status(out)
         if out.get("regime_state") in (None, "", not_obs):
             out["regime_state"] = first_observed(first_value(row, ("regime",), not_obs))
         if out.get("risk_level") in (None, "", not_obs):
@@ -4240,6 +4271,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "risk_level",
         "funding_state",
         "volatility_bucket",
+        "shadow_decision",
+        "alpha_discovery_board_status",
+        "paper_ready_allowed",
+        "live_ready_allowed",
+        "shadow_decision_reason",
         "rt_cost_bps",
         *label_horizon_fields(label_horizons),
         *future_price_debug_fields(label_horizons),
@@ -4294,24 +4330,24 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "missing_future_px_count": alt_impulse_shadow_missing_future_px_count,
             },
         )
-    alt_impulse_shadow_by_symbol = aggregate_high_score_outcomes(
+    alt_impulse_shadow_by_symbol = decorate_alt_impulse_shadow_rows(aggregate_high_score_outcomes(
         alt_impulse_shadow_rows,
         ["symbol", "skip_reason"],
-    )
-    alt_impulse_shadow_by_reason = aggregate_high_score_outcomes(
+    ))
+    alt_impulse_shadow_by_reason = decorate_alt_impulse_shadow_rows(aggregate_high_score_outcomes(
         alt_impulse_shadow_rows,
         ["skip_reason"],
-    )
-    alt_impulse_shadow_by_regime = aggregate_high_score_outcomes(
+    ))
+    alt_impulse_shadow_by_regime = decorate_alt_impulse_shadow_rows(aggregate_high_score_outcomes(
         alt_impulse_shadow_rows,
         ["regime_state"],
-    )
-    alt_impulse_shadow_by_symbol_regime_horizon = aggregate_rows_by_symbol_regime_horizon(
+    ))
+    alt_impulse_shadow_by_symbol_regime_horizon = decorate_alt_impulse_shadow_rows(aggregate_rows_by_symbol_regime_horizon(
         alt_impulse_shadow_rows,
         label_horizons,
-    )
+    ))
     high_score_blocked_outcomes_by_horizon = aggregate_rows_by_horizon(high_score_blocked_outcome_rows, label_horizons)
-    alt_impulse_shadow_by_horizon = aggregate_rows_by_horizon(alt_impulse_shadow_rows, label_horizons)
+    alt_impulse_shadow_by_horizon = decorate_alt_impulse_shadow_rows(aggregate_rows_by_horizon(alt_impulse_shadow_rows, label_horizons))
     skipped_candidate_outcomes_by_horizon = aggregate_rows_by_horizon(outcome_rows, label_horizons)
     skipped_candidate_outcomes_by_symbol = aggregate_high_score_outcomes(outcome_rows, ["symbol", "skip_reason"])
     skipped_candidate_outcomes_by_reason = aggregate_high_score_outcomes(outcome_rows, ["skip_reason"])
@@ -7321,27 +7357,27 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     write_csv(
         "summaries/alt_impulse_shadow_outcomes_by_symbol.csv",
         alt_impulse_shadow_by_symbol,
-        ["symbol", "skip_reason", "count", *[f"avg_{int(h)}h_net_bps" for h in label_horizons], *[f"win_rate_{int(h)}h" for h in label_horizons]],
+        ["symbol", "skip_reason", "shadow_decision", "alpha_discovery_board_status", "paper_ready_allowed", "live_ready_allowed", "shadow_decision_reason", "count", *[f"avg_{int(h)}h_net_bps" for h in label_horizons], *[f"win_rate_{int(h)}h" for h in label_horizons]],
     )
     write_csv(
         "summaries/alt_impulse_shadow_outcomes_by_reason.csv",
         alt_impulse_shadow_by_reason,
-        ["skip_reason", "count", *[f"avg_{int(h)}h_net_bps" for h in label_horizons], *[f"win_rate_{int(h)}h" for h in label_horizons]],
+        ["skip_reason", "shadow_decision", "alpha_discovery_board_status", "paper_ready_allowed", "live_ready_allowed", "shadow_decision_reason", "count", *[f"avg_{int(h)}h_net_bps" for h in label_horizons], *[f"win_rate_{int(h)}h" for h in label_horizons]],
     )
     write_csv(
         "summaries/alt_impulse_shadow_outcomes_by_horizon.csv",
         alt_impulse_shadow_by_horizon,
-        ["horizon_hours", "count", "pending_count", "not_observable_count", "complete_count", "avg_net_bps", "win_rate"],
+        ["horizon_hours", "shadow_decision", "alpha_discovery_board_status", "paper_ready_allowed", "live_ready_allowed", "shadow_decision_reason", "count", "pending_count", "not_observable_count", "complete_count", "avg_net_bps", "win_rate"],
     )
     write_csv(
         "summaries/alt_impulse_shadow_by_regime.csv",
         alt_impulse_shadow_by_regime,
-        ["regime_state", "count", *[f"avg_{int(h)}h_net_bps" for h in label_horizons], *[f"win_rate_{int(h)}h" for h in label_horizons]],
+        ["regime_state", "shadow_decision", "alpha_discovery_board_status", "paper_ready_allowed", "live_ready_allowed", "shadow_decision_reason", "count", *[f"avg_{int(h)}h_net_bps" for h in label_horizons], *[f"win_rate_{int(h)}h" for h in label_horizons]],
     )
     write_csv(
         "summaries/alt_impulse_shadow_by_symbol_regime_horizon.csv",
         alt_impulse_shadow_by_symbol_regime_horizon,
-        ["symbol", "regime_state", "horizon_hours", "count", "pending_count", "not_observable_count", "complete_count", "avg_net_bps", "win_rate"],
+        ["symbol", "regime_state", "horizon_hours", "shadow_decision", "alpha_discovery_board_status", "paper_ready_allowed", "live_ready_allowed", "shadow_decision_reason", "count", "pending_count", "not_observable_count", "complete_count", "avg_net_bps", "win_rate"],
     )
     multi_position_swing_fields = [
         "ts_utc",
@@ -8109,9 +8145,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         return f"{symbol}: count={len(rows)}, " + horizon_avg_win_text(rows)
 
     alt_impulse_future_probe_text = (
-        "diagnostic_only_review_required"
+        "REGIME_SHADOW_no_live_or_paper_ready"
         if any(row.get("label_status") == "complete" for row in alt_impulse_shadow_rows)
-        else ("not_observable_no_matured_labels" if alt_impulse_shadow_rows else "not_applicable_no_shadow_samples")
+        else ("KEEP_SHADOW_no_live_or_paper_ready" if alt_impulse_shadow_rows else "not_applicable_no_shadow_samples")
     )
 
     def multi_position_by_k_row(k, shadow_mode=MULTI_SHADOW_MODE_ALL):
@@ -8496,6 +8532,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- {alt_impulse_symbol_line('SOL/USDT')}",
         f"- {alt_impulse_symbol_line('BNB/USDT')}",
         f"- by_skip_reason: {aggregate_summary_lines(alt_impulse_shadow_by_reason, ['skip_reason'])}",
+        f"- by_regime: {aggregate_summary_lines(alt_impulse_shadow_by_regime, ['regime_state'])}",
         f"- by_horizon: {by_horizon_summary_lines(alt_impulse_shadow_by_horizon)}",
         f"- 是否支持未来 live probe: {alt_impulse_future_probe_text}",
         "",

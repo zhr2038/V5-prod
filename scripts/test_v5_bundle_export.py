@@ -3204,6 +3204,7 @@ def main():
                 by_symbol = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_outcomes_by_symbol.csv")).read().decode().splitlines()))
                 by_reason = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_outcomes_by_reason.csv")).read().decode().splitlines()))
                 by_horizon = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_outcomes_by_horizon.csv")).read().decode().splitlines()))
+                by_regime = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_by_regime.csv")).read().decode().splitlines()))
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
             assert len(outcomes) == 2, outcomes
@@ -3211,19 +3212,26 @@ def main():
             assert eth["label_4h_net_bps"] == "70.0", outcomes
             assert eth["label_status"] == "complete", outcomes
             assert eth["label_not_observable_reason"] == "", outcomes
+            assert eth["shadow_decision"] == "REGIME_SHADOW", outcomes
+            assert eth["alpha_discovery_board_status"] == "REGIME_SHADOW", outcomes
+            assert eth["paper_ready_allowed"] == "false", outcomes
+            assert eth["live_ready_allowed"] == "false", outcomes
             sol = next(row for row in outcomes if row["symbol"] == "SOL/USDT")
             assert sol["label_status"] == "pending", outcomes
             by_symbol_map = {(row["symbol"], row["skip_reason"]): row for row in by_symbol}
             assert by_symbol_map[("ETH/USDT", "protect_entry_trend_only")]["avg_4h_net_bps"] == "70.0", by_symbol
             assert by_symbol_map[("ETH/USDT", "protect_entry_trend_only")]["win_rate_4h"] == "1.0", by_symbol
+            assert by_symbol_map[("ETH/USDT", "protect_entry_trend_only")]["alpha_discovery_board_status"] == "REGIME_SHADOW", by_symbol
             assert any(row["skip_reason"] == "protect_entry_no_alpha6_confirmation" for row in by_reason), by_reason
             assert any(row["horizon_hours"] == "48" for row in by_horizon), by_horizon
+            assert any(row["regime_state"] == "Trending" and row["alpha_discovery_board_status"] == "REGIME_SHADOW" for row in by_regime), by_regime
             assert window["alt_impulse_shadow_label_count"] == 2, window
             assert "## ALT impulse shadow" in readme, readme
             assert "ETH/USDT: count=1, 4h_avg=70.0" in readme, readme
             assert "SOL/USDT: count=1, 4h_avg=not_observable" in readme, readme
             assert "BNB/USDT: count=0" in readme, readme
-            assert "是否支持未来 live probe: diagnostic_only_review_required" in readme, readme
+            assert "by_regime:" in readme, readme
+            assert "是否支持未来 live probe: REGIME_SHADOW_no_live_or_paper_ready" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

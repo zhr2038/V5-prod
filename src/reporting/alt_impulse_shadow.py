@@ -36,6 +36,14 @@ ALT_IMPULSE_SHADOW_REASONS = {
     "protect_entry_no_alpha6_confirmation",
     "protect_entry_alpha6_score_too_low",
 }
+ALT_IMPULSE_SHADOW_DECISION_REASON = "alt_impulse_regime_dependent_shadow_only"
+ALT_IMPULSE_SHADOW_STATUS_FIELDS = [
+    "shadow_decision",
+    "alpha_discovery_board_status",
+    "paper_ready_allowed",
+    "live_ready_allowed",
+    "shadow_decision_reason",
+]
 
 
 def _diagnostics_cfg(cfg: Any) -> DiagnosticsConfig:
@@ -324,6 +332,11 @@ def _collect_shadow_candidates(
             "risk_level": risk_level,
             "funding_state": funding_state,
             "volatility_bucket": volatility_bucket,
+            "shadow_decision": "REGIME_SHADOW",
+            "alpha_discovery_board_status": "REGIME_SHADOW",
+            "paper_ready_allowed": False,
+            "live_ready_allowed": False,
+            "shadow_decision_reason": ALT_IMPULSE_SHADOW_DECISION_REASON,
             "rt_cost_bps": rt_cost_bps,
             "label_status": "pending",
         }
@@ -371,11 +384,36 @@ def _summary_fields(horizons: list[int]) -> list[str]:
         "risk_level",
         "funding_state",
         "volatility_bucket",
+        *ALT_IMPULSE_SHADOW_STATUS_FIELDS,
         "rt_cost_bps",
         *horizon_fields,
         "label_status",
         "label_not_observable_reason",
     ]
+
+
+def _summary_shadow_decision(row: Mapping[str, Any]) -> str:
+    try:
+        complete_count = int(float(row.get("complete_count") or 0))
+    except Exception:
+        complete_count = 0
+    return "REGIME_SHADOW" if complete_count > 0 else "KEEP_SHADOW"
+
+
+def _with_shadow_status(row: dict[str, Any], *, decision: str | None = None) -> dict[str, Any]:
+    normalized = str(decision or row.get("shadow_decision") or "").strip().upper()
+    if normalized not in {"REGIME_SHADOW", "KEEP_SHADOW"}:
+        normalized = _summary_shadow_decision(row)
+    row["shadow_decision"] = normalized
+    row["alpha_discovery_board_status"] = normalized
+    row["paper_ready_allowed"] = False
+    row["live_ready_allowed"] = False
+    row["shadow_decision_reason"] = ALT_IMPULSE_SHADOW_DECISION_REASON
+    return row
+
+
+def _with_shadow_status_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [_with_shadow_status(dict(row)) for row in rows]
 
 
 def _alt_global_not_observable_reason(record: Mapping[str, Any], horizons: list[int]) -> str:
@@ -451,7 +489,7 @@ def _aggregate_records_by_symbol_regime_horizon(
             payload = dict(horizon_row)
             payload["symbol"] = symbol
             payload["regime_state"] = regime_state
-            out.append(payload)
+            out.append(_with_shadow_status(payload))
     return out
 
 
@@ -510,6 +548,11 @@ def update_alt_impulse_shadow_evaluator(
                 "risk_level",
                 "funding_state",
                 "volatility_bucket",
+                "shadow_decision",
+                "alpha_discovery_board_status",
+                "paper_ready_allowed",
+                "live_ready_allowed",
+                "shadow_decision_reason",
                 "rt_cost_bps",
             ):
                 if existing.get(preserve_key) in (None, "") and record.get(preserve_key) not in (None, ""):
@@ -530,6 +573,7 @@ def update_alt_impulse_shadow_evaluator(
         )
         for record in records:
             _normalize_label_status_reason(record, horizons)
+            _with_shadow_status(record, decision="REGIME_SHADOW")
         records.sort(key=lambda row: (_record_entry_ts_ms(row), str(row.get("run_id") or ""), str(row.get("symbol") or ""), str(row.get("skip_reason") or "")))
         _write_records(labels_path, records)
 
@@ -542,10 +586,11 @@ def update_alt_impulse_shadow_evaluator(
     _write_csv(summaries_dir / "alt_impulse_shadow_outcomes.csv", csv_rows, fields)
     _write_csv(
         summaries_dir / "alt_impulse_shadow_outcomes_by_symbol.csv",
-        _aggregate_records_by_fields(records, key_fields=["symbol", "skip_reason"], horizons=horizons),
+        _with_shadow_status_rows(_aggregate_records_by_fields(records, key_fields=["symbol", "skip_reason"], horizons=horizons)),
         [
             "symbol",
             "skip_reason",
+            *ALT_IMPULSE_SHADOW_STATUS_FIELDS,
             "count",
             "pending_count",
             "not_observable_count",
@@ -556,9 +601,10 @@ def update_alt_impulse_shadow_evaluator(
     )
     _write_csv(
         summaries_dir / "alt_impulse_shadow_outcomes_by_reason.csv",
-        _aggregate_records_by_fields(records, key_fields=["skip_reason"], horizons=horizons),
+        _with_shadow_status_rows(_aggregate_records_by_fields(records, key_fields=["skip_reason"], horizons=horizons)),
         [
             "skip_reason",
+            *ALT_IMPULSE_SHADOW_STATUS_FIELDS,
             "count",
             "pending_count",
             "not_observable_count",
@@ -569,9 +615,10 @@ def update_alt_impulse_shadow_evaluator(
     )
     _write_csv(
         summaries_dir / "alt_impulse_shadow_by_regime.csv",
-        _aggregate_records_by_fields(records, key_fields=["regime_state"], horizons=horizons),
+        _with_shadow_status_rows(_aggregate_records_by_fields(records, key_fields=["regime_state"], horizons=horizons)),
         [
             "regime_state",
+            *ALT_IMPULSE_SHADOW_STATUS_FIELDS,
             "count",
             "pending_count",
             "not_observable_count",
@@ -587,6 +634,7 @@ def update_alt_impulse_shadow_evaluator(
             "symbol",
             "regime_state",
             "horizon_hours",
+            *ALT_IMPULSE_SHADOW_STATUS_FIELDS,
             "count",
             "pending_count",
             "not_observable_count",
@@ -597,9 +645,10 @@ def update_alt_impulse_shadow_evaluator(
     )
     _write_csv(
         summaries_dir / "alt_impulse_shadow_outcomes_by_horizon.csv",
-        _aggregate_records_by_horizon(records, horizons=horizons),
+        _with_shadow_status_rows(_aggregate_records_by_horizon(records, horizons=horizons)),
         [
             "horizon_hours",
+            *ALT_IMPULSE_SHADOW_STATUS_FIELDS,
             "count",
             "pending_count",
             "not_observable_count",
