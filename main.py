@@ -1898,7 +1898,20 @@ def _candidate_snapshot_symbol_cost_row(
     notional_usdt: float,
 ) -> dict[str, Any]:
     raw = dict(getattr(estimate, "raw_response", {}) or {})
+    one_way_all_in = _first_present(
+        raw.get("one_way_all_in_cost_bps"),
+        raw.get("one_way_cost_bps"),
+        raw.get("all_in_one_way_cost_bps"),
+        getattr(estimate, "one_way_all_in_cost_bps", None),
+    )
+    roundtrip_all_in = _first_present(
+        raw.get("roundtrip_all_in_cost_bps"),
+        raw.get("roundtrip_cost_bps"),
+        raw.get("all_in_roundtrip_cost_bps"),
+        getattr(estimate, "roundtrip_all_in_cost_bps", None),
+    )
     total_cost = _first_present(
+        roundtrip_all_in,
         raw.get("effective_total_cost_bps"),
         raw.get("selected_total_cost_bps"),
         raw.get("total_cost_bps"),
@@ -1915,9 +1928,15 @@ def _candidate_snapshot_symbol_cost_row(
     row["cost_source"] = source
     row.setdefault("source", source)
     row["effective_total_cost_bps"] = total_cost
+    row.setdefault("one_way_all_in_cost_bps", one_way_all_in)
+    row.setdefault("roundtrip_all_in_cost_bps", roundtrip_all_in)
+    row.setdefault("selected_entry_gate_cost_bps", total_cost)
     row.setdefault("selected_total_cost_bps", total_cost)
     row.setdefault("total_cost_bps", total_cost)
     row.setdefault("cost_bps", total_cost)
+    row.setdefault("cost_quality", getattr(estimate, "cost_quality", None))
+    row.setdefault("cost_trusted_for_paper", getattr(estimate, "cost_trusted_for_paper", None))
+    row.setdefault("cost_trusted_for_live", getattr(estimate, "cost_trusted_for_live", None))
     row.setdefault("fee_bps", getattr(estimate, "fee_bps", None))
     row.setdefault("slippage_bps", getattr(estimate, "slippage_bps", None))
     row.setdefault("spread_bps", getattr(estimate, "spread_bps", None))

@@ -36,6 +36,56 @@ def test_cost_gate_filters_low_edge() -> None:
     assert result.filtered is True
 
 
+def test_cost_gate_uses_roundtrip_all_in_cost_with_local_floor() -> None:
+    cfg = AppConfig()
+    cfg.execution.cost_aware_roundtrip_cost_bps = 30
+    order = Order("BTC/USDT", "buy", "OPEN_LONG", 100.0, 100.0, {"expected_edge_bps": 60.0})
+    estimate = CostEstimate.from_payload(
+        {
+            "symbol": "BTC-USDT",
+            "regime": "normal",
+            "one_way_all_in_cost_bps": 12,
+            "roundtrip_all_in_cost_bps": 24,
+            "source": "public_spread_proxy",
+            "cost_quality": "proxy",
+            "cost_trusted_for_paper": True,
+            "cost_trusted_for_live": False,
+        }
+    )
+
+    result = apply_quant_lab_cost_gate(order, estimate, cfg)
+
+    assert result.one_way_all_in_cost_bps == 12.0
+    assert result.roundtrip_all_in_cost_bps == 24.0
+    assert result.selected_entry_gate_cost_bps == 30.0
+    assert result.effective_total_cost_bps == 30.0
+    assert result.min_required_edge_bps == 45.0
+    assert result.cost_quality == "proxy"
+    assert result.cost_trusted_for_paper is True
+    assert result.cost_trusted_for_live is False
+
+
+def test_cost_gate_uses_higher_roundtrip_all_in_cost_over_local_floor() -> None:
+    cfg = AppConfig()
+    cfg.execution.cost_aware_roundtrip_cost_bps = 30
+    order = Order("BTC/USDT", "buy", "OPEN_LONG", 100.0, 100.0, {"expected_edge_bps": 80.0})
+    estimate = CostEstimate.from_payload(
+        {
+            "symbol": "BTC-USDT",
+            "regime": "normal",
+            "roundtrip_all_in_cost_bps": 45,
+            "source": "mixed_actual_proxy",
+        }
+    )
+
+    result = apply_quant_lab_cost_gate(order, estimate, cfg)
+
+    assert result.roundtrip_all_in_cost_bps == 45.0
+    assert result.selected_entry_gate_cost_bps == 45.0
+    assert result.effective_total_cost_bps == 45.0
+    assert result.min_required_edge_bps == 67.5
+
+
 def test_cost_gate_allows_high_edge_and_missing_edge() -> None:
     cfg = _cfg()
     estimate = CostEstimate(symbol="BTC-USDT", regime="normal", total_cost_bps=5.0, source="public_spread_proxy")

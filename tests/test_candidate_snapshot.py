@@ -113,6 +113,7 @@ def test_candidate_snapshot_builds_symbol_rows_and_stable_ids(tmp_path: Path) ->
     assert bnb["required_edge_bps"] == 45.0
     assert bnb["cost_bps"] == 30.0
     assert bnb["selected_total_cost_bps"] == 28.0
+    assert bnb["selected_entry_gate_cost_bps"] == 30.0
     assert bnb["cost_source"] == "public_spread_proxy"
     assert bnb["cost_source_quality"] == "public_proxy"
     assert bnb["cost_model_version"] == "cost_v2"
@@ -129,6 +130,7 @@ def test_candidate_snapshot_builds_symbol_rows_and_stable_ids(tmp_path: Path) ->
     assert sol["cost_source_quality"] == "local_estimate"
     assert sol["cost_bps"] == 30.0
     assert sol["selected_total_cost_bps"] == 30.0
+    assert sol["selected_entry_gate_cost_bps"] == 30.0
     assert sol["required_edge_bps"] == 45.0
     assert sol["expected_edge_bps"] == (0.83 - 0.18) / 0.003
     assert sol["expected_edge_source"] == "score_proxy"
@@ -197,9 +199,75 @@ def test_candidate_snapshot_uses_quant_lab_cost_estimates_for_blocked_candidate(
     assert btc["cost_model_version"] == "cost_v2"
     assert btc["expected_edge_bps"] == 40.0
     assert btc["expected_edge_source"] == "quant_lab.expected_edge_bps"
-    assert btc["required_edge_bps"] == 27.75
+    assert btc["selected_entry_gate_cost_bps"] == 30.0
+    assert btc["required_edge_bps"] == 45.0
     assert btc["cost_gate_verified"] is True
-    assert btc["would_block_by_cost"] is False
+    assert btc["would_block_by_cost"] is True
+
+
+def test_candidate_snapshot_records_all_in_cost_fields_and_entry_gate_floor() -> None:
+    audit = SimpleNamespace(
+        top_scores=[
+            {"symbol": "BTC/USDT", "score": 0.70, "rank": 1},
+            {"symbol": "ETH/USDT", "score": 0.69, "rank": 2},
+        ],
+        targets_pre_risk={},
+        targets_post_risk={},
+        router_decisions=[],
+        target_execution_explain=[],
+        strategy_signals=[],
+        quant_lab={
+            "cost_estimates": [
+                {
+                    "symbol": "BTC/USDT",
+                    "cost_source": "public_spread_proxy",
+                    "one_way_all_in_cost_bps": 12.0,
+                    "roundtrip_all_in_cost_bps": 24.0,
+                    "cost_quality": "public_proxy",
+                    "cost_trusted_for_paper": True,
+                    "cost_trusted_for_live": False,
+                    "cost_model_version": "cost_v3",
+                },
+                {
+                    "symbol": "ETH/USDT",
+                    "cost_source": "mixed_actual_proxy",
+                    "roundtrip_all_in_cost_bps": 45.0,
+                    "cost_quality": "mixed_actual_proxy",
+                    "cost_trusted_for_paper": True,
+                    "cost_trusted_for_live": True,
+                    "cost_model_version": "cost_v3",
+                },
+            ]
+        },
+    )
+
+    rows = build_candidate_snapshot_rows(
+        run_id="run_all_in_cost",
+        ts_utc="2026-05-15T00:00:00Z",
+        symbols=["BTC/USDT", "ETH/USDT"],
+        audit=audit,
+        local_cost_bps=30.0,
+        local_cost_model_version="v5_local_execution.cost_aware_roundtrip_cost_bps",
+        cost_min_edge_multiplier=1.5,
+    )
+
+    by_symbol = {row["symbol"]: row for row in rows}
+    btc = by_symbol["BTC/USDT"]
+    assert btc["one_way_all_in_cost_bps"] == 12.0
+    assert btc["roundtrip_all_in_cost_bps"] == 24.0
+    assert btc["cost_bps"] == 24.0
+    assert btc["selected_entry_gate_cost_bps"] == 30.0
+    assert btc["required_edge_bps"] == 45.0
+    assert btc["cost_quality"] == "public_proxy"
+    assert btc["cost_trusted_for_paper"] is True
+    assert btc["cost_trusted_for_live"] is False
+
+    eth = by_symbol["ETH/USDT"]
+    assert eth["roundtrip_all_in_cost_bps"] == 45.0
+    assert eth["cost_bps"] == 45.0
+    assert eth["selected_entry_gate_cost_bps"] == 45.0
+    assert eth["required_edge_bps"] == 67.5
+    assert eth["cost_trusted_for_live"] is True
 
 
 def test_blocked_candidate_uses_recent_quant_lab_cached_cost() -> None:

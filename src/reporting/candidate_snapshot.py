@@ -49,6 +49,12 @@ CANDIDATE_SNAPSHOT_FIELDS = (
     "required_edge_bps",
     "cost_bps",
     "selected_total_cost_bps",
+    "one_way_all_in_cost_bps",
+    "roundtrip_all_in_cost_bps",
+    "selected_entry_gate_cost_bps",
+    "cost_quality",
+    "cost_trusted_for_paper",
+    "cost_trusted_for_live",
     "cost_source",
     "cost_source_quality",
     "degraded_cost_model",
@@ -183,6 +189,12 @@ def write_latest_symbol_cost_table(path: str | Path, rows: Sequence[Mapping[str,
         "source",
         "effective_total_cost_bps",
         "selected_total_cost_bps",
+        "one_way_all_in_cost_bps",
+        "roundtrip_all_in_cost_bps",
+        "selected_entry_gate_cost_bps",
+        "cost_quality",
+        "cost_trusted_for_paper",
+        "cost_trusted_for_live",
         "total_cost_bps",
         "cost_bps",
         "fee_bps",
@@ -401,7 +413,18 @@ def build_candidate_snapshot_rows(
             _nested_get(qlab, ("min_required_edge_bps",)),
             _nested_get(order, ("meta", "required_edge_bps")),
         )
+        one_way_all_in_cost_bps = _first_float(
+            _nested_get(qlab, ("one_way_all_in_cost_bps",)),
+            _nested_get(qlab, ("one_way_cost_bps",)),
+            _nested_get(qlab, ("all_in_one_way_cost_bps",)),
+        )
+        roundtrip_all_in_cost_bps = _first_float(
+            _nested_get(qlab, ("roundtrip_all_in_cost_bps",)),
+            _nested_get(qlab, ("roundtrip_cost_bps",)),
+            _nested_get(qlab, ("all_in_roundtrip_cost_bps",)),
+        )
         cost_bps = _first_float(
+            roundtrip_all_in_cost_bps,
             _nested_get(qlab, ("effective_total_cost_bps",)),
             _nested_get(qlab, ("selected_total_cost_bps",)),
             _nested_get(qlab, ("total_cost_bps",)),
@@ -409,6 +432,7 @@ def build_candidate_snapshot_rows(
         )
         selected_total_cost_bps = _first_float(
             _nested_get(qlab, ("selected_total_cost_bps",)),
+            roundtrip_all_in_cost_bps,
             _nested_get(qlab, ("total_cost_bps",)),
             _nested_get(qlab, ("cost_bps",)),
             _nested_get(qlab, ("effective_total_cost_bps",)),
@@ -416,6 +440,9 @@ def build_candidate_snapshot_rows(
         qlab_has_cost = _mapping_has_any(
             qlab,
             (
+                "one_way_all_in_cost_bps",
+                "roundtrip_all_in_cost_bps",
+                "selected_entry_gate_cost_bps",
                 "effective_total_cost_bps",
                 "selected_total_cost_bps",
                 "total_cost_bps",
@@ -429,10 +456,31 @@ def build_candidate_snapshot_rows(
         if cost_bps is None:
             cost_bps = local_cost_value
             used_local_cost = True
+        selected_entry_gate_cost_bps = _first_float(_nested_get(qlab, ("selected_entry_gate_cost_bps",)))
+        if selected_entry_gate_cost_bps is None:
+            remote_cost_for_gate = _first_float(roundtrip_all_in_cost_bps, cost_bps, 0.0)
+            if local_cost_value is not None:
+                selected_entry_gate_cost_bps = max(float(remote_cost_for_gate or 0.0), float(local_cost_value))
+            else:
+                selected_entry_gate_cost_bps = max(float(remote_cost_for_gate or 0.0), float(min_cost_floor_value))
         if selected_total_cost_bps is None:
             selected_total_cost_bps = cost_bps
-        if required_edge is None and cost_bps is not None:
-            required_edge = float(cost_bps) * float(multiplier)
+        if required_edge is None and selected_entry_gate_cost_bps is not None:
+            required_edge = float(selected_entry_gate_cost_bps) * float(multiplier)
+        elif required_edge is not None and selected_entry_gate_cost_bps is not None:
+            required_edge = max(float(required_edge), float(selected_entry_gate_cost_bps) * float(multiplier))
+        cost_quality = _first(
+            _nested_get(qlab, ("cost_quality",)),
+            _nested_get(qlab, ("quality",)),
+        )
+        cost_trusted_for_paper = _first_bool(
+            _nested_get(qlab, ("cost_trusted_for_paper",)),
+            _nested_get(qlab, ("trusted_for_paper",)),
+        )
+        cost_trusted_for_live = _first_bool(
+            _nested_get(qlab, ("cost_trusted_for_live",)),
+            _nested_get(qlab, ("trusted_for_live",)),
+        )
         cost_absence_reason = _cost_absence_reason(order=order, final_decision=final_decision)
         cost_source = _normalized_cost_source(
             _first(
@@ -470,10 +518,13 @@ def build_candidate_snapshot_rows(
             _nested_get(qlab, ("would_filter",)),
             _nested_get(qlab, ("filtered",)),
         )
+        computed_would_block_by_cost = bool(
+            expected_edge is not None and required_edge is not None and float(expected_edge) < float(required_edge)
+        )
         if would_block_by_cost is None:
-            would_block_by_cost = bool(
-                expected_edge is not None and required_edge is not None and float(expected_edge) < float(required_edge)
-            )
+            would_block_by_cost = computed_would_block_by_cost
+        else:
+            would_block_by_cost = bool(would_block_by_cost or computed_would_block_by_cost)
         cost_reason = _first(
             _nested_get(qlab, ("filter_reason",)),
             _nested_get(qlab, ("reason",)),
@@ -541,6 +592,12 @@ def build_candidate_snapshot_rows(
             "required_edge_bps": required_edge,
             "cost_bps": cost_bps,
             "selected_total_cost_bps": selected_total_cost_bps,
+            "one_way_all_in_cost_bps": one_way_all_in_cost_bps,
+            "roundtrip_all_in_cost_bps": roundtrip_all_in_cost_bps,
+            "selected_entry_gate_cost_bps": selected_entry_gate_cost_bps,
+            "cost_quality": cost_quality,
+            "cost_trusted_for_paper": cost_trusted_for_paper,
+            "cost_trusted_for_live": cost_trusted_for_live,
             "cost_source": cost_source,
             "cost_source_quality": cost_source_quality,
             "degraded_cost_model": bool(degraded_cost_model),
@@ -657,6 +714,15 @@ def _backfill_legacy_cost_fields(
     out["cost_source"] = "local_estimate"
     out["cost_bps"] = cost_bps
     out["selected_total_cost_bps"] = _first_float(out.get("selected_total_cost_bps"), cost_bps)
+    out["roundtrip_all_in_cost_bps"] = _first_float(out.get("roundtrip_all_in_cost_bps"), cost_bps)
+    out["selected_entry_gate_cost_bps"] = _first_float(
+        out.get("selected_entry_gate_cost_bps"),
+        out.get("selected_total_cost_bps"),
+        cost_bps,
+    )
+    out["cost_quality"] = _first(out.get("cost_quality"), out.get("cost_source_quality"), "local_estimate")
+    out["cost_trusted_for_paper"] = _first(out.get("cost_trusted_for_paper"), False)
+    out["cost_trusted_for_live"] = _first(out.get("cost_trusted_for_live"), False)
     out["cost_model_version"] = _first(out.get("cost_model_version"), fallback_model)
     out["required_edge_bps"] = _first_float(out.get("required_edge_bps"), out.get("min_required_edge_bps"), (cost_bps or 0.0) * 1.5)
     out["expected_edge_bps"] = _first_float(out.get("expected_edge_bps"), 0.0)
@@ -949,10 +1015,14 @@ def _row_has_cost_fields(row: Mapping[str, Any]) -> bool:
     return _mapping_has_any(
         row,
         (
+            "one_way_all_in_cost_bps",
+            "roundtrip_all_in_cost_bps",
+            "selected_entry_gate_cost_bps",
             "effective_total_cost_bps",
             "selected_total_cost_bps",
             "total_cost_bps",
             "cost_bps",
+            "cost_quality",
             "cost_source",
             "source",
             "cost_model_version",

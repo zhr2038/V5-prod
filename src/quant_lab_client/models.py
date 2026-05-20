@@ -32,6 +32,22 @@ def _first_float(data: Mapping[str, Any], *keys: str, default: Optional[float] =
     return default
 
 
+def _bool(data: Mapping[str, Any], key: str, default: Optional[bool] = None) -> Optional[bool]:
+    value = data.get(key)
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y"}:
+        return True
+    if text in {"false", "0", "no", "n"}:
+        return False
+    return default
+
+
 def _list(data: Mapping[str, Any], key: str) -> List[Any]:
     value = data.get(key)
     if isinstance(value, list):
@@ -164,16 +180,35 @@ class CostEstimate:
     total_cost_bps_p90: Optional[float] = None
     required_edge_bps: Optional[float] = None
     fallback_reason: Optional[str] = None
+    one_way_all_in_cost_bps: Optional[float] = None
+    roundtrip_all_in_cost_bps: Optional[float] = None
+    cost_quality: Optional[str] = None
+    cost_trusted_for_paper: Optional[bool] = None
+    cost_trusted_for_live: Optional[bool] = None
     raw_response: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_payload(cls, payload: Any) -> "CostEstimate":
         data = _payload(payload)
-        total = _float(data, "total_cost_bps")
-        if total is None:
-            total = _float(data, "total_bps")
-        if total is None:
-            total = _float(data, "cost_bps", 0.0)
+        one_way_all_in = _first_float(data, "one_way_all_in_cost_bps", "one_way_cost_bps", "all_in_one_way_cost_bps")
+        roundtrip_all_in = _first_float(
+            data,
+            "roundtrip_all_in_cost_bps",
+            "roundtrip_cost_bps",
+            "all_in_roundtrip_cost_bps",
+        )
+        total = _first_float(
+            data,
+            "roundtrip_all_in_cost_bps",
+            "roundtrip_cost_bps",
+            "all_in_roundtrip_cost_bps",
+            "effective_total_cost_bps",
+            "selected_total_cost_bps",
+            "total_cost_bps",
+            "total_bps",
+            "cost_bps",
+            default=0.0,
+        )
         sample_count = data.get("sample_count")
         try:
             sample_count_i = int(sample_count) if sample_count is not None and sample_count != "" else None
@@ -202,6 +237,11 @@ class CostEstimate:
             total_cost_bps_p90=_first_float(data, "total_cost_bps_p90", "p90_total_cost_bps", "cost_bps_p90"),
             required_edge_bps=_first_float(data, "required_edge_bps", "min_required_edge_bps"),
             fallback_reason=str(data.get("fallback_reason") or "") or None,
+            one_way_all_in_cost_bps=one_way_all_in,
+            roundtrip_all_in_cost_bps=roundtrip_all_in,
+            cost_quality=str(data.get("cost_quality") or "") or None,
+            cost_trusted_for_paper=_bool(data, "cost_trusted_for_paper"),
+            cost_trusted_for_live=_bool(data, "cost_trusted_for_live"),
             raw_response=dict(data),
         )
 

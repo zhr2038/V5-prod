@@ -30,6 +30,12 @@ class CostGateResult:
     min_required_edge_bps: Optional[float]
     expected_edge_source: Optional[str] = None
     proxy_source: Optional[str] = None
+    one_way_all_in_cost_bps: Optional[float] = None
+    roundtrip_all_in_cost_bps: Optional[float] = None
+    selected_entry_gate_cost_bps: Optional[float] = None
+    cost_quality: Optional[str] = None
+    cost_trusted_for_paper: Optional[bool] = None
+    cost_trusted_for_live: Optional[bool] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -143,11 +149,23 @@ def apply_quant_lab_cost_gate(order: Any, cost_estimate: CostEstimate, cfg: Any,
     min_floor = float(_cfg_value(cfg, "min_cost_bps_floor", 5.0) or 0.0)
     multiplier = float(_cfg_value(cfg, "cost_min_edge_multiplier", 1.5) or 1.5)
     local_cost, local_cost_source = local_cost_detail_for_order(order, cfg)
+    roundtrip_all_in_cost_bps = _safe_non_negative_float(getattr(cost_estimate, "roundtrip_all_in_cost_bps", None))
+    response_cost_for_gate = roundtrip_all_in_cost_bps
+    if response_cost_for_gate is None:
+        response_cost_for_gate = _safe_non_negative_float(getattr(cost_estimate, "total_cost_bps", None)) or 0.0
+    selected_entry_gate_cost_bps = max(response_cost_for_gate, local_cost)
     effective_total_cost_bps = max(
-        float(cost_estimate.total_cost_bps or 0.0),
+        selected_entry_gate_cost_bps,
         min_floor,
-        local_cost,
     )
+    cost_gate_meta = {
+        "one_way_all_in_cost_bps": _safe_non_negative_float(getattr(cost_estimate, "one_way_all_in_cost_bps", None)),
+        "roundtrip_all_in_cost_bps": roundtrip_all_in_cost_bps,
+        "selected_entry_gate_cost_bps": selected_entry_gate_cost_bps,
+        "cost_quality": getattr(cost_estimate, "cost_quality", None),
+        "cost_trusted_for_paper": getattr(cost_estimate, "cost_trusted_for_paper", None),
+        "cost_trusted_for_live": getattr(cost_estimate, "cost_trusted_for_live", None),
+    }
     mode_value = str(mode or _cfg_value(cfg, "mode", "shadow") or "shadow").strip().lower().replace("-", "_")
     expected_edge, expected_edge_source = _order_expected_edge(order)
     proxy_source: Optional[str] = None
@@ -176,6 +194,7 @@ def apply_quant_lab_cost_gate(order: Any, cost_estimate: CostEstimate, cfg: Any,
                 expected_edge_bps=None,
                 min_required_edge_bps=min_required,
                 expected_edge_source=None,
+                **cost_gate_meta,
             )
         policy = _missing_edge_policy(cfg, mode_value)
         if policy == "use_score_proxy":
@@ -205,6 +224,7 @@ def apply_quant_lab_cost_gate(order: Any, cost_estimate: CostEstimate, cfg: Any,
                     min_required_edge_bps=min_required,
                     expected_edge_source=proxy_source,
                     proxy_source=proxy_source,
+                    **cost_gate_meta,
                 )
             policy = "block" if mode_value in {"cost_only", "enforce"} else "record_only"
         if policy == "block" and _is_missing_edge_block_candidate(order):
@@ -231,6 +251,7 @@ def apply_quant_lab_cost_gate(order: Any, cost_estimate: CostEstimate, cfg: Any,
                 min_required_edge_bps=min_required,
                 expected_edge_source=None,
                 proxy_source=proxy_source,
+                **cost_gate_meta,
             )
         return CostGateResult(
             passed=False,
@@ -255,6 +276,7 @@ def apply_quant_lab_cost_gate(order: Any, cost_estimate: CostEstimate, cfg: Any,
             min_required_edge_bps=min_required,
             expected_edge_source=None,
             proxy_source=proxy_source,
+            **cost_gate_meta,
         )
     filtered = expected_edge < min_required
     return CostGateResult(
@@ -280,4 +302,5 @@ def apply_quant_lab_cost_gate(order: Any, cost_estimate: CostEstimate, cfg: Any,
         min_required_edge_bps=min_required,
         expected_edge_source=expected_edge_source,
         proxy_source=proxy_source,
+        **cost_gate_meta,
     )
