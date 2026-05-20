@@ -211,6 +211,82 @@ def fixture_open_position_root(root):
     return run_id
 
 
+def fixture_open_probe_watch_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    window_end = int(now.timestamp())
+    run_id = now.strftime("%Y%m%d_%H")
+    entry_ts = window_end - 2 * 3600
+    closed_entry_ts = window_end - 5 * 3600
+    closed_exit_ts = window_end - 4 * 3600
+
+    write_text(
+        root / "configs/live_prod.yaml",
+        "execution:\n"
+        "  probe_take_profit_net_bps: 80\n"
+        "  probe_stop_loss_net_bps: -50\n"
+        "  probe_trailing_enable_after_net_bps: 50\n"
+        "  probe_trailing_gap_bps: 25\n"
+        "  probe_time_stop_hours: 8\n"
+        "  probe_time_stop_min_net_bps: 10\n",
+    )
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    qty = 0.00013568
+    write_json(root / "reports/ledger_state.json", {"balances": {"USDT": "90", "BTC": str(qty)}})
+    write_json(
+        root / "reports/profit_taking_state.json",
+        {
+            "BTC/USDT": {
+                "symbol": "BTC/USDT",
+                "entry_px": 77383.7,
+                "entry_ts": iso(entry_ts),
+                "entry_reason": "btc_leadership_probe",
+                "probe_type": "btc_leadership_probe",
+                "highest_net_bps": 12.3,
+            }
+        },
+    )
+    write_json(root / "reports/highest_px_state.json", {"BTC/USDT": {"symbol": "BTC/USDT", "highest_px": 77650.0, "entry_px": 77383.7}})
+    write_json(root / "reports/stop_loss_state.json", {"BTC/USDT": {"symbol": "BTC/USDT", "entry_price": 77383.7, "probe_type": "btc_leadership_probe"}})
+    write_json(root / "reports/fixed_stop_loss_state.json", {})
+    write_json(root / "reports/event_candidates.json", {"regime": "TRENDING", "candidates": [{"symbol": "BTC/USDT", "price": 77608.3}]})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(
+        run_dir / "decision_audit.json",
+        {
+            "now_ts": window_end + 15,
+            "window_end_ts": window_end,
+            "regime": "Trending",
+            "current_level": "PROTECT",
+            "router_decisions": [
+                {"symbol": "BTC/USDT", "action": "create", "intent": "OPEN_LONG", "side": "buy", "reason": "btc_leadership_probe", "probe_type": "btc_leadership_probe"},
+                {"symbol": "BTC/USDT", "action": "skip", "reason": "active_probe_ignore_zero_target_close", "probe_type": "btc_leadership_probe"},
+                {"symbol": "BTC/USDT", "action": "skip", "reason": "active_probe_ignore_zero_target_close", "probe_type": "btc_leadership_probe"},
+                {"symbol": "SOL/USDT", "action": "create", "intent": "OPEN_LONG", "side": "buy", "reason": "market_impulse_probe", "probe_type": "market_impulse_probe"},
+                {"symbol": "SOL/USDT", "action": "create", "intent": "CLOSE_LONG", "side": "sell", "reason": "zero_target_close", "source_reason": "zero_target_close", "probe_type": "market_impulse_probe"},
+            ],
+        },
+    )
+    write_text(
+        run_dir / "trades.csv",
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,entry_reason,exit_reason,probe_type\n"
+        f"{iso(entry_ts)},{run_id},BTC/USDT,OPEN_LONG,buy,{qty},77383.7,10.5,0.01,btc_leadership_probe,,btc_leadership_probe\n"
+        f"{iso(closed_entry_ts)},{run_id},SOL/USDT,OPEN_LONG,buy,1,100,100,0.01,market_impulse_probe,,market_impulse_probe\n"
+        f"{iso(closed_exit_ts)},{run_id},SOL/USDT,CLOSE_LONG,sell,1,101,101,0.01,,zero_target_close,market_impulse_probe\n",
+    )
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id})
+    return run_id
+
+
 def fixture_dust_residual_root(root):
     now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
 
@@ -4062,6 +4138,46 @@ def main():
             assert "当前是否有持仓: yes / 1" in readme, readme
             assert "unrealized net bps: BTC/USDT=1178.8" in readme, readme
             assert "当前 stop 是否足够保护浮盈: no" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-open-probe-watch-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_open_probe_watch_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                watch = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/open_probe_watch.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+
+            assert len(watch) == 1, watch
+            row = watch[0]
+            assert row["symbol"] == "BTC/USDT", row
+            assert row["probe_type"] == "btc_leadership_probe", row
+            assert row["entry_px"] == "77383.7", row
+            assert row["current_px"] == "77608.3", row
+            assert row["highest_net_bps"] == "12.3", row
+            assert row["probe_take_profit_net_bps"] == "80", row
+            assert row["probe_stop_loss_net_bps"] == "-50", row
+            assert row["probe_time_stop_hours"] == "8", row
+            assert row["active_probe_ignore_zero_target_close_count"] == "2", row
+            assert row["state_present"] == "true", row
+            assert "take_profit_remaining_bps=" in row["next_expected_exit_condition"], row
+            assert "time_stop_remaining_hours=" in row["next_expected_exit_condition"], row
+            assert window["open_probe_watch_rows"] == 1, window
+            assert window["active_probe_ignore_zero_target_close_count"] == 2, window
+            high_probe_zero = [
+                item for item in issues["issues"]
+                if item.get("severity") == "high" and item.get("code") == "active_probe_closed_by_zero_target_close"
+            ]
+            assert len(high_probe_zero) == 1, issues
+            assert "## Active probe watch" in readme, readme
+            assert "当前是否有 active probe: yes / 1" in readme, readme
+            assert "zero-target close 是否被正确保护: yes / 2" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

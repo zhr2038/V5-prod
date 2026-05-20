@@ -1697,6 +1697,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     btc_blocked_rows = []
     maturity_rows = []
     open_position_rows = []
+    open_probe_watch_rows = []
     dust_residual_roundtrip_rows = []
     early_exit_rows = []
     high_score_blocked_rows = []
@@ -5581,6 +5582,154 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 open_position_rows.append(open_position)
 
     closed_roundtrip_rows = [row for row in trade_rows if row.get("roundtrip_status") == "closed"]
+
+    def probe_config_number(key, default):
+        value = config_number(key)
+        return float(value) if value is not None else float(default)
+
+    probe_take_profit_net_bps_cfg = probe_config_number("probe_take_profit_net_bps", 80.0)
+    probe_stop_loss_net_bps_cfg = probe_config_number("probe_stop_loss_net_bps", -50.0)
+    probe_trailing_enable_after_net_bps_cfg = probe_config_number("probe_trailing_enable_after_net_bps", 50.0)
+    probe_trailing_gap_bps_cfg = probe_config_number("probe_trailing_gap_bps", 25.0)
+    probe_time_stop_hours_cfg = probe_config_number("probe_time_stop_hours", 8.0)
+    probe_time_stop_min_net_bps_cfg = probe_config_number("probe_time_stop_min_net_bps", 10.0)
+    active_probe_ignore_counts_by_symbol = Counter(
+        row.get("symbol") or not_obs
+        for row in router_rows
+        if row.get("reason") == "active_probe_ignore_zero_target_close"
+    )
+    open_position_by_symbol = {row.get("symbol"): row for row in open_position_rows}
+
+    def active_probe_state_present(symbol):
+        return any(state_present(state, symbol) for state in (profit_state, highest_state, stop_state, fixed_stop_state))
+
+    def probe_next_exit_condition(net_bps, highest_net_bps, hold_hours):
+        parts = []
+        if net_bps is None:
+            parts.append("net_bps_not_observable")
+        elif net_bps <= probe_stop_loss_net_bps_cfg:
+            parts.append("probe_stop_loss_now")
+        else:
+            parts.append(f"stop_loss_buffer_bps={fmt_num(net_bps - probe_stop_loss_net_bps_cfg, 4)}")
+
+        if net_bps is not None and net_bps >= probe_take_profit_net_bps_cfg:
+            parts.append("probe_take_profit_now")
+        elif net_bps is not None:
+            parts.append(f"take_profit_remaining_bps={fmt_num(probe_take_profit_net_bps_cfg - net_bps, 4)}")
+
+        if highest_net_bps is None:
+            parts.append("trailing_high_not_observable")
+        elif highest_net_bps < probe_trailing_enable_after_net_bps_cfg:
+            parts.append(f"trailing_enable_remaining_bps={fmt_num(probe_trailing_enable_after_net_bps_cfg - highest_net_bps, 4)}")
+        elif net_bps is None:
+            parts.append("trailing_drawdown_not_observable")
+        else:
+            drawdown = highest_net_bps - net_bps
+            if drawdown >= probe_trailing_gap_bps_cfg:
+                parts.append("probe_trailing_stop_now")
+            else:
+                parts.append(f"trailing_gap_remaining_bps={fmt_num(probe_trailing_gap_bps_cfg - drawdown, 4)}")
+
+        if hold_hours is None:
+            parts.append("time_stop_hold_not_observable")
+        elif hold_hours >= probe_time_stop_hours_cfg and (net_bps is None or net_bps < probe_time_stop_min_net_bps_cfg):
+            parts.append("probe_time_stop_now")
+        elif hold_hours < probe_time_stop_hours_cfg:
+            parts.append(f"time_stop_remaining_hours={fmt_num(probe_time_stop_hours_cfg - hold_hours, 4)}")
+        else:
+            parts.append(f"time_stop_armed_requires_net_below_bps={fmt_num(probe_time_stop_min_net_bps_cfg, 4)}")
+        return ";".join(parts)
+
+    for trade_row in trade_rows:
+        if trade_row.get("roundtrip_status") not in {"open", "open_residual"}:
+            continue
+        entry_reason = flatten_value(trade_row.get("entry_reason"))
+        probe_type = first_observed(trade_row.get("probe_type"), probe_type_from_reason(entry_reason))
+        if entry_reason not in PROBE_TYPES and probe_type not in PROBE_TYPES:
+            continue
+        symbol = trade_row.get("symbol") or not_obs
+        open_position = open_position_by_symbol.get(symbol, {})
+        profit_entry = state_entry(profit_state, symbol) or {}
+        stop_entry = state_entry(stop_state, symbol) or {}
+        entry_dt = parse_dt_utc(trade_row.get("entry_ts"))
+        hold_hours = (NOW - entry_dt).total_seconds() / 3600.0 if entry_dt else None
+        entry_px = as_float(first_observed(trade_row.get("entry_px"), open_position.get("entry_px")))
+        current_px = as_float(open_position.get("current_px"))
+        gross_bps = as_float(open_position.get("unrealized_gross_bps"))
+        net_bps = as_float(open_position.get("unrealized_net_bps"))
+        highest_net_bps = numeric_first(
+            first_value(profit_entry, ("highest_net_bps",), not_obs),
+            first_value(stop_entry, ("highest_net_bps",), not_obs),
+            net_bps,
+        )
+        state_present_any = active_probe_state_present(symbol)
+        ignore_count = int(active_probe_ignore_counts_by_symbol.get(symbol, 0))
+        past_time_stop = bool(
+            hold_hours is not None
+            and hold_hours > probe_time_stop_hours_cfg + 1.0
+        )
+        if past_time_stop:
+            diagnosis = "medium_issue_active_probe_past_time_stop"
+            add_issue(
+                "medium",
+                "active_probe_past_time_stop",
+                "Active probe is still open more than one hour past configured probe_time_stop_hours.",
+                {
+                    "symbol": symbol,
+                    "probe_type": probe_type,
+                    "entry_ts": trade_row.get("entry_ts", not_obs),
+                    "hold_hours": fmt_num(hold_hours, 4),
+                    "probe_time_stop_hours": fmt_num(probe_time_stop_hours_cfg, 4),
+                    "unrealized_net_bps": fmt_num(net_bps, 4),
+                },
+            )
+        elif state_present_any:
+            diagnosis = "active_probe_zero_target_protected" if ignore_count else "active_probe_state_present"
+        else:
+            diagnosis = "active_probe_state_not_observable"
+        open_probe_watch_rows.append({
+            "symbol": symbol,
+            "probe_type": probe_type,
+            "entry_ts": trade_row.get("entry_ts", not_obs),
+            "entry_px": fmt_num(entry_px, 10),
+            "current_px": fmt_num(current_px, 10),
+            "hold_hours": fmt_num(hold_hours, 4),
+            "unrealized_gross_bps": fmt_num(gross_bps, 4),
+            "unrealized_net_bps": fmt_num(net_bps, 4),
+            "highest_net_bps": fmt_num(highest_net_bps, 4),
+            "probe_take_profit_net_bps": fmt_num(probe_take_profit_net_bps_cfg, 4),
+            "probe_stop_loss_net_bps": fmt_num(probe_stop_loss_net_bps_cfg, 4),
+            "probe_trailing_enable_after_net_bps": fmt_num(probe_trailing_enable_after_net_bps_cfg, 4),
+            "probe_trailing_gap_bps": fmt_num(probe_trailing_gap_bps_cfg, 4),
+            "probe_time_stop_hours": fmt_num(probe_time_stop_hours_cfg, 4),
+            "probe_time_stop_min_net_bps": fmt_num(probe_time_stop_min_net_bps_cfg, 4),
+            "next_expected_exit_condition": probe_next_exit_condition(net_bps, highest_net_bps, hold_hours),
+            "active_probe_ignore_zero_target_close_count": str(ignore_count),
+            "state_present": str(state_present_any).lower(),
+            "diagnosis": diagnosis,
+        })
+
+    for row in closed_roundtrip_rows:
+        exit_reason = flatten_value(row.get("exit_reason"))
+        entry_reason = flatten_value(row.get("entry_reason"))
+        probe_type = first_observed(row.get("probe_type"), probe_type_from_reason(entry_reason))
+        if (
+            (entry_reason in PROBE_TYPES or probe_type in PROBE_TYPES)
+            and exit_reason in {"zero_target_close", "normal_zero_target_close"}
+        ):
+            add_issue(
+                "high",
+                "active_probe_closed_by_zero_target_close",
+                "Probe position was closed by normal zero_target_close instead of probe exit policy.",
+                {
+                    "symbol": row.get("symbol", not_obs),
+                    "probe_type": probe_type,
+                    "entry_ts": row.get("entry_ts", not_obs),
+                    "exit_ts": row.get("exit_ts", not_obs),
+                    "exit_reason": exit_reason,
+                },
+            )
+
     configured_swing_min_hold_hours = config_number("swing_min_hold_hours")
     if configured_swing_min_hold_hours is None:
         configured_swing_min_hold_hours = 24.0
@@ -7247,6 +7396,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         ["symbol", "entry_ts", "entry_px", "qty", "current_px", "current_value_usdt", "notional_entry_usdt", "unrealized_gross_bps", "unrealized_net_bps", "unrealized_net_usdt", "entry_reason", "probe_type", "current_stop_px", "highest_px", "current_level", "regime", "is_probe", "profit_lock_active", "trailing_active"],
     )
     write_csv(
+        "summaries/open_probe_watch.csv",
+        open_probe_watch_rows,
+        ["symbol", "probe_type", "entry_ts", "entry_px", "current_px", "hold_hours", "unrealized_gross_bps", "unrealized_net_bps", "highest_net_bps", "probe_take_profit_net_bps", "probe_stop_loss_net_bps", "probe_trailing_enable_after_net_bps", "probe_trailing_gap_bps", "probe_time_stop_hours", "probe_time_stop_min_net_bps", "next_expected_exit_condition", "active_probe_ignore_zero_target_close_count", "state_present", "diagnosis"],
+    )
+    write_csv(
         "summaries/probe_diagnostics.csv",
         probe_rows,
         ["source", "run_id", "ts_utc", "symbol", "probe_type", "event_type", "action", "reason", "status", "alpha6_score", "f4_volume_expansion", "f5_rsi_trend_confirm", "rolling_high", "breakout_met", "net_expectancy_bps", "raw_json"],
@@ -7652,9 +7806,23 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     repeated_exit_issues = sum(1 for item in issues if item.get("code") == "repeated_probe_exit_signal_after_flat_dust_only")
     open_net_values = [as_float(row.get("unrealized_net_bps")) for row in open_position_rows]
     open_net_values = [value for value in open_net_values if value is not None]
+    open_probe_net_values = [as_float(row.get("unrealized_net_bps")) for row in open_probe_watch_rows]
+    open_probe_net_values = [value for value in open_probe_net_values if value is not None]
     dust_residual_position_count = len(dust_residual_position_keys)
     dust_residual_roundtrip_count = len(dust_residual_roundtrip_rows)
     effective_open_position_count = len(open_position_rows)
+    active_probe_ignore_zero_target_close_total = sum(
+        as_int(row.get("active_probe_ignore_zero_target_close_count"))
+        for row in open_probe_watch_rows
+    )
+    active_probe_past_time_stop_count = sum(
+        1 for row in open_probe_watch_rows
+        if row.get("diagnosis") == "medium_issue_active_probe_past_time_stop"
+    )
+    active_probe_zero_target_close_issue_count = sum(
+        1 for item in issues
+        if item.get("code") == "active_probe_closed_by_zero_target_close"
+    )
     negative_expectancy_mismatch_count = sum(1 for row in negative_consistency_rows if row.get("mismatch_suspected") == "true")
     rank_exit_conflict_count = sum(1 for row in rank_exit_consistency_rows if row.get("conflict_suspected") == "true")
     rank_exit_target_positive_sell_count = sum(1 for row in rank_exit_consistency_rows if row.get("target_positive") == "true" or row.get("has_target_still_positive_note") == "true")
@@ -8070,6 +8238,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "f3_dominant_swing_guard_still_swing_count": f3_dominant_swing_guard_still_swing_count,
         "probe_rows": len(probe_rows),
         "probe_lifecycle_rows": len(lifecycle_rows),
+        "open_probe_watch_rows": len(open_probe_watch_rows),
+        "open_probe_active_count": len(open_probe_watch_rows),
+        "open_probe_symbols": sorted({row.get("symbol") for row in open_probe_watch_rows if row.get("symbol")}),
+        "open_probe_unrealized_net_bps": {"min": min(open_probe_net_values) if open_probe_net_values else not_obs, "max": max(open_probe_net_values) if open_probe_net_values else not_obs, "avg": sum(open_probe_net_values) / len(open_probe_net_values) if open_probe_net_values else not_obs},
+        "active_probe_ignore_zero_target_close_count": active_probe_ignore_zero_target_close_total,
+        "active_probe_past_time_stop_count": active_probe_past_time_stop_count,
+        "active_probe_zero_target_close_issue_count": active_probe_zero_target_close_issue_count,
         "dust_anti_chase_rows": len(dust_rows),
         "btc_leadership_blocked_rows": len(btc_blocked_rows),
         "btc_leadership_blocked_labeler_summary": btc_blocked_labeler_summary,
@@ -8182,6 +8357,33 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         open_pnl_text = "not_applicable_no_open_positions"
         open_net_bps_text = "not_applicable_no_open_positions"
         open_stop_protection_text = "not_applicable_no_open_positions"
+
+    if open_probe_watch_rows:
+        active_probe_text = f"yes / {len(open_probe_watch_rows)}"
+        active_probe_net_text = ", ".join(
+            f"{row.get('symbol', not_obs)}={row.get('unrealized_net_bps', not_obs)}"
+            for row in open_probe_watch_rows
+        )
+        active_probe_distance_text = " | ".join(
+            f"{row.get('symbol', not_obs)}: {row.get('next_expected_exit_condition', not_obs)}"
+            for row in open_probe_watch_rows
+        )
+        active_probe_zero_target_text = (
+            f"yes / {active_probe_ignore_zero_target_close_total}"
+            if active_probe_ignore_zero_target_close_total
+            else "no / 0"
+        )
+        active_probe_next_focus_text = (
+            "past_time_stop_requires_review"
+            if active_probe_past_time_stop_count
+            else "watch take-profit / stop-loss / trailing / time-stop thresholds next bundle"
+        )
+    else:
+        active_probe_text = "no / 0"
+        active_probe_net_text = "not_applicable_no_active_probe"
+        active_probe_distance_text = "not_applicable_no_active_probe"
+        active_probe_zero_target_text = "not_applicable_no_active_probe"
+        active_probe_next_focus_text = "not_applicable_no_active_probe"
 
     if protect_sideways_normal_entry_rows:
         protect_sideways_by_symbol_text = "; ".join(
@@ -8620,6 +8822,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- unrealized net bps: {open_net_bps_text}",
         f"- 当前 stop 是否足够保护浮盈: {open_stop_protection_text}",
         f"- dust residual ignored: positions={dust_residual_position_count}, roundtrips={dust_residual_roundtrip_count}",
+        "",
+        "## Active probe watch",
+        f"- 当前是否有 active probe: {active_probe_text}",
+        f"- 当前浮盈/浮亏 net bps: {active_probe_net_text}",
+        f"- 距离 take-profit / stop-loss / trailing / time-stop: {active_probe_distance_text}",
+        f"- zero-target close 是否被正确保护: {active_probe_zero_target_text}",
+        f"- 下一包重点: {active_probe_next_focus_text}",
+        "- output: summaries/open_probe_watch.csv",
         "",
         "## PROTECT Sideways 普通开仓表现",
         f"- sample_count: {len(protect_sideways_normal_entry_rows)}",
@@ -9064,6 +9274,7 @@ sanity = {
     "contains raw/reports/quant_lab_usage.jsonl": (OUT / "raw/reports/quant_lab_usage.jsonl").is_file(),
     "contains raw/reports/quant_lab_requests.jsonl": (OUT / "raw/reports/quant_lab_requests.jsonl").is_file(),
     "contains summaries/probe_lifecycle_audit.csv": (OUT / "summaries/probe_lifecycle_audit.csv").is_file(),
+    "contains summaries/open_probe_watch.csv": (OUT / "summaries/open_probe_watch.csv").is_file(),
     "contains summaries/quant_lab_compliance.csv": (OUT / "summaries/quant_lab_compliance.csv").is_file(),
     "contains summaries/quant_lab_permission_audit.csv": (OUT / "summaries/quant_lab_permission_audit.csv").is_file(),
     "contains summaries/quant_lab_mode_audit.csv": (OUT / "summaries/quant_lab_mode_audit.csv").is_file(),
@@ -9100,6 +9311,7 @@ failure_check_names = [
     "contains raw/reports/quant_lab_usage.jsonl",
     "contains raw/reports/quant_lab_requests.jsonl",
     "contains summaries/probe_lifecycle_audit.csv",
+    "contains summaries/open_probe_watch.csv",
     "contains summaries/quant_lab_compliance.csv",
     "contains summaries/quant_lab_permission_audit.csv",
     "contains summaries/quant_lab_mode_audit.csv",
