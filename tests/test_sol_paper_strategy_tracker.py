@@ -691,6 +691,70 @@ def test_sol_paper_strategy_tracker_reads_paper_ready_advisory(tmp_path: Path) -
     assert advisory[0]["max_paper_notional_usdt"] == "12.0"
 
 
+def test_sol_f4_proposal_uses_same_horizon_paper_advisory_over_kill(tmp_path: Path) -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_sol_f4_horizon_advisory"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate_snapshot.csv").write_text(
+        "run_id,ts_utc,symbol,final_decision,strategy_candidate\n",
+        encoding="utf-8",
+    )
+    _write_paper_strategy_proposals(
+        tmp_path / "reports",
+        [
+            {
+                "proposal_id": "SOL_F4_VOLUME_EXPANSION_PAPER_V1",
+                "strategy_candidate": "v5.f4_volume_expansion_entry",
+                "symbol": "SOL-USDT",
+                "recommended_mode": "paper",
+                "suggested_horizon": "72h",
+            }
+        ],
+    )
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "strategy_candidate": "v5.f4_volume_expansion_entry",
+                "symbol": "SOL-USDT",
+                "decision": "KILL",
+                "recommended_mode": "none",
+                "horizon_hours": "4",
+                "live_block_reasons": "short_horizon_negative",
+            },
+            {
+                "strategy_candidate": "v5.f4_volume_expansion_entry",
+                "symbol": "SOL-USDT",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "horizon_hours": "72",
+                "max_paper_notional_usdt": "100",
+            },
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_sol_f4_horizon_advisory", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["proposal_rows"] == 1
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    f4 = next(row for row in runs if row["strategy_id"] == "SOL_F4_VOLUME_EXPANSION_PAPER_V1")
+    assert f4["would_enter"] == "False"
+    assert f4["no_sample_reason"] == "no_sol_candidate"
+    assert f4["advisory_decision"] == "PAPER_READY"
+    assert f4["advisory_recommended_mode"] == "paper"
+    assert f4["advisory_response_action"] == "paper_tracking"
+    assert f4["advisory_match_key"] == "v5.f4_volume_expansion_entry:72h"
+    assert f4["advisory_match_reason"] == "proposal_candidate_same_horizon"
+    assert f4["advisory_max_paper_notional_usdt"] == "100.0"
+
+
 def test_sol_paper_strategy_tracker_reads_advisory_from_expert_pack_tar(tmp_path: Path) -> None:
     cfg = _cfg()
     cfg.diagnostics.quant_lab_strategy_opportunity_advisory_paths = [

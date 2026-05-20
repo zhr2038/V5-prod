@@ -134,6 +134,8 @@ PAPER_RUN_FIELDS = [
     "advisory_recommended_mode",
     "advisory_negative",
     "advisory_response_action",
+    "advisory_match_key",
+    "advisory_match_reason",
     "advisory_max_paper_notional_usdt",
     "advisory_max_live_notional_usdt",
     "advisory_max_live_notional_usdt_ignored",
@@ -832,6 +834,32 @@ def _eth_f3_proposal_to_spec(row: Mapping[str, Any]) -> Optional[dict[str, Any]]
     }
 
 
+def _proposal_matches_spec(row: Mapping[str, Any], spec: Mapping[str, Any]) -> bool:
+    proposal_id = str(row.get("proposal_id") or row.get("strategy_id") or "").strip()
+    if proposal_id and proposal_id == str(spec.get("strategy_id") or ""):
+        return True
+    candidate = _strategy_key(_proposal_strategy_candidate(row))
+    if candidate and candidate in {_strategy_key(value) for value in (spec.get("source_strategy_candidates") or set())}:
+        symbol = _proposal_symbol(row)
+        return not symbol or symbol == _strategy_symbol(spec)
+    return False
+
+
+def _merge_proposal_into_spec(spec: dict[str, Any], row: Mapping[str, Any]) -> None:
+    proposal_id = str(row.get("proposal_id") or row.get("strategy_id") or "").strip()
+    if proposal_id:
+        spec["proposal_id"] = proposal_id
+    horizon = _proposal_horizon_hours(row)
+    if horizon:
+        spec["primary_horizon_hours"] = horizon
+        spec["suggested_horizon"] = f"{horizon}h"
+    candidate = _proposal_strategy_candidate(row)
+    if candidate:
+        spec["proposal_strategy_candidate"] = candidate
+    spec["proposal_present"] = True
+    spec["proposal_source"] = str(row.get("source_path") or "")
+
+
 def _strategy_configs_with_proposals(
     diagnostics: DiagnosticsConfig,
     proposal_rows: Iterable[Mapping[str, Any]],
@@ -840,14 +868,18 @@ def _strategy_configs_with_proposals(
     by_id = {str(spec.get("strategy_id") or ""): spec for spec in specs}
     for row in proposal_rows:
         spec = _eth_f3_proposal_to_spec(row)
-        if not spec:
+        if spec:
+            existing = by_id.get(ETH_F3_DOMINANT_STRATEGY_ID)
+            if existing is None:
+                specs.append(spec)
+                by_id[ETH_F3_DOMINANT_STRATEGY_ID] = spec
+            else:
+                existing.update(spec)
             continue
-        existing = by_id.get(ETH_F3_DOMINANT_STRATEGY_ID)
-        if existing is None:
-            specs.append(spec)
-            by_id[ETH_F3_DOMINANT_STRATEGY_ID] = spec
-        else:
-            existing.update(spec)
+        for existing in specs:
+            if _proposal_matches_spec(row, existing):
+                _merge_proposal_into_spec(existing, row)
+                break
     return specs
 
 
@@ -863,29 +895,123 @@ def _advisory_keys(row: Mapping[str, Any]) -> set[str]:
     }
 
 
-def _advisory_by_strategy(rows: Iterable[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
-    out: dict[str, Mapping[str, Any]] = {}
+def _advisory_by_strategy(rows: Iterable[Mapping[str, Any]]) -> dict[str, list[Mapping[str, Any]]]:
+    out: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     for row in rows:
         for key in _advisory_keys(row):
-            out.setdefault(key, row)
-    return out
+            out[key].append(row)
+    return dict(out)
+
+
+def _advisory_decision(row: Mapping[str, Any]) -> str:
+    return str(row.get("decision") or "").strip().upper()
+
+
+def _advisory_mode(row: Mapping[str, Any]) -> str:
+    return str(row.get("recommended_mode") or "").strip().lower().replace("-", "_")
+
+
+def _advisory_is_positive(row: Mapping[str, Any]) -> bool:
+    return _advisory_decision(row) == "PAPER_READY" or _advisory_mode(row) in ADVISORY_ALLOWED_RECOMMENDED_MODES
+
+
+def _advisory_rank(row: Mapping[str, Any]) -> tuple[int, int, float]:
+    decision = _advisory_decision(row)
+    if decision == "PAPER_READY":
+        decision_rank = 3
+    elif _advisory_mode(row) in ADVISORY_ALLOWED_RECOMMENDED_MODES:
+        decision_rank = 2
+    elif decision == "KILL":
+        decision_rank = 0
+    else:
+        decision_rank = 1
+    sample_count = _normalize_float(row.get("complete_sample_count")) or _normalize_float(row.get("sample_count")) or 0.0
+    return (decision_rank, 1 if _advisory_is_positive(row) else 0, float(sample_count))
+
+
+def _with_advisory_match(row: Mapping[str, Any], *, key: str, reason: str) -> Mapping[str, Any]:
+    payload = dict(row)
+    payload["_match_key"] = key
+    payload["_match_reason"] = reason
+    return payload
 
 
 def _advisory_for_spec(
     spec: Mapping[str, Any],
-    advisory_by_strategy: Mapping[str, Mapping[str, Any]] | None,
+    advisory_by_strategy: Mapping[str, list[Mapping[str, Any]]] | None,
 ) -> Mapping[str, Any]:
     if _spec_bool(spec, "ignore_strategy_opportunity_advisory", False):
         return {}
     if not advisory_by_strategy:
         return {}
-    for key in (
-        _strategy_key(spec.get("strategy_id")),
+    proposal_keys = [
+        key
+        for key in (
+            _strategy_key(spec.get("proposal_id")),
+            _strategy_key(spec.get("strategy_id")),
+        )
+        if key
+    ]
+    strategy_symbol = _strategy_symbol(spec)
+    proposal_horizon = _primary_horizon_for_spec(spec, DEFAULT_HORIZONS)
+    for key in proposal_keys:
+        exact_rows = [
+            row
+            for row in advisory_by_strategy.get(key, [])
+            if not row.get("symbol") or _symbol_text(row.get("symbol")) == strategy_symbol
+        ]
+        if exact_rows:
+            same_horizon = [
+                row
+                for row in exact_rows
+                if _parse_horizon_hours(row.get("horizon_hours")) == proposal_horizon
+            ]
+            rows = same_horizon or exact_rows
+            return _with_advisory_match(
+                sorted(rows, key=_advisory_rank, reverse=True)[0],
+                key=key,
+                reason="proposal_id_or_strategy_id_exact",
+            )
+
+    candidate_keys = [
+        _strategy_key(spec.get("proposal_strategy_candidate")),
         _strategy_key(spec.get("experiment_name")),
         *[_strategy_key(value) for value in (spec.get("source_strategy_candidates") or set())],
-    ):
-        if key and key in advisory_by_strategy:
-            return advisory_by_strategy[key]
+    ]
+    has_proposal = bool(spec.get("proposal_present") or spec.get("proposal_id"))
+    for key in [item for item in candidate_keys if item]:
+        candidate_rows = [
+            row
+            for row in advisory_by_strategy.get(key, [])
+            if not row.get("symbol") or _symbol_text(row.get("symbol")) == strategy_symbol
+        ]
+        if not candidate_rows:
+            continue
+        if has_proposal:
+            same_horizon = [
+                row
+                for row in candidate_rows
+                if _parse_horizon_hours(row.get("horizon_hours")) == proposal_horizon
+            ]
+            if same_horizon:
+                return _with_advisory_match(
+                    sorted(same_horizon, key=_advisory_rank, reverse=True)[0],
+                    key=f"{key}:{proposal_horizon}h",
+                    reason="proposal_candidate_same_horizon",
+                )
+            positive_rows = [row for row in candidate_rows if _advisory_is_positive(row)]
+            if positive_rows:
+                return _with_advisory_match(
+                    sorted(positive_rows, key=_advisory_rank, reverse=True)[0],
+                    key=key,
+                    reason="proposal_candidate_positive_fallback",
+                )
+            return {}
+        return _with_advisory_match(
+            sorted(candidate_rows, key=_advisory_rank, reverse=True)[0],
+            key=key,
+            reason="strategy_candidate_legacy",
+        )
     return {}
 
 
@@ -922,6 +1048,8 @@ def _advisory_response_fields(
         "advisory_recommended_mode": recommended_mode,
         "advisory_negative": negative,
         "advisory_response_action": response_action,
+        "advisory_match_key": str(advisory.get("_match_key") or ""),
+        "advisory_match_reason": str(advisory.get("_match_reason") or ""),
         "advisory_max_paper_notional_usdt": _normalize_float(advisory.get("max_paper_notional_usdt")),
         "advisory_max_live_notional_usdt": max_notional,
         "advisory_max_live_notional_usdt_ignored": max_ignored,
