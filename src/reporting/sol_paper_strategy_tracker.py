@@ -162,6 +162,7 @@ PAPER_DAILY_FIELDS = [
     "experiment_name",
     "symbol",
     "entry_count",
+    "entry_day_count",
     "complete_count",
     "pending_count",
     "not_observable_count",
@@ -173,6 +174,8 @@ PAPER_DAILY_FIELDS = [
     "win_rate",
     "paper_days_to_date",
 ]
+for _horizon in DEFAULT_HORIZONS:
+    PAPER_DAILY_FIELDS.append(f"avg_paper_pnl_bps_{_horizon}h")
 
 PAPER_SLIPPAGE_FIELDS = [
     "strategy_id",
@@ -1863,6 +1866,35 @@ def _reason_items(value: Any) -> list[str]:
     return [item.strip() for item in text.replace(",", ";").split(";") if item.strip()]
 
 
+def _horizon_pnl_values(rows: Iterable[Mapping[str, Any]], horizon: int) -> list[float]:
+    return [
+        value
+        for value in (
+            _normalize_float(row.get(f"paper_pnl_bps_{horizon}h"))
+            for row in rows
+            if bool(row.get("would_enter"))
+        )
+        if value is not None
+    ]
+
+
+def _avg(values: list[float]) -> Optional[float]:
+    return round(sum(values) / len(values), 6) if values else None
+
+
+def _eth_f3_long_horizon_negative(rows: list[dict[str, Any]]) -> bool:
+    if not rows:
+        return False
+    strategy_ids = {str(row.get("strategy_id") or "") for row in rows}
+    if ETH_F3_DOMINANT_STRATEGY_ID not in strategy_ids:
+        return False
+    for horizon in (24, 48):
+        avg = _avg(_horizon_pnl_values(rows, horizon))
+        if avg is not None and avg < 0.0:
+            return True
+    return False
+
+
 def _readiness_for_rows(
     rows: list[dict[str, Any]],
     *,
@@ -1913,11 +1945,14 @@ def _readiness_for_rows(
         for reason in _reason_items(row.get("extra_live_block_reasons")):
             if reason not in reasons:
                 reasons.append(reason)
+    keep_shadow = _eth_f3_long_horizon_negative(rows)
+    if keep_shadow and "eth_f3_negative_24h_or_48h_paper_pnl" not in reasons:
+        reasons.append("eth_f3_negative_24h_or_48h_paper_pnl")
     rules_pass = not reasons
     if rules_pass and not enable_live_experiment:
         reasons.append("live_experiment_disabled")
-    live_small_ready = bool(rules_pass and enable_live_experiment)
-    status = "LIVE_SMALL_READY" if live_small_ready else "PAPER_READY"
+    live_small_ready = bool(rules_pass and enable_live_experiment and not keep_shadow)
+    status = "KEEP_SHADOW" if keep_shadow else ("LIVE_SMALL_READY" if live_small_ready else "PAPER_READY")
     return {
         "live_small_ready": live_small_ready,
         "readiness_status": status,
@@ -1971,6 +2006,7 @@ def _annotate_readiness(
 
 def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_strategy_days: dict[tuple[str, str], set[str]] = defaultdict(set)
+    entry_days_by_strategy: dict[tuple[str, str], set[str]] = defaultdict(set)
     observed_days_by_horizon: dict[tuple[str, str, int], set[str]] = defaultdict(set)
     for record in records:
         strategy_id = str(record.get("strategy_id") or "")
@@ -1978,6 +2014,7 @@ def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         paper_date = str(record.get("paper_date") or "")
         by_strategy_days[(strategy_id, symbol)].add(paper_date)
         if bool(record.get("would_enter")) and paper_date:
+            entry_days_by_strategy[(strategy_id, symbol)].add(paper_date)
             for horizon in DEFAULT_HORIZONS:
                 if _normalize_float(record.get(f"paper_pnl_bps_{horizon}h")) is not None:
                     observed_days_by_horizon[(strategy_id, symbol, horizon)].add(paper_date)
@@ -1996,20 +2033,16 @@ def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         values = [_normalize_float(row.get("paper_pnl_bps")) for row in entry_rows]
         usable = [value for value in values if value is not None]
         horizon_values: dict[str, list[float]] = {}
+        horizon_avgs: dict[str, float] = {}
         horizon_all_usable: list[float] = []
         horizon_observed_counts: dict[str, int] = {}
         horizon_day_counts: dict[str, int] = {}
         for horizon in DEFAULT_HORIZONS:
             key = f"{horizon}h"
-            values_for_horizon = [
-                value
-                for value in (
-                    _normalize_float(row.get(f"paper_pnl_bps_{horizon}h"))
-                    for row in entry_rows
-                )
-                if value is not None
-            ]
+            values_for_horizon = _horizon_pnl_values(entry_rows, horizon)
             horizon_values[key] = values_for_horizon
+            if values_for_horizon:
+                horizon_avgs[key] = round(sum(values_for_horizon) / len(values_for_horizon), 6)
             horizon_all_usable.extend(values_for_horizon)
             horizon_observed_counts[key] = len(values_for_horizon)
             horizon_day_counts[key] = len(
@@ -2022,34 +2055,36 @@ def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         effective_usable = usable or horizon_all_usable
         pnl_usdt = [_normalize_float(row.get("paper_pnl_usdt")) for row in entry_rows]
         pnl_usdt_usable = [value for value in pnl_usdt if value is not None]
-        out.append(
+        entry_day_count = len(
             {
-                "paper_date": paper_date,
-                "strategy_id": strategy_id,
-                "experiment_name": rows[0].get("experiment_name"),
-                "symbol": symbol,
-                "entry_count": len(entry_rows),
-                "complete_count": sum(1 for row in entry_rows if str(row.get("label_status") or "") == "complete"),
-                "pending_count": sum(1 for row in entry_rows if str(row.get("label_status") or "") == "pending"),
-                "not_observable_count": sum(1 for row in entry_rows if str(row.get("label_status") or "") == "not_observable"),
-                "avg_paper_pnl_bps": round(sum(effective_usable) / len(effective_usable), 6) if effective_usable else None,
-                "avg_paper_pnl_bps_by_horizon": json.dumps(
-                    {
-                        horizon: round(sum(values) / len(values), 6)
-                        for horizon, values in horizon_values.items()
-                        if values
-                    },
-                    sort_keys=True,
-                ),
-                "paper_pnl_observed_count_by_horizon": json.dumps(horizon_observed_counts, sort_keys=True),
-                "paper_pnl_day_count_by_horizon": json.dumps(horizon_day_counts, sort_keys=True),
-                "paper_pnl_usdt_sum": round(sum(pnl_usdt_usable), 8) if pnl_usdt_usable else None,
-                "win_rate": round(sum(1 for value in effective_usable if float(value) > 0.0) / len(effective_usable), 6) if effective_usable else None,
-                "paper_days_to_date": len(
-                    {date for date in by_strategy_days[(strategy_id, symbol)] if date and date <= paper_date}
-                ),
+                date
+                for date in entry_days_by_strategy[(strategy_id, symbol)]
+                if date and date <= paper_date
             }
         )
+        daily_row = {
+            "paper_date": paper_date,
+            "strategy_id": strategy_id,
+            "experiment_name": rows[0].get("experiment_name"),
+            "symbol": symbol,
+            "entry_count": len(entry_rows),
+            "entry_day_count": entry_day_count,
+            "complete_count": sum(1 for row in entry_rows if str(row.get("label_status") or "") == "complete"),
+            "pending_count": sum(1 for row in entry_rows if str(row.get("label_status") or "") == "pending"),
+            "not_observable_count": sum(1 for row in entry_rows if str(row.get("label_status") or "") == "not_observable"),
+            "avg_paper_pnl_bps": round(sum(effective_usable) / len(effective_usable), 6) if effective_usable else None,
+            "avg_paper_pnl_bps_by_horizon": json.dumps(horizon_avgs, sort_keys=True),
+            "paper_pnl_observed_count_by_horizon": json.dumps(horizon_observed_counts, sort_keys=True),
+            "paper_pnl_day_count_by_horizon": json.dumps(horizon_day_counts, sort_keys=True),
+            "paper_pnl_usdt_sum": round(sum(pnl_usdt_usable), 8) if pnl_usdt_usable else None,
+            "win_rate": round(sum(1 for value in effective_usable if float(value) > 0.0) / len(effective_usable), 6) if effective_usable else None,
+            "paper_days_to_date": len(
+                {date for date in by_strategy_days[(strategy_id, symbol)] if date and date <= paper_date}
+            ),
+        }
+        for horizon in DEFAULT_HORIZONS:
+            daily_row[f"avg_paper_pnl_bps_{horizon}h"] = horizon_avgs.get(f"{horizon}h")
+        out.append(daily_row)
     return out
 
 

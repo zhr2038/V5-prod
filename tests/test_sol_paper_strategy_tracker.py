@@ -63,6 +63,10 @@ def test_paper_strategy_daily_aggregates_horizon_pnl_when_primary_missing() -> N
     assert len(rows) == 1
     row = rows[0]
     assert row["avg_paper_pnl_bps"] == 10.0
+    assert row["entry_day_count"] == 1
+    assert row["avg_paper_pnl_bps_4h"] == 12.5
+    assert row["avg_paper_pnl_bps_8h"] == 25.0
+    assert row["avg_paper_pnl_bps_12h"] == -7.5
     avg_by_horizon = json.loads(row["avg_paper_pnl_bps_by_horizon"])
     observed_by_horizon = json.loads(row["paper_pnl_observed_count_by_horizon"])
     day_count_by_horizon = json.loads(row["paper_pnl_day_count_by_horizon"])
@@ -73,6 +77,34 @@ def test_paper_strategy_daily_aggregates_horizon_pnl_when_primary_missing() -> N
     assert day_count_by_horizon["4h"] == 1
     assert day_count_by_horizon["8h"] == 1
     assert day_count_by_horizon["12h"] == 1
+
+
+def test_eth_f3_negative_24h_or_48h_downgrades_to_keep_shadow() -> None:
+    readiness = _readiness_for_rows(
+        [
+            {
+                "paper_date": "2026-05-20",
+                "strategy_id": "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+                "symbol": "ETH/USDT",
+                "would_enter": True,
+                "arrival_mid": 100,
+                "estimated_spread_bps": 2,
+                "slippage_covered": True,
+                "cost_source": "mixed_actual_proxy",
+                "paper_pnl_bps_24h": -5.0,
+                "paper_pnl_bps_48h": 20.0,
+            }
+        ],
+        required_days=1,
+        required_entry_days=1,
+        required_coverage=0.0,
+        enable_live_experiment=True,
+        allowed_cost_sources={"mixed_actual_proxy"},
+    )
+
+    assert readiness["readiness_status"] == "KEEP_SHADOW"
+    assert readiness["live_small_ready"] is False
+    assert "eth_f3_negative_24h_or_48h_paper_pnl" in readiness["live_block_reason"]
 
 
 def _write_candidate_snapshot(run_dir: Path) -> None:
@@ -294,8 +326,11 @@ def test_sol_paper_strategy_tracker_writes_runs_daily_and_slippage(tmp_path: Pat
     assert len(heartbeat_daily) == 2
     assert {row["paper_days_to_date"] for row in entry_daily} == {"1"}
     assert {row["paper_days_to_date"] for row in heartbeat_daily} == {"2"}
+    assert {row["entry_day_count"] for row in entry_daily} == {"1"}
+    assert {row["entry_day_count"] for row in heartbeat_daily} == {"1"}
     assert {row["avg_paper_pnl_bps"] for row in entry_daily} == {"970.0"}
     assert all("avg_paper_pnl_bps_by_horizon" in row for row in daily)
+    assert all(row["avg_paper_pnl_bps_24h"] == "970.0" for row in entry_daily)
     assert all(json.loads(row["paper_pnl_observed_count_by_horizon"])["24h"] == 1 for row in entry_daily)
 
     coverage = _read_csv(tmp_path / "reports" / "summaries" / "paper_slippage_coverage.csv")
