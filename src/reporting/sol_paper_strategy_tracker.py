@@ -166,6 +166,9 @@ PAPER_DAILY_FIELDS = [
     "pending_count",
     "not_observable_count",
     "avg_paper_pnl_bps",
+    "avg_paper_pnl_bps_by_horizon",
+    "paper_pnl_observed_count_by_horizon",
+    "paper_pnl_day_count_by_horizon",
     "paper_pnl_usdt_sum",
     "win_rate",
     "paper_days_to_date",
@@ -1968,10 +1971,16 @@ def _annotate_readiness(
 
 def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_strategy_days: dict[tuple[str, str], set[str]] = defaultdict(set)
+    observed_days_by_horizon: dict[tuple[str, str, int], set[str]] = defaultdict(set)
     for record in records:
-        by_strategy_days[(str(record.get("strategy_id") or ""), str(record.get("symbol") or ""))].add(
-            str(record.get("paper_date") or "")
-        )
+        strategy_id = str(record.get("strategy_id") or "")
+        symbol = str(record.get("symbol") or "")
+        paper_date = str(record.get("paper_date") or "")
+        by_strategy_days[(strategy_id, symbol)].add(paper_date)
+        if bool(record.get("would_enter")) and paper_date:
+            for horizon in DEFAULT_HORIZONS:
+                if _normalize_float(record.get(f"paper_pnl_bps_{horizon}h")) is not None:
+                    observed_days_by_horizon[(strategy_id, symbol, horizon)].add(paper_date)
     buckets: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for record in records:
         buckets[
@@ -1986,6 +1995,31 @@ def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         entry_rows = [row for row in rows if bool(row.get("would_enter"))]
         values = [_normalize_float(row.get("paper_pnl_bps")) for row in entry_rows]
         usable = [value for value in values if value is not None]
+        horizon_values: dict[str, list[float]] = {}
+        horizon_all_usable: list[float] = []
+        horizon_observed_counts: dict[str, int] = {}
+        horizon_day_counts: dict[str, int] = {}
+        for horizon in DEFAULT_HORIZONS:
+            key = f"{horizon}h"
+            values_for_horizon = [
+                value
+                for value in (
+                    _normalize_float(row.get(f"paper_pnl_bps_{horizon}h"))
+                    for row in entry_rows
+                )
+                if value is not None
+            ]
+            horizon_values[key] = values_for_horizon
+            horizon_all_usable.extend(values_for_horizon)
+            horizon_observed_counts[key] = len(values_for_horizon)
+            horizon_day_counts[key] = len(
+                {
+                    date
+                    for date in observed_days_by_horizon[(strategy_id, symbol, horizon)]
+                    if date and date <= paper_date
+                }
+            )
+        effective_usable = usable or horizon_all_usable
         pnl_usdt = [_normalize_float(row.get("paper_pnl_usdt")) for row in entry_rows]
         pnl_usdt_usable = [value for value in pnl_usdt if value is not None]
         out.append(
@@ -1998,9 +2032,19 @@ def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "complete_count": sum(1 for row in entry_rows if str(row.get("label_status") or "") == "complete"),
                 "pending_count": sum(1 for row in entry_rows if str(row.get("label_status") or "") == "pending"),
                 "not_observable_count": sum(1 for row in entry_rows if str(row.get("label_status") or "") == "not_observable"),
-                "avg_paper_pnl_bps": round(sum(usable) / len(usable), 6) if usable else None,
+                "avg_paper_pnl_bps": round(sum(effective_usable) / len(effective_usable), 6) if effective_usable else None,
+                "avg_paper_pnl_bps_by_horizon": json.dumps(
+                    {
+                        horizon: round(sum(values) / len(values), 6)
+                        for horizon, values in horizon_values.items()
+                        if values
+                    },
+                    sort_keys=True,
+                ),
+                "paper_pnl_observed_count_by_horizon": json.dumps(horizon_observed_counts, sort_keys=True),
+                "paper_pnl_day_count_by_horizon": json.dumps(horizon_day_counts, sort_keys=True),
                 "paper_pnl_usdt_sum": round(sum(pnl_usdt_usable), 8) if pnl_usdt_usable else None,
-                "win_rate": round(sum(1 for value in usable if float(value) > 0.0) / len(usable), 6) if usable else None,
+                "win_rate": round(sum(1 for value in effective_usable if float(value) > 0.0) / len(effective_usable), 6) if effective_usable else None,
                 "paper_days_to_date": len(
                     {date for date in by_strategy_days[(strategy_id, symbol)] if date and date <= paper_date}
                 ),

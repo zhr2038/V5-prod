@@ -14,6 +14,7 @@ from configs.schema import AppConfig
 from src.core.models import MarketSeries
 from src.reporting.decision_audit import DecisionAudit
 from src.reporting.sol_paper_strategy_tracker import (
+    _daily_rows,
     _readiness_for_rows,
     update_sol_paper_strategy_tracker,
 )
@@ -39,6 +40,39 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
 
 def _read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def test_paper_strategy_daily_aggregates_horizon_pnl_when_primary_missing() -> None:
+    rows = _daily_rows(
+        [
+            {
+                "paper_date": "2026-05-20",
+                "strategy_id": "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+                "experiment_name": "eth_f3",
+                "symbol": "ETH/USDT",
+                "would_enter": True,
+                "label_status": "complete",
+                "paper_pnl_bps": None,
+                "paper_pnl_bps_4h": 12.5,
+                "paper_pnl_bps_8h": 25.0,
+                "paper_pnl_bps_12h": -7.5,
+            }
+        ]
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["avg_paper_pnl_bps"] == 10.0
+    avg_by_horizon = json.loads(row["avg_paper_pnl_bps_by_horizon"])
+    observed_by_horizon = json.loads(row["paper_pnl_observed_count_by_horizon"])
+    day_count_by_horizon = json.loads(row["paper_pnl_day_count_by_horizon"])
+    assert avg_by_horizon == {"4h": 12.5, "8h": 25.0, "12h": -7.5}
+    assert observed_by_horizon["4h"] == 1
+    assert observed_by_horizon["8h"] == 1
+    assert observed_by_horizon["12h"] == 1
+    assert day_count_by_horizon["4h"] == 1
+    assert day_count_by_horizon["8h"] == 1
+    assert day_count_by_horizon["12h"] == 1
 
 
 def _write_candidate_snapshot(run_dir: Path) -> None:
@@ -261,6 +295,8 @@ def test_sol_paper_strategy_tracker_writes_runs_daily_and_slippage(tmp_path: Pat
     assert {row["paper_days_to_date"] for row in entry_daily} == {"1"}
     assert {row["paper_days_to_date"] for row in heartbeat_daily} == {"2"}
     assert {row["avg_paper_pnl_bps"] for row in entry_daily} == {"970.0"}
+    assert all("avg_paper_pnl_bps_by_horizon" in row for row in daily)
+    assert all(json.loads(row["paper_pnl_observed_count_by_horizon"])["24h"] == 1 for row in entry_daily)
 
     coverage = _read_csv(tmp_path / "reports" / "summaries" / "paper_slippage_coverage.csv")
     by_strategy = {row["strategy_id"]: row for row in coverage}
