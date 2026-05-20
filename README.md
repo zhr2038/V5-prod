@@ -475,6 +475,8 @@ heartbeat 诊断字段：
 - `f5_rsi_trend_confirm`
 - `original_block_reason`
 - `cost_source`
+- `advisory_decision`
+- `advisory_match_key`
 - `no_sample_reason`
 
 `no_sample_reason` 使用标准枚举：

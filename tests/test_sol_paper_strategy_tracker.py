@@ -452,6 +452,59 @@ def test_sol_paper_strategy_tracker_heartbeat_explains_blocking_conditions(
     assert {row["label_24h_reason"] for row in runs} == {expected_reason}
 
 
+def test_sol_paper_no_entry_row_includes_required_diagnostics(tmp_path: Path) -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    run_id = "r_sol_no_entry_diag"
+    run_dir = tmp_path / "reports" / "runs" / run_id
+    _write_single_sol_candidate(
+        run_dir,
+        run_id=run_id,
+        overrides={
+            "strategy_candidate": "f4_volume_swing",
+            "f4_volume_expansion": "-0.2",
+            "alpha6_score": "0.41",
+            "alpha6_side": "buy",
+            "f5_rsi_trend_confirm": "0.38",
+            "risk_level": "PROTECT",
+        },
+    )
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "strategy_id": "SOL_F4_VOLUME_EXPANSION_PAPER_V1",
+                "strategy_candidate": "v5.f4_volume_expansion_entry",
+                "symbol": "SOL-USDT",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "horizon_hours": "24",
+            }
+        ],
+    )
+
+    update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit(run_id, start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    f4 = next(row for row in runs if row["strategy_id"] == "SOL_F4_VOLUME_EXPANSION_PAPER_V1")
+    assert f4["would_enter"] == "False"
+    assert f4["no_sample_reason"] == "f4_below_threshold"
+    assert f4["risk_level"] == "PROTECT"
+    assert f4["alpha6_score"] == "0.41"
+    assert f4["alpha6_side"] == "buy"
+    assert f4["f4_volume_expansion"] == "-0.2"
+    assert f4["f4_threshold"] == "0.0"
+    assert f4["f5_rsi_trend_confirm"] == "0.38"
+    assert f4["advisory_decision"] == "PAPER_READY"
+    assert f4["advisory_match_key"] == "sol_f4_volume_expansion_paper_v1"
+
+
 def test_sol_paper_strategy_tracker_uses_standard_no_sample_reason_for_source_mismatch(tmp_path: Path) -> None:
     cfg = _cfg()
     start_s = 1_779_000_000
