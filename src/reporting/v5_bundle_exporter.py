@@ -647,6 +647,194 @@ def _read_order_lifecycle_rows(reports: Path) -> list[Dict[str, Any]]:
     return rows
 
 
+def _is_nullish(value: Any) -> bool:
+    return str(value if value is not None else "").strip().lower() in {
+        "",
+        "null",
+        "none",
+        "nan",
+        "not_observable",
+    }
+
+
+def _identity(value: Any) -> str:
+    return "" if _is_nullish(value) else str(value).strip()
+
+
+def _lifecycle_field_needs_fill(row: Mapping[str, Any], field: str) -> bool:
+    value = row.get(field)
+    if _is_nullish(value):
+        return True
+    if field in {"fill_count", "fee", "fee_usdt", "filled_qty", "avg_fill_px", "fill_px", "notional_usdt"}:
+        number = _to_float(value)
+        return number is not None and abs(number) <= 0.0
+    return False
+
+
+def _dedupe_fill_rows(rows: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    out: list[Mapping[str, Any]] = []
+    seen: set[tuple[str, str, str, str, str, str]] = set()
+    for row in rows:
+        key = (
+            _identity(row.get("run_id")),
+            _identity(row.get("order_id")),
+            _identity(row.get("trade_id")),
+            _identity(row.get("ts_utc")),
+            _identity(row.get("symbol")),
+            _identity(row.get("qty")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
+
+def _same_symbol_side_intent(lifecycle: Mapping[str, Any], fill: Mapping[str, Any]) -> bool:
+    lifecycle_symbol = _normalized_symbol(lifecycle.get("symbol") or lifecycle.get("normalized_symbol"))
+    fill_symbol = _normalized_symbol(fill.get("symbol") or fill.get("normalized_symbol"))
+    if lifecycle_symbol != fill_symbol:
+        return False
+    lifecycle_side = _identity(lifecycle.get("side")).lower()
+    fill_side = _identity(fill.get("side")).lower()
+    if lifecycle_side and fill_side and lifecycle_side != fill_side:
+        return False
+    lifecycle_intent = _identity(lifecycle.get("intent")).upper()
+    fill_action = _identity(fill.get("action")).upper()
+    if lifecycle_intent and fill_action and lifecycle_intent != fill_action:
+        return False
+    return True
+
+
+def _numeric_close(left: Any, right: Any, tolerance: float = 1e-9) -> bool:
+    left_num = _to_float(left)
+    right_num = _to_float(right)
+    if left_num is None or right_num is None:
+        return False
+    return abs(left_num - right_num) <= tolerance
+
+
+def _matching_fill_rows_for_lifecycle(
+    lifecycle: Mapping[str, Any],
+    candidate_fills: Iterable[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    candidates = list(candidate_fills)
+    cl_ord_id = _identity(lifecycle.get("cl_ord_id"))
+    exchange_order_id = _identity(lifecycle.get("exchange_order_id"))
+    order_ids = {value for value in (cl_ord_id, exchange_order_id) if value}
+    trade_ids = {
+        part.strip()
+        for part in _identity(lifecycle.get("trade_ids")).replace(",", ";").split(";")
+        if part.strip()
+    }
+    exact: list[Mapping[str, Any]] = []
+    for fill in candidates:
+        order_id = _identity(fill.get("order_id"))
+        trade_id = _identity(fill.get("trade_id"))
+        if order_id and order_id in order_ids:
+            exact.append(fill)
+        elif trade_id and trade_id in trade_ids:
+            exact.append(fill)
+    if exact:
+        return _dedupe_fill_rows(exact)
+
+    soft = [fill for fill in candidates if _same_symbol_side_intent(lifecycle, fill)]
+    if not soft:
+        return []
+    price_filtered = [
+        fill
+        for fill in soft
+        if _numeric_close(lifecycle.get("avg_fill_px") or lifecycle.get("fill_px"), fill.get("price"), tolerance=1e-6)
+    ]
+    qty_filtered = [
+        fill
+        for fill in (price_filtered or soft)
+        if _numeric_close(lifecycle.get("filled_qty"), fill.get("qty"), tolerance=1e-12)
+    ]
+    for group in (qty_filtered, price_filtered, soft):
+        deduped = _dedupe_fill_rows(group)
+        if len(deduped) == 1:
+            return deduped
+    return []
+
+
+def _aggregate_fill_metrics_for_lifecycle(fills: list[Mapping[str, Any]]) -> Dict[str, Any]:
+    if not fills:
+        return {}
+    ordered = sorted(fills, key=lambda row: (_identity(row.get("ts_utc")), _identity(row.get("trade_id"))))
+    ts_values = [_identity(row.get("ts_utc")) for row in ordered if _identity(row.get("ts_utc"))]
+    qty_sum = 0.0
+    px_qty_sum = 0.0
+    notional_sum = 0.0
+    fee_usdt_sum = 0.0
+    fee_values: list[float] = []
+    fee_ccys: set[str] = set()
+    trade_ids: list[str] = []
+    first_px: Optional[float] = None
+    for fill in ordered:
+        px = _to_float(fill.get("price"))
+        qty = _to_float(fill.get("qty"))
+        if px is not None and first_px is None:
+            first_px = px
+        if px is not None and qty is not None and qty > 0:
+            qty_sum += qty
+            px_qty_sum += px * qty
+        notional = _to_float(fill.get("notional_usdt"))
+        if notional is not None:
+            notional_sum += abs(notional)
+        fee_usdt = _to_float(fill.get("fee_usdt"))
+        if fee_usdt is not None:
+            fee_usdt_sum += abs(fee_usdt)
+        fee = _to_float(fill.get("fee"))
+        if fee is not None:
+            fee_values.append(fee)
+        fee_ccy = _identity(fill.get("fee_ccy")).upper()
+        if fee_ccy:
+            fee_ccys.add(fee_ccy)
+        trade_id = _identity(fill.get("trade_id"))
+        if trade_id:
+            trade_ids.append(trade_id)
+    avg_px = (px_qty_sum / qty_sum) if qty_sum > 0 else first_px
+    fee_ccy_value = next(iter(fee_ccys)) if len(fee_ccys) == 1 else ("mixed" if fee_ccys else "")
+    return {
+        "first_fill_ts": ts_values[0] if ts_values else "",
+        "last_fill_ts": ts_values[-1] if ts_values else "",
+        "fill_px": first_px,
+        "avg_fill_px": avg_px,
+        "filled_qty": qty_sum if qty_sum > 0 else None,
+        "fee": sum(fee_values) if fee_values and fee_ccy_value != "mixed" else None,
+        "fee_ccy": fee_ccy_value,
+        "fee_usdt": fee_usdt_sum if fee_usdt_sum > 0 else None,
+        "notional_usdt": notional_sum if notional_sum > 0 else None,
+        "trade_ids": ";".join(dict.fromkeys(trade_ids)),
+        "fill_count": len(ordered),
+    }
+
+
+def _backfill_order_lifecycle_from_fill_metrics(
+    rows: list[Dict[str, Any]],
+    fill_metrics_rows: Iterable[Mapping[str, Any]],
+) -> list[Dict[str, Any]]:
+    fills_by_run: dict[str, list[Mapping[str, Any]]] = {}
+    for fill in fill_metrics_rows:
+        run_id = _identity(fill.get("run_id"))
+        if not run_id:
+            continue
+        fills_by_run.setdefault(run_id, []).append(fill)
+
+    out: list[Dict[str, Any]] = []
+    for row in rows:
+        enriched = dict(row)
+        matches = _matching_fill_rows_for_lifecycle(enriched, fills_by_run.get(_identity(enriched.get("run_id")), []))
+        if matches:
+            aggregate = _aggregate_fill_metrics_for_lifecycle(matches)
+            for field, value in aggregate.items():
+                if value is not None and _lifecycle_field_needs_fill(enriched, field):
+                    enriched[field] = _csv_null(value)
+        out.append(enriched)
+    return out
+
+
 def _copy_order_lifecycle_files(staging: Path, reports: Path) -> None:
     aggregate = reports / "order_lifecycle.csv"
     if aggregate.exists():
@@ -1822,7 +2010,10 @@ def export_v5_bundle(
     trade_metrics_rows, fill_metrics_rows, mismatch_rows = _build_trade_bundle_rows(reports)
     candidate_rows = _read_candidate_snapshot_rows(reports)
     candidate_cost_source_coverage = _candidate_cost_source_coverage(candidate_rows)
-    order_lifecycle_rows = _read_order_lifecycle_rows(reports)
+    order_lifecycle_rows = _backfill_order_lifecycle_from_fill_metrics(
+        _read_order_lifecycle_rows(reports),
+        fill_metrics_rows,
+    )
     trade_metric_fill_count = _count_trade_metric_fills(trade_metrics_rows)
     order_lifecycle_missing_for_trades = trade_metric_fill_count > 0 and not order_lifecycle_rows
     summary_high_issue_count = len([row for row in mismatch_rows if str(row.get("high_issue")) == "true"])

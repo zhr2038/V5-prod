@@ -397,6 +397,57 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert window["post_deployment_global_default_cost_count"] == 0
 
 
+def test_bundle_export_backfills_order_lifecycle_fill_fields_from_trades(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    reports = root / "reports"
+    out = tmp_path / "bundles"
+    run_dir = reports / "runs" / "r_fill"
+    run_dir.mkdir(parents=True)
+    (reports / "quant_lab_usage.jsonl").write_text("", encoding="utf-8")
+    (reports / "quant_lab_requests.jsonl").write_text("", encoding="utf-8")
+    (run_dir / "trades.csv").write_text(
+        "\n".join(
+            [
+                "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee,fee_ccy,fee_usdt,slippage_usdt,order_id,trade_id",
+                "2026-05-20T07:00:32Z,r_fill,BTC/USDT,OPEN_LONG,buy,0.00013568,77383.7,10.5,-0.0105,USDT,0.0105,0.001,clid-btc,trade-btc-1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "summary.json").write_text(json.dumps({"run_id": "r_fill", "num_trades": 1}), encoding="utf-8")
+    (run_dir / "order_lifecycle.csv").write_text(
+        "\n".join(
+            [
+                "schema_version,lifecycle_id,run_id,ts_utc,symbol,normalized_symbol,side,intent,order_state,decision_ts,signal_price,arrival_bid,arrival_ask,arrival_mid,spread_bps_at_decision,submit_ts,order_type,order_px,cl_ord_id,exchange_order_id,first_fill_ts,last_fill_ts,fill_px,avg_fill_px,filled_qty,fee,fee_ccy,fee_usdt,notional_usdt,requested_notional_usdt,trade_ids,fill_count",
+                "v5.order_lifecycle.v1,olc_btc,r_fill,2026-05-20T07:00:35Z,BTC/USDT,BTC-USDT,buy,OPEN_LONG,FILLED,2026-05-20T07:00:00Z,77383.7,77380,77390,77385,1.29,2026-05-20T07:00:31Z,market,null,clid-btc,okx-btc,,,,77383.7,0.00013568,,,0,10.5,10.5,,0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    bundle = export_v5_bundle(reports_dir=reports, out_dir=out, window_hours=24 * 3650)
+
+    with tarfile.open(bundle, "r:gz") as tf:
+        order_lifecycle = list(csv.DictReader(tf.extractfile("summaries/order_lifecycle.csv").read().decode("utf-8").splitlines()))
+        fill_metrics = list(csv.DictReader(tf.extractfile("summaries/fill_metrics.csv").read().decode("utf-8").splitlines()))
+
+    assert len(fill_metrics) == 1
+    assert len(order_lifecycle) == 1
+    row = order_lifecycle[0]
+    assert row["first_fill_ts"] == "2026-05-20T07:00:32Z"
+    assert row["last_fill_ts"] == "2026-05-20T07:00:32Z"
+    assert row["fill_px"] == "77383.7"
+    assert row["avg_fill_px"] == "77383.7"
+    assert row["filled_qty"] == "0.00013568"
+    assert row["fee"] == "-0.0105"
+    assert row["fee_ccy"] == "USDT"
+    assert row["fee_usdt"] == "0.0105"
+    assert row["trade_ids"] == "trade-btc-1"
+    assert row["fill_count"] == "1"
+
+
 def test_bundle_export_flags_missing_order_lifecycle_when_trades_exist(tmp_path: Path) -> None:
     root = tmp_path / "root"
     reports = root / "reports"

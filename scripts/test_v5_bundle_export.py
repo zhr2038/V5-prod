@@ -808,6 +808,39 @@ def fixture_summary_trade_count_mismatch_root(root):
     )
 
 
+def fixture_order_lifecycle_fill_backfill_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    run_id = now.strftime("%Y%m%d_%H")
+    ts = int(now.timestamp()) + 32
+
+    write_text(root / "configs/live_prod.yaml", "probe_time_stop_hours: 4\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(run_dir / "decision_audit.json", {"window_end_ts": int(now.timestamp()), "router_decisions": []})
+    write_text(
+        run_dir / "trades.csv",
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee,fee_ccy,fee_usdt,slippage_usdt,order_id,trade_id\n"
+        f"{iso(ts)},{run_id},BTC/USDT,OPEN_LONG,buy,0.00013568,77383.7,10.5,-0.0105,USDT,0.0105,0.001,clid-btc,trade-btc-1\n",
+    )
+    write_text(
+        run_dir / "order_lifecycle.csv",
+        "schema_version,lifecycle_id,run_id,ts_utc,symbol,normalized_symbol,side,intent,order_state,decision_ts,signal_price,arrival_bid,arrival_ask,arrival_mid,spread_bps_at_decision,submit_ts,order_type,order_px,cl_ord_id,exchange_order_id,first_fill_ts,last_fill_ts,fill_px,avg_fill_px,filled_qty,fee,fee_ccy,fee_usdt,notional_usdt,requested_notional_usdt,trade_ids,fill_count\n"
+        f"v5.order_lifecycle.v1,olc_btc,{run_id},{iso(ts + 3)},BTC/USDT,BTC-USDT,buy,OPEN_LONG,FILLED,{iso(ts - 32)},77383.7,77380,77390,77385,1.29,{iso(ts - 1)},market,null,clid-btc,okx-btc,,,,77383.7,0.00013568,,,0,10.5,10.5,,0\n",
+    )
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id, "num_trades": 1, "budget": {"fills_count_today": 1}})
+
+
 def fixture_config_runtime_consumption_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -3112,6 +3145,42 @@ def main():
             assert manifest["summary_metrics_version"] == "v5.summary_metrics.v1", manifest
             assert "## Summary trade metrics check" in readme, readme
             assert "summary_trade_count_mismatch rows: 2" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-order-lifecycle-fill-backfill-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_order_lifecycle_fill_backfill_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                order_lifecycle = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/order_lifecycle.csv")).read().decode().splitlines()))
+                fill_metrics = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/fill_metrics.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+            assert len(fill_metrics) == 1, fill_metrics
+            assert len(order_lifecycle) == 1, order_lifecycle
+            row = order_lifecycle[0]
+            assert row["first_fill_ts"].endswith("Z"), row
+            assert row["last_fill_ts"] == row["first_fill_ts"], row
+            assert row["fill_px"] == "77383.7", row
+            assert row["avg_fill_px"] == "77383.7", row
+            assert row["filled_qty"] == "0.00013568", row
+            assert row["fee"] == "-0.0105", row
+            assert row["fee_ccy"] == "USDT", row
+            assert row["fee_usdt"] == "0.0105", row
+            assert row["trade_ids"] == "trade-btc-1", row
+            assert row["fill_count"] == "1", row
+            lifecycle_issues = [
+                item for item in issues["issues"]
+                if item.get("severity") == "high" and item.get("code") == "order_lifecycle_missing_for_trades"
+            ]
+            assert lifecycle_issues == [], issues
+            assert window["order_lifecycle_rows"] == 1, window
+            assert window["order_lifecycle_trade_metric_fill_count"] == 1, window
+            assert window["order_lifecycle_missing_high_issue"] is False, window
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

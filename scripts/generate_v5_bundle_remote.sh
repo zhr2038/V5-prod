@@ -2987,7 +2987,164 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 collection_errors.append({"source": str(path), "error": f"order_lifecycle_csv: {exc!r}"})
         return rows
 
-    order_lifecycle_rows = load_order_lifecycle_rows()
+    def lifecycle_nullish(value):
+        return str(value if value is not None else "").strip().lower() in {"", "null", "none", "nan", not_obs}
+
+    def lifecycle_identity(value):
+        return "" if lifecycle_nullish(value) else str(value).strip()
+
+    def lifecycle_field_needs_fill(row, field):
+        value = row.get(field)
+        if lifecycle_nullish(value):
+            return True
+        if field in {"fill_count", "fee", "fee_usdt", "filled_qty", "avg_fill_px", "fill_px", "notional_usdt"}:
+            number = as_float(value)
+            return number is not None and abs(number) <= 0.0
+        return False
+
+    def lifecycle_dedupe_fills(rows):
+        out = []
+        seen_keys = set()
+        for row in rows:
+            key = (
+                lifecycle_identity(row.get("run_id")),
+                lifecycle_identity(row.get("order_id")),
+                lifecycle_identity(row.get("trade_id")),
+                lifecycle_identity(row.get("ts_utc")),
+                lifecycle_identity(row.get("symbol")),
+                lifecycle_identity(row.get("qty")),
+            )
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            out.append(row)
+        return out
+
+    def lifecycle_same_symbol_side_intent(row, fill):
+        row_symbol = normalize_trade_symbol_for_contract(first_observed(row.get("symbol"), row.get("normalized_symbol")))
+        fill_symbol = normalize_trade_symbol_for_contract(first_observed(fill.get("symbol"), fill.get("normalized_symbol")))
+        if row_symbol != fill_symbol:
+            return False
+        row_side = lifecycle_identity(row.get("side")).lower()
+        fill_side = lifecycle_identity(fill.get("side")).lower()
+        if row_side and fill_side and row_side != fill_side:
+            return False
+        row_intent = lifecycle_identity(row.get("intent")).upper()
+        fill_action = lifecycle_identity(fill.get("action")).upper()
+        if row_intent and fill_action and row_intent != fill_action:
+            return False
+        return True
+
+    def numeric_close(left, right, tolerance):
+        left_num = as_float(left)
+        right_num = as_float(right)
+        return left_num is not None and right_num is not None and abs(left_num - right_num) <= tolerance
+
+    def matching_fill_rows_for_lifecycle(row, candidates):
+        cl_ord_id = lifecycle_identity(row.get("cl_ord_id"))
+        exchange_order_id = lifecycle_identity(row.get("exchange_order_id"))
+        order_ids = {value for value in (cl_ord_id, exchange_order_id) if value}
+        trade_ids = {
+            part.strip()
+            for part in lifecycle_identity(row.get("trade_ids")).replace(",", ";").split(";")
+            if part.strip()
+        }
+        exact = []
+        for fill in candidates:
+            order_id = lifecycle_identity(fill.get("order_id"))
+            trade_id = lifecycle_identity(fill.get("trade_id"))
+            if order_id and order_id in order_ids:
+                exact.append(fill)
+            elif trade_id and trade_id in trade_ids:
+                exact.append(fill)
+        if exact:
+            return lifecycle_dedupe_fills(exact)
+        soft = [fill for fill in candidates if lifecycle_same_symbol_side_intent(row, fill)]
+        if not soft:
+            return []
+        price_filtered = [
+            fill for fill in soft
+            if numeric_close(first_observed(row.get("avg_fill_px"), row.get("fill_px")), fill.get("price"), 1e-6)
+        ]
+        qty_filtered = [
+            fill for fill in (price_filtered or soft)
+            if numeric_close(row.get("filled_qty"), fill.get("qty"), 1e-12)
+        ]
+        for group in (qty_filtered, price_filtered, soft):
+            deduped = lifecycle_dedupe_fills(group)
+            if len(deduped) == 1:
+                return deduped
+        return []
+
+    def aggregate_lifecycle_fill_metrics(fills):
+        ordered = sorted(fills, key=lambda row: (lifecycle_identity(row.get("ts_utc")), lifecycle_identity(row.get("trade_id"))))
+        ts_values = [lifecycle_identity(row.get("ts_utc")) for row in ordered if lifecycle_identity(row.get("ts_utc"))]
+        qty_sum = 0.0
+        px_qty_sum = 0.0
+        notional_sum = 0.0
+        fee_usdt_sum = 0.0
+        fee_values = []
+        fee_ccys = set()
+        trade_ids = []
+        first_px = None
+        for fill in ordered:
+            px = as_float(fill.get("price"))
+            qty = as_float(fill.get("qty"))
+            if px is not None and first_px is None:
+                first_px = px
+            if px is not None and qty is not None and qty > 0:
+                qty_sum += qty
+                px_qty_sum += px * qty
+            notional = as_float(fill.get("notional_usdt"))
+            if notional is not None:
+                notional_sum += abs(float(notional))
+            fee_usdt = as_float(fill.get("fee_usdt"))
+            if fee_usdt is not None:
+                fee_usdt_sum += abs(float(fee_usdt))
+            fee = as_float(fill.get("fee"))
+            if fee is not None:
+                fee_values.append(float(fee))
+            fee_ccy = lifecycle_identity(fill.get("fee_ccy")).upper()
+            if fee_ccy:
+                fee_ccys.add(fee_ccy)
+            trade_id = lifecycle_identity(fill.get("trade_id"))
+            if trade_id:
+                trade_ids.append(trade_id)
+        avg_px = (px_qty_sum / qty_sum) if qty_sum > 0 else first_px
+        fee_ccy = next(iter(fee_ccys)) if len(fee_ccys) == 1 else ("mixed" if fee_ccys else "")
+        return {
+            "first_fill_ts": ts_values[0] if ts_values else "",
+            "last_fill_ts": ts_values[-1] if ts_values else "",
+            "fill_px": first_px,
+            "avg_fill_px": avg_px,
+            "filled_qty": qty_sum if qty_sum > 0 else None,
+            "fee": sum(fee_values) if fee_values and fee_ccy != "mixed" else None,
+            "fee_ccy": fee_ccy,
+            "fee_usdt": fee_usdt_sum if fee_usdt_sum > 0 else None,
+            "notional_usdt": notional_sum if notional_sum > 0 else None,
+            "trade_ids": ";".join(dict.fromkeys(trade_ids)),
+            "fill_count": len(ordered),
+        }
+
+    def backfill_order_lifecycle_from_fill_metrics(rows):
+        fills_by_run = defaultdict(list)
+        for fill in fill_metrics_rows:
+            run_id = lifecycle_identity(fill.get("run_id"))
+            if run_id:
+                fills_by_run[run_id].append(fill)
+        out = []
+        for row in rows:
+            enriched = dict(row)
+            matches = matching_fill_rows_for_lifecycle(enriched, fills_by_run.get(lifecycle_identity(enriched.get("run_id")), []))
+            if matches:
+                aggregate = aggregate_lifecycle_fill_metrics(matches)
+                for field, value in aggregate.items():
+                    if value is not None and lifecycle_field_needs_fill(enriched, field):
+                        enriched[field] = csv_null(value)
+            out.append(enriched)
+        return out
+
+    order_lifecycle_rows = backfill_order_lifecycle_from_fill_metrics(load_order_lifecycle_rows())
     order_lifecycle_trade_metric_fill_count = sum(
         as_int(first_observed(row.get("trades_counted_rows"), row.get("num_trades"), row.get("fills_count_today"))) or 0
         for row in trade_metrics_rows
