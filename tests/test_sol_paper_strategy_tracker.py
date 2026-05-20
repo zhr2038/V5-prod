@@ -68,9 +68,17 @@ def test_paper_strategy_daily_aggregates_horizon_pnl_when_primary_missing() -> N
     assert row["avg_paper_pnl_bps_8h"] == 25.0
     assert row["avg_paper_pnl_bps_12h"] == -7.5
     avg_by_horizon = json.loads(row["avg_paper_pnl_bps_by_horizon"])
+    complete_by_horizon = json.loads(row["complete_count_by_horizon"])
+    win_rate_by_horizon = json.loads(row["win_rate_by_horizon"])
     observed_by_horizon = json.loads(row["paper_pnl_observed_count_by_horizon"])
     day_count_by_horizon = json.loads(row["paper_pnl_day_count_by_horizon"])
     assert avg_by_horizon == {"4h": 12.5, "8h": 25.0, "12h": -7.5}
+    assert complete_by_horizon["4h"] == 1
+    assert complete_by_horizon["8h"] == 1
+    assert complete_by_horizon["12h"] == 1
+    assert win_rate_by_horizon["4h"] == 1.0
+    assert win_rate_by_horizon["8h"] == 1.0
+    assert win_rate_by_horizon["12h"] == 0.0
     assert observed_by_horizon["4h"] == 1
     assert observed_by_horizon["8h"] == 1
     assert observed_by_horizon["12h"] == 1
@@ -105,6 +113,36 @@ def test_eth_f3_negative_24h_or_48h_downgrades_to_keep_shadow() -> None:
     assert readiness["readiness_status"] == "KEEP_SHADOW"
     assert readiness["live_small_ready"] is False
     assert "eth_f3_negative_24h_or_48h_paper_pnl" in readiness["live_block_reason"]
+
+
+def test_eth_f3_paper_ready_does_not_become_live_without_long_horizon_readiness() -> None:
+    readiness = _readiness_for_rows(
+        [
+            {
+                "paper_date": "2026-05-20",
+                "strategy_id": "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+                "symbol": "ETH/USDT",
+                "would_enter": True,
+                "arrival_mid": 100,
+                "estimated_spread_bps": 2,
+                "slippage_covered": True,
+                "cost_source": "mixed_actual_proxy",
+                "extra_live_block_reasons": "cost_source_not_actual_or_mixed;f3_global_evidence_negative;no_paper_pnl_observations",
+                "paper_pnl_bps_4h": 15.0,
+                "paper_pnl_bps_8h": 20.0,
+                "paper_pnl_bps_12h": 25.0,
+            }
+        ],
+        required_days=1,
+        required_entry_days=1,
+        required_coverage=0.0,
+        enable_live_experiment=True,
+        allowed_cost_sources={"mixed_actual_proxy"},
+    )
+
+    assert readiness["readiness_status"] == "PAPER_READY"
+    assert readiness["live_small_ready"] is False
+    assert "f3_global_evidence_negative" in readiness["live_block_reason"]
 
 
 def _write_candidate_snapshot(run_dir: Path) -> None:

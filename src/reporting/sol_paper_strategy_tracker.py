@@ -168,6 +168,8 @@ PAPER_DAILY_FIELDS = [
     "not_observable_count",
     "avg_paper_pnl_bps",
     "avg_paper_pnl_bps_by_horizon",
+    "complete_count_by_horizon",
+    "win_rate_by_horizon",
     "paper_pnl_observed_count_by_horizon",
     "paper_pnl_day_count_by_horizon",
     "paper_pnl_usdt_sum",
@@ -2036,15 +2038,29 @@ def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         horizon_avgs: dict[str, float] = {}
         horizon_all_usable: list[float] = []
         horizon_observed_counts: dict[str, int] = {}
+        horizon_complete_counts: dict[str, int] = {}
         horizon_day_counts: dict[str, int] = {}
+        horizon_win_rates: dict[str, float] = {}
         for horizon in DEFAULT_HORIZONS:
             key = f"{horizon}h"
             values_for_horizon = _horizon_pnl_values(entry_rows, horizon)
             horizon_values[key] = values_for_horizon
             if values_for_horizon:
                 horizon_avgs[key] = round(sum(values_for_horizon) / len(values_for_horizon), 6)
+                horizon_win_rates[key] = round(
+                    sum(1 for value in values_for_horizon if float(value) > 0.0) / len(values_for_horizon),
+                    6,
+                )
             horizon_all_usable.extend(values_for_horizon)
             horizon_observed_counts[key] = len(values_for_horizon)
+            status_key = f"{HORIZON_PREFIX}{horizon}h_status"
+            pnl_key = f"paper_pnl_bps_{horizon}h"
+            horizon_complete_counts[key] = sum(
+                1
+                for row in entry_rows
+                if str(row.get(status_key) or "").strip().lower() == "complete"
+                or _normalize_float(row.get(pnl_key)) is not None
+            )
             horizon_day_counts[key] = len(
                 {
                     date
@@ -2074,6 +2090,8 @@ def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "not_observable_count": sum(1 for row in entry_rows if str(row.get("label_status") or "") == "not_observable"),
             "avg_paper_pnl_bps": round(sum(effective_usable) / len(effective_usable), 6) if effective_usable else None,
             "avg_paper_pnl_bps_by_horizon": json.dumps(horizon_avgs, sort_keys=True),
+            "complete_count_by_horizon": json.dumps(horizon_complete_counts, sort_keys=True),
+            "win_rate_by_horizon": json.dumps(horizon_win_rates, sort_keys=True),
             "paper_pnl_observed_count_by_horizon": json.dumps(horizon_observed_counts, sort_keys=True),
             "paper_pnl_day_count_by_horizon": json.dumps(horizon_day_counts, sort_keys=True),
             "paper_pnl_usdt_sum": round(sum(pnl_usdt_usable), 8) if pnl_usdt_usable else None,
