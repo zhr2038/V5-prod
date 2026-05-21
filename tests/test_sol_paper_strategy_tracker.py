@@ -20,6 +20,9 @@ from src.reporting.sol_paper_strategy_tracker import (
 )
 
 
+CONTRACT_VERSION = "v5.quant_lab.telemetry.v2"
+
+
 def _series(symbol: str, start_s: int, prices: dict[int, float]) -> MarketSeries:
     hours = sorted(prices)
     return MarketSeries(
@@ -262,6 +265,28 @@ def _write_strategy_advisory(reports_dir: Path, rows: list[dict[str, str]]) -> N
         writer = csv.DictWriter(fh, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _fresh_meta(start_s: int, *, contract_version: str = CONTRACT_VERSION) -> dict[str, str]:
+    return {
+        "as_of_ts": str(start_s),
+        "generated_at": str(start_s),
+        "expires_at": str(start_s + 3600),
+        "contract_version": contract_version,
+        "quant_lab_git_commit": "test_commit",
+        "source_version": "test_source_v1",
+    }
+
+
+def _stale_meta(start_s: int, *, contract_version: str = CONTRACT_VERSION) -> dict[str, str]:
+    return {
+        "as_of_ts": str(start_s - 10_000),
+        "generated_at": str(start_s - 10_000),
+        "expires_at": str(start_s - 9_000),
+        "contract_version": contract_version,
+        "quant_lab_git_commit": "stale_commit",
+        "source_version": "stale_source_v1",
+    }
 
 
 def _write_paper_strategy_proposals(reports_dir: Path, rows: list[dict[str, str]]) -> None:
@@ -1048,6 +1073,7 @@ def test_sol_paper_strategy_tracker_ignores_live_small_notional_by_default(tmp_p
                 "decision": "LIVE_SMALL_READY",
                 "recommended_mode": "live",
                 "max_live_notional_usdt": "25",
+                **_fresh_meta(start_s),
             }
         ],
     )
@@ -1116,6 +1142,274 @@ def test_sol_paper_strategy_tracker_reads_api_advisory(monkeypatch: pytest.Monke
     assert advisory[0]["source_path"] == "api:/v1/strategy-opportunity-advisory"
     assert advisory[0]["strategy_candidate"] == "f4_volume_swing"
     assert advisory[0]["response_action"] == "paper_tracking"
+
+
+def test_strategy_advisory_uses_fresh_local_without_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_fresh_local"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "strategy_candidate": "f4_volume_swing",
+                "symbol": "SOL/USDT",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "max_paper_notional_usdt": "10",
+                **_fresh_meta(start_s),
+            }
+        ],
+    )
+
+    from src.quant_lab_client import client as client_mod
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("API should not be called when local advisory is fresh")
+
+    monkeypatch.setattr(client_mod.QuantLabClient, "from_config", classmethod(lambda cls, *args, **kwargs: fail_if_called()))
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_fresh_local", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["advisory_rows"] == 1
+    advisory = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_reader.csv")
+    assert advisory[0]["advisory_source"] == "local"
+    assert advisory[0]["advisory_fresh"] == "True"
+    assert advisory[0]["api_fallback_attempted"] == "False"
+
+
+def test_strategy_advisory_stale_local_uses_api_and_updates_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_stale_api"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "strategy_candidate": "f4_volume_swing",
+                "symbol": "SOL/USDT",
+                "decision": "KILL",
+                "recommended_mode": "shadow",
+                "max_paper_notional_usdt": "1",
+                **_stale_meta(start_s),
+            }
+        ],
+    )
+
+    class FakeClient:
+        def get_json(self, endpoint: str, params: dict | None = None) -> SimpleNamespace:
+            return SimpleNamespace(
+                ok=True,
+                data={
+                    "rows": [
+                        {
+                            "strategy_candidate": "f4_volume_swing",
+                            "symbol": "SOL/USDT",
+                            "decision": "PAPER_READY",
+                            "recommended_mode": "paper",
+                            "max_paper_notional_usdt": 99,
+                            **_fresh_meta(start_s),
+                        }
+                    ]
+                },
+            )
+
+    from src.quant_lab_client import client as client_mod
+
+    monkeypatch.setattr(
+        client_mod.QuantLabClient,
+        "from_config",
+        classmethod(lambda cls, *args, **kwargs: FakeClient()),
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_stale_api", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["advisory_rows"] == 1
+    advisory = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_reader.csv")
+    assert advisory[0]["advisory_source"] == "api"
+    assert advisory[0]["api_fallback_attempted"] == "True"
+    assert advisory[0]["api_fallback_success"] == "True"
+    assert advisory[0]["max_paper_notional_usdt"] == "99.0"
+    cached = _read_csv(tmp_path / "reports" / "strategy_opportunity_advisory.csv")
+    assert cached[0]["max_paper_notional_usdt"] == "99.0"
+
+
+def test_strategy_advisory_stale_local_api_fail_is_paper_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    cfg.diagnostics.enable_live_small_from_quant_lab = True
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_stale_api_fail"
+    _write_single_sol_candidate(run_dir, run_id="r_stale_api_fail", overrides={})
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "strategy_id": "SOL_F4_VOLUME_EXPANSION_PAPER_V1",
+                "symbol": "SOL/USDT",
+                "decision": "LIVE_SMALL_READY",
+                "recommended_mode": "live",
+                "max_live_notional_usdt": "25",
+                **_stale_meta(start_s),
+            }
+        ],
+    )
+
+    class FakeClient:
+        def get_json(self, endpoint: str, params: dict | None = None) -> SimpleNamespace:
+            return SimpleNamespace(ok=False, data={})
+
+    from src.quant_lab_client import client as client_mod
+
+    monkeypatch.setattr(
+        client_mod.QuantLabClient,
+        "from_config",
+        classmethod(lambda cls, *args, **kwargs: FakeClient()),
+    )
+
+    update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_stale_api_fail", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    advisory = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_reader.csv")
+    assert advisory[0]["advisory_source"] == "stale_local"
+    assert advisory[0]["stale_advisory_used"] == "True"
+    assert advisory[0]["api_fallback_attempted"] == "True"
+    assert advisory[0]["api_fallback_success"] == "False"
+    assert advisory[0]["max_live_notional_usdt"] == "0.0"
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    f4 = next(row for row in runs if row["strategy_id"] == "SOL_F4_VOLUME_EXPANSION_PAPER_V1")
+    assert f4["advisory_response_action"] == "stale_advisory_live_disabled"
+    assert f4["advisory_max_live_notional_usdt"] == "0.0"
+    assert f4["advisory_fresh"] == "False"
+
+
+def test_strategy_advisory_contract_mismatch_falls_back_to_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_contract_mismatch"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "strategy_candidate": "f4_volume_swing",
+                "symbol": "SOL/USDT",
+                "decision": "KILL",
+                "recommended_mode": "shadow",
+                **_fresh_meta(start_s, contract_version="old.contract"),
+            }
+        ],
+    )
+
+    class FakeClient:
+        def get_json(self, endpoint: str, params: dict | None = None) -> SimpleNamespace:
+            return SimpleNamespace(
+                ok=True,
+                data={
+                    "rows": [
+                        {
+                            "strategy_candidate": "f4_volume_swing",
+                            "symbol": "SOL/USDT",
+                            "decision": "PAPER_READY",
+                            "recommended_mode": "paper",
+                            "max_paper_notional_usdt": 44,
+                            **_fresh_meta(start_s),
+                        }
+                    ]
+                },
+            )
+
+    from src.quant_lab_client import client as client_mod
+
+    monkeypatch.setattr(
+        client_mod.QuantLabClient,
+        "from_config",
+        classmethod(lambda cls, *args, **kwargs: FakeClient()),
+    )
+
+    update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_contract_mismatch", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    advisory = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_reader.csv")
+    assert advisory[0]["advisory_source"] == "api"
+    assert advisory[0]["advisory_contract_match"] == "True"
+    assert advisory[0]["max_paper_notional_usdt"] == "44.0"
+
+
+def test_strategy_advisory_stale_paper_ready_keeps_paper_without_live(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    cfg.diagnostics.enable_live_small_from_quant_lab = True
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_stale_paper"
+    _write_single_sol_candidate(run_dir, run_id="r_stale_paper", overrides={})
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "strategy_id": "SOL_F4_VOLUME_EXPANSION_PAPER_V1",
+                "symbol": "SOL/USDT",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "max_live_notional_usdt": "25",
+                **_stale_meta(start_s),
+            }
+        ],
+    )
+
+    class FakeClient:
+        def get_json(self, endpoint: str, params: dict | None = None) -> SimpleNamespace:
+            raise RuntimeError("api unavailable")
+
+    from src.quant_lab_client import client as client_mod
+
+    monkeypatch.setattr(
+        client_mod.QuantLabClient,
+        "from_config",
+        classmethod(lambda cls, *args, **kwargs: FakeClient()),
+    )
+
+    update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_stale_paper", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    f4 = next(row for row in runs if row["strategy_id"] == "SOL_F4_VOLUME_EXPANSION_PAPER_V1")
+    assert f4["would_enter"] == "True"
+    assert f4["advisory_response_action"] == "paper_tracking"
+    assert f4["advisory_source"] == "stale_local"
+    assert f4["advisory_max_live_notional_usdt"] == "0.0"
 
 
 def test_sol_paper_strategy_tracker_disabled_writes_no_files(tmp_path: Path) -> None:

@@ -6,6 +6,7 @@ import json
 import tarfile
 import zipfile
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 
@@ -128,6 +129,13 @@ PAPER_RUN_FIELDS = [
     "live_block_reason",
     "advisory_present",
     "advisory_source",
+    "advisory_source_path",
+    "advisory_fresh",
+    "advisory_age_sec",
+    "advisory_contract_match",
+    "stale_advisory_used",
+    "api_fallback_attempted",
+    "api_fallback_success",
     "advisory_strategy_id",
     "advisory_strategy_candidate",
     "advisory_decision",
@@ -202,6 +210,19 @@ PAPER_SLIPPAGE_FIELDS = [
 
 STRATEGY_ADVISORY_FIELDS = [
     "source_path",
+    "advisory_source",
+    "advisory_fresh",
+    "advisory_age_sec",
+    "advisory_contract_match",
+    "stale_advisory_used",
+    "api_fallback_attempted",
+    "api_fallback_success",
+    "as_of_ts",
+    "generated_at",
+    "expires_at",
+    "contract_version",
+    "quant_lab_git_commit",
+    "source_version",
     "strategy_id",
     "strategy_candidate",
     "experiment_name",
@@ -433,6 +454,31 @@ def _advisory_first(row: Mapping[str, Any], names: Iterable[str]) -> Any:
     return ""
 
 
+def _advisory_time_ms(value: Any) -> Optional[int]:
+    parsed = _coerce_epoch_ms(value)
+    if parsed is not None:
+        return parsed
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt_value = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if dt_value.tzinfo is None:
+        dt_value = dt_value.replace(tzinfo=timezone.utc)
+    return int(dt_value.timestamp() * 1000.0)
+
+
+def _advisory_expected_contract_version(diagnostics: DiagnosticsConfig) -> str:
+    return str(
+        getattr(diagnostics, "enforce_readiness_required_contract_version", "")
+        or "v5.quant_lab.telemetry.v2"
+    ).strip()
+
+
 def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict[str, Any]:
     strategy_id = str(
         _advisory_first(row, ("strategy_id", "strategy", "strategy_name", "alpha_id", "proposal_id"))
@@ -470,6 +516,12 @@ def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict
         "max_paper_notional_usdt": _normalize_float(row.get("max_paper_notional_usdt")),
         "max_live_notional_usdt": _normalize_float(row.get("max_live_notional_usdt")),
         "live_block_reasons": str(_advisory_first(row, ("live_block_reasons", "live_block_reason")) or "").strip(),
+        "as_of_ts": str(_advisory_first(row, ("as_of_ts", "as_of", "asof_ts", "as_of_ts_utc")) or "").strip(),
+        "generated_at": str(_advisory_first(row, ("generated_at", "generated_ts", "generated_ts_utc", "generated_at_utc", "ts_utc", "created_at")) or "").strip(),
+        "expires_at": str(_advisory_first(row, ("expires_at", "expires_ts", "expires_at_utc")) or "").strip(),
+        "contract_version": str(_advisory_first(row, ("contract_version", "telemetry_contract_version")) or "").strip(),
+        "quant_lab_git_commit": str(_advisory_first(row, ("quant_lab_git_commit", "git_commit", "source_git_commit")) or "").strip(),
+        "source_version": str(_advisory_first(row, ("source_version", "version")) or "").strip(),
     }
 
 
@@ -667,6 +719,123 @@ def _read_strategy_opportunity_advisory_api(
     return rows
 
 
+def _advisory_cache_write_path(
+    configured: Iterable[Any],
+    *,
+    run_path: Path,
+    reports_dir: Path,
+) -> Optional[Path]:
+    for raw_path in configured:
+        text = str(raw_path or "").strip()
+        if not text:
+            continue
+        lower = text.lower()
+        if not lower.endswith(".csv") or "strategy_opportunity_advisory" not in lower:
+            continue
+        for path in _candidate_advisory_paths(text, run_path=run_path, reports_dir=reports_dir):
+            return path
+    return None
+
+
+def _advisory_source_cache_path(rows: Iterable[Mapping[str, Any]]) -> Optional[Path]:
+    for row in rows:
+        source_path = str(row.get("source_path") or "").strip()
+        lower = source_path.lower()
+        if not source_path or source_path.startswith("api:"):
+            continue
+        if not lower.endswith(".csv"):
+            continue
+        if ".zip:" in lower or ".tar:" in lower or ".tar.gz:" in lower or ".tgz:" in lower:
+            continue
+        return Path(source_path)
+    return None
+
+
+def _write_advisory_cache_atomic(path: Path, rows: list[dict[str, Any]]) -> None:
+    if not path or not rows:
+        return
+    fields = sorted({field for row in rows for field in row})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.tmp")
+    with tmp_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    tmp_path.replace(path)
+
+
+def _advisory_row_reference_ms(row: Mapping[str, Any]) -> Optional[int]:
+    values = [
+        _advisory_time_ms(row.get("as_of_ts")),
+        _advisory_time_ms(row.get("generated_at")),
+    ]
+    values = [value for value in values if value is not None]
+    return max(values) if values else None
+
+
+def _assess_advisory_rows(
+    rows: list[dict[str, Any]],
+    *,
+    diagnostics: DiagnosticsConfig,
+    now_ms: int,
+    source: str,
+    api_fallback_attempted: bool = False,
+    api_fallback_success: bool = False,
+) -> dict[str, Any]:
+    max_age_minutes = float(
+        getattr(diagnostics, "quant_lab_strategy_opportunity_advisory_max_age_minutes", 90.0)
+        or 90.0
+    )
+    require_contract = bool(
+        getattr(diagnostics, "quant_lab_strategy_opportunity_advisory_require_contract_version", True)
+    )
+    expected_contract = _advisory_expected_contract_version(diagnostics)
+    references = [_advisory_row_reference_ms(row) for row in rows]
+    references = [value for value in references if value is not None]
+    reference_ms = max(references) if references else None
+    expires_values = [_advisory_time_ms(row.get("expires_at")) for row in rows]
+    expires_values = [value for value in expires_values if value is not None]
+    min_expires_ms = min(expires_values) if expires_values else None
+    age_sec = None
+    if reference_ms is not None and now_ms > 0:
+        age_sec = max(0.0, (float(now_ms) - float(reference_ms)) / 1000.0)
+    has_time_context = reference_ms is not None or min_expires_ms is not None
+    age_ok = bool(age_sec is not None and age_sec <= max_age_minutes * 60.0)
+    expires_ok = min_expires_ms is None or now_ms <= min_expires_ms
+    if min_expires_ms is not None and reference_ms is None:
+        age_ok = expires_ok
+    contracts = {str(row.get("contract_version") or "").strip() for row in rows}
+    contracts.discard("")
+    if not require_contract:
+        contract_match = True
+    elif not expected_contract:
+        contract_match = bool(contracts)
+    else:
+        contract_match = bool(contracts) and contracts == {expected_contract}
+    fresh = bool(rows and has_time_context and age_ok and expires_ok and contract_match)
+    advisory_source = source
+    if source == "local" and not fresh:
+        advisory_source = "stale_local"
+    return {
+        "advisory_source": advisory_source,
+        "advisory_fresh": fresh,
+        "advisory_age_sec": round(age_sec, 3) if age_sec is not None else None,
+        "advisory_contract_match": contract_match,
+        "stale_advisory_used": advisory_source == "stale_local",
+        "api_fallback_attempted": bool(api_fallback_attempted),
+        "api_fallback_success": bool(api_fallback_success),
+    }
+
+
+def _annotate_advisory_rows(rows: list[dict[str, Any]], meta: Mapping[str, Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        payload = dict(row)
+        payload.update(meta)
+        out.append(payload)
+    return out
+
+
 def _read_strategy_opportunity_advisory(
     *,
     run_path: Path,
@@ -674,6 +843,7 @@ def _read_strategy_opportunity_advisory(
     diagnostics: DiagnosticsConfig,
     cfg: AppConfig,
     run_id: str,
+    now_ms: int,
 ) -> list[dict[str, Any]]:
     if not bool(getattr(diagnostics, "quant_lab_strategy_opportunity_advisory_enabled", True)):
         return []
@@ -710,9 +880,64 @@ def _read_strategy_opportunity_advisory(
             "live_block_reasons",
         ],
     )
-    if not rows:
-        rows.extend(_read_strategy_opportunity_advisory_api(cfg=cfg, diagnostics=diagnostics, run_id=run_id))
-    return rows
+    local_meta = _assess_advisory_rows(
+        rows,
+        diagnostics=diagnostics,
+        now_ms=now_ms,
+        source="local",
+    )
+    if rows and bool(local_meta.get("advisory_fresh")):
+        return _annotate_advisory_rows(rows, local_meta)
+
+    api_rows = _read_strategy_opportunity_advisory_api(cfg=cfg, diagnostics=diagnostics, run_id=run_id)
+    if api_rows:
+        api_rows = _dedupe_rows(
+            api_rows,
+            [
+                "strategy_id",
+                "strategy_candidate",
+                "experiment_name",
+                "symbol",
+                "decision",
+                "recommended_mode",
+                "horizon_hours",
+                "sample_count",
+                "complete_sample_count",
+                "advisory_status",
+                "advisory_reason",
+                "max_paper_notional_usdt",
+                "max_live_notional_usdt",
+                "live_block_reasons",
+            ],
+        )
+        api_meta = _assess_advisory_rows(
+            api_rows,
+            diagnostics=diagnostics,
+            now_ms=now_ms,
+            source="api",
+            api_fallback_attempted=True,
+            api_fallback_success=True,
+        )
+        cache_path = _advisory_source_cache_path(rows) or _advisory_cache_write_path(
+            configured,
+            run_path=run_path,
+            reports_dir=reports_dir,
+        )
+        if cache_path is not None:
+            try:
+                _write_advisory_cache_atomic(cache_path, api_rows)
+            except Exception:
+                pass
+        return _annotate_advisory_rows(api_rows, api_meta)
+
+    if rows:
+        stale_meta = dict(local_meta)
+        stale_meta["api_fallback_attempted"] = True
+        stale_meta["api_fallback_success"] = False
+        stale_meta["advisory_source"] = "stale_local"
+        stale_meta["stale_advisory_used"] = True
+        return _annotate_advisory_rows(rows, stale_meta)
+    return []
 
 
 def _dedupe_rows(rows: Iterable[Mapping[str, Any]], keys: Iterable[str]) -> list[dict[str, Any]]:
@@ -1031,25 +1256,38 @@ def _advisory_response_fields(
     enable_live_small = bool(getattr(diagnostics, "enable_live_small_from_quant_lab", False))
     decision = str(advisory.get("decision") or "").strip().upper()
     recommended_mode = str(advisory.get("recommended_mode") or "").strip().lower().replace("-", "_")
-    max_notional = _normalize_float(advisory.get("max_live_notional_usdt"))
+    advisory_fresh = _normalize_bool(advisory.get("advisory_fresh"))
+    if advisory_fresh is None:
+        advisory_fresh = True if advisory else False
+    raw_max_notional = _normalize_float(advisory.get("max_live_notional_usdt"))
+    max_notional = 0.0 if advisory and not advisory_fresh else raw_max_notional
     present = bool(advisory)
     negative = decision == "KILL"
     live_small = decision == "LIVE_SMALL_READY"
     mode_allowed = recommended_mode in ADVISORY_ALLOWED_RECOMMENDED_MODES
-    max_ignored = bool(max_notional is not None and not (live_small and enable_live_small))
+    max_ignored = bool(max_notional is not None and not (live_small and enable_live_small and advisory_fresh))
     if not present:
         response_action = "no_advisory"
     elif negative:
         response_action = "negative_advisory"
     elif mode_allowed:
         response_action = "paper_tracking"
+    elif live_small and not advisory_fresh:
+        response_action = "stale_advisory_live_disabled"
     elif live_small and not enable_live_small:
         response_action = "ignored_live_small_disabled"
     else:
         response_action = "ignored_recommended_mode_not_paper_or_shadow"
     return {
         "advisory_present": present,
-        "advisory_source": str(advisory.get("source_path") or ""),
+        "advisory_source": str(advisory.get("advisory_source") or ("missing" if not present else "")),
+        "advisory_source_path": str(advisory.get("source_path") or ""),
+        "advisory_fresh": bool(advisory_fresh),
+        "advisory_age_sec": _normalize_float(advisory.get("advisory_age_sec")),
+        "advisory_contract_match": bool(_normalize_bool(advisory.get("advisory_contract_match"))),
+        "stale_advisory_used": bool(_normalize_bool(advisory.get("stale_advisory_used"))),
+        "api_fallback_attempted": bool(_normalize_bool(advisory.get("api_fallback_attempted"))),
+        "api_fallback_success": bool(_normalize_bool(advisory.get("api_fallback_success"))),
         "advisory_strategy_id": str(advisory.get("strategy_id") or ""),
         "advisory_strategy_candidate": str(advisory.get("strategy_candidate") or ""),
         "advisory_decision": decision,
@@ -1071,11 +1309,27 @@ def _advisory_summary_rows(
     diagnostics: DiagnosticsConfig,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for row in advisory_rows:
+    materialized = list(advisory_rows)
+    if not materialized:
+        materialized = [{"advisory_source": "missing", "advisory_fresh": False, "advisory_contract_match": False}]
+    for row in materialized:
         fields = _advisory_response_fields(row, diagnostics)
         out.append(
             {
                 "source_path": row.get("source_path"),
+                "advisory_source": fields["advisory_source"],
+                "advisory_fresh": fields["advisory_fresh"],
+                "advisory_age_sec": fields["advisory_age_sec"],
+                "advisory_contract_match": fields["advisory_contract_match"],
+                "stale_advisory_used": fields["stale_advisory_used"],
+                "api_fallback_attempted": fields["api_fallback_attempted"],
+                "api_fallback_success": fields["api_fallback_success"],
+                "as_of_ts": row.get("as_of_ts"),
+                "generated_at": row.get("generated_at"),
+                "expires_at": row.get("expires_at"),
+                "contract_version": row.get("contract_version"),
+                "quant_lab_git_commit": row.get("quant_lab_git_commit"),
+                "source_version": row.get("source_version"),
                 "strategy_id": row.get("strategy_id"),
                 "strategy_candidate": row.get("strategy_candidate"),
                 "experiment_name": row.get("experiment_name"),
@@ -1088,7 +1342,7 @@ def _advisory_summary_rows(
                 "advisory_status": row.get("advisory_status"),
                 "advisory_reason": row.get("advisory_reason"),
                 "max_paper_notional_usdt": row.get("max_paper_notional_usdt"),
-                "max_live_notional_usdt": row.get("max_live_notional_usdt"),
+                "max_live_notional_usdt": fields["advisory_max_live_notional_usdt"],
                 "live_block_reasons": row.get("live_block_reasons"),
                 "enable_live_small_from_quant_lab": fields["enable_live_small_from_quant_lab"],
                 "response_action": fields["advisory_response_action"],
@@ -2180,12 +2434,14 @@ def update_sol_paper_strategy_tracker(
     cache_root = Path(cache_dir) if cache_dir is not None else Path(__file__).resolve().parents[2] / "data" / "cache"
     horizons = _horizons(diagnostics)
     candidate_rows = _read_candidate_snapshot(run_path / "candidate_snapshot.csv")
+    asof_ts_ms = _asof_ts_ms(audit, market_data_1h)
     advisory_rows = _read_strategy_opportunity_advisory(
         run_path=run_path,
         reports_dir=reports_dir,
         diagnostics=diagnostics,
         cfg=cfg,
         run_id=str(getattr(audit, "run_id", "") or ""),
+        now_ms=asof_ts_ms,
     )
     proposal_rows = _read_paper_strategy_proposals(
         run_path=run_path,
@@ -2217,7 +2473,6 @@ def update_sol_paper_strategy_tracker(
                     existing[preserve_key] = value
 
     records = list(records_by_key.values())
-    asof_ts_ms = _asof_ts_ms(audit, market_data_1h)
     if ohlcv_provider is None:
         ohlcv_provider = _default_ohlcv_provider_for_cfg(cfg)
     if records:

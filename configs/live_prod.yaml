@@ -272,6 +272,8 @@ diagnostics:
     - /v1/strategy-opportunity-advisory
     - /v1/strategy_opportunity_advisory
     - /v1/reports/strategy-opportunity-advisory
+  quant_lab_strategy_opportunity_advisory_max_age_minutes: 90
+  quant_lab_strategy_opportunity_advisory_require_contract_version: true
   quant_lab_paper_strategy_proposals_enabled: true
   quant_lab_paper_strategy_proposals_paths:
     - /var/lib/v5-prod/paper_strategy_proposals.csv

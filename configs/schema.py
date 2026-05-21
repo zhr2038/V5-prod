@@ -1523,6 +1523,15 @@ class DiagnosticsConfig(BaseModel):
         ],
         description="Quant-lab API endpoints to try for strategy opportunity advisory JSON",
     )
+    quant_lab_strategy_opportunity_advisory_max_age_minutes: float = Field(
+        default=90.0,
+        ge=1.0,
+        description="Maximum age for local strategy opportunity advisory rows before API fallback is attempted",
+    )
+    quant_lab_strategy_opportunity_advisory_require_contract_version: bool = Field(
+        default=True,
+        description="Require local strategy opportunity advisory contract_version to match enforce_readiness_required_contract_version",
+    )
     quant_lab_paper_strategy_proposals_enabled: bool = Field(
         default=True,
         description="Read quant-lab paper strategy proposals as paper-only strategy definitions",
