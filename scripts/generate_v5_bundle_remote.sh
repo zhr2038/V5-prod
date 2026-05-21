@@ -64,9 +64,82 @@ CURRENT_REPORT_FILES = [
     ("reports/summaries/paper_strategy_runs.csv", "summaries/paper_strategy_runs.csv", False),
     ("reports/summaries/paper_strategy_daily.csv", "summaries/paper_strategy_daily.csv", False),
     ("reports/summaries/paper_slippage_coverage.csv", "summaries/paper_slippage_coverage.csv", False),
+    ("reports/summaries/expanded_universe_advisory_reader.csv", "summaries/expanded_universe_advisory_reader.csv", False),
+    ("reports/summaries/expanded_universe_paper_runs.csv", "summaries/expanded_universe_paper_runs.csv", False),
     ("reports/quant_lab_usage.jsonl", "raw/reports/quant_lab_usage.jsonl", False),
     ("reports/quant_lab_requests.jsonl", "raw/reports/quant_lab_requests.jsonl", False),
 ]
+EXPANDED_UNIVERSE_ADVISORY_FIELDS = (
+    "run_id",
+    "ts_utc",
+    "source_path",
+    "advisory_source",
+    "advisory_fresh",
+    "advisory_age_sec",
+    "advisory_contract_match",
+    "stale_advisory_used",
+    "api_fallback_attempted",
+    "api_fallback_success",
+    "as_of_ts",
+    "generated_at",
+    "expires_at",
+    "contract_version",
+    "quant_lab_git_commit",
+    "source_version",
+    "universe_type",
+    "symbol",
+    "symbol_in_live_universe",
+    "live_symbols_unchanged",
+    "strategy_id",
+    "strategy_candidate",
+    "experiment_name",
+    "decision",
+    "recommended_mode",
+    "horizon_hours",
+    "sample_count",
+    "complete_sample_count",
+    "response_action",
+    "negative_advisory",
+    "paper_tracking_allowed",
+    "shadow_tracking_allowed",
+    "max_paper_notional_usdt",
+    "max_live_notional_usdt",
+    "max_live_notional_usdt_ignored",
+    "live_block_reasons",
+    "would_block_if_enabled",
+    "would_enter",
+    "no_sample_reason",
+    "advisory_reason",
+    "live_order_effect",
+)
+EXPANDED_UNIVERSE_PAPER_RUN_FIELDS = (
+    "run_id",
+    "ts_utc",
+    "paper_date",
+    "universe_type",
+    "symbol",
+    "symbol_in_live_universe",
+    "live_symbols_unchanged",
+    "strategy_id",
+    "strategy_candidate",
+    "experiment_name",
+    "tracking_mode",
+    "decision",
+    "recommended_mode",
+    "response_action",
+    "negative_advisory",
+    "would_enter",
+    "would_size_usdt",
+    "max_paper_notional_usdt",
+    "max_live_notional_usdt_ignored",
+    "no_sample_reason",
+    "advisory_source",
+    "advisory_source_path",
+    "advisory_fresh",
+    "advisory_contract_match",
+    "live_block_reasons",
+    "live_order_effect",
+)
 ENTRY_QUALITY_REPORT_FILES = [
     ("missed_low_audit.csv", "raw/reports/entry_quality/missed_low_audit.csv", "csv"),
     ("missed_low_by_symbol.csv", "raw/reports/entry_quality/missed_low_by_symbol.csv", "csv"),
@@ -414,6 +487,16 @@ def write_text(dest_rel, text):
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(text, encoding="utf-8")
     return dest
+
+
+def ensure_csv_header(dest_rel, fields):
+    dest = OUT / dest_rel
+    if dest.is_file():
+        return False
+    write_text(dest_rel, ",".join(fields) + "\n")
+    copied_sources[dest_rel] = "generated empty header"
+    notes.append(f"generated empty summary header: {dest_rel}")
+    return True
 
 
 def copy_sanitized(src_rel, dest_rel, required=False, limit=MAX_COPY_BYTES):
@@ -809,6 +892,8 @@ def copy_current_reports():
         dest = OUT / dest_rel
         if not dest.is_file():
             write_text(dest_rel, "")
+    ensure_csv_header("summaries/expanded_universe_advisory_reader.csv", EXPANDED_UNIVERSE_ADVISORY_FIELDS)
+    ensure_csv_header("summaries/expanded_universe_paper_runs.csv", EXPANDED_UNIVERSE_PAPER_RUN_FIELDS)
 
     matched = False
     for base in (ROOT / "reports", ROOT / "reports" / "summaries"):

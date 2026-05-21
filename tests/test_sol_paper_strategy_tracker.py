@@ -1205,6 +1205,81 @@ def test_strategy_advisory_entry_quality_rows_are_display_only(tmp_path: Path) -
     assert pullback["max_live_notional_usdt_ignored"] == "True"
 
 
+def test_expanded_paper_universe_advisory_is_read_only(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_expanded_paper"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "strategy_id": "TRX_EXPANDED_PAPER_V1",
+                "strategy_candidate": "v5.expanded_paper_trx_breakout",
+                "symbol": "TRX-USDT",
+                "universe_type": "expanded_paper",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "max_paper_notional_usdt": "7",
+                "max_live_notional_usdt": "100",
+                **_fresh_meta(start_s),
+            },
+            {
+                "strategy_id": "HYPE_EXPANDED_SHADOW_V1",
+                "strategy_candidate": "v5.expanded_paper_hype_shadow",
+                "symbol": "HYPE-USDT",
+                "universe_type": "expanded_paper",
+                "decision": "KEEP_SHADOW",
+                "recommended_mode": "shadow",
+                "no_sample_reason": "needs_more_samples",
+                **_fresh_meta(start_s),
+            },
+            {
+                "strategy_id": "SUI_EXPANDED_KILL_V1",
+                "strategy_candidate": "v5.expanded_paper_sui_reversal",
+                "symbol": "SUI-USDT",
+                "universe_type": "expanded_paper",
+                "decision": "KILL",
+                "recommended_mode": "paper",
+                "live_block_reasons": "negative_evidence",
+                **_fresh_meta(start_s),
+            },
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_expanded_paper", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert cfg.symbols == ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+    assert result["expanded_universe_advisory_rows"] == 3
+    assert result["expanded_universe_paper_rows"] == 3
+
+    advisory = _read_csv(tmp_path / "reports" / "summaries" / "expanded_universe_advisory_reader.csv")
+    by_symbol = {row["symbol"]: row for row in advisory}
+    assert by_symbol["TRX/USDT"]["response_action"] == "paper_tracking"
+    assert by_symbol["TRX/USDT"]["symbol_in_live_universe"] == "False"
+    assert by_symbol["TRX/USDT"]["max_live_notional_usdt"] == "0.0"
+    assert by_symbol["TRX/USDT"]["max_live_notional_usdt_ignored"] == "True"
+    assert by_symbol["HYPE/USDT"]["response_action"] == "shadow_tracking"
+    assert by_symbol["SUI/USDT"]["response_action"] == "negative_advisory"
+    assert all(row["live_order_effect"] == "read_only_no_live_order" for row in advisory)
+
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "expanded_universe_paper_runs.csv")
+    run_by_symbol = {row["symbol"]: row for row in runs}
+    assert run_by_symbol["TRX/USDT"]["tracking_mode"] == "paper"
+    assert run_by_symbol["TRX/USDT"]["would_enter"] == "True"
+    assert run_by_symbol["TRX/USDT"]["would_size_usdt"] == "7.0"
+    assert run_by_symbol["HYPE/USDT"]["tracking_mode"] == "shadow"
+    assert run_by_symbol["SUI/USDT"]["tracking_mode"] == "negative"
+    assert all(row["live_symbols_unchanged"] == "True" for row in runs)
+
+
 def test_strategy_advisory_uses_fresh_local_without_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cfg = _cfg()
     cfg.quant_lab.enabled = True

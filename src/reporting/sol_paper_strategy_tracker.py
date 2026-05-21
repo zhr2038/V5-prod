@@ -230,6 +230,7 @@ STRATEGY_ADVISORY_FIELDS = [
     "symbol",
     "decision",
     "recommended_mode",
+    "universe_type",
     "horizon_hours",
     "sample_count",
     "complete_sample_count",
@@ -245,6 +246,79 @@ STRATEGY_ADVISORY_FIELDS = [
     "response_action",
     "negative_advisory",
     "max_live_notional_usdt_ignored",
+]
+
+EXPANDED_UNIVERSE_ADVISORY_FIELDS = [
+    "run_id",
+    "ts_utc",
+    "source_path",
+    "advisory_source",
+    "advisory_fresh",
+    "advisory_age_sec",
+    "advisory_contract_match",
+    "stale_advisory_used",
+    "api_fallback_attempted",
+    "api_fallback_success",
+    "as_of_ts",
+    "generated_at",
+    "expires_at",
+    "contract_version",
+    "quant_lab_git_commit",
+    "source_version",
+    "universe_type",
+    "symbol",
+    "symbol_in_live_universe",
+    "live_symbols_unchanged",
+    "strategy_id",
+    "strategy_candidate",
+    "experiment_name",
+    "decision",
+    "recommended_mode",
+    "horizon_hours",
+    "sample_count",
+    "complete_sample_count",
+    "response_action",
+    "negative_advisory",
+    "paper_tracking_allowed",
+    "shadow_tracking_allowed",
+    "max_paper_notional_usdt",
+    "max_live_notional_usdt",
+    "max_live_notional_usdt_ignored",
+    "live_block_reasons",
+    "would_block_if_enabled",
+    "would_enter",
+    "no_sample_reason",
+    "advisory_reason",
+    "live_order_effect",
+]
+
+EXPANDED_UNIVERSE_PAPER_RUN_FIELDS = [
+    "run_id",
+    "ts_utc",
+    "paper_date",
+    "universe_type",
+    "symbol",
+    "symbol_in_live_universe",
+    "live_symbols_unchanged",
+    "strategy_id",
+    "strategy_candidate",
+    "experiment_name",
+    "tracking_mode",
+    "decision",
+    "recommended_mode",
+    "response_action",
+    "negative_advisory",
+    "would_enter",
+    "would_size_usdt",
+    "max_paper_notional_usdt",
+    "max_live_notional_usdt_ignored",
+    "no_sample_reason",
+    "advisory_source",
+    "advisory_source_path",
+    "advisory_fresh",
+    "advisory_contract_match",
+    "live_block_reasons",
+    "live_order_effect",
 ]
 
 
@@ -512,6 +586,7 @@ def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict
         "symbol": _symbol_text(_advisory_first(row, ("symbol", "instId", "instrument", "normalized_symbol"))),
         "decision": decision,
         "recommended_mode": recommended_mode,
+        "universe_type": str(_advisory_first(row, ("universe_type", "paper_universe_type", "universe")) or "").strip().lower(),
         "horizon_hours": _parse_horizon_hours(row.get("horizon_hours") or row.get("suggested_horizon")),
         "sample_count": _normalize_float(row.get("sample_count")),
         "complete_sample_count": _normalize_float(row.get("complete_sample_count")),
@@ -1359,6 +1434,7 @@ def _advisory_summary_rows(
                 "symbol": row.get("symbol"),
                 "decision": row.get("decision"),
                 "recommended_mode": row.get("recommended_mode"),
+                "universe_type": row.get("universe_type"),
                 "horizon_hours": row.get("horizon_hours"),
                 "sample_count": row.get("sample_count"),
                 "complete_sample_count": row.get("complete_sample_count"),
@@ -1374,6 +1450,151 @@ def _advisory_summary_rows(
                 "response_action": fields["advisory_response_action"],
                 "negative_advisory": fields["advisory_negative"],
                 "max_live_notional_usdt_ignored": fields["advisory_max_live_notional_usdt_ignored"],
+            }
+        )
+    return out
+
+
+def _live_symbol_set(cfg: AppConfig) -> set[str]:
+    return {_symbol_text(symbol) for symbol in (getattr(cfg, "symbols", None) or []) if _symbol_text(symbol)}
+
+
+def _expanded_universe_type(row: Mapping[str, Any]) -> str:
+    return str(row.get("universe_type") or "").strip().lower().replace("-", "_")
+
+
+def _expanded_would_enter(row: Mapping[str, Any]) -> bool:
+    explicit = _normalize_bool(row.get("would_enter"))
+    if explicit is not None:
+        return bool(explicit)
+    decision = str(row.get("decision") or "").strip().upper()
+    mode = str(row.get("recommended_mode") or "").strip().lower().replace("-", "_")
+    return bool(mode == "paper" and decision != "KILL")
+
+
+def _expanded_no_sample_reason(row: Mapping[str, Any], fields: Mapping[str, Any]) -> str:
+    for value in (
+        row.get("no_sample_reason"),
+        row.get("advisory_reason"),
+        row.get("live_block_reasons"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    action = str(fields.get("advisory_response_action") or "").strip()
+    if action == "negative_advisory":
+        return "negative_advisory"
+    if action == "paper_tracking":
+        return "expanded_paper_tracking"
+    if action == "shadow_tracking":
+        return "expanded_shadow_tracking"
+    return "expanded_universe_display_only"
+
+
+def _expanded_universe_advisory_rows(
+    advisory_rows: Iterable[Mapping[str, Any]],
+    *,
+    diagnostics: DiagnosticsConfig,
+    cfg: AppConfig,
+    run_id: str,
+    asof_ts_ms: int,
+) -> list[dict[str, Any]]:
+    live_symbols = _live_symbol_set(cfg)
+    ts_utc = _iso_from_ms(asof_ts_ms)
+    out: list[dict[str, Any]] = []
+    for row in advisory_rows:
+        if _expanded_universe_type(row) != "expanded_paper":
+            continue
+        fields = _advisory_response_fields(row, diagnostics)
+        symbol = _symbol_text(row.get("symbol"))
+        response_action = str(fields.get("advisory_response_action") or "")
+        paper_allowed = response_action == "paper_tracking"
+        shadow_allowed = response_action == "shadow_tracking"
+        out.append(
+            {
+                "run_id": run_id,
+                "ts_utc": ts_utc,
+                "source_path": row.get("source_path"),
+                "advisory_source": fields["advisory_source"],
+                "advisory_fresh": fields["advisory_fresh"],
+                "advisory_age_sec": fields["advisory_age_sec"],
+                "advisory_contract_match": fields["advisory_contract_match"],
+                "stale_advisory_used": fields["stale_advisory_used"],
+                "api_fallback_attempted": fields["api_fallback_attempted"],
+                "api_fallback_success": fields["api_fallback_success"],
+                "as_of_ts": row.get("as_of_ts"),
+                "generated_at": row.get("generated_at"),
+                "expires_at": row.get("expires_at"),
+                "contract_version": row.get("contract_version"),
+                "quant_lab_git_commit": row.get("quant_lab_git_commit"),
+                "source_version": row.get("source_version"),
+                "universe_type": "expanded_paper",
+                "symbol": symbol,
+                "symbol_in_live_universe": symbol in live_symbols,
+                "live_symbols_unchanged": True,
+                "strategy_id": row.get("strategy_id"),
+                "strategy_candidate": row.get("strategy_candidate"),
+                "experiment_name": row.get("experiment_name"),
+                "decision": row.get("decision"),
+                "recommended_mode": row.get("recommended_mode"),
+                "horizon_hours": row.get("horizon_hours"),
+                "sample_count": row.get("sample_count"),
+                "complete_sample_count": row.get("complete_sample_count"),
+                "response_action": response_action,
+                "negative_advisory": fields["advisory_negative"],
+                "paper_tracking_allowed": paper_allowed,
+                "shadow_tracking_allowed": shadow_allowed,
+                "max_paper_notional_usdt": row.get("max_paper_notional_usdt"),
+                "max_live_notional_usdt": 0.0,
+                "max_live_notional_usdt_ignored": True,
+                "live_block_reasons": row.get("live_block_reasons"),
+                "would_block_if_enabled": row.get("would_block_if_enabled"),
+                "would_enter": row.get("would_enter"),
+                "no_sample_reason": _expanded_no_sample_reason(row, fields),
+                "advisory_reason": row.get("advisory_reason"),
+                "live_order_effect": "read_only_no_live_order",
+            }
+        )
+    return out
+
+
+def _expanded_universe_paper_rows(expanded_rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in expanded_rows:
+        response_action = str(row.get("response_action") or "")
+        if response_action not in {"paper_tracking", "shadow_tracking", "negative_advisory"}:
+            continue
+        tracking_mode = "negative" if response_action == "negative_advisory" else str(row.get("recommended_mode") or "")
+        would_enter = _expanded_would_enter(row)
+        max_paper = _normalize_float(row.get("max_paper_notional_usdt"))
+        out.append(
+            {
+                "run_id": row.get("run_id"),
+                "ts_utc": row.get("ts_utc"),
+                "paper_date": str(row.get("ts_utc") or "")[:10],
+                "universe_type": "expanded_paper",
+                "symbol": row.get("symbol"),
+                "symbol_in_live_universe": row.get("symbol_in_live_universe"),
+                "live_symbols_unchanged": True,
+                "strategy_id": row.get("strategy_id"),
+                "strategy_candidate": row.get("strategy_candidate"),
+                "experiment_name": row.get("experiment_name"),
+                "tracking_mode": tracking_mode,
+                "decision": row.get("decision"),
+                "recommended_mode": row.get("recommended_mode"),
+                "response_action": response_action,
+                "negative_advisory": row.get("negative_advisory"),
+                "would_enter": would_enter,
+                "would_size_usdt": max_paper if would_enter and max_paper is not None else 0.0,
+                "max_paper_notional_usdt": max_paper,
+                "max_live_notional_usdt_ignored": True,
+                "no_sample_reason": row.get("no_sample_reason"),
+                "advisory_source": row.get("advisory_source"),
+                "advisory_source_path": row.get("source_path"),
+                "advisory_fresh": row.get("advisory_fresh"),
+                "advisory_contract_match": row.get("advisory_contract_match"),
+                "live_block_reasons": row.get("live_block_reasons"),
+                "live_order_effect": "read_only_no_live_order",
             }
         )
     return out
@@ -2474,6 +2695,14 @@ def update_sol_paper_strategy_tracker(
         reports_dir=reports_dir,
         diagnostics=diagnostics,
     )
+    expanded_advisory_rows = _expanded_universe_advisory_rows(
+        advisory_rows,
+        diagnostics=diagnostics,
+        cfg=cfg,
+        run_id=str(getattr(audit, "run_id", "") or ""),
+        asof_ts_ms=asof_ts_ms,
+    )
+    expanded_paper_rows = _expanded_universe_paper_rows(expanded_advisory_rows)
     advisory_index = _advisory_by_strategy(advisory_rows)
     records_by_key = _load_existing_records(labels_path)
     new_records = _collect_candidates(
@@ -2545,12 +2774,24 @@ def update_sol_paper_strategy_tracker(
         _advisory_summary_rows(advisory_rows, diagnostics),
         STRATEGY_ADVISORY_FIELDS,
     )
+    _write_csv(
+        summaries_dir / "expanded_universe_advisory_reader.csv",
+        expanded_advisory_rows,
+        EXPANDED_UNIVERSE_ADVISORY_FIELDS,
+    )
+    _write_csv(
+        summaries_dir / "expanded_universe_paper_runs.csv",
+        expanded_paper_rows,
+        EXPANDED_UNIVERSE_PAPER_RUN_FIELDS,
+    )
 
     return {
         "enabled": True,
         "new_records": int(inserted),
         "total_records": int(len(records)),
         "advisory_rows": int(len(advisory_rows)),
+        "expanded_universe_advisory_rows": int(len(expanded_advisory_rows)),
+        "expanded_universe_paper_rows": int(len(expanded_paper_rows)),
         "proposal_rows": int(len(proposal_rows)),
         "labels_path": str(labels_path),
         "summaries_dir": str(summaries_dir),

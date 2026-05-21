@@ -2989,6 +2989,16 @@ def fixture_entry_quality_advisory_root(root):
         )
         + "\n",
     )
+    write_text(
+        root / "reports/summaries/expanded_universe_advisory_reader.csv",
+        "run_id,ts_utc,universe_type,symbol,response_action,live_order_effect\n"
+        "r_expanded,2026-05-20T00:00:00Z,expanded_paper,TRX/USDT,paper_tracking,read_only_no_live_order\n",
+    )
+    write_text(
+        root / "reports/summaries/expanded_universe_paper_runs.csv",
+        "run_id,ts_utc,paper_date,universe_type,symbol,tracking_mode,would_enter,live_order_effect\n"
+        "r_expanded,2026-05-20T00:00:00Z,2026-05-20,expanded_paper,TRX/USDT,paper,True,read_only_no_live_order\n",
+    )
     return run_id
 
 
@@ -4455,6 +4465,8 @@ def main():
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+                expanded_advisory = tf.extractfile(extract_member(tf, "summaries/expanded_universe_advisory_reader.csv")).read().decode()
+                expanded_runs = tf.extractfile(extract_member(tf, "summaries/expanded_universe_paper_runs.csv")).read().decode()
                 raw_missed_low = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/missed_low_audit.csv")).read().decode()
                 raw_missed_by_symbol = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/missed_low_by_symbol.csv")).read().decode()
                 raw_late_sensitivity = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/late_entry_chase_threshold_sensitivity.csv")).read().decode()
@@ -4500,6 +4512,8 @@ def main():
             assert "late_chase_loss" in raw_missed_low, raw_missed_low
             assert "BTC/USDT" in raw_missed_by_symbol, raw_missed_by_symbol
             assert "threshold_bps" in raw_late_sensitivity, raw_late_sensitivity
+            assert "TRX/USDT" in expanded_advisory, expanded_advisory
+            assert "read_only_no_live_order" in expanded_runs, expanded_runs
             assert raw_pullback["rows"][0]["ready_for_paper"] is True, raw_pullback
             assert "## Entry quality advisory" in readme, readme
             assert "missed_low late_chase_loss_count: 1" in readme, readme
