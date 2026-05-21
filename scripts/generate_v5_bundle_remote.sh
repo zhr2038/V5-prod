@@ -16,6 +16,8 @@ import socket
 import subprocess
 import sys
 import tarfile
+import urllib.parse
+import urllib.request
 from collections import Counter, defaultdict, deque
 from pathlib import Path
 
@@ -8089,9 +8091,157 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             return "pullback_reversal"
         return "entry_quality"
 
+    def parse_yaml_scalar(section_text, key, default=""):
+        match = re.search(rf"(?m)^\s*{re.escape(key)}\s*:\s*([^#\n]+)", section_text or "")
+        if not match:
+            return default
+        return match.group(1).strip().strip("\"'")
+
+    def parse_bool_text(value, default=False):
+        text = str(value or "").strip().lower()
+        if text in {"true", "yes", "1", "on"}:
+            return True
+        if text in {"false", "no", "0", "off"}:
+            return False
+        return default
+
+    def quant_lab_token_from_env_file(path_text, token_env):
+        if not path_text:
+            return ""
+        path = Path(str(path_text)).expanduser()
+        if not path.is_file():
+            return ""
+        try:
+            for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("export "):
+                    line = line[len("export "):].strip()
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                if key.strip() == token_env:
+                    return value.strip().strip("\"'")
+        except Exception as exc:
+            collection_errors.append({"source": str(path), "error": f"entry_quality_api_env_read: {exc!r}"})
+        return ""
+
+    def extract_strategy_advisory_items(payload):
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
+        if not isinstance(payload, dict):
+            return []
+        for key in ("strategy_opportunity_advisory", "advisory", "advisories", "rows", "items", "data"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+            if isinstance(value, dict):
+                nested = extract_strategy_advisory_items(value)
+                if nested:
+                    return nested
+        return []
+
+    def advisory_reference_dt(row):
+        values = [
+            parse_dt_utc(row.get("as_of_ts")),
+            parse_dt_utc(row.get("generated_at")),
+        ]
+        values = [value for value in values if value is not None]
+        return max(values) if values else None
+
+    def assess_api_advisory_row(row):
+        max_age_minutes = config_number("quant_lab_strategy_opportunity_advisory_max_age_minutes") or 90.0
+        require_contract = config_bool("quant_lab_strategy_opportunity_advisory_require_contract_version", True)
+        reference_dt = advisory_reference_dt(row)
+        expires_dt = parse_dt_utc(row.get("expires_at"))
+        age_sec = (NOW - reference_dt).total_seconds() if reference_dt else None
+        age_ok = bool(age_sec is not None and age_sec <= max_age_minutes * 60.0)
+        expires_ok = expires_dt is None or NOW <= expires_dt
+        contract = flatten_value(row.get("contract_version")).strip()
+        contract_match = (not require_contract) or (contract == QUANT_LAB_CONTRACT_VERSION)
+        fresh = bool(reference_dt is not None and age_ok and expires_ok and contract_match)
+        return fresh, age_sec, contract_match
+
+    def normalize_strategy_advisory_api_row(row, endpoint):
+        fresh, age_sec, contract_match = assess_api_advisory_row(row)
+        return {
+            "source_path": f"api:{endpoint}",
+            "advisory_source": "api",
+            "advisory_fresh": str(bool(fresh)),
+            "advisory_age_sec": fmt_num(age_sec, 3) if age_sec is not None else not_obs,
+            "advisory_contract_match": str(bool(contract_match)),
+            "stale_advisory_used": str(not bool(fresh)).lower(),
+            "api_fallback_attempted": "true",
+            "api_fallback_success": "true",
+            "as_of_ts": flatten_value(row.get("as_of_ts")),
+            "generated_at": flatten_value(row.get("generated_at")),
+            "expires_at": flatten_value(row.get("expires_at")),
+            "contract_version": flatten_value(row.get("contract_version")),
+            "quant_lab_git_commit": flatten_value(first_observed(row.get("quant_lab_git_commit"), row.get("git_commit"), row.get("source_git_commit"), "")),
+            "source_version": flatten_value(first_observed(row.get("source_version"), row.get("version"), "")),
+            "strategy_id": flatten_value(first_observed(row.get("strategy_id"), row.get("strategy"), row.get("strategy_name"), row.get("alpha_id"), row.get("proposal_id"), "")),
+            "strategy_candidate": flatten_value(first_observed(row.get("strategy_candidate"), row.get("candidate"), row.get("candidate_name"), row.get("source_strategy_candidate"), "")),
+            "experiment_name": flatten_value(first_observed(row.get("experiment_name"), row.get("alpha_name"), row.get("strategy_family"), "")),
+            "symbol": flatten_value(first_observed(row.get("symbol"), row.get("instId"), row.get("instrument"), row.get("normalized_symbol"), "")),
+            "decision": flatten_value(first_observed(row.get("decision"), row.get("readiness_status"), row.get("board_decision"), row.get("status"), "")),
+            "recommended_mode": flatten_value(first_observed(row.get("recommended_mode"), row.get("mode"), row.get("target_mode"), "")).strip().lower().replace("-", "_"),
+            "horizon_hours": flatten_value(first_observed(row.get("horizon_hours"), row.get("suggested_horizon"), "")),
+            "sample_count": flatten_value(row.get("sample_count")),
+            "complete_sample_count": flatten_value(row.get("complete_sample_count")),
+            "advisory_status": flatten_value(first_observed(row.get("status"), row.get("readiness_status"), row.get("decision"), "")),
+            "advisory_reason": flatten_value(first_observed(row.get("reason"), row.get("block_reason"), row.get("live_block_reason"), row.get("live_block_reasons"), row.get("notes"), "")),
+            "max_paper_notional_usdt": flatten_value(row.get("max_paper_notional_usdt")),
+            "max_live_notional_usdt": "0" if not fresh else flatten_value(row.get("max_live_notional_usdt")),
+            "live_block_reasons": flatten_value(first_observed(row.get("live_block_reasons"), row.get("live_block_reason"), "")),
+            "would_block_if_enabled": flatten_value(first_observed(row.get("would_block_if_enabled"), row.get("would_block_if_enforced"), row.get("would_block"), row.get("would_filter"), "")),
+            "would_enter": flatten_value(first_observed(row.get("would_enter"), row.get("would_enter_if_enabled"), "")),
+            "no_sample_reason": flatten_value(first_observed(row.get("no_sample_reason"), row.get("no_entry_reason"), row.get("not_observable_reason"), "")),
+        }
+
+    def entry_quality_api_fallback_rows():
+        if not config_bool("quant_lab_strategy_opportunity_advisory_api_enabled", True):
+            return []
+        quant_lab_section = live_section_text("quant_lab")
+        if not parse_bool_text(parse_yaml_scalar(quant_lab_section, "enabled", "false"), False):
+            return []
+        base_url = parse_yaml_scalar(quant_lab_section, "base_url", "http://qyun2.hrhome.top:8027").rstrip("/")
+        token_env = parse_yaml_scalar(quant_lab_section, "api_token_env", "QUANT_LAB_API_TOKEN") or "QUANT_LAB_API_TOKEN"
+        token = os.environ.get(token_env, "").strip()
+        if not token:
+            token = quant_lab_token_from_env_file(parse_yaml_scalar(quant_lab_section, "api_env_path", ""), token_env)
+        if not token:
+            collection_errors.append({"source": "entry_quality_api_fallback", "error": "token_missing"})
+            return []
+        out_rows = []
+        for endpoint in ("/v1/strategy-opportunity-advisory", "/v1/strategy_opportunity_advisory"):
+            url = f"{base_url}{endpoint}?{urllib.parse.urlencode({'format': 'json'})}"
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    payload = json.loads(response.read().decode("utf-8", errors="replace"))
+            except Exception as exc:
+                collection_errors.append({"source": f"entry_quality_api_fallback:{endpoint}", "error": repr(exc)})
+                continue
+            for item in extract_strategy_advisory_items(payload):
+                normalized = normalize_strategy_advisory_api_row(item, endpoint)
+                if entry_quality_strategy_key(normalized):
+                    out_rows.append(normalized)
+            if out_rows:
+                break
+        deduped = []
+        seen = set()
+        for row in out_rows:
+            key = tuple(flatten_value(row.get(field)) for field in ("strategy_id", "strategy_candidate", "symbol", "decision", "recommended_mode", "horizon_hours", "source_path"))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(row)
+        return deduped
+
     def strategy_advisory_summary_rows():
         rows = load_csv_dicts(OUT / "summaries" / "strategy_opportunity_advisory_reader.csv")
-        if rows:
+        if rows and any(entry_quality_strategy_key(row) for row in rows):
             return rows
         raw_paths = [
             OUT / "raw" / "reports" / "strategy_opportunity_advisory.csv",
@@ -8106,6 +8256,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 payload.setdefault("source_path", path.as_posix())
                 payload.setdefault("advisory_source", "local")
                 raw_rows.append(payload)
+        if raw_rows and any(entry_quality_strategy_key(row) for row in raw_rows):
+            return raw_rows
+        api_rows = entry_quality_api_fallback_rows()
+        if api_rows:
+            return api_rows
+        if rows:
+            return rows
         return raw_rows
 
     def advisory_value(row, *names, default=not_obs):
