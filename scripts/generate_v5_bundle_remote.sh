@@ -86,6 +86,31 @@ ENTRY_QUALITY_SOURCE_DIRS = [
     "/var/lib/v5-prod/quant_lab",
     "/var/lib/v5-prod/quant_lab/latest/reports",
 ]
+ENTRY_QUALITY_SOURCE_ARCHIVES = [
+    "/var/lib/v5-prod/quant_lab_latest_bundle.zip",
+    "/var/lib/v5-prod/quant_lab_latest_bundle.tar.gz",
+    "/var/lib/v5-prod/quant_lab_latest_bundle*.zip",
+    "/var/lib/v5-prod/quant_lab_latest_bundle*.tar.gz",
+    "/var/lib/v5-prod/quant_lab_expert_pack*.zip",
+    "/var/lib/v5-prod/quant_lab_expert_pack*.tar.gz",
+    "reports/quant_lab_latest_bundle.zip",
+    "reports/quant_lab_latest_bundle.tar.gz",
+    "reports/quant_lab/latest_bundle.zip",
+    "reports/quant_lab/latest_bundle.tar.gz",
+    "reports/quant_lab_expert_pack*.zip",
+    "reports/quant_lab_expert_pack*.tar.gz",
+]
+ENTRY_QUALITY_REPORT_API_ENDPOINT_TEMPLATES = [
+    "/v1/reports/entry-quality/{filename}",
+    "/v1/reports/entry_quality/{filename}",
+    "/v1/entry-quality/{filename}",
+    "/v1/entry_quality/{filename}",
+    "/v1/reports/{filename}",
+    "/v1/reports/download?path=reports/{filename}",
+    "/v1/reports/download?path=entry_quality/{filename}",
+    "/v1/report?path=reports/{filename}",
+    "/v1/report?path=entry_quality/{filename}",
+]
 ENTRY_QUALITY_STRATEGY_CANDIDATES = {
     "v5.entry_quality_missed_low_audit",
     "v5.late_entry_chase_guard_shadow",
@@ -414,6 +439,270 @@ def copy_sanitized(src_rel, dest_rel, required=False, limit=MAX_COPY_BYTES):
         return False
 
 
+def yaml_section_text_from_raw(section_name):
+    path = OUT / "raw" / "config_live_prod.yaml"
+    if not path.is_file():
+        path = ROOT / "configs" / "live_prod.yaml"
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+    except Exception as exc:
+        collection_errors.append({"source": str(path), "error": f"entry_quality_config_read: {exc!r}"})
+        return ""
+    match = re.search(
+        rf"(?ms)^{re.escape(section_name)}:\s*\n(.*?)(?=^[A-Za-z_][A-Za-z0-9_]*:\s*|\Z)",
+        text or "",
+    )
+    return match.group(1) if match else ""
+
+
+def parse_yaml_scalar(section_text, key, default=""):
+    match = re.search(rf"(?m)^\s*{re.escape(key)}\s*:\s*([^#\n]+)", section_text or "")
+    if not match:
+        return default
+    return match.group(1).strip().strip("\"'")
+
+
+def parse_bool_text(value, default=False):
+    text = str(value or "").strip().lower()
+    if text in {"true", "yes", "1", "on"}:
+        return True
+    if text in {"false", "no", "0", "off"}:
+        return False
+    return default
+
+
+def quant_lab_token_from_env_file(path_text, token_env):
+    if not path_text:
+        return ""
+    path = Path(str(path_text)).expanduser()
+    if not path.is_file():
+        return ""
+    try:
+        for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):].strip()
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key.strip() == token_env:
+                return value.strip().strip("\"'")
+    except Exception as exc:
+        collection_errors.append({"source": str(path), "error": f"entry_quality_api_env_read: {exc!r}"})
+    return ""
+
+
+def normalize_entry_quality_report_text(text, file_kind):
+    if file_kind == "json":
+        try:
+            parsed = json.loads(text)
+            return json.dumps(sanitize_obj(parsed), ensure_ascii=False, indent=2) + "\n"
+        except Exception:
+            return sanitize_text(text)
+    return sanitize_text(text)
+
+
+def csv_text_from_dict_rows(rows):
+    dict_rows = [row for row in rows if isinstance(row, dict)]
+    if not dict_rows:
+        return ""
+    fields = []
+    seen = set()
+    for row in dict_rows:
+        for key in row:
+            if key not in seen:
+                seen.add(key)
+                fields.append(key)
+    from io import StringIO
+    sio = StringIO()
+    writer = csv.DictWriter(sio, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(dict_rows)
+    return sio.getvalue()
+
+
+def entry_quality_payload_to_text(payload, filename, file_kind):
+    if isinstance(payload, str):
+        return payload
+    if file_kind == "json":
+        if isinstance(payload, dict):
+            for key in ("content", "text", "raw", filename):
+                value = payload.get(key)
+                if isinstance(value, str):
+                    return value
+            for key in ("data", "payload", "report"):
+                value = payload.get(key)
+                if isinstance(value, dict):
+                    return json.dumps(value, ensure_ascii=False, indent=2) + "\n"
+        return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    if isinstance(payload, dict):
+        for key in ("content", "text", "raw", filename):
+            value = payload.get(key)
+            if isinstance(value, str):
+                return value
+        for key in ("rows", "items", "data", "report"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                text = csv_text_from_dict_rows(value)
+                if text:
+                    return text
+    if isinstance(payload, list):
+        text = csv_text_from_dict_rows(payload)
+        if text:
+            return text
+    return ""
+
+
+def entry_quality_archive_paths():
+    paths = []
+    seen = set()
+    for raw in ENTRY_QUALITY_SOURCE_ARCHIVES:
+        base = Path(raw)
+        if not base.is_absolute():
+            base = ROOT / base
+        matches = sorted(base.parent.glob(base.name)) if any(ch in base.name for ch in "*?[") else [base]
+        for path in matches:
+            if not path.is_file():
+                continue
+            key = str(path.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            paths.append(path)
+    paths.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+    return paths
+
+
+def read_entry_quality_from_archive(archive_path, filename):
+    candidates = []
+    try:
+        if archive_path.suffix.lower() == ".zip":
+            import zipfile
+            with zipfile.ZipFile(archive_path) as zf:
+                for name in zf.namelist():
+                    normalized = name.replace("\\", "/")
+                    if normalized.endswith(f"/{filename}") or normalized == filename:
+                        score = 0
+                        if normalized.endswith(f"reports/{filename}"):
+                            score = 3
+                        elif "/reports/" in normalized:
+                            score = 2
+                        elif "/entry_quality/" in normalized:
+                            score = 1
+                        candidates.append((score, normalized))
+                if not candidates:
+                    return ""
+                _, member = sorted(candidates, reverse=True)[0]
+                data = zf.read(member)[:MAX_COPY_BYTES]
+                return data.decode("utf-8", "replace")
+        with tarfile.open(archive_path) as tf:
+            for member in tf.getmembers():
+                normalized = member.name.replace("\\", "/")
+                if not member.isfile():
+                    continue
+                if normalized.endswith(f"/{filename}") or normalized == filename:
+                    score = 0
+                    if normalized.endswith(f"reports/{filename}"):
+                        score = 3
+                    elif "/reports/" in normalized:
+                        score = 2
+                    elif "/entry_quality/" in normalized:
+                        score = 1
+                    candidates.append((score, normalized, member))
+            if not candidates:
+                return ""
+            _, _, member = sorted(candidates, key=lambda item: (item[0], item[1]), reverse=True)[0]
+            fh = tf.extractfile(member)
+            if fh is None:
+                return ""
+            data = fh.read(MAX_COPY_BYTES)
+            return data.decode("utf-8", "replace")
+    except Exception as exc:
+        collection_errors.append({"source": str(archive_path), "filename": filename, "error": f"entry_quality_archive_read: {exc!r}"})
+    return ""
+
+
+def fetch_entry_quality_report_from_api(filename, file_kind):
+    quant_lab_section = yaml_section_text_from_raw("quant_lab")
+    if not parse_bool_text(parse_yaml_scalar(quant_lab_section, "enabled", "false"), False):
+        return "", ""
+    base_url = parse_yaml_scalar(quant_lab_section, "base_url", "http://qyun2.hrhome.top:8027").rstrip("/")
+    token_env = parse_yaml_scalar(quant_lab_section, "api_token_env", "QUANT_LAB_API_TOKEN") or "QUANT_LAB_API_TOKEN"
+    token = os.environ.get(token_env, "").strip()
+    if not token:
+        token = quant_lab_token_from_env_file(parse_yaml_scalar(quant_lab_section, "api_env_path", ""), token_env)
+    if not token:
+        collection_errors.append({"source": f"entry_quality_report_api:{filename}", "error": "token_missing"})
+        return "", ""
+    quoted = urllib.parse.quote(filename)
+    errors = []
+    for template in ENTRY_QUALITY_REPORT_API_ENDPOINT_TEMPLATES:
+        endpoint = template.format(filename=quoted)
+        url = f"{base_url}{endpoint}"
+        separator = "&" if "?" in url else "?"
+        url = f"{url}{separator}{urllib.parse.urlencode({'format': 'raw'})}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "text/csv,application/json,text/markdown,text/plain,*/*",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5) as response:
+                raw = response.read(MAX_COPY_BYTES)
+                content_type = str(response.headers.get("content-type") or "").lower()
+            text = raw.decode("utf-8", "replace")
+            if "json" in content_type:
+                try:
+                    converted = entry_quality_payload_to_text(json.loads(text), filename, file_kind)
+                    if converted:
+                        return converted, f"api:{endpoint}"
+                except Exception:
+                    pass
+            if text.strip():
+                return text, f"api:{endpoint}"
+        except Exception as exc:
+            errors.append(f"{endpoint}: {type(exc).__name__}")
+    if errors:
+        collection_errors.append({"source": f"entry_quality_report_api:{filename}", "error": "; ".join(errors[:5])})
+    return "", ""
+
+
+def copy_entry_quality_report(filename, dest_rel, file_kind):
+    for source_dir in ENTRY_QUALITY_SOURCE_DIRS:
+        base = Path(source_dir)
+        if not base.is_absolute():
+            base = ROOT / base
+        src = base / filename
+        if not src.is_file():
+            continue
+        try:
+            text = normalize_entry_quality_report_text(read_text_limited(src, MAX_COPY_BYTES), file_kind)
+            write_text(dest_rel, text)
+            copied_sources[dest_rel] = str(src)
+            return True
+        except Exception as exc:
+            collection_errors.append({"source": str(src), "dest": dest_rel, "error": repr(exc)})
+    for archive_path in entry_quality_archive_paths():
+        text = read_entry_quality_from_archive(archive_path, filename)
+        if not text:
+            continue
+        text = normalize_entry_quality_report_text(text, file_kind)
+        write_text(dest_rel, text)
+        copied_sources[dest_rel] = f"{archive_path}:{filename}"
+        return True
+    text, source = fetch_entry_quality_report_from_api(filename, file_kind)
+    if text:
+        text = normalize_entry_quality_report_text(text, file_kind)
+        write_text(dest_rel, text)
+        copied_sources[dest_rel] = source
+        return True
+    return False
+
+
 def parse_run_time(run_name):
     for fmt in ("%Y%m%d_%H", "%Y%m%dT%H%M%SZ", "%Y%m%d_%H%M%S"):
         try:
@@ -508,32 +797,12 @@ def copy_current_reports():
         if (ROOT / src_rel).is_file():
             copy_sanitized(src_rel, dest_rel)
     for filename, dest_rel, file_kind in ENTRY_QUALITY_REPORT_FILES:
-        copied_entry_quality = False
-        for source_dir in ENTRY_QUALITY_SOURCE_DIRS:
-            base = Path(source_dir)
-            if not base.is_absolute():
-                base = ROOT / base
-            src = base / filename
-            if not src.is_file():
-                continue
-            try:
-                text = read_text_limited(src, MAX_COPY_BYTES)
-                if file_kind == "json":
-                    try:
-                        parsed = json.loads(text)
-                        text = json.dumps(sanitize_obj(parsed), ensure_ascii=False, indent=2) + "\n"
-                    except Exception:
-                        text = sanitize_text(text)
-                else:
-                    text = sanitize_text(text)
-                write_text(dest_rel, text)
-                copied_sources[dest_rel] = str(src)
-                copied_entry_quality = True
-                break
-            except Exception as exc:
-                collection_errors.append({"source": str(src), "dest": dest_rel, "error": repr(exc)})
-        if copied_entry_quality:
-            continue
+        if not copy_entry_quality_report(filename, dest_rel, file_kind):
+            collection_errors.append({
+                "source": f"entry_quality_report:{filename}",
+                "dest": dest_rel,
+                "error": "missing_from_local_archive_and_api",
+            })
     for dest_rel in ("raw/reports/quant_lab_usage.jsonl", "raw/reports/quant_lab_requests.jsonl"):
         dest = OUT / dest_rel
         if not dest.is_file():
@@ -8007,11 +8276,23 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     )
 
     entry_quality_dir = OUT / "raw" / "reports" / "entry_quality"
-    missed_low_rows = load_csv_dicts(entry_quality_dir / "missed_low_audit.csv")
-    late_entry_chase_rows = load_csv_dicts(entry_quality_dir / "late_entry_chase_shadow.csv")
-    pullback_reversal_rows = load_csv_dicts(entry_quality_dir / "pullback_reversal_shadow_outcomes.csv")
-    late_entry_chase_advisory = load_json(entry_quality_dir / "late_entry_chase_threshold_advisory.json") if (entry_quality_dir / "late_entry_chase_threshold_advisory.json").is_file() else {}
-    pullback_reversal_readiness = load_json(entry_quality_dir / "pullback_reversal_readiness.json") if (entry_quality_dir / "pullback_reversal_readiness.json").is_file() else {}
+    missed_low_path = entry_quality_dir / "missed_low_audit.csv"
+    late_entry_chase_path = entry_quality_dir / "late_entry_chase_shadow.csv"
+    pullback_reversal_path = entry_quality_dir / "pullback_reversal_shadow_outcomes.csv"
+    late_entry_chase_advisory_path = entry_quality_dir / "late_entry_chase_threshold_advisory.json"
+    pullback_reversal_readiness_path = entry_quality_dir / "pullback_reversal_readiness.json"
+    entry_quality_summary_path = entry_quality_dir / "entry_quality_summary.md"
+    missed_low_present = missed_low_path.is_file()
+    late_entry_chase_present = late_entry_chase_path.is_file()
+    pullback_reversal_present = pullback_reversal_path.is_file()
+    late_entry_chase_advisory_present = late_entry_chase_advisory_path.is_file()
+    pullback_reversal_readiness_present = pullback_reversal_readiness_path.is_file()
+    entry_quality_summary_present = entry_quality_summary_path.is_file()
+    missed_low_rows = load_csv_dicts(missed_low_path)
+    late_entry_chase_rows = load_csv_dicts(late_entry_chase_path)
+    pullback_reversal_rows = load_csv_dicts(pullback_reversal_path)
+    late_entry_chase_advisory = load_json(late_entry_chase_advisory_path) if late_entry_chase_advisory_present else {}
+    pullback_reversal_readiness = load_json(pullback_reversal_readiness_path) if pullback_reversal_readiness_present else {}
     if not isinstance(late_entry_chase_advisory, dict):
         late_entry_chase_advisory = {}
     if not isinstance(pullback_reversal_readiness, dict):
@@ -8058,13 +8339,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         pullback_reversal_ready_for_live_probe = not_obs
     late_entry_chase_guard_enabled = config_bool("late_entry_chase_guard_enabled", False)
     pullback_reversal_live_enabled = config_bool("pullback_reversal_live_enabled", False)
-    entry_quality_summary_present = (entry_quality_dir / "entry_quality_summary.md").is_file()
     entry_quality_available = bool(
-        missed_low_rows
-        or late_entry_chase_rows
-        or pullback_reversal_rows
-        or late_entry_chase_advisory
-        or pullback_reversal_readiness
+        missed_low_present
+        or late_entry_chase_present
+        or pullback_reversal_present
+        or late_entry_chase_advisory_present
+        or pullback_reversal_readiness_present
         or entry_quality_summary_present
     )
 
@@ -8368,7 +8648,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         {
             "advisory_name": "missed_low",
             "source_file": "raw/reports/entry_quality/missed_low_audit.csv",
-            "available": str(bool(missed_low_rows)).lower(),
+            "available": str(missed_low_present).lower(),
             "row_count": len(missed_low_rows),
             "late_chase_loss_count": late_chase_loss_count,
             "ready_for_live_guard": not_obs,
@@ -8377,13 +8657,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "late_entry_chase_guard_enabled": str(late_entry_chase_guard_enabled).lower(),
             "pullback_reversal_live_enabled": str(pullback_reversal_live_enabled).lower(),
             "live_order_effect": "read_only_no_hard_block",
-            "status": "available" if missed_low_rows else "missing_or_empty",
+            "status": "available" if missed_low_present else "missing_or_empty",
             "raw_json": not_obs,
         },
         {
             "advisory_name": "late_entry_chase",
             "source_file": "raw/reports/entry_quality/late_entry_chase_threshold_advisory.json",
-            "available": str(bool(late_entry_chase_advisory)).lower(),
+            "available": str(late_entry_chase_present or late_entry_chase_advisory_present).lower(),
             "row_count": len(late_entry_chase_rows),
             "late_chase_loss_count": late_chase_loss_count,
             "ready_for_live_guard": late_entry_chase_ready_for_live_guard,
@@ -8392,13 +8672,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "late_entry_chase_guard_enabled": str(late_entry_chase_guard_enabled).lower(),
             "pullback_reversal_live_enabled": str(pullback_reversal_live_enabled).lower(),
             "live_order_effect": "read_only_no_hard_block",
-            "status": "available" if late_entry_chase_advisory or late_entry_chase_rows else "missing_or_empty",
+            "status": "available" if late_entry_chase_present or late_entry_chase_advisory_present else "missing_or_empty",
             "raw_json": safe_json(late_entry_chase_advisory) if late_entry_chase_advisory else not_obs,
         },
         {
             "advisory_name": "pullback_reversal",
             "source_file": "raw/reports/entry_quality/pullback_reversal_readiness.json",
-            "available": str(bool(pullback_reversal_readiness)).lower(),
+            "available": str(pullback_reversal_present or pullback_reversal_readiness_present).lower(),
             "row_count": len(pullback_reversal_rows),
             "late_chase_loss_count": not_obs,
             "ready_for_live_guard": not_obs,
@@ -8407,7 +8687,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "late_entry_chase_guard_enabled": str(late_entry_chase_guard_enabled).lower(),
             "pullback_reversal_live_enabled": str(pullback_reversal_live_enabled).lower(),
             "live_order_effect": "read_only_no_hard_block",
-            "status": "available" if pullback_reversal_readiness or pullback_reversal_rows else "missing_or_empty",
+            "status": "available" if pullback_reversal_present or pullback_reversal_readiness_present else "missing_or_empty",
             "raw_json": safe_json(pullback_reversal_readiness) if pullback_reversal_readiness else not_obs,
         },
         {

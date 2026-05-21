@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import zipfile
 
 
 SCRIPT = pathlib.Path(__file__).with_name("generate_v5_bundle_remote.sh")
@@ -23,6 +24,13 @@ def write_json(path, obj):
 def write_text(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def write_zip(path, members):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, text in members.items():
+            zf.writestr(name, text)
 
 
 def iso(ts):
@@ -4474,6 +4482,45 @@ def main():
             assert "would_enter_count: 1" in readme, readme
             assert "late_entry_chase_guard_enabled: false" in readme, readme
             assert "live_order_effect: read_only_no_hard_block" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-entry-quality-archive-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_entry_quality_advisory_root(root)
+        source_dir = root / "reports/quant_lab/latest/reports"
+        members = {}
+        for filename in (
+            "missed_low_audit.csv",
+            "late_entry_chase_shadow.csv",
+            "late_entry_chase_threshold_advisory.json",
+            "pullback_reversal_shadow_outcomes.csv",
+            "pullback_reversal_readiness.json",
+            "entry_quality_summary.md",
+        ):
+            members[f"reports/{filename}"] = (source_dir / filename).read_text(encoding="utf-8")
+        shutil.rmtree(root / "reports/quant_lab/latest")
+        write_zip(root / "reports/quant_lab_latest_bundle.zip", members)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                reader = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/entry_quality_advisory_reader.csv")).read().decode().splitlines()))
+                raw_names = set(tf.getnames())
+                raw_missed_low = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/missed_low_audit.csv")).read().decode()
+                raw_late_advisory = json.loads(tf.extractfile(extract_member(tf, "raw/reports/entry_quality/late_entry_chase_threshold_advisory.json")).read().decode())
+                raw_summary = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/entry_quality_summary.md")).read().decode()
+
+            by_name = {row["advisory_name"]: row for row in reader}
+            assert by_name["missed_low"]["available"] == "true", reader
+            assert by_name["late_entry_chase"]["available"] == "true", reader
+            assert by_name["pullback_reversal"]["available"] == "true", reader
+            assert by_name["entry_quality_summary"]["available"] == "true", reader
+            assert "late_chase_loss" in raw_missed_low, raw_missed_low
+            assert raw_late_advisory["late_chase_loss_count"] == 1, raw_late_advisory
+            assert "read-only fixture" in raw_summary, raw_summary
+            assert any(name.endswith("raw/reports/entry_quality/pullback_reversal_shadow_outcomes.csv") for name in raw_names), raw_names
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
