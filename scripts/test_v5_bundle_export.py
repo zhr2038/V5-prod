@@ -2951,6 +2951,18 @@ def fixture_entry_quality_advisory_root(root):
         },
     )
     write_text(source_dir / "entry_quality_summary.md", "# Entry quality\n\nread-only fixture\n")
+    write_text(
+        root / "reports/summaries/strategy_opportunity_advisory_reader.csv",
+        "\n".join(
+            [
+                "source_path,advisory_source,advisory_fresh,stale_advisory_used,api_fallback_attempted,api_fallback_success,strategy_candidate,symbol,decision,recommended_mode,would_block_if_enabled,would_enter,no_sample_reason,max_live_notional_usdt,response_action,live_block_reasons",
+                "api:/v1/strategy-opportunity-advisory,api,True,False,True,True,v5.entry_quality_missed_low_audit,BTC/USDT,KEEP_RESEARCH,research,,False,research_only,0,research_display_only,",
+                "api:/v1/strategy-opportunity-advisory,api,True,False,True,True,v5.late_entry_chase_guard_shadow,BTC/USDT,KEEP_SHADOW,shadow,True,False,late_chase_loss_shadow,0,shadow_tracking,",
+                "api:/v1/strategy-opportunity-advisory,api,True,False,True,True,v5.pullback_reversal_shadow_sol,SOL/USDT,PAPER_READY,paper,False,True,,25,paper_tracking,cost_source_not_actual_or_mixed",
+            ]
+        )
+        + "\n",
+    )
     return run_id
 
 
@@ -4423,15 +4435,27 @@ def main():
             missed = next(row for row in reader if row["advisory_name"] == "missed_low")
             late = next(row for row in reader if row["advisory_name"] == "late_entry_chase")
             pullback = next(row for row in reader if row["advisory_name"] == "pullback_reversal")
+            strategy_rows = [row for row in reader if row["advisory_name"] == "strategy_opportunity_advisory"]
             assert missed["available"] == "true", reader
             assert missed["late_chase_loss_count"] == "1", missed
             assert late["ready_for_live_guard"] == "false", late
             assert pullback["ready_for_paper"] == "true", pullback
             assert pullback["ready_for_live_probe"] == "false", pullback
+            assert len(strategy_rows) == 3, strategy_rows
+            by_strategy = {row["strategy_candidate"]: row for row in strategy_rows}
+            assert by_strategy["v5.entry_quality_missed_low_audit"]["recommended_mode"] == "research", strategy_rows
+            assert by_strategy["v5.entry_quality_missed_low_audit"]["status"] == "research_display_only", strategy_rows
+            assert by_strategy["v5.late_entry_chase_guard_shadow"]["would_block_if_enabled"] == "True", strategy_rows
+            assert by_strategy["v5.late_entry_chase_guard_shadow"]["status"] == "shadow_tracking", strategy_rows
+            assert by_strategy["v5.pullback_reversal_shadow_sol"]["would_enter"] == "True", strategy_rows
+            assert by_strategy["v5.pullback_reversal_shadow_sol"]["max_live_notional_usdt_ignored"] == "true", strategy_rows
             assert late["late_entry_chase_guard_enabled"] == "false", late
             assert pullback["pullback_reversal_live_enabled"] == "false", pullback
             assert all(row["live_order_effect"] == "read_only_no_hard_block" for row in reader), reader
             assert window["entry_quality_available"] is True, window
+            assert window["entry_quality_strategy_advisory_count"] == 3, window
+            assert window["entry_quality_would_block_if_enabled_count"] == 1, window
+            assert window["entry_quality_would_enter_count"] == 1, window
             assert window["missed_low_late_chase_loss_count"] == 1, window
             assert window["late_entry_chase_ready_for_live_guard"] == "false", window
             assert window["pullback_reversal_ready_for_paper"] == "true", window
@@ -4445,6 +4469,9 @@ def main():
             assert raw_pullback["ready_for_paper"] is True, raw_pullback
             assert "## Entry quality advisory" in readme, readme
             assert "missed_low late_chase_loss_count: 1" in readme, readme
+            assert "strategy_advisory_count: 3" in readme, readme
+            assert "would_block_if_enabled_count: 1" in readme, readme
+            assert "would_enter_count: 1" in readme, readme
             assert "late_entry_chase_guard_enabled: false" in readme, readme
             assert "live_order_effect: read_only_no_hard_block" in readme, readme
         finally:

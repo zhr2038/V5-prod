@@ -84,6 +84,14 @@ ENTRY_QUALITY_SOURCE_DIRS = [
     "/var/lib/v5-prod/quant_lab",
     "/var/lib/v5-prod/quant_lab/latest/reports",
 ]
+ENTRY_QUALITY_STRATEGY_CANDIDATES = {
+    "v5.entry_quality_missed_low_audit",
+    "v5.late_entry_chase_guard_shadow",
+    "v5.pullback_reversal_shadow_btc",
+    "v5.pullback_reversal_shadow_sol",
+    "v5.pullback_reversal_shadow_eth",
+    "v5.pullback_reversal_shadow_bnb",
+}
 SECRET_KEY_RE = re.compile(
     r"(?i)(authorization|api[_-]?(?:key|secret)|secret|token|cookie|pass(?:word|phrase)|private[_-]?key|ok-access-(?:key|sign|passphrase))"
 )
@@ -688,6 +696,10 @@ def load_csv_dicts(path):
     except Exception as exc:
         collection_errors.append({"source": str(path), "error": f"csv_load: {exc!r}"})
     return rows
+
+
+def truthy_text(value):
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def flatten_value(value):
@@ -8053,6 +8065,148 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         or pullback_reversal_readiness
         or entry_quality_summary_present
     )
+
+    def entry_quality_strategy_key(row):
+        values = [
+            flatten_value(row.get("strategy_candidate")),
+            flatten_value(row.get("advisory_strategy_candidate")),
+            flatten_value(row.get("strategy_id")),
+            flatten_value(row.get("advisory_strategy_id")),
+            flatten_value(row.get("experiment_name")),
+        ]
+        normalized = [value.strip().lower() for value in values if value and value != not_obs]
+        for value in normalized:
+            if value in ENTRY_QUALITY_STRATEGY_CANDIDATES:
+                return value
+        return ""
+
+    def entry_quality_strategy_module(key):
+        if "missed_low" in key:
+            return "missed_low"
+        if "late_entry_chase" in key:
+            return "late_entry_chase"
+        if "pullback_reversal" in key:
+            return "pullback_reversal"
+        return "entry_quality"
+
+    def strategy_advisory_summary_rows():
+        rows = load_csv_dicts(OUT / "summaries" / "strategy_opportunity_advisory_reader.csv")
+        if rows:
+            return rows
+        raw_paths = [
+            OUT / "raw" / "reports" / "strategy_opportunity_advisory.csv",
+            OUT / "raw" / "reports" / "quant_lab" / "strategy_opportunity_advisory.csv",
+            OUT / "raw" / "reports" / "quant_lab_latest" / "strategy_opportunity_advisory.csv",
+            OUT / "raw" / "reports" / "quant_lab" / "latest" / "reports" / "strategy_opportunity_advisory.csv",
+        ]
+        raw_rows = []
+        for path in raw_paths:
+            for row in load_csv_dicts(path):
+                payload = dict(row)
+                payload.setdefault("source_path", path.as_posix())
+                payload.setdefault("advisory_source", "local")
+                raw_rows.append(payload)
+        return raw_rows
+
+    def advisory_value(row, *names, default=not_obs):
+        for name in names:
+            value = row.get(name)
+            if value not in (None, "", not_obs):
+                return value
+        return default
+
+    def advisory_mode(row):
+        return flatten_value(advisory_value(row, "recommended_mode", "advisory_recommended_mode", default="")).strip().lower().replace("-", "_")
+
+    def advisory_decision(row):
+        return flatten_value(advisory_value(row, "decision", "advisory_decision", default="")).strip().upper()
+
+    def advisory_response_action(row):
+        existing = flatten_value(advisory_value(row, "response_action", "advisory_response_action", default=""))
+        if existing:
+            return existing
+        decision = advisory_decision(row)
+        mode = advisory_mode(row)
+        fresh_text = flatten_value(advisory_value(row, "advisory_fresh", default="true")).strip().lower()
+        fresh = fresh_text not in {"false", "0", "no"}
+        if decision == "KILL":
+            return "negative_advisory"
+        if mode == "research":
+            return "research_display_only"
+        if mode == "shadow":
+            return "shadow_tracking"
+        if mode == "paper":
+            return "paper_tracking"
+        if decision == "LIVE_SMALL_READY" and not fresh:
+            return "stale_advisory_live_disabled"
+        if decision == "LIVE_SMALL_READY":
+            return "ignored_live_small_disabled"
+        return "display_only"
+
+    def advisory_no_sample_reason(row, module_name):
+        reason = flatten_value(advisory_value(
+            row,
+            "no_sample_reason",
+            "advisory_reason",
+            "live_block_reasons",
+            "block_reason",
+            default="",
+        )).strip()
+        if reason:
+            return reason
+        action = advisory_response_action(row)
+        if action == "negative_advisory":
+            return "negative_advisory"
+        if action == "research_display_only":
+            return "research_display_only"
+        if module_name == "late_entry_chase":
+            return "late_entry_chase_shadow_only"
+        if module_name == "pullback_reversal":
+            return "pullback_reversal_shadow_only"
+        return "entry_quality_advisory_only"
+
+    entry_quality_strategy_rows = []
+    for advisory_row in strategy_advisory_summary_rows():
+        strategy_key = entry_quality_strategy_key(advisory_row)
+        if not strategy_key:
+            continue
+        module_name = entry_quality_strategy_module(strategy_key)
+        fresh = flatten_value(advisory_value(advisory_row, "advisory_fresh", default=not_obs))
+        max_live_notional = advisory_value(advisory_row, "max_live_notional_usdt", "advisory_max_live_notional_usdt")
+        if fresh.strip().lower() in {"false", "0", "no"}:
+            max_live_notional = "0"
+        entry_quality_strategy_rows.append({
+            "advisory_name": "strategy_opportunity_advisory",
+            "source_file": flatten_value(advisory_value(advisory_row, "source_path", "advisory_source_path")),
+            "available": "true",
+            "row_count": 1,
+            "late_chase_loss_count": late_chase_loss_count if module_name == "late_entry_chase" else not_obs,
+            "ready_for_live_guard": late_entry_chase_ready_for_live_guard if module_name == "late_entry_chase" else not_obs,
+            "ready_for_paper": pullback_reversal_ready_for_paper if module_name == "pullback_reversal" else not_obs,
+            "ready_for_live_probe": pullback_reversal_ready_for_live_probe if module_name == "pullback_reversal" else not_obs,
+            "strategy_candidate": strategy_key,
+            "symbol": flatten_value(advisory_value(advisory_row, "symbol")),
+            "decision": advisory_decision(advisory_row) or not_obs,
+            "recommended_mode": advisory_mode(advisory_row) or not_obs,
+            "advisory_source": flatten_value(advisory_value(advisory_row, "advisory_source")),
+            "advisory_fresh": fresh,
+            "stale_advisory_used": flatten_value(advisory_value(advisory_row, "stale_advisory_used")),
+            "api_fallback_attempted": flatten_value(advisory_value(advisory_row, "api_fallback_attempted")),
+            "api_fallback_success": flatten_value(advisory_value(advisory_row, "api_fallback_success")),
+            "would_block_if_enabled": flatten_value(advisory_value(advisory_row, "would_block_if_enabled", "would_block_if_enforced")),
+            "would_enter": flatten_value(advisory_value(advisory_row, "would_enter")),
+            "no_sample_reason": advisory_no_sample_reason(advisory_row, module_name),
+            "max_live_notional_usdt": flatten_value(max_live_notional),
+            "max_live_notional_usdt_ignored": "true",
+            "live_block_reasons": flatten_value(advisory_value(advisory_row, "live_block_reasons", "advisory_live_block_reasons")),
+            "late_entry_chase_guard_enabled": str(late_entry_chase_guard_enabled).lower(),
+            "pullback_reversal_live_enabled": str(pullback_reversal_live_enabled).lower(),
+            "live_order_effect": "read_only_no_hard_block",
+            "status": advisory_response_action(advisory_row),
+            "raw_json": safe_json(advisory_row),
+        })
+    if entry_quality_strategy_rows:
+        entry_quality_available = True
     entry_quality_advisory_rows = [
         {
             "advisory_name": "missed_low",
@@ -8137,6 +8291,43 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "quant-lab entry-quality advisory reports were not available; live trading is unchanged.",
             {"live_order_effect": "read_only_no_hard_block"},
         )
+    entry_quality_default_fields = {
+        "strategy_candidate": not_obs,
+        "symbol": not_obs,
+        "decision": not_obs,
+        "recommended_mode": not_obs,
+        "advisory_source": not_obs,
+        "advisory_fresh": not_obs,
+        "stale_advisory_used": not_obs,
+        "api_fallback_attempted": not_obs,
+        "api_fallback_success": not_obs,
+        "would_block_if_enabled": not_obs,
+        "would_enter": not_obs,
+        "no_sample_reason": not_obs,
+        "max_live_notional_usdt": not_obs,
+        "max_live_notional_usdt_ignored": "true",
+        "live_block_reasons": not_obs,
+    }
+    for row in entry_quality_advisory_rows:
+        for key, value in entry_quality_default_fields.items():
+            row.setdefault(key, value)
+    entry_quality_advisory_rows.extend(entry_quality_strategy_rows)
+    entry_quality_would_block_count = sum(
+        1 for row in entry_quality_strategy_rows
+        if truthy_text(row.get("would_block_if_enabled"))
+    )
+    entry_quality_would_enter_count = sum(
+        1 for row in entry_quality_strategy_rows
+        if truthy_text(row.get("would_enter"))
+    )
+    entry_quality_no_sample_reasons = dict(
+        sorted(
+            Counter(
+                flatten_value(row.get("no_sample_reason") or not_obs)
+                for row in entry_quality_strategy_rows
+            ).items()
+        )
+    )
     write_csv(
         "summaries/entry_quality_advisory_reader.csv",
         entry_quality_advisory_rows,
@@ -8149,6 +8340,21 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "ready_for_live_guard",
             "ready_for_paper",
             "ready_for_live_probe",
+            "strategy_candidate",
+            "symbol",
+            "decision",
+            "recommended_mode",
+            "advisory_source",
+            "advisory_fresh",
+            "stale_advisory_used",
+            "api_fallback_attempted",
+            "api_fallback_success",
+            "would_block_if_enabled",
+            "would_enter",
+            "no_sample_reason",
+            "max_live_notional_usdt",
+            "max_live_notional_usdt_ignored",
+            "live_block_reasons",
             "late_entry_chase_guard_enabled",
             "pullback_reversal_live_enabled",
             "live_order_effect",
@@ -8551,6 +8757,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "entry_quality_advisory_rows": len(entry_quality_advisory_rows),
         "entry_quality_available": bool(entry_quality_available),
         "entry_quality_status": "available" if entry_quality_available else "quant_lab_entry_quality_unavailable",
+        "entry_quality_strategy_advisory_count": len(entry_quality_strategy_rows),
+        "entry_quality_would_block_if_enabled_count": entry_quality_would_block_count,
+        "entry_quality_would_enter_count": entry_quality_would_enter_count,
+        "entry_quality_no_sample_reasons": entry_quality_no_sample_reasons,
         "missed_low_late_chase_loss_count": late_chase_loss_count,
         "late_entry_chase_ready_for_live_guard": late_entry_chase_ready_for_live_guard,
         "pullback_reversal_ready_for_paper": pullback_reversal_ready_for_paper,
@@ -9196,6 +9406,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- pullback_reversal ready_for_paper: {window_summary.get('pullback_reversal_ready_for_paper', not_obs)}",
         f"- pullback_reversal ready_for_live_probe: {window_summary.get('pullback_reversal_ready_for_live_probe', not_obs)}",
         f"- advisory_status: {window_summary.get('entry_quality_status', not_obs)}",
+        f"- strategy_advisory_count: {window_summary.get('entry_quality_strategy_advisory_count', not_obs)}",
+        f"- would_block_if_enabled_count: {window_summary.get('entry_quality_would_block_if_enabled_count', not_obs)}",
+        f"- would_enter_count: {window_summary.get('entry_quality_would_enter_count', not_obs)}",
+        f"- no_sample_reasons: {window_summary.get('entry_quality_no_sample_reasons', not_obs)}",
         f"- late_entry_chase_guard_enabled: {str(window_summary.get('late_entry_chase_guard_enabled', False)).lower()}",
         f"- pullback_reversal_live_enabled: {str(window_summary.get('pullback_reversal_live_enabled', False)).lower()}",
         "- live_order_effect: read_only_no_hard_block",

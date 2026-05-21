@@ -44,6 +44,7 @@ DEFAULT_HORIZONS = [4, 8, 12, 24, 48, 72]
 PRIMARY_HORIZON = 24
 LIVE_SMALL_READY_COST_SOURCES = {"actual_fills", "mixed_actual_proxy"}
 ADVISORY_ALLOWED_RECOMMENDED_MODES = {"paper", "shadow"}
+ADVISORY_DISPLAY_ONLY_RECOMMENDED_MODES = {"research"}
 
 DEFAULT_PAPER_STRATEGY_CONFIGS = [
     {
@@ -237,6 +238,9 @@ STRATEGY_ADVISORY_FIELDS = [
     "max_paper_notional_usdt",
     "max_live_notional_usdt",
     "live_block_reasons",
+    "would_block_if_enabled",
+    "would_enter",
+    "no_sample_reason",
     "enable_live_small_from_quant_lab",
     "response_action",
     "negative_advisory",
@@ -516,6 +520,22 @@ def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict
         "max_paper_notional_usdt": _normalize_float(row.get("max_paper_notional_usdt")),
         "max_live_notional_usdt": _normalize_float(row.get("max_live_notional_usdt")),
         "live_block_reasons": str(_advisory_first(row, ("live_block_reasons", "live_block_reason")) or "").strip(),
+        "would_block_if_enabled": _normalize_bool(
+            _advisory_first(
+                row,
+                (
+                    "would_block_if_enabled",
+                    "would_block_if_enforced",
+                    "would_block",
+                    "would_filter",
+                ),
+            )
+        ),
+        "would_enter": _normalize_bool(_advisory_first(row, ("would_enter", "would_enter_if_enabled"))),
+        "no_sample_reason": str(
+            _advisory_first(row, ("no_sample_reason", "no_entry_reason", "not_observable_reason"))
+            or ""
+        ).strip(),
         "as_of_ts": str(_advisory_first(row, ("as_of_ts", "as_of", "asof_ts", "as_of_ts_utc")) or "").strip(),
         "generated_at": str(_advisory_first(row, ("generated_at", "generated_ts", "generated_ts_utc", "generated_at_utc", "ts_utc", "created_at")) or "").strip(),
         "expires_at": str(_advisory_first(row, ("expires_at", "expires_ts", "expires_at_utc")) or "").strip(),
@@ -1264,14 +1284,17 @@ def _advisory_response_fields(
     present = bool(advisory)
     negative = decision == "KILL"
     live_small = decision == "LIVE_SMALL_READY"
-    mode_allowed = recommended_mode in ADVISORY_ALLOWED_RECOMMENDED_MODES
     max_ignored = bool(max_notional is not None and not (live_small and enable_live_small and advisory_fresh))
     if not present:
         response_action = "no_advisory"
     elif negative:
         response_action = "negative_advisory"
-    elif mode_allowed:
+    elif recommended_mode == "paper":
         response_action = "paper_tracking"
+    elif recommended_mode == "shadow":
+        response_action = "shadow_tracking"
+    elif recommended_mode in ADVISORY_DISPLAY_ONLY_RECOMMENDED_MODES:
+        response_action = "research_display_only"
     elif live_small and not advisory_fresh:
         response_action = "stale_advisory_live_disabled"
     elif live_small and not enable_live_small:
@@ -1344,6 +1367,9 @@ def _advisory_summary_rows(
                 "max_paper_notional_usdt": row.get("max_paper_notional_usdt"),
                 "max_live_notional_usdt": fields["advisory_max_live_notional_usdt"],
                 "live_block_reasons": row.get("live_block_reasons"),
+                "would_block_if_enabled": row.get("would_block_if_enabled"),
+                "would_enter": row.get("would_enter"),
+                "no_sample_reason": row.get("no_sample_reason"),
                 "enable_live_small_from_quant_lab": fields["enable_live_small_from_quant_lab"],
                 "response_action": fields["advisory_response_action"],
                 "negative_advisory": fields["advisory_negative"],

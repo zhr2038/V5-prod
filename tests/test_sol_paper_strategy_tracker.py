@@ -1144,6 +1144,67 @@ def test_sol_paper_strategy_tracker_reads_api_advisory(monkeypatch: pytest.Monke
     assert advisory[0]["response_action"] == "paper_tracking"
 
 
+def test_strategy_advisory_entry_quality_rows_are_display_only(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_entry_quality_advisory"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "strategy_candidate": "v5.entry_quality_missed_low_audit",
+                "symbol": "BTC/USDT",
+                "decision": "KEEP_RESEARCH",
+                "recommended_mode": "research",
+                "no_sample_reason": "research_only",
+                **_fresh_meta(start_s),
+            },
+            {
+                "strategy_candidate": "v5.late_entry_chase_guard_shadow",
+                "symbol": "BTC/USDT",
+                "decision": "KEEP_SHADOW",
+                "recommended_mode": "shadow",
+                "would_block_if_enabled": "true",
+                "no_sample_reason": "late_chase_loss_shadow",
+                **_fresh_meta(start_s),
+            },
+            {
+                "strategy_candidate": "v5.pullback_reversal_shadow_sol",
+                "symbol": "SOL/USDT",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "would_enter": "true",
+                "max_live_notional_usdt": "50",
+                **_fresh_meta(start_s),
+            },
+        ],
+    )
+
+    update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_entry_quality_advisory", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    advisory = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_reader.csv")
+    by_candidate = {row["strategy_candidate"]: row for row in advisory}
+    missed_low = by_candidate["v5.entry_quality_missed_low_audit"]
+    late_chase = by_candidate["v5.late_entry_chase_guard_shadow"]
+    pullback = by_candidate["v5.pullback_reversal_shadow_sol"]
+    assert missed_low["recommended_mode"] == "research"
+    assert missed_low["response_action"] == "research_display_only"
+    assert late_chase["response_action"] == "shadow_tracking"
+    assert late_chase["would_block_if_enabled"] == "True"
+    assert late_chase["no_sample_reason"] == "late_chase_loss_shadow"
+    assert pullback["response_action"] == "paper_tracking"
+    assert pullback["would_enter"] == "True"
+    assert pullback["max_live_notional_usdt_ignored"] == "True"
+
+
 def test_strategy_advisory_uses_fresh_local_without_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cfg = _cfg()
     cfg.quant_lab.enabled = True
