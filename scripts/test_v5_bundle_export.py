@@ -2868,6 +2868,92 @@ def fixture_protect_sol_exception_shadow_root(root):
     return run_id
 
 
+def fixture_entry_quality_advisory_root(root):
+    now = dt.datetime.now(dt.timezone.utc)
+    window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
+    run_id = now.strftime("%Y%m%d_%H")
+    write_text(
+        root / "configs/live_prod.yaml",
+        "\n".join(
+            [
+                "execution:",
+                "  late_entry_chase_guard_enabled: false",
+                "  pullback_reversal_live_enabled: false",
+                "  probe_time_stop_hours: 8",
+            ]
+        )
+        + "\n",
+    )
+    write_json(
+        root / "reports/effective_live_config.json",
+        {
+            "execution": {
+                "late_entry_chase_guard_enabled": False,
+                "pullback_reversal_live_enabled": False,
+                "probe_time_stop_hours": 8,
+            }
+        },
+    )
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(
+        run_dir / "decision_audit.json",
+        {
+            "now_ts": window_end,
+            "window_end_ts": window_end,
+            "counts": {},
+            "router_decisions": [],
+            "quant_lab": {
+                "entry_quality_advisory": {
+                    "status": "available",
+                    "live_order_effect": "read_only_no_hard_block",
+                }
+            },
+        },
+    )
+    write_text(run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id, "num_trades": 0})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    source_dir = root / "reports/quant_lab/latest/reports"
+    write_text(
+        source_dir / "missed_low_audit.csv",
+        "symbol,entry_ts,diagnosis\nBTC/USDT,2026-05-20T07:00:00Z,late_chase_loss\nETH/USDT,2026-05-20T08:00:00Z,late_but_profitable\n",
+    )
+    write_text(
+        source_dir / "late_entry_chase_shadow.csv",
+        "symbol,label_status,net_bps_24h\nBTC/USDT,complete,-12\n",
+    )
+    write_json(
+        source_dir / "late_entry_chase_threshold_advisory.json",
+        {
+            "ready_for_live_guard": False,
+            "late_chase_loss_count": 1,
+        },
+    )
+    write_text(
+        source_dir / "pullback_reversal_shadow_outcomes.csv",
+        "symbol,label_status,net_bps_24h\nSOL/USDT,pending,\n",
+    )
+    write_json(
+        source_dir / "pullback_reversal_readiness.json",
+        {
+            "ready_for_paper": True,
+            "ready_for_live_probe": False,
+        },
+    )
+    write_text(source_dir / "entry_quality_summary.md", "# Entry quality\n\nread-only fixture\n")
+    return run_id
+
+
 def run_bundle(root):
     script_path = bash_path(SCRIPT)
     root_path = bash_path(root)
@@ -4316,6 +4402,51 @@ def main():
             assert window["protect_sol_exception_shadow_duplicate_count"] == 1, window
             assert "## PROTECT SOL exception shadow" in readme, readme
             assert "enable_live_experiment: false" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-entry-quality-advisory-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_entry_quality_advisory_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                reader = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/entry_quality_advisory_reader.csv")).read().decode().splitlines()))
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+                raw_missed_low = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/missed_low_audit.csv")).read().decode()
+                raw_pullback = json.loads(tf.extractfile(extract_member(tf, "raw/reports/entry_quality/pullback_reversal_readiness.json")).read().decode())
+
+            missed = next(row for row in reader if row["advisory_name"] == "missed_low")
+            late = next(row for row in reader if row["advisory_name"] == "late_entry_chase")
+            pullback = next(row for row in reader if row["advisory_name"] == "pullback_reversal")
+            assert missed["available"] == "true", reader
+            assert missed["late_chase_loss_count"] == "1", missed
+            assert late["ready_for_live_guard"] == "false", late
+            assert pullback["ready_for_paper"] == "true", pullback
+            assert pullback["ready_for_live_probe"] == "false", pullback
+            assert late["late_entry_chase_guard_enabled"] == "false", late
+            assert pullback["pullback_reversal_live_enabled"] == "false", pullback
+            assert all(row["live_order_effect"] == "read_only_no_hard_block" for row in reader), reader
+            assert window["entry_quality_available"] is True, window
+            assert window["missed_low_late_chase_loss_count"] == 1, window
+            assert window["late_entry_chase_ready_for_live_guard"] == "false", window
+            assert window["pullback_reversal_ready_for_paper"] == "true", window
+            assert window["pullback_reversal_ready_for_live_probe"] == "false", window
+            unavailable = [
+                item for item in issues["issues"]
+                if item.get("code") == "quant_lab_entry_quality_unavailable"
+            ]
+            assert unavailable == [], issues
+            assert "late_chase_loss" in raw_missed_low, raw_missed_low
+            assert raw_pullback["ready_for_paper"] is True, raw_pullback
+            assert "## Entry quality advisory" in readme, readme
+            assert "missed_low late_chase_loss_count: 1" in readme, readme
+            assert "late_entry_chase_guard_enabled: false" in readme, readme
+            assert "live_order_effect: read_only_no_hard_block" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

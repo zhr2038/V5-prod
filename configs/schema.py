@@ -612,6 +612,8 @@ class ExecutionConfig(BaseModel):
     quant_lab_effective_enabled: bool = Field(default=False, description="Runtime-injected effective top-level quant-lab enablement")
     quant_lab_effective_mode: str = Field(default="", description="Runtime-injected effective quant-lab mode after override resolution")
     quant_lab_config_source: str = Field(default="", description="Runtime-injected quant-lab config source")
+    late_entry_chase_guard_enabled: bool = Field(default=False, description="Read-only entry-quality advisory switch; live late-chase guard stays disabled by default")
+    pullback_reversal_live_enabled: bool = Field(default=False, description="Read-only entry-quality advisory switch; pullback reversal live trading stays disabled by default")
     
     # Allow trading on small reconcile drift (useful for initialization)
     allow_trade_on_small_reconcile_drift: bool = Field(default=False, description="Allow trading when reconcile has small drift (not hard failures)")

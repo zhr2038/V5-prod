@@ -3259,6 +3259,29 @@ def main() -> None:
     except Exception as e:
         log.warning(f"SOL paper strategy tracker failed: {e}")
 
+    # Read-only quant-lab entry-quality advisory. It must never hard-block orders.
+    try:
+        from src.reporting.entry_quality_advisory import read_entry_quality_advisory
+
+        entry_quality_advisory = read_entry_quality_advisory(cfg)
+        audit.quant_lab = dict(audit.quant_lab or {})
+        audit.quant_lab["entry_quality_advisory"] = entry_quality_advisory
+        audit.add_note(
+            "entry_quality_advisory "
+            f"status={entry_quality_advisory.get('status')} "
+            "live_order_effect=read_only_no_hard_block"
+        )
+    except Exception as e:
+        audit.quant_lab = dict(audit.quant_lab or {})
+        audit.quant_lab["entry_quality_advisory"] = {
+            "status": "quant_lab_entry_quality_unavailable",
+            "available": False,
+            "live_order_effect": "read_only_no_hard_block",
+            "error_type": type(e).__name__,
+            "error_message": str(e)[:500],
+        }
+        log.warning(f"entry quality advisory reader failed: {e}")
+
     try:
         from src.reporting.order_lifecycle import annotate_orders_with_arrival, write_order_lifecycle
 

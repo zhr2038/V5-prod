@@ -65,6 +65,25 @@ CURRENT_REPORT_FILES = [
     ("reports/quant_lab_usage.jsonl", "raw/reports/quant_lab_usage.jsonl", False),
     ("reports/quant_lab_requests.jsonl", "raw/reports/quant_lab_requests.jsonl", False),
 ]
+ENTRY_QUALITY_REPORT_FILES = [
+    ("missed_low_audit.csv", "raw/reports/entry_quality/missed_low_audit.csv", "csv"),
+    ("late_entry_chase_shadow.csv", "raw/reports/entry_quality/late_entry_chase_shadow.csv", "csv"),
+    ("late_entry_chase_threshold_advisory.json", "raw/reports/entry_quality/late_entry_chase_threshold_advisory.json", "json"),
+    ("pullback_reversal_shadow_outcomes.csv", "raw/reports/entry_quality/pullback_reversal_shadow_outcomes.csv", "csv"),
+    ("pullback_reversal_readiness.json", "raw/reports/entry_quality/pullback_reversal_readiness.json", "json"),
+    ("entry_quality_summary.md", "raw/reports/entry_quality/entry_quality_summary.md", "text"),
+]
+ENTRY_QUALITY_SOURCE_DIRS = [
+    "reports",
+    "reports/entry_quality",
+    "reports/quant_lab",
+    "reports/quant_lab_latest",
+    "reports/quant_lab/latest/reports",
+    "/var/lib/v5-prod",
+    "/var/lib/v5-prod/entry_quality",
+    "/var/lib/v5-prod/quant_lab",
+    "/var/lib/v5-prod/quant_lab/latest/reports",
+]
 SECRET_KEY_RE = re.compile(
     r"(?i)(authorization|api[_-]?(?:key|secret)|secret|token|cookie|pass(?:word|phrase)|private[_-]?key|ok-access-(?:key|sign|passphrase))"
 )
@@ -478,6 +497,33 @@ def copy_current_reports():
     ):
         if (ROOT / src_rel).is_file():
             copy_sanitized(src_rel, dest_rel)
+    for filename, dest_rel, file_kind in ENTRY_QUALITY_REPORT_FILES:
+        copied_entry_quality = False
+        for source_dir in ENTRY_QUALITY_SOURCE_DIRS:
+            base = Path(source_dir)
+            if not base.is_absolute():
+                base = ROOT / base
+            src = base / filename
+            if not src.is_file():
+                continue
+            try:
+                text = read_text_limited(src, MAX_COPY_BYTES)
+                if file_kind == "json":
+                    try:
+                        parsed = json.loads(text)
+                        text = json.dumps(sanitize_obj(parsed), ensure_ascii=False, indent=2) + "\n"
+                    except Exception:
+                        text = sanitize_text(text)
+                else:
+                    text = sanitize_text(text)
+                write_text(dest_rel, text)
+                copied_sources[dest_rel] = str(src)
+                copied_entry_quality = True
+                break
+            except Exception as exc:
+                collection_errors.append({"source": str(src), "dest": dest_rel, "error": repr(exc)})
+        if copied_entry_quality:
+            continue
     for dest_rel in ("raw/reports/quant_lab_usage.jsonl", "raw/reports/quant_lab_requests.jsonl"):
         dest = OUT / dest_rel
         if not dest.is_file():
@@ -626,6 +672,21 @@ def load_jsonl(path):
                     collection_errors.append({"source": str(path), "line": line_no, "error": f"jsonl_load: {exc!r}"})
     except Exception as exc:
         collection_errors.append({"source": str(path), "error": f"jsonl_open: {exc!r}"})
+    return rows
+
+
+def load_csv_dicts(path):
+    rows = []
+    if not path.is_file():
+        return rows
+    try:
+        with path.open("r", encoding="utf-8", errors="replace", newline="") as fh:
+            reader = csv.DictReader(fh)
+            for row in reader:
+                if row:
+                    rows.append(dict(row))
+    except Exception as exc:
+        collection_errors.append({"source": str(path), "error": f"csv_load: {exc!r}"})
     return rows
 
 
@@ -7931,6 +7992,171 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         ["ts_utc", "run_id", "active", "trend_buy_count", "btc_trend_score", "selected_live", "selected_by_priority", "selected_by_trend_score", "selected_by_alpha6_confirmed", "selected_by_expected_net_shadow", "candidates_json"],
     )
 
+    entry_quality_dir = OUT / "raw" / "reports" / "entry_quality"
+    missed_low_rows = load_csv_dicts(entry_quality_dir / "missed_low_audit.csv")
+    late_entry_chase_rows = load_csv_dicts(entry_quality_dir / "late_entry_chase_shadow.csv")
+    pullback_reversal_rows = load_csv_dicts(entry_quality_dir / "pullback_reversal_shadow_outcomes.csv")
+    late_entry_chase_advisory = load_json(entry_quality_dir / "late_entry_chase_threshold_advisory.json") if (entry_quality_dir / "late_entry_chase_threshold_advisory.json").is_file() else {}
+    pullback_reversal_readiness = load_json(entry_quality_dir / "pullback_reversal_readiness.json") if (entry_quality_dir / "pullback_reversal_readiness.json").is_file() else {}
+    if not isinstance(late_entry_chase_advisory, dict):
+        late_entry_chase_advisory = {}
+    if not isinstance(pullback_reversal_readiness, dict):
+        pullback_reversal_readiness = {}
+
+    def first_json_value(obj, keys, default=not_obs):
+        if not isinstance(obj, dict):
+            return default
+        for key in keys:
+            if key in obj and obj.get(key) not in (None, ""):
+                return obj.get(key)
+        for value in obj.values():
+            if isinstance(value, dict):
+                found = first_json_value(value, keys, None)
+                if found not in (None, ""):
+                    return found
+        return default
+
+    late_chase_loss_count = sum(
+        1 for row in missed_low_rows
+        if flatten_value(first_observed(row.get("diagnosis"), row.get("bucket"), "")).strip() == "late_chase_loss"
+    )
+    if late_chase_loss_count == 0:
+        json_count = as_int(first_json_value(late_entry_chase_advisory, ("late_chase_loss_count", "missed_low_late_chase_loss_count"), 0))
+        if json_count:
+            late_chase_loss_count = json_count
+    late_entry_chase_ready_for_live_guard = flatten_value(first_json_value(
+        late_entry_chase_advisory,
+        ("ready_for_live_guard", "late_entry_chase_ready_for_live_guard", "ready_for_live"),
+    )).lower()
+    if late_entry_chase_ready_for_live_guard in {"", "none", "null"}:
+        late_entry_chase_ready_for_live_guard = not_obs
+    pullback_reversal_ready_for_paper = flatten_value(first_json_value(
+        pullback_reversal_readiness,
+        ("ready_for_paper", "pullback_reversal_ready_for_paper"),
+    )).lower()
+    if pullback_reversal_ready_for_paper in {"", "none", "null"}:
+        pullback_reversal_ready_for_paper = not_obs
+    pullback_reversal_ready_for_live_probe = flatten_value(first_json_value(
+        pullback_reversal_readiness,
+        ("ready_for_live_probe", "pullback_reversal_ready_for_live_probe", "ready_for_live"),
+    )).lower()
+    if pullback_reversal_ready_for_live_probe in {"", "none", "null"}:
+        pullback_reversal_ready_for_live_probe = not_obs
+    late_entry_chase_guard_enabled = config_bool("late_entry_chase_guard_enabled", False)
+    pullback_reversal_live_enabled = config_bool("pullback_reversal_live_enabled", False)
+    entry_quality_summary_present = (entry_quality_dir / "entry_quality_summary.md").is_file()
+    entry_quality_available = bool(
+        missed_low_rows
+        or late_entry_chase_rows
+        or pullback_reversal_rows
+        or late_entry_chase_advisory
+        or pullback_reversal_readiness
+        or entry_quality_summary_present
+    )
+    entry_quality_advisory_rows = [
+        {
+            "advisory_name": "missed_low",
+            "source_file": "raw/reports/entry_quality/missed_low_audit.csv",
+            "available": str(bool(missed_low_rows)).lower(),
+            "row_count": len(missed_low_rows),
+            "late_chase_loss_count": late_chase_loss_count,
+            "ready_for_live_guard": not_obs,
+            "ready_for_paper": not_obs,
+            "ready_for_live_probe": not_obs,
+            "late_entry_chase_guard_enabled": str(late_entry_chase_guard_enabled).lower(),
+            "pullback_reversal_live_enabled": str(pullback_reversal_live_enabled).lower(),
+            "live_order_effect": "read_only_no_hard_block",
+            "status": "available" if missed_low_rows else "missing_or_empty",
+            "raw_json": not_obs,
+        },
+        {
+            "advisory_name": "late_entry_chase",
+            "source_file": "raw/reports/entry_quality/late_entry_chase_threshold_advisory.json",
+            "available": str(bool(late_entry_chase_advisory)).lower(),
+            "row_count": len(late_entry_chase_rows),
+            "late_chase_loss_count": late_chase_loss_count,
+            "ready_for_live_guard": late_entry_chase_ready_for_live_guard,
+            "ready_for_paper": not_obs,
+            "ready_for_live_probe": not_obs,
+            "late_entry_chase_guard_enabled": str(late_entry_chase_guard_enabled).lower(),
+            "pullback_reversal_live_enabled": str(pullback_reversal_live_enabled).lower(),
+            "live_order_effect": "read_only_no_hard_block",
+            "status": "available" if late_entry_chase_advisory or late_entry_chase_rows else "missing_or_empty",
+            "raw_json": safe_json(late_entry_chase_advisory) if late_entry_chase_advisory else not_obs,
+        },
+        {
+            "advisory_name": "pullback_reversal",
+            "source_file": "raw/reports/entry_quality/pullback_reversal_readiness.json",
+            "available": str(bool(pullback_reversal_readiness)).lower(),
+            "row_count": len(pullback_reversal_rows),
+            "late_chase_loss_count": not_obs,
+            "ready_for_live_guard": not_obs,
+            "ready_for_paper": pullback_reversal_ready_for_paper,
+            "ready_for_live_probe": pullback_reversal_ready_for_live_probe,
+            "late_entry_chase_guard_enabled": str(late_entry_chase_guard_enabled).lower(),
+            "pullback_reversal_live_enabled": str(pullback_reversal_live_enabled).lower(),
+            "live_order_effect": "read_only_no_hard_block",
+            "status": "available" if pullback_reversal_readiness or pullback_reversal_rows else "missing_or_empty",
+            "raw_json": safe_json(pullback_reversal_readiness) if pullback_reversal_readiness else not_obs,
+        },
+        {
+            "advisory_name": "entry_quality_summary",
+            "source_file": "raw/reports/entry_quality/entry_quality_summary.md",
+            "available": str(entry_quality_summary_present).lower(),
+            "row_count": 1 if entry_quality_summary_present else 0,
+            "late_chase_loss_count": not_obs,
+            "ready_for_live_guard": not_obs,
+            "ready_for_paper": not_obs,
+            "ready_for_live_probe": not_obs,
+            "late_entry_chase_guard_enabled": str(late_entry_chase_guard_enabled).lower(),
+            "pullback_reversal_live_enabled": str(pullback_reversal_live_enabled).lower(),
+            "live_order_effect": "read_only_no_hard_block",
+            "status": "available" if entry_quality_summary_present else "missing_or_empty",
+            "raw_json": not_obs,
+        },
+    ]
+    if not entry_quality_available:
+        entry_quality_advisory_rows.append({
+            "advisory_name": "entry_quality",
+            "source_file": not_obs,
+            "available": "false",
+            "row_count": 0,
+            "late_chase_loss_count": not_obs,
+            "ready_for_live_guard": not_obs,
+            "ready_for_paper": not_obs,
+            "ready_for_live_probe": not_obs,
+            "late_entry_chase_guard_enabled": str(late_entry_chase_guard_enabled).lower(),
+            "pullback_reversal_live_enabled": str(pullback_reversal_live_enabled).lower(),
+            "live_order_effect": "read_only_no_hard_block",
+            "status": "quant_lab_entry_quality_unavailable",
+            "raw_json": not_obs,
+        })
+        add_issue(
+            "warning",
+            "quant_lab_entry_quality_unavailable",
+            "quant-lab entry-quality advisory reports were not available; live trading is unchanged.",
+            {"live_order_effect": "read_only_no_hard_block"},
+        )
+    write_csv(
+        "summaries/entry_quality_advisory_reader.csv",
+        entry_quality_advisory_rows,
+        [
+            "advisory_name",
+            "source_file",
+            "available",
+            "row_count",
+            "late_chase_loss_count",
+            "ready_for_live_guard",
+            "ready_for_paper",
+            "ready_for_live_probe",
+            "late_entry_chase_guard_enabled",
+            "pullback_reversal_live_enabled",
+            "live_order_effect",
+            "status",
+            "raw_json",
+        ],
+    )
+
     high_count = sum(1 for item in issues if item.get("severity") == "high")
     medium_count = sum(1 for item in issues if item.get("severity") == "medium")
     warning_count = sum(1 for item in issues if item.get("severity") == "warning")
@@ -8322,6 +8548,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "cost_usage_post_deployment_scope": post_deployment_scope,
         "cost_usage_current_source_snapshot_hash": current_source_hash,
         "post_deployment_cost_usage_start_utc": post_deployment_start_utc,
+        "entry_quality_advisory_rows": len(entry_quality_advisory_rows),
+        "entry_quality_available": bool(entry_quality_available),
+        "entry_quality_status": "available" if entry_quality_available else "quant_lab_entry_quality_unavailable",
+        "missed_low_late_chase_loss_count": late_chase_loss_count,
+        "late_entry_chase_ready_for_live_guard": late_entry_chase_ready_for_live_guard,
+        "pullback_reversal_ready_for_paper": pullback_reversal_ready_for_paper,
+        "pullback_reversal_ready_for_live_probe": pullback_reversal_ready_for_live_probe,
+        "late_entry_chase_guard_enabled": bool(late_entry_chase_guard_enabled),
+        "pullback_reversal_live_enabled": bool(pullback_reversal_live_enabled),
         "telemetry_contract_version": QUANT_LAB_CONTRACT_VERSION,
         "telemetry_schema_version": QUANT_LAB_SCHEMA_VERSION,
         "rank_exit_sell_count": len(rank_exit_consistency_rows),
@@ -8954,6 +9189,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- latest_24h_global_default_cost_count: {window_summary.get('latest_24h_global_default_cost_count', not_obs)}",
         f"- post_deployment_global_default_cost_count: {window_summary.get('post_deployment_global_default_cost_count', not_obs)}",
         f"- readiness rows: post_deployment={window_summary.get('post_deployment_cost_usage_rows', not_obs)}, scope={window_summary.get('cost_usage_post_deployment_scope', not_obs)}",
+        "",
+        "## Entry quality advisory",
+        f"- missed_low late_chase_loss_count: {window_summary.get('missed_low_late_chase_loss_count', not_obs)}",
+        f"- late_entry_chase ready_for_live_guard: {window_summary.get('late_entry_chase_ready_for_live_guard', not_obs)}",
+        f"- pullback_reversal ready_for_paper: {window_summary.get('pullback_reversal_ready_for_paper', not_obs)}",
+        f"- pullback_reversal ready_for_live_probe: {window_summary.get('pullback_reversal_ready_for_live_probe', not_obs)}",
+        f"- advisory_status: {window_summary.get('entry_quality_status', not_obs)}",
+        f"- late_entry_chase_guard_enabled: {str(window_summary.get('late_entry_chase_guard_enabled', False)).lower()}",
+        f"- pullback_reversal_live_enabled: {str(window_summary.get('pullback_reversal_live_enabled', False)).lower()}",
+        "- live_order_effect: read_only_no_hard_block",
+        "- output: summaries/entry_quality_advisory_reader.csv and raw/reports/entry_quality/*",
         "",
         "## Probe 生命周期检查",
         f"- 今天是否有 market_impulse_probe / btc_leadership_probe: market_impulse_probe={bool(market_probe_seen or probe_counts['market_impulse_probe_candidate_count'] or probe_counts['market_impulse_probe_open_count'])}, btc_leadership_probe={bool(btc_seen_in_decision_audit or probe_counts['btc_leadership_probe_candidate_count'] or probe_counts['btc_leadership_probe_open_count'] or probe_counts['btc_leadership_probe_blocked_count'])}",

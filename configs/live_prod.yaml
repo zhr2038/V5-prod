@@ -538,6 +538,8 @@ execution:
   auto_upgrade_dust_sell_to_close: true
 
   # 追高/入场质量防护
+  late_entry_chase_guard_enabled: false       # read-only quant-lab advisory only; no live hard block
+  pullback_reversal_live_enabled: false       # read-only quant-lab advisory only; no live orders
   anti_chase_enabled: true
   anti_chase_max_entry_premium_pct: 0.012
   anti_chase_max_add_notional_ratio: 1.00
