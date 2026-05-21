@@ -8300,12 +8300,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
 
     def first_json_value(obj, keys, default=not_obs):
         if not isinstance(obj, dict):
+            if isinstance(obj, list):
+                for item in obj:
+                    found = first_json_value(item, keys, None)
+                    if found not in (None, ""):
+                        return found
             return default
         for key in keys:
             if key in obj and obj.get(key) not in (None, ""):
                 return obj.get(key)
         for value in obj.values():
-            if isinstance(value, dict):
+            if isinstance(value, (dict, list)):
                 found = first_json_value(value, keys, None)
                 if found not in (None, ""):
                     return found

@@ -2945,6 +2945,12 @@ def fixture_entry_quality_advisory_root(root):
         {
             "ready_for_live_guard": False,
             "late_chase_loss_count": 1,
+            "rows": [
+                {
+                    "ready_for_live_guard": False,
+                    "late_chase_loss_count": 1,
+                }
+            ],
         },
     )
     write_text(
@@ -2954,8 +2960,12 @@ def fixture_entry_quality_advisory_root(root):
     write_json(
         source_dir / "pullback_reversal_readiness.json",
         {
-            "ready_for_paper": True,
-            "ready_for_live_probe": False,
+            "rows": [
+                {
+                    "ready_for_paper": True,
+                    "ready_for_live_probe": False,
+                }
+            ],
         },
     )
     write_text(source_dir / "entry_quality_summary.md", "# Entry quality\n\nread-only fixture\n")
@@ -4474,7 +4484,7 @@ def main():
             ]
             assert unavailable == [], issues
             assert "late_chase_loss" in raw_missed_low, raw_missed_low
-            assert raw_pullback["ready_for_paper"] is True, raw_pullback
+            assert raw_pullback["rows"][0]["ready_for_paper"] is True, raw_pullback
             assert "## Entry quality advisory" in readme, readme
             assert "missed_low late_chase_loss_count: 1" in readme, readme
             assert "strategy_advisory_count: 3" in readme, readme
