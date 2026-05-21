@@ -69,8 +69,10 @@ CURRENT_REPORT_FILES = [
 ]
 ENTRY_QUALITY_REPORT_FILES = [
     ("missed_low_audit.csv", "raw/reports/entry_quality/missed_low_audit.csv", "csv"),
+    ("missed_low_by_symbol.csv", "raw/reports/entry_quality/missed_low_by_symbol.csv", "csv"),
     ("late_entry_chase_shadow.csv", "raw/reports/entry_quality/late_entry_chase_shadow.csv", "csv"),
     ("late_entry_chase_threshold_advisory.json", "raw/reports/entry_quality/late_entry_chase_threshold_advisory.json", "json"),
+    ("late_entry_chase_threshold_sensitivity.csv", "raw/reports/entry_quality/late_entry_chase_threshold_sensitivity.csv", "csv"),
     ("pullback_reversal_shadow_outcomes.csv", "raw/reports/entry_quality/pullback_reversal_shadow_outcomes.csv", "csv"),
     ("pullback_reversal_readiness.json", "raw/reports/entry_quality/pullback_reversal_readiness.json", "json"),
     ("entry_quality_summary.md", "raw/reports/entry_quality/entry_quality_summary.md", "text"),
@@ -8277,19 +8279,25 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
 
     entry_quality_dir = OUT / "raw" / "reports" / "entry_quality"
     missed_low_path = entry_quality_dir / "missed_low_audit.csv"
+    missed_low_by_symbol_path = entry_quality_dir / "missed_low_by_symbol.csv"
     late_entry_chase_path = entry_quality_dir / "late_entry_chase_shadow.csv"
+    late_entry_chase_sensitivity_path = entry_quality_dir / "late_entry_chase_threshold_sensitivity.csv"
     pullback_reversal_path = entry_quality_dir / "pullback_reversal_shadow_outcomes.csv"
     late_entry_chase_advisory_path = entry_quality_dir / "late_entry_chase_threshold_advisory.json"
     pullback_reversal_readiness_path = entry_quality_dir / "pullback_reversal_readiness.json"
     entry_quality_summary_path = entry_quality_dir / "entry_quality_summary.md"
     missed_low_present = missed_low_path.is_file()
+    missed_low_by_symbol_present = missed_low_by_symbol_path.is_file()
     late_entry_chase_present = late_entry_chase_path.is_file()
+    late_entry_chase_sensitivity_present = late_entry_chase_sensitivity_path.is_file()
     pullback_reversal_present = pullback_reversal_path.is_file()
     late_entry_chase_advisory_present = late_entry_chase_advisory_path.is_file()
     pullback_reversal_readiness_present = pullback_reversal_readiness_path.is_file()
     entry_quality_summary_present = entry_quality_summary_path.is_file()
     missed_low_rows = load_csv_dicts(missed_low_path)
+    missed_low_by_symbol_rows = load_csv_dicts(missed_low_by_symbol_path)
     late_entry_chase_rows = load_csv_dicts(late_entry_chase_path)
+    late_entry_chase_sensitivity_rows = load_csv_dicts(late_entry_chase_sensitivity_path)
     pullback_reversal_rows = load_csv_dicts(pullback_reversal_path)
     late_entry_chase_advisory = load_json(late_entry_chase_advisory_path) if late_entry_chase_advisory_present else {}
     pullback_reversal_readiness = load_json(pullback_reversal_readiness_path) if pullback_reversal_readiness_present else {}
@@ -8346,7 +8354,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     pullback_reversal_live_enabled = config_bool("pullback_reversal_live_enabled", False)
     entry_quality_available = bool(
         missed_low_present
+        or missed_low_by_symbol_present
         or late_entry_chase_present
+        or late_entry_chase_sensitivity_present
         or pullback_reversal_present
         or late_entry_chase_advisory_present
         or pullback_reversal_readiness_present
@@ -8666,6 +8676,21 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "raw_json": not_obs,
         },
         {
+            "advisory_name": "missed_low_by_symbol",
+            "source_file": "raw/reports/entry_quality/missed_low_by_symbol.csv",
+            "available": str(missed_low_by_symbol_present).lower(),
+            "row_count": len(missed_low_by_symbol_rows),
+            "late_chase_loss_count": late_chase_loss_count,
+            "ready_for_live_guard": not_obs,
+            "ready_for_paper": not_obs,
+            "ready_for_live_probe": not_obs,
+            "late_entry_chase_guard_enabled": str(late_entry_chase_guard_enabled).lower(),
+            "pullback_reversal_live_enabled": str(pullback_reversal_live_enabled).lower(),
+            "live_order_effect": "read_only_no_hard_block",
+            "status": "available" if missed_low_by_symbol_present else "missing_or_empty",
+            "raw_json": not_obs,
+        },
+        {
             "advisory_name": "late_entry_chase",
             "source_file": "raw/reports/entry_quality/late_entry_chase_threshold_advisory.json",
             "available": str(late_entry_chase_present or late_entry_chase_advisory_present).lower(),
@@ -8679,6 +8704,21 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "live_order_effect": "read_only_no_hard_block",
             "status": "available" if late_entry_chase_present or late_entry_chase_advisory_present else "missing_or_empty",
             "raw_json": safe_json(late_entry_chase_advisory) if late_entry_chase_advisory else not_obs,
+        },
+        {
+            "advisory_name": "late_entry_chase_threshold_sensitivity",
+            "source_file": "raw/reports/entry_quality/late_entry_chase_threshold_sensitivity.csv",
+            "available": str(late_entry_chase_sensitivity_present).lower(),
+            "row_count": len(late_entry_chase_sensitivity_rows),
+            "late_chase_loss_count": late_chase_loss_count,
+            "ready_for_live_guard": late_entry_chase_ready_for_live_guard,
+            "ready_for_paper": not_obs,
+            "ready_for_live_probe": not_obs,
+            "late_entry_chase_guard_enabled": str(late_entry_chase_guard_enabled).lower(),
+            "pullback_reversal_live_enabled": str(pullback_reversal_live_enabled).lower(),
+            "live_order_effect": "read_only_no_hard_block",
+            "status": "available" if late_entry_chase_sensitivity_present else "missing_or_empty",
+            "raw_json": not_obs,
         },
         {
             "advisory_name": "pullback_reversal",

@@ -2937,6 +2937,10 @@ def fixture_entry_quality_advisory_root(root):
         "symbol,entry_ts,diagnosis\nBTC/USDT,2026-05-20T07:00:00Z,late_chase_loss\nETH/USDT,2026-05-20T08:00:00Z,late_but_profitable\n",
     )
     write_text(
+        source_dir / "missed_low_by_symbol.csv",
+        "symbol,count,late_chase_loss_count\nBTC/USDT,1,1\nETH/USDT,1,0\n",
+    )
+    write_text(
         source_dir / "late_entry_chase_shadow.csv",
         "symbol,label_status,net_bps_24h\nBTC/USDT,complete,-12\n",
     )
@@ -2952,6 +2956,10 @@ def fixture_entry_quality_advisory_root(root):
                 }
             ],
         },
+    )
+    write_text(
+        source_dir / "late_entry_chase_threshold_sensitivity.csv",
+        "threshold_bps,would_block_count,would_block_loss_count\n150,40,18\n300,1,0\n",
     )
     write_text(
         source_dir / "pullback_reversal_shadow_outcomes.csv",
@@ -4448,15 +4456,21 @@ def main():
                 issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
                 raw_missed_low = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/missed_low_audit.csv")).read().decode()
+                raw_missed_by_symbol = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/missed_low_by_symbol.csv")).read().decode()
+                raw_late_sensitivity = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/late_entry_chase_threshold_sensitivity.csv")).read().decode()
                 raw_pullback = json.loads(tf.extractfile(extract_member(tf, "raw/reports/entry_quality/pullback_reversal_readiness.json")).read().decode())
 
             missed = next(row for row in reader if row["advisory_name"] == "missed_low")
+            missed_by_symbol = next(row for row in reader if row["advisory_name"] == "missed_low_by_symbol")
             late = next(row for row in reader if row["advisory_name"] == "late_entry_chase")
+            late_sensitivity = next(row for row in reader if row["advisory_name"] == "late_entry_chase_threshold_sensitivity")
             pullback = next(row for row in reader if row["advisory_name"] == "pullback_reversal")
             strategy_rows = [row for row in reader if row["advisory_name"] == "strategy_opportunity_advisory"]
             assert missed["available"] == "true", reader
+            assert missed_by_symbol["available"] == "true", reader
             assert missed["late_chase_loss_count"] == "1", missed
             assert late["ready_for_live_guard"] == "false", late
+            assert late_sensitivity["available"] == "true", reader
             assert pullback["ready_for_paper"] == "true", pullback
             assert pullback["ready_for_live_probe"] == "false", pullback
             assert len(strategy_rows) == 3, strategy_rows
@@ -4484,6 +4498,8 @@ def main():
             ]
             assert unavailable == [], issues
             assert "late_chase_loss" in raw_missed_low, raw_missed_low
+            assert "BTC/USDT" in raw_missed_by_symbol, raw_missed_by_symbol
+            assert "threshold_bps" in raw_late_sensitivity, raw_late_sensitivity
             assert raw_pullback["rows"][0]["ready_for_paper"] is True, raw_pullback
             assert "## Entry quality advisory" in readme, readme
             assert "missed_low late_chase_loss_count: 1" in readme, readme
@@ -4504,8 +4520,10 @@ def main():
         members = {}
         for filename in (
             "missed_low_audit.csv",
+            "missed_low_by_symbol.csv",
             "late_entry_chase_shadow.csv",
             "late_entry_chase_threshold_advisory.json",
+            "late_entry_chase_threshold_sensitivity.csv",
             "pullback_reversal_shadow_outcomes.csv",
             "pullback_reversal_readiness.json",
             "entry_quality_summary.md",
@@ -4519,16 +4537,22 @@ def main():
                 reader = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/entry_quality_advisory_reader.csv")).read().decode().splitlines()))
                 raw_names = set(tf.getnames())
                 raw_missed_low = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/missed_low_audit.csv")).read().decode()
+                raw_missed_by_symbol = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/missed_low_by_symbol.csv")).read().decode()
                 raw_late_advisory = json.loads(tf.extractfile(extract_member(tf, "raw/reports/entry_quality/late_entry_chase_threshold_advisory.json")).read().decode())
+                raw_late_sensitivity = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/late_entry_chase_threshold_sensitivity.csv")).read().decode()
                 raw_summary = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/entry_quality_summary.md")).read().decode()
 
             by_name = {row["advisory_name"]: row for row in reader}
             assert by_name["missed_low"]["available"] == "true", reader
+            assert by_name["missed_low_by_symbol"]["available"] == "true", reader
             assert by_name["late_entry_chase"]["available"] == "true", reader
+            assert by_name["late_entry_chase_threshold_sensitivity"]["available"] == "true", reader
             assert by_name["pullback_reversal"]["available"] == "true", reader
             assert by_name["entry_quality_summary"]["available"] == "true", reader
             assert "late_chase_loss" in raw_missed_low, raw_missed_low
+            assert "BTC/USDT" in raw_missed_by_symbol, raw_missed_by_symbol
             assert raw_late_advisory["late_chase_loss_count"] == 1, raw_late_advisory
+            assert "threshold_bps" in raw_late_sensitivity, raw_late_sensitivity
             assert "read-only fixture" in raw_summary, raw_summary
             assert any(name.endswith("raw/reports/entry_quality/pullback_reversal_shadow_outcomes.csv") for name in raw_names), raw_names
         finally:
