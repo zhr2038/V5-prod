@@ -64,8 +64,6 @@ CURRENT_REPORT_FILES = [
     ("reports/summaries/paper_strategy_runs.csv", "summaries/paper_strategy_runs.csv", False),
     ("reports/summaries/paper_strategy_daily.csv", "summaries/paper_strategy_daily.csv", False),
     ("reports/summaries/paper_slippage_coverage.csv", "summaries/paper_slippage_coverage.csv", False),
-    ("reports/summaries/expanded_universe_advisory_reader.csv", "summaries/expanded_universe_advisory_reader.csv", False),
-    ("reports/summaries/expanded_universe_paper_runs.csv", "summaries/expanded_universe_paper_runs.csv", False),
     ("reports/quant_lab_usage.jsonl", "raw/reports/quant_lab_usage.jsonl", False),
     ("reports/quant_lab_requests.jsonl", "raw/reports/quant_lab_requests.jsonl", False),
 ]
@@ -892,8 +890,22 @@ def copy_current_reports():
         dest = OUT / dest_rel
         if not dest.is_file():
             write_text(dest_rel, "")
-    ensure_csv_header("summaries/expanded_universe_advisory_reader.csv", EXPANDED_UNIVERSE_ADVISORY_FIELDS)
-    ensure_csv_header("summaries/expanded_universe_paper_runs.csv", EXPANDED_UNIVERSE_PAPER_RUN_FIELDS)
+    for src_rel, dest_rel, fields in (
+        (
+            "reports/summaries/expanded_universe_advisory_reader.csv",
+            "summaries/expanded_universe_advisory_reader.csv",
+            EXPANDED_UNIVERSE_ADVISORY_FIELDS,
+        ),
+        (
+            "reports/summaries/expanded_universe_paper_runs.csv",
+            "summaries/expanded_universe_paper_runs.csv",
+            EXPANDED_UNIVERSE_PAPER_RUN_FIELDS,
+        ),
+    ):
+        if (ROOT / src_rel).is_file():
+            copy_sanitized(src_rel, dest_rel)
+        else:
+            ensure_csv_header(dest_rel, fields)
 
     matched = False
     for base in (ROOT / "reports", ROOT / "reports" / "summaries"):
