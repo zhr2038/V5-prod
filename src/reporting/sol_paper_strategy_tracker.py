@@ -35,10 +35,11 @@ from src.reporting.skipped_candidate_tracker import (
 SOL_SYMBOL = "SOL/USDT"
 ETH_SYMBOL = "ETH/USDT"
 ETH_F3_DOMINANT_STRATEGY_ID = "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1"
+ETH_F3_DOMINANT_MIN_48H_COMPLETE_COUNT = 30
 ETH_F3_DOMINANT_LIVE_BLOCK_REASONS = [
     "cost_source_not_actual_or_mixed",
     "f3_global_evidence_negative",
-    "no_paper_pnl_observations",
+    "eth_f3_paper_only_no_live",
 ]
 DEFAULT_HORIZONS = [4, 8, 12, 24, 48, 72]
 PRIMARY_HORIZON = 24
@@ -2385,17 +2386,14 @@ def _avg(values: list[float]) -> Optional[float]:
     return round(sum(values) / len(values), 6) if values else None
 
 
-def _eth_f3_long_horizon_negative(rows: list[dict[str, Any]]) -> bool:
-    if not rows:
-        return False
+def _is_eth_f3_rows(rows: list[dict[str, Any]]) -> bool:
     strategy_ids = {str(row.get("strategy_id") or "") for row in rows}
-    if ETH_F3_DOMINANT_STRATEGY_ID not in strategy_ids:
-        return False
-    for horizon in (24, 48):
-        avg = _avg(_horizon_pnl_values(rows, horizon))
-        if avg is not None and avg < 0.0:
-            return True
-    return False
+    return ETH_F3_DOMINANT_STRATEGY_ID in strategy_ids
+
+
+def _eth_f3_48h_stats(rows: list[dict[str, Any]]) -> tuple[int, Optional[float]]:
+    values = _horizon_pnl_values(rows, 48)
+    return len(values), _avg(values)
 
 
 def _readiness_for_rows(
@@ -2448,14 +2446,33 @@ def _readiness_for_rows(
         for reason in _reason_items(row.get("extra_live_block_reasons")):
             if reason not in reasons:
                 reasons.append(reason)
-    keep_shadow = _eth_f3_long_horizon_negative(rows)
-    if keep_shadow and "eth_f3_negative_24h_or_48h_paper_pnl" not in reasons:
-        reasons.append("eth_f3_negative_24h_or_48h_paper_pnl")
+    eth_f3_paper_only = _is_eth_f3_rows(rows)
+    eth_f3_48h_complete_count, eth_f3_48h_avg = _eth_f3_48h_stats(rows) if eth_f3_paper_only else (0, None)
+    keep_shadow = bool(eth_f3_paper_only and eth_f3_48h_avg is not None and eth_f3_48h_avg < 0.0)
+    if eth_f3_paper_only:
+        if "eth_f3_paper_only_no_live" not in reasons:
+            reasons.append("eth_f3_paper_only_no_live")
+        if eth_f3_48h_complete_count < ETH_F3_DOMINANT_MIN_48H_COMPLETE_COUNT:
+            if "eth_f3_waiting_for_48h_complete_samples" not in reasons:
+                reasons.append("eth_f3_waiting_for_48h_complete_samples")
+        elif eth_f3_48h_avg is not None and eth_f3_48h_avg > 0.0:
+            if "eth_f3_48h_positive_continue_paper" not in reasons:
+                reasons.append("eth_f3_48h_positive_continue_paper")
+        else:
+            if "eth_f3_48h_not_positive_continue_paper" not in reasons:
+                reasons.append("eth_f3_48h_not_positive_continue_paper")
+        if keep_shadow and "eth_f3_negative_48h_paper_pnl" not in reasons:
+            reasons.append("eth_f3_negative_48h_paper_pnl")
     rules_pass = not reasons
     if rules_pass and not enable_live_experiment:
         reasons.append("live_experiment_disabled")
-    live_small_ready = bool(rules_pass and enable_live_experiment and not keep_shadow)
-    status = "KEEP_SHADOW" if keep_shadow else ("LIVE_SMALL_READY" if live_small_ready else "PAPER_READY")
+    live_small_ready = bool(rules_pass and enable_live_experiment and not keep_shadow and not eth_f3_paper_only)
+    if keep_shadow:
+        status = "KEEP_SHADOW"
+    elif eth_f3_paper_only:
+        status = "PAPER_READY"
+    else:
+        status = "LIVE_SMALL_READY" if live_small_ready else "PAPER_READY"
     return {
         "live_small_ready": live_small_ready,
         "readiness_status": status,

@@ -90,7 +90,7 @@ def test_paper_strategy_daily_aggregates_horizon_pnl_when_primary_missing() -> N
     assert day_count_by_horizon["12h"] == 1
 
 
-def test_eth_f3_negative_24h_or_48h_downgrades_to_keep_shadow() -> None:
+def test_eth_f3_weak_short_horizon_but_positive_48h_stays_paper() -> None:
     readiness = _readiness_for_rows(
         [
             {
@@ -113,9 +113,69 @@ def test_eth_f3_negative_24h_or_48h_downgrades_to_keep_shadow() -> None:
         allowed_cost_sources={"mixed_actual_proxy"},
     )
 
+    assert readiness["readiness_status"] == "PAPER_READY"
+    assert readiness["live_small_ready"] is False
+    assert "eth_f3_paper_only_no_live" in readiness["live_block_reason"]
+    assert "eth_f3_waiting_for_48h_complete_samples" in readiness["live_block_reason"]
+    assert "eth_f3_negative_48h_paper_pnl" not in readiness["live_block_reason"]
+
+
+def test_eth_f3_negative_48h_downgrades_to_keep_shadow() -> None:
+    readiness = _readiness_for_rows(
+        [
+            {
+                "paper_date": "2026-05-20",
+                "strategy_id": "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+                "symbol": "ETH/USDT",
+                "would_enter": True,
+                "arrival_mid": 100,
+                "estimated_spread_bps": 2,
+                "slippage_covered": True,
+                "cost_source": "mixed_actual_proxy",
+                "paper_pnl_bps_24h": 10.0,
+                "paper_pnl_bps_48h": -1.0,
+            }
+        ],
+        required_days=1,
+        required_entry_days=1,
+        required_coverage=0.0,
+        enable_live_experiment=True,
+        allowed_cost_sources={"mixed_actual_proxy"},
+    )
+
     assert readiness["readiness_status"] == "KEEP_SHADOW"
     assert readiness["live_small_ready"] is False
-    assert "eth_f3_negative_24h_or_48h_paper_pnl" in readiness["live_block_reason"]
+    assert "eth_f3_negative_48h_paper_pnl" in readiness["live_block_reason"]
+
+
+def test_eth_f3_positive_48h_sample_threshold_stays_paper_not_live() -> None:
+    rows = [
+        {
+            "paper_date": f"2026-05-{day:02d}",
+            "strategy_id": "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+            "symbol": "ETH/USDT",
+            "would_enter": True,
+            "arrival_mid": 100,
+            "estimated_spread_bps": 2,
+            "slippage_covered": True,
+            "cost_source": "mixed_actual_proxy",
+            "paper_pnl_bps_48h": 5.0,
+        }
+        for day in range(1, 31)
+    ]
+    readiness = _readiness_for_rows(
+        rows,
+        required_days=1,
+        required_entry_days=1,
+        required_coverage=0.0,
+        enable_live_experiment=True,
+        allowed_cost_sources={"mixed_actual_proxy"},
+    )
+
+    assert readiness["readiness_status"] == "PAPER_READY"
+    assert readiness["live_small_ready"] is False
+    assert "eth_f3_48h_positive_continue_paper" in readiness["live_block_reason"]
+    assert "eth_f3_waiting_for_48h_complete_samples" not in readiness["live_block_reason"]
 
 
 def test_eth_f3_paper_ready_does_not_become_live_without_long_horizon_readiness() -> None:
@@ -130,7 +190,7 @@ def test_eth_f3_paper_ready_does_not_become_live_without_long_horizon_readiness(
                 "estimated_spread_bps": 2,
                 "slippage_covered": True,
                 "cost_source": "mixed_actual_proxy",
-                "extra_live_block_reasons": "cost_source_not_actual_or_mixed;f3_global_evidence_negative;no_paper_pnl_observations",
+                "extra_live_block_reasons": "cost_source_not_actual_or_mixed;f3_global_evidence_negative;eth_f3_paper_only_no_live",
                 "paper_pnl_bps_4h": 15.0,
                 "paper_pnl_bps_8h": 20.0,
                 "paper_pnl_bps_12h": 25.0,
@@ -707,7 +767,7 @@ def test_paper_strategy_tracker_adds_eth_f3_heartbeat_from_proposal(tmp_path: Pa
     assert eth["proposal_source"].endswith("paper_strategy_proposals.csv")
     assert "cost_source_not_actual_or_mixed" in eth["live_block_reason"]
     assert "f3_global_evidence_negative" in eth["live_block_reason"]
-    assert "no_paper_pnl_observations" in eth["live_block_reason"]
+    assert "eth_f3_paper_only_no_live" in eth["live_block_reason"]
 
     daily = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_daily.csv")
     assert any(row["strategy_id"] == "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1" for row in daily)
