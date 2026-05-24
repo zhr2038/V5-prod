@@ -611,6 +611,14 @@ quant_lab:
     shadow: record_only
     cost_only: block
     enforce: block
+  live_cost_trust_guard:
+    enabled: true
+    mode: block_non_whitelist_only
+    block_only_new_open: true
+    never_block_exits: true
+  quant_lab_shadow_live_canary_whitelist_enabled: true
+  quant_lab_shadow_live_canary_whitelist:
+    - BTC_STRICT_PROBE
 
   strategy_name: v5
   strategy_version: "5.0.0"

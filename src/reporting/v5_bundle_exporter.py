@@ -38,6 +38,7 @@ from src.reporting.sol_paper_strategy_tracker import (
     PAPER_RUN_FIELDS,
     PAPER_SLIPPAGE_FIELDS,
     STRATEGY_ADVISORY_FIELDS,
+    STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS,
 )
 from src.reporting.quant_lab_audit import (
     CONTRACT_VERSION,
@@ -241,6 +242,30 @@ COST_FIELDS = (
     "passed",
     "filtered",
     "filter_reason",
+)
+
+LIVE_GUARD_IMPACT_FIELDS = (
+    "run_id",
+    "ts_utc",
+    "symbol",
+    "strategy_candidate",
+    "intent",
+    "would_have_opened_live",
+    "blocked_by_quant_lab_no_live_modes",
+    "blocked_by_cost_trust_guard",
+    "blocked_by_shadow_live_whitelist",
+    "whitelist_strategy_match",
+    "cost_quality",
+    "cost_trusted_for_live",
+    "cost_trust_level",
+    "cost_trust_block_reasons",
+    "final_decision_before_guard",
+    "final_decision_after_guard",
+    "guard_mode",
+    "guard_enforced",
+    "would_block_by_cost_trust_guard",
+    "cost_trust_exception",
+    "paper_or_shadow_bypassed",
 )
 
 FALLBACK_FIELDS = (
@@ -874,6 +899,7 @@ def _copy_sol_paper_strategy_files(staging: Path, reports: Path) -> None:
         ("paper_strategy_daily.csv", PAPER_DAILY_FIELDS),
         ("paper_slippage_coverage.csv", PAPER_SLIPPAGE_FIELDS),
         ("strategy_opportunity_advisory_reader.csv", STRATEGY_ADVISORY_FIELDS),
+        ("strategy_opportunity_advisory_source_health.csv", STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS),
         ("expanded_universe_advisory_reader.csv", EXPANDED_UNIVERSE_ADVISORY_FIELDS),
         ("expanded_universe_paper_runs.csv", EXPANDED_UNIVERSE_PAPER_RUN_FIELDS),
         ("alpha_factory_advisory_reader.csv", ALPHA_FACTORY_ADVISORY_FIELDS),
@@ -1285,6 +1311,28 @@ def _build_cost_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
             merged.setdefault("cost_gate_verified", False)
         out.append({field: merged.get(field, "") for field in COST_FIELDS})
     return out
+
+
+def _build_live_guard_impact_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    out: list[Dict[str, Any]] = []
+    for row in rows:
+        if _event_kind(row) != "live_guard_impact":
+            continue
+        out.append({field: row.get(field, "") for field in LIVE_GUARD_IMPACT_FIELDS})
+    return out
+
+
+def _live_guard_reason_mix(rows: Iterable[Mapping[str, Any]]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for row in rows:
+        if not _truthy(row.get("would_block_by_cost_trust_guard")) and not _truthy(row.get("blocked_by_cost_trust_guard")):
+            continue
+        for reason in str(row.get("cost_trust_block_reasons") or "").split(";"):
+            reason = reason.strip()
+            if not reason:
+                continue
+            counts[reason] = counts.get(reason, 0) + 1
+    return counts
 
 
 def _build_fallback_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
@@ -2013,6 +2061,7 @@ def export_v5_bundle(
     compliance_rows = _build_compliance_rows(usage_rows)
     permission_rows = _build_permission_audit_rows(usage_rows)
     cost_rows = _build_cost_rows(usage_rows)
+    live_guard_impact_rows = _build_live_guard_impact_rows(usage_rows)
     fallback_rows = _build_fallback_rows(usage_rows + request_rows)
     mode_rows = _build_mode_audit_rows(usage_rows)
     trade_metrics_rows, fill_metrics_rows, mismatch_rows = _build_trade_bundle_rows(reports)
@@ -2045,6 +2094,7 @@ def export_v5_bundle(
         _write_csv(staging / "summaries/quant_lab_permission_audit.csv", PERMISSION_AUDIT_FIELDS, permission_rows)
         _write_csv(staging / "summaries/quant_lab_mode_audit.csv", MODE_AUDIT_FIELDS, mode_rows)
         _write_csv(staging / "summaries/quant_lab_cost_usage.csv", COST_FIELDS, cost_rows)
+        _write_csv(staging / "summaries/live_guard_impact.csv", LIVE_GUARD_IMPACT_FIELDS, live_guard_impact_rows)
         _write_csv(staging / "summaries/quant_lab_fallbacks.csv", FALLBACK_FIELDS, fallback_rows)
         _write_csv(staging / "summaries/trade_metrics.csv", TRADE_METRICS_FIELDS, trade_metrics_rows)
         _write_csv(staging / "summaries/fill_metrics.csv", FILL_METRICS_FIELDS, fill_metrics_rows)
@@ -2078,6 +2128,19 @@ def export_v5_bundle(
                 "order_lifecycle_rows": len(order_lifecycle_rows),
                 "order_lifecycle_trade_metric_fill_count": trade_metric_fill_count,
                 "order_lifecycle_missing_high_issue": order_lifecycle_missing_for_trades,
+                "live_guard_would_block_count": len(
+                    [row for row in live_guard_impact_rows if _truthy(row.get("would_block_by_cost_trust_guard"))]
+                ),
+                "live_guard_actual_block_count": len(
+                    [row for row in live_guard_impact_rows if _truthy(row.get("blocked_by_cost_trust_guard"))]
+                ),
+                "whitelist_allowed_count": len(
+                    [row for row in live_guard_impact_rows if _truthy(row.get("cost_trust_exception"))]
+                ),
+                "paper_or_shadow_redirected_count": len(
+                    [row for row in live_guard_impact_rows if _truthy(row.get("paper_or_shadow_bypassed"))]
+                ),
+                "blocked_by_reason_mix": _live_guard_reason_mix(live_guard_impact_rows),
                 "data_quality_warnings": data_quality_warnings,
             }
         )

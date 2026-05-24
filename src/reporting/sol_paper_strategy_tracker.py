@@ -6,6 +6,7 @@ import json
 import tarfile
 import zipfile
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
@@ -257,6 +258,24 @@ STRATEGY_ADVISORY_FIELDS = [
     "max_live_notional_usdt_ignored",
 ]
 
+STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = [
+    "run_id",
+    "ts_utc",
+    "local_row_count",
+    "api_row_count",
+    "selected_row_count",
+    "latest_local_generated_at",
+    "latest_api_generated_at",
+    "selected_latest_generated_at",
+    "advisory_source_lag_sec",
+    "selected_source",
+    "api_fallback_attempted",
+    "api_fallback_success",
+    "stale_reason",
+    "warning",
+    "freshness_inconsistency_warning",
+]
+
 EXPANDED_UNIVERSE_ADVISORY_FIELDS = [
     "run_id",
     "ts_utc",
@@ -360,6 +379,12 @@ ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS = [
     "live_order_effect",
     "strategy_candidates",
 ]
+
+
+@dataclass
+class AdvisoryReadResult:
+    rows: list[dict[str, Any]]
+    source_health_rows: list[dict[str, Any]]
 
 
 def _diagnostics_cfg(cfg: Any) -> DiagnosticsConfig:
@@ -913,6 +938,21 @@ def _advisory_row_reference_ms(row: Mapping[str, Any]) -> Optional[int]:
     return max(values) if values else None
 
 
+def _latest_advisory_generated_ms(rows: Iterable[Mapping[str, Any]]) -> Optional[int]:
+    values = [_advisory_time_ms(row.get("generated_at")) for row in rows]
+    values = [value for value in values if value is not None]
+    if values:
+        return max(values)
+    references = [_advisory_row_reference_ms(row) for row in rows]
+    references = [value for value in references if value is not None]
+    return max(references) if references else None
+
+
+def _latest_advisory_generated_at(rows: Iterable[Mapping[str, Any]]) -> str:
+    value = _latest_advisory_generated_ms(rows)
+    return _iso_from_ms(value) if value is not None else ""
+
+
 def _assess_advisory_rows(
     rows: list[dict[str, Any]],
     *,
@@ -953,6 +993,17 @@ def _assess_advisory_rows(
     else:
         contract_match = bool(contracts) and contracts == {expected_contract}
     fresh = bool(rows and has_time_context and age_ok and expires_ok and contract_match)
+    stale_reasons: list[str] = []
+    if not rows:
+        stale_reasons.append("no_rows")
+    if rows and not has_time_context:
+        stale_reasons.append("missing_time_context")
+    if rows and age_sec is not None and not age_ok:
+        stale_reasons.append("age_exceeds_max")
+    if rows and not expires_ok:
+        stale_reasons.append("expired")
+    if rows and not contract_match:
+        stale_reasons.append("contract_mismatch")
     advisory_source = source
     if source == "local" and not fresh:
         advisory_source = "stale_local"
@@ -964,6 +1015,8 @@ def _assess_advisory_rows(
         "stale_advisory_used": advisory_source == "stale_local",
         "api_fallback_attempted": bool(api_fallback_attempted),
         "api_fallback_success": bool(api_fallback_success),
+        "stale_reason": ";".join(stale_reasons),
+        "max_age_sec": float(max_age_minutes) * 60.0,
     }
 
 
@@ -976,7 +1029,65 @@ def _annotate_advisory_rows(rows: list[dict[str, Any]], meta: Mapping[str, Any])
     return out
 
 
-def _read_strategy_opportunity_advisory(
+def _advisory_source_health_row(
+    *,
+    run_id: str,
+    now_ms: int,
+    local_rows: list[dict[str, Any]],
+    api_rows: list[dict[str, Any]],
+    selected_rows: list[dict[str, Any]],
+    selected_meta: Mapping[str, Any],
+    local_meta: Mapping[str, Any],
+    api_meta: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    local_latest_ms = _latest_advisory_generated_ms(local_rows)
+    api_latest_ms = _latest_advisory_generated_ms(api_rows)
+    selected_latest_ms = _latest_advisory_generated_ms(selected_rows)
+    lag_sec = None
+    if local_latest_ms is not None and selected_latest_ms is not None:
+        lag_sec = max(0.0, (float(local_latest_ms) - float(selected_latest_ms)) / 1000.0)
+    warning = ""
+    if lag_sec is not None and lag_sec > 0:
+        warning = "selected_advisory_older_than_local_bundle"
+    max_age_sec = float(selected_meta.get("max_age_sec") or local_meta.get("max_age_sec") or 0.0)
+    age_sec = _normalize_float(selected_meta.get("advisory_age_sec"))
+    contract_match = _normalize_bool(selected_meta.get("advisory_contract_match"))
+    freshness_inconsistency_warning = ""
+    if (
+        selected_rows
+        and not bool(_normalize_bool(selected_meta.get("advisory_fresh")))
+        and age_sec is not None
+        and max_age_sec > 0
+        and age_sec < max_age_sec
+        and contract_match is True
+    ):
+        freshness_inconsistency_warning = "freshness_inconsistency_warning"
+    return {
+        "run_id": run_id,
+        "ts_utc": _iso_from_ms(now_ms),
+        "local_row_count": len(local_rows),
+        "api_row_count": len(api_rows),
+        "selected_row_count": len(selected_rows),
+        "latest_local_generated_at": _iso_from_ms(local_latest_ms) if local_latest_ms is not None else "",
+        "latest_api_generated_at": _iso_from_ms(api_latest_ms) if api_latest_ms is not None else "",
+        "selected_latest_generated_at": _iso_from_ms(selected_latest_ms) if selected_latest_ms is not None else "",
+        "advisory_source_lag_sec": round(lag_sec, 3) if lag_sec is not None else "",
+        "selected_source": selected_meta.get("advisory_source") or "missing",
+        "api_fallback_attempted": bool(
+            selected_meta.get("api_fallback_attempted")
+            or (api_meta or {}).get("api_fallback_attempted")
+        ),
+        "api_fallback_success": bool(
+            selected_meta.get("api_fallback_success")
+            or (api_meta or {}).get("api_fallback_success")
+        ),
+        "stale_reason": selected_meta.get("stale_reason") or "",
+        "warning": warning,
+        "freshness_inconsistency_warning": freshness_inconsistency_warning,
+    }
+
+
+def _read_strategy_opportunity_advisory_result(
     *,
     run_path: Path,
     reports_dir: Path,
@@ -984,9 +1095,9 @@ def _read_strategy_opportunity_advisory(
     cfg: AppConfig,
     run_id: str,
     now_ms: int,
-) -> list[dict[str, Any]]:
+) -> AdvisoryReadResult:
     if not bool(getattr(diagnostics, "quant_lab_strategy_opportunity_advisory_enabled", True)):
-        return []
+        return AdvisoryReadResult(rows=[], source_health_rows=[])
     configured = (
         getattr(diagnostics, "quant_lab_strategy_opportunity_advisory_paths", None)
         or _default_advisory_paths()
@@ -1027,9 +1138,25 @@ def _read_strategy_opportunity_advisory(
         source="local",
     )
     if rows and bool(local_meta.get("advisory_fresh")):
-        return _annotate_advisory_rows(rows, local_meta)
+        selected_rows = _annotate_advisory_rows(rows, local_meta)
+        return AdvisoryReadResult(
+            rows=selected_rows,
+            source_health_rows=[
+                _advisory_source_health_row(
+                    run_id=run_id,
+                    now_ms=now_ms,
+                    local_rows=rows,
+                    api_rows=[],
+                    selected_rows=selected_rows,
+                    selected_meta=local_meta,
+                    local_meta=local_meta,
+                    api_meta=None,
+                )
+            ],
+        )
 
     api_rows = _read_strategy_opportunity_advisory_api(cfg=cfg, diagnostics=diagnostics, run_id=run_id)
+    api_meta: dict[str, Any] | None = None
     if api_rows:
         api_rows = _dedupe_rows(
             api_rows,
@@ -1058,6 +1185,7 @@ def _read_strategy_opportunity_advisory(
             api_fallback_attempted=True,
             api_fallback_success=True,
         )
+        selected_rows = _annotate_advisory_rows(api_rows, api_meta)
         cache_path = _advisory_source_cache_path(rows) or _advisory_cache_write_path(
             configured,
             run_path=run_path,
@@ -1068,7 +1196,21 @@ def _read_strategy_opportunity_advisory(
                 _write_advisory_cache_atomic(cache_path, api_rows)
             except Exception:
                 pass
-        return _annotate_advisory_rows(api_rows, api_meta)
+        return AdvisoryReadResult(
+            rows=selected_rows,
+            source_health_rows=[
+                _advisory_source_health_row(
+                    run_id=run_id,
+                    now_ms=now_ms,
+                    local_rows=rows,
+                    api_rows=api_rows,
+                    selected_rows=selected_rows,
+                    selected_meta=api_meta,
+                    local_meta=local_meta,
+                    api_meta=api_meta,
+                )
+            ],
+        )
 
     if rows:
         stale_meta = dict(local_meta)
@@ -1076,8 +1218,64 @@ def _read_strategy_opportunity_advisory(
         stale_meta["api_fallback_success"] = False
         stale_meta["advisory_source"] = "stale_local"
         stale_meta["stale_advisory_used"] = True
-        return _annotate_advisory_rows(rows, stale_meta)
-    return []
+        selected_rows = _annotate_advisory_rows(rows, stale_meta)
+        return AdvisoryReadResult(
+            rows=selected_rows,
+            source_health_rows=[
+                _advisory_source_health_row(
+                    run_id=run_id,
+                    now_ms=now_ms,
+                    local_rows=rows,
+                    api_rows=[],
+                    selected_rows=selected_rows,
+                    selected_meta=stale_meta,
+                    local_meta=local_meta,
+                    api_meta=None,
+                )
+            ],
+        )
+    missing_meta = _assess_advisory_rows(
+        [],
+        diagnostics=diagnostics,
+        now_ms=now_ms,
+        source="missing",
+        api_fallback_attempted=True,
+        api_fallback_success=False,
+    )
+    return AdvisoryReadResult(
+        rows=[],
+        source_health_rows=[
+            _advisory_source_health_row(
+                run_id=run_id,
+                now_ms=now_ms,
+                local_rows=[],
+                api_rows=[],
+                selected_rows=[],
+                selected_meta=missing_meta,
+                local_meta=local_meta,
+                api_meta=None,
+            )
+        ],
+    )
+
+
+def _read_strategy_opportunity_advisory(
+    *,
+    run_path: Path,
+    reports_dir: Path,
+    diagnostics: DiagnosticsConfig,
+    cfg: AppConfig,
+    run_id: str,
+    now_ms: int,
+) -> list[dict[str, Any]]:
+    return _read_strategy_opportunity_advisory_result(
+        run_path=run_path,
+        reports_dir=reports_dir,
+        diagnostics=diagnostics,
+        cfg=cfg,
+        run_id=run_id,
+        now_ms=now_ms,
+    ).rows
 
 
 def _dedupe_rows(rows: Iterable[Mapping[str, Any]], keys: Iterable[str]) -> list[dict[str, Any]]:
@@ -2858,7 +3056,7 @@ def update_sol_paper_strategy_tracker(
     horizons = _horizons(diagnostics)
     candidate_rows = _read_candidate_snapshot(run_path / "candidate_snapshot.csv")
     asof_ts_ms = _asof_ts_ms(audit, market_data_1h)
-    advisory_rows = _read_strategy_opportunity_advisory(
+    advisory_result = _read_strategy_opportunity_advisory_result(
         run_path=run_path,
         reports_dir=reports_dir,
         diagnostics=diagnostics,
@@ -2866,6 +3064,7 @@ def update_sol_paper_strategy_tracker(
         run_id=str(getattr(audit, "run_id", "") or ""),
         now_ms=asof_ts_ms,
     )
+    advisory_rows = advisory_result.rows
     proposal_rows = _read_paper_strategy_proposals(
         run_path=run_path,
         reports_dir=reports_dir,
@@ -2962,6 +3161,11 @@ def update_sol_paper_strategy_tracker(
         STRATEGY_ADVISORY_FIELDS,
     )
     _write_csv(
+        summaries_dir / "strategy_opportunity_advisory_source_health.csv",
+        advisory_result.source_health_rows,
+        STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS,
+    )
+    _write_csv(
         summaries_dir / "expanded_universe_advisory_reader.csv",
         expanded_advisory_rows,
         EXPANDED_UNIVERSE_ADVISORY_FIELDS,
@@ -2987,6 +3191,7 @@ def update_sol_paper_strategy_tracker(
         "new_records": int(inserted),
         "total_records": int(len(records)),
         "advisory_rows": int(len(advisory_rows)),
+        "strategy_opportunity_advisory_source_health_rows": int(len(advisory_result.source_health_rows)),
         "expanded_universe_advisory_rows": int(len(expanded_advisory_rows)),
         "expanded_universe_paper_rows": int(len(expanded_paper_rows)),
         "alpha_factory_advisory_rows": int(len(alpha_factory_rows)),

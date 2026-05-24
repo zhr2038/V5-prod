@@ -1530,6 +1530,13 @@ def test_strategy_advisory_stale_local_uses_api_and_updates_cache(monkeypatch: p
     assert advisory[0]["max_paper_notional_usdt"] == "99.0"
     cached = _read_csv(tmp_path / "reports" / "strategy_opportunity_advisory.csv")
     assert cached[0]["max_paper_notional_usdt"] == "99.0"
+    health = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_source_health.csv")
+    assert health[0]["local_row_count"] == "1"
+    assert health[0]["api_row_count"] == "1"
+    assert health[0]["selected_row_count"] == "1"
+    assert health[0]["selected_source"] == "api"
+    assert health[0]["api_fallback_attempted"] == "True"
+    assert health[0]["api_fallback_success"] == "True"
 
 
 def test_strategy_advisory_stale_local_api_fail_is_paper_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -1584,6 +1591,75 @@ def test_strategy_advisory_stale_local_api_fail_is_paper_only(monkeypatch: pytes
     assert f4["advisory_response_action"] == "stale_advisory_live_disabled"
     assert f4["advisory_max_live_notional_usdt"] == "0.0"
     assert f4["advisory_fresh"] == "False"
+    health = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_source_health.csv")
+    assert health[0]["selected_source"] == "stale_local"
+    assert "age_exceeds_max" in health[0]["stale_reason"]
+
+
+def test_strategy_advisory_source_health_warns_when_api_selected_older_than_local(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_api_older"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "strategy_candidate": "f4_volume_swing",
+                "symbol": "SOL/USDT",
+                "decision": "KILL",
+                "recommended_mode": "shadow",
+                "max_paper_notional_usdt": "1",
+                **_stale_meta(start_s),
+            }
+        ],
+    )
+
+    class FakeClient:
+        def get_json(self, endpoint: str, params: dict | None = None) -> SimpleNamespace:
+            return SimpleNamespace(
+                ok=True,
+                data={
+                    "rows": [
+                        {
+                            "strategy_candidate": "f4_volume_swing",
+                            "symbol": "SOL/USDT",
+                            "decision": "PAPER_READY",
+                            "recommended_mode": "paper",
+                            "generated_at": str(start_s - 11_000),
+                            "as_of_ts": str(start_s - 11_000),
+                            "expires_at": str(start_s - 10_500),
+                            "contract_version": CONTRACT_VERSION,
+                        }
+                    ]
+                },
+            )
+
+    from src.quant_lab_client import client as client_mod
+
+    monkeypatch.setattr(
+        client_mod.QuantLabClient,
+        "from_config",
+        classmethod(lambda cls, *args, **kwargs: FakeClient()),
+    )
+
+    update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_api_older", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    health = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_source_health.csv")
+    assert health[0]["local_row_count"] == "1"
+    assert health[0]["api_row_count"] == "1"
+    assert health[0]["selected_source"] == "api"
+    assert health[0]["warning"] == "selected_advisory_older_than_local_bundle"
+    assert float(health[0]["advisory_source_lag_sec"]) > 0
 
 
 def test_strategy_advisory_contract_mismatch_falls_back_to_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

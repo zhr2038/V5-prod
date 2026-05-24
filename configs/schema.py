@@ -1670,6 +1670,23 @@ class MLLabelerConfig(BaseModel):
     )
 
 
+class LiveCostTrustGuardConfig(BaseModel):
+    enabled: bool = Field(default=True)
+    mode: str = Field(default="observe_only")
+    block_only_new_open: bool = Field(default=True)
+    never_block_exits: bool = Field(default=True)
+
+    @field_validator("mode")
+    @classmethod
+    def _validate_mode(cls, v: str) -> str:
+        value = str(v or "observe_only").strip().lower().replace("-", "_")
+        if value not in {"observe_only", "block_non_whitelist_only", "block_all_untrusted_open"}:
+            raise ValueError(
+                "live_cost_trust_guard.mode must be observe_only, block_non_whitelist_only, or block_all_untrusted_open"
+            )
+        return value
+
+
 class QuantLabConfig(BaseModel):
     enabled: bool = False
     mode: str = "shadow"
@@ -1703,6 +1720,9 @@ class QuantLabConfig(BaseModel):
             "enforce": "block",
         }
     )
+    live_cost_trust_guard: LiveCostTrustGuardConfig = Field(default_factory=LiveCostTrustGuardConfig)
+    quant_lab_shadow_live_canary_whitelist_enabled: bool = True
+    quant_lab_shadow_live_canary_whitelist: List[str] = Field(default_factory=lambda: ["BTC_STRICT_PROBE"])
 
     strategy_name: str = "v5"
     strategy_version: str = "5.0.0"

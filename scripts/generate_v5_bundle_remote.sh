@@ -167,6 +167,23 @@ ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS = (
     "live_order_effect",
     "strategy_candidates",
 )
+STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = (
+    "run_id",
+    "ts_utc",
+    "local_row_count",
+    "api_row_count",
+    "selected_row_count",
+    "latest_local_generated_at",
+    "latest_api_generated_at",
+    "selected_latest_generated_at",
+    "advisory_source_lag_sec",
+    "selected_source",
+    "api_fallback_attempted",
+    "api_fallback_success",
+    "stale_reason",
+    "warning",
+    "freshness_inconsistency_warning",
+)
 ENTRY_QUALITY_REPORT_FILES = [
     ("missed_low_audit.csv", "raw/reports/entry_quality/missed_low_audit.csv", "csv"),
     ("missed_low_by_symbol.csv", "raw/reports/entry_quality/missed_low_by_symbol.csv", "csv"),
@@ -924,6 +941,11 @@ def copy_current_reports():
             "reports/summaries/expanded_universe_advisory_reader.csv",
             "summaries/expanded_universe_advisory_reader.csv",
             EXPANDED_UNIVERSE_ADVISORY_FIELDS,
+        ),
+        (
+            "reports/summaries/strategy_opportunity_advisory_source_health.csv",
+            "summaries/strategy_opportunity_advisory_source_health.csv",
+            STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS,
         ),
         (
             "reports/summaries/expanded_universe_paper_runs.csv",
@@ -2191,6 +2213,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     quant_lab_permission_audit_rows = []
     quant_lab_mode_audit_rows = []
     quant_lab_cost_usage_rows = []
+    live_guard_impact_rows = []
     quant_lab_fallback_rows = []
     quant_lab_shadow_outcome_rows = []
     quant_lab_shadow_outcomes_by_permission = []
@@ -7736,6 +7759,30 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "diagnosis": cost_diagnosis,
                 "raw_json": safe_json(row),
             })
+        if event_type == "live_guard_impact" or event_kind == "live_guard_impact":
+            live_guard_impact_rows.append({
+                "run_id": flatten_value(row.get("run_id") or not_obs),
+                "ts_utc": flatten_value(first_observed(row.get("ts_utc"), row.get("ts"), not_obs)),
+                "symbol": flatten_value(row.get("symbol") or not_obs),
+                "strategy_candidate": flatten_value(row.get("strategy_candidate") or not_obs),
+                "intent": flatten_value(row.get("intent") or not_obs),
+                "would_have_opened_live": bool_observed(row.get("would_have_opened_live")),
+                "blocked_by_quant_lab_no_live_modes": bool_observed(row.get("blocked_by_quant_lab_no_live_modes")),
+                "blocked_by_cost_trust_guard": bool_observed(row.get("blocked_by_cost_trust_guard")),
+                "blocked_by_shadow_live_whitelist": bool_observed(row.get("blocked_by_shadow_live_whitelist")),
+                "whitelist_strategy_match": bool_observed(row.get("whitelist_strategy_match")),
+                "cost_quality": flatten_value(row.get("cost_quality") or not_obs),
+                "cost_trusted_for_live": bool_observed(row.get("cost_trusted_for_live")),
+                "cost_trust_level": flatten_value(row.get("cost_trust_level") or not_obs),
+                "cost_trust_block_reasons": flatten_value(row.get("cost_trust_block_reasons") or not_obs),
+                "final_decision_before_guard": flatten_value(row.get("final_decision_before_guard") or not_obs),
+                "final_decision_after_guard": flatten_value(row.get("final_decision_after_guard") or not_obs),
+                "guard_mode": flatten_value(row.get("guard_mode") or not_obs),
+                "guard_enforced": bool_observed(row.get("guard_enforced")),
+                "would_block_by_cost_trust_guard": bool_observed(row.get("would_block_by_cost_trust_guard")),
+                "cost_trust_exception": bool_observed(row.get("cost_trust_exception")),
+                "paper_or_shadow_bypassed": bool_observed(row.get("paper_or_shadow_bypassed")),
+            })
         if quant_lab_is_fallback(row):
             quant_lab_fallback_rows.append({
                 "source": source,
@@ -8118,6 +8165,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "summaries/quant_lab_cost_usage.csv",
         quant_lab_cost_usage_rows,
         ["source", "run_id", "ts_utc", "event_type", "schema_version", "contract_version", "event_id_generation_version", "source_snapshot_hash", "event_id", "request_id", "endpoint_path", "status_code", "success", "latency_ms", "error_type", "error_message_short", "mode", "symbol", "request_symbol", "normalized_symbol", "response_symbol", "venue", "instrument_type", "side", "intent", "notional_usdt", "quantile", "requested_quantile", "strategy_id", "requested_regime", "matched_regime", "alpha_id", "cost_bps", "cost_usdt", "cost_source", "fallback_level", "cost_model_version", "cost_contract_version", "as_of_ts", "sample_count", "selected_total_cost_bps", "total_cost_bps", "effective_total_cost_bps", "total_cost_bps_p50", "total_cost_bps_p75", "total_cost_bps_p90", "required_edge_bps", "expected_edge_bps", "expected_edge_source", "min_required_edge_bps", "would_filter_by_cost", "would_block_by_cost", "actually_filtered", "cost_gate_enforced", "quant_lab_decision", "fallback_used", "fallback_used_for_cost_model", "fallback_reason", "degraded_cost_model", "filtered", "filter_reason", "warning", "cost_gate_verified", "diagnosis", "raw_json"],
+    )
+    write_csv(
+        "summaries/live_guard_impact.csv",
+        live_guard_impact_rows,
+        ["run_id", "ts_utc", "symbol", "strategy_candidate", "intent", "would_have_opened_live", "blocked_by_quant_lab_no_live_modes", "blocked_by_cost_trust_guard", "blocked_by_shadow_live_whitelist", "whitelist_strategy_match", "cost_quality", "cost_trusted_for_live", "cost_trust_level", "cost_trust_block_reasons", "final_decision_before_guard", "final_decision_after_guard", "guard_mode", "guard_enforced", "would_block_by_cost_trust_guard", "cost_trust_exception", "paper_or_shadow_bypassed"],
     )
     write_csv(
         "summaries/quant_lab_fallbacks.csv",
@@ -9265,9 +9317,21 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     else:
         ml_live_overlay_status = "not_observable"
 
+    advisory_source_health_rows = load_csv_dicts(OUT / "summaries" / "strategy_opportunity_advisory_source_health.csv")
+    advisory_source_health = advisory_source_health_rows[-1] if advisory_source_health_rows else {}
+
     data_quality_warnings = []
     if provenance_meta.get("code_provenance") == "degraded":
         data_quality_warnings.append(f"dirty_worktree: {provenance_meta.get('provenance_status', not_obs)}")
+
+    live_guard_blocked_by_reason_mix = Counter()
+    for row in live_guard_impact_rows:
+        if not truthy_observed(row.get("would_block_by_cost_trust_guard")) and not truthy_observed(row.get("blocked_by_cost_trust_guard")):
+            continue
+        for reason in flatten_value(row.get("cost_trust_block_reasons") or "").split(";"):
+            reason = reason.strip()
+            if reason and reason != not_obs:
+                live_guard_blocked_by_reason_mix[reason] += 1
 
     window_summary = {
         "sampled_at_utc": NOW.isoformat(),
@@ -9348,6 +9412,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "quant_lab_request_error_count": quant_lab_request_error_count,
         "quant_lab_actual_fallback_count": len(quant_lab_fallback_rows),
         "quant_lab_fallback_count": len(quant_lab_fallback_rows),
+        "live_guard_would_block_count": sum(1 for row in live_guard_impact_rows if truthy_observed(row.get("would_block_by_cost_trust_guard"))),
+        "live_guard_actual_block_count": sum(1 for row in live_guard_impact_rows if truthy_observed(row.get("blocked_by_cost_trust_guard"))),
+        "whitelist_allowed_count": sum(1 for row in live_guard_impact_rows if truthy_observed(row.get("cost_trust_exception"))),
+        "paper_or_shadow_redirected_count": sum(1 for row in live_guard_impact_rows if truthy_observed(row.get("paper_or_shadow_bypassed"))),
+        "blocked_by_reason_mix": dict(live_guard_blocked_by_reason_mix),
         "cost_usage_legacy_rows": len(legacy_cost_rows),
         "cost_usage_current_contract_rows": len(current_contract_cost_rows),
         "cost_usage_latest_24h_rows": len(latest_24h_cost_rows),
@@ -9375,6 +9444,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "entry_quality_advisory_rows": len(entry_quality_advisory_rows),
         "entry_quality_available": bool(entry_quality_available),
         "entry_quality_status": "available" if entry_quality_available else "quant_lab_entry_quality_unavailable",
+        "strategy_advisory_selected_source": advisory_source_health.get("selected_source", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_local_row_count": advisory_source_health.get("local_row_count", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_api_row_count": advisory_source_health.get("api_row_count", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_selected_row_count": advisory_source_health.get("selected_row_count", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_source_lag_sec": advisory_source_health.get("advisory_source_lag_sec", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "entry_quality_strategy_advisory_count": len(entry_quality_strategy_rows),
         "entry_quality_would_block_if_enabled_count": entry_quality_would_block_count,
         "entry_quality_would_enter_count": entry_quality_would_enter_count,
@@ -9955,6 +10029,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if quant_lab_shadow_outcomes_by_permission
         else "not_observable_no_rows"
     )
+    advisory_source_health_rows = load_csv_dicts(OUT / "summaries" / "strategy_opportunity_advisory_source_health.csv")
+    advisory_source_health = advisory_source_health_rows[-1] if advisory_source_health_rows else {}
 
     def protect_sol_exception_shadow_text():
         if not protect_sol_exception_shadow_by_horizon:
@@ -10017,6 +10093,26 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- latest_24h_global_default_cost_count: {window_summary.get('latest_24h_global_default_cost_count', not_obs)}",
         f"- post_deployment_global_default_cost_count: {window_summary.get('post_deployment_global_default_cost_count', not_obs)}",
         f"- readiness rows: post_deployment={window_summary.get('post_deployment_cost_usage_rows', not_obs)}, scope={window_summary.get('cost_usage_post_deployment_scope', not_obs)}",
+        "",
+        "## Live cost trust guard",
+        f"- live_guard_would_block_count: {window_summary.get('live_guard_would_block_count', not_obs)}",
+        f"- live_guard_actual_block_count: {window_summary.get('live_guard_actual_block_count', not_obs)}",
+        f"- whitelist_allowed_count: {window_summary.get('whitelist_allowed_count', not_obs)}",
+        f"- paper_or_shadow_redirected_count: {window_summary.get('paper_or_shadow_redirected_count', not_obs)}",
+        f"- blocked_by_reason_mix: {window_summary.get('blocked_by_reason_mix', not_obs)}",
+        "- rule: exits and paper/shadow telemetry are never blocked; BTC_STRICT_PROBE canary exceptions are audited.",
+        "",
+        "## Strategy advisory source health",
+        f"- selected_source: {advisory_source_health.get('selected_source', not_obs)}",
+        f"- local_row_count: {advisory_source_health.get('local_row_count', not_obs)}",
+        f"- api_row_count: {advisory_source_health.get('api_row_count', not_obs)}",
+        f"- selected_row_count: {advisory_source_health.get('selected_row_count', not_obs)}",
+        f"- latest_local_generated_at: {advisory_source_health.get('latest_local_generated_at', not_obs)}",
+        f"- latest_api_generated_at: {advisory_source_health.get('latest_api_generated_at', not_obs)}",
+        f"- selected_latest_generated_at: {advisory_source_health.get('selected_latest_generated_at', not_obs)}",
+        f"- advisory_source_lag_sec: {advisory_source_health.get('advisory_source_lag_sec', not_obs)}",
+        f"- stale_reason: {advisory_source_health.get('stale_reason', not_obs)}",
+        f"- warning: {first_observed(advisory_source_health.get('warning'), advisory_source_health.get('freshness_inconsistency_warning'), not_obs)}",
         "",
         "## Entry quality advisory",
         f"- missed_low late_chase_loss_count: {window_summary.get('missed_low_late_chase_loss_count', not_obs)}",
