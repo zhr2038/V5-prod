@@ -1721,7 +1721,7 @@ class QuantLabConfig(BaseModel):
         }
     )
     live_cost_trust_guard: LiveCostTrustGuardConfig = Field(default_factory=LiveCostTrustGuardConfig)
-    quant_lab_shadow_live_canary_whitelist_enabled: bool = True
+    quant_lab_shadow_live_canary_whitelist_enabled: bool = False
     quant_lab_shadow_live_canary_whitelist: List[str] = Field(default_factory=lambda: ["BTC_STRICT_PROBE"])
 
     strategy_name: str = "v5"

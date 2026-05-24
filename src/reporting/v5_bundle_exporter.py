@@ -251,21 +251,16 @@ LIVE_GUARD_IMPACT_FIELDS = (
     "strategy_candidate",
     "intent",
     "would_have_opened_live",
-    "blocked_by_quant_lab_no_live_modes",
-    "blocked_by_cost_trust_guard",
-    "blocked_by_shadow_live_whitelist",
-    "whitelist_strategy_match",
+    "would_be_blocked_by_quant_lab_no_live_modes",
+    "would_be_blocked_by_cost_trust_guard",
+    "would_be_blocked_by_shadow_live_whitelist",
     "cost_quality",
     "cost_trusted_for_live",
     "cost_trust_level",
-    "cost_trust_block_reasons",
-    "final_decision_before_guard",
-    "final_decision_after_guard",
-    "guard_mode",
+    "raw_permission_decision",
+    "allowed_live_modes",
+    "final_decision_actual",
     "guard_enforced",
-    "would_block_by_cost_trust_guard",
-    "cost_trust_exception",
-    "paper_or_shadow_bypassed",
 )
 
 FALLBACK_FIELDS = (
@@ -1318,20 +1313,43 @@ def _build_live_guard_impact_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, 
     for row in rows:
         if _event_kind(row) != "live_guard_impact":
             continue
-        out.append({field: row.get(field, "") for field in LIVE_GUARD_IMPACT_FIELDS})
+        merged = dict(row)
+        merged.setdefault(
+            "would_be_blocked_by_quant_lab_no_live_modes",
+            merged.get("blocked_by_quant_lab_no_live_modes", ""),
+        )
+        merged.setdefault(
+            "would_be_blocked_by_cost_trust_guard",
+            merged.get("would_block_by_cost_trust_guard", ""),
+        )
+        merged.setdefault(
+            "would_be_blocked_by_shadow_live_whitelist",
+            merged.get("blocked_by_shadow_live_whitelist", ""),
+        )
+        merged.setdefault("final_decision_actual", merged.get("final_decision_after_guard", ""))
+        merged["guard_enforced"] = False
+        out.append({field: merged.get(field, "") for field in LIVE_GUARD_IMPACT_FIELDS})
     return out
 
 
-def _live_guard_reason_mix(rows: Iterable[Mapping[str, Any]]) -> Dict[str, int]:
+def _live_guard_would_block(row: Mapping[str, Any]) -> bool:
+    return any(
+        _truthy(row.get(field))
+        for field in (
+            "would_be_blocked_by_quant_lab_no_live_modes",
+            "would_be_blocked_by_cost_trust_guard",
+            "would_be_blocked_by_shadow_live_whitelist",
+        )
+    )
+
+
+def _live_guard_value_mix(rows: Iterable[Mapping[str, Any]], field: str) -> Dict[str, int]:
     counts: Dict[str, int] = {}
     for row in rows:
-        if not _truthy(row.get("would_block_by_cost_trust_guard")) and not _truthy(row.get("blocked_by_cost_trust_guard")):
+        if not _live_guard_would_block(row):
             continue
-        for reason in str(row.get("cost_trust_block_reasons") or "").split(";"):
-            reason = reason.strip()
-            if not reason:
-                continue
-            counts[reason] = counts.get(reason, 0) + 1
+        value = str(row.get(field) or "not_observable").strip() or "not_observable"
+        counts[value] = counts.get(value, 0) + 1
     return counts
 
 
@@ -2128,19 +2146,13 @@ def export_v5_bundle(
                 "order_lifecycle_rows": len(order_lifecycle_rows),
                 "order_lifecycle_trade_metric_fill_count": trade_metric_fill_count,
                 "order_lifecycle_missing_high_issue": order_lifecycle_missing_for_trades,
-                "live_guard_would_block_count": len(
-                    [row for row in live_guard_impact_rows if _truthy(row.get("would_block_by_cost_trust_guard"))]
-                ),
-                "live_guard_actual_block_count": len(
-                    [row for row in live_guard_impact_rows if _truthy(row.get("blocked_by_cost_trust_guard"))]
-                ),
-                "whitelist_allowed_count": len(
-                    [row for row in live_guard_impact_rows if _truthy(row.get("cost_trust_exception"))]
-                ),
-                "paper_or_shadow_redirected_count": len(
-                    [row for row in live_guard_impact_rows if _truthy(row.get("paper_or_shadow_bypassed"))]
-                ),
-                "blocked_by_reason_mix": _live_guard_reason_mix(live_guard_impact_rows),
+                "live_guard_would_block_count": len([row for row in live_guard_impact_rows if _live_guard_would_block(row)]),
+                "would_block_count": len([row for row in live_guard_impact_rows if _live_guard_would_block(row)]),
+                "live_guard_actual_block_count": 0,
+                "guard_enforced": False,
+                "would_block_but_profitable_open_positions_count": 0,
+                "would_block_strategy_mix": _live_guard_value_mix(live_guard_impact_rows, "strategy_candidate"),
+                "would_block_symbol_mix": _live_guard_value_mix(live_guard_impact_rows, "symbol"),
                 "data_quality_warnings": data_quality_warnings,
             }
         )

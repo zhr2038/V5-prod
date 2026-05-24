@@ -7767,21 +7767,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "strategy_candidate": flatten_value(row.get("strategy_candidate") or not_obs),
                 "intent": flatten_value(row.get("intent") or not_obs),
                 "would_have_opened_live": bool_observed(row.get("would_have_opened_live")),
-                "blocked_by_quant_lab_no_live_modes": bool_observed(row.get("blocked_by_quant_lab_no_live_modes")),
-                "blocked_by_cost_trust_guard": bool_observed(row.get("blocked_by_cost_trust_guard")),
-                "blocked_by_shadow_live_whitelist": bool_observed(row.get("blocked_by_shadow_live_whitelist")),
-                "whitelist_strategy_match": bool_observed(row.get("whitelist_strategy_match")),
+                "would_be_blocked_by_quant_lab_no_live_modes": bool_observed(first_observed(row.get("would_be_blocked_by_quant_lab_no_live_modes"), row.get("blocked_by_quant_lab_no_live_modes"))),
+                "would_be_blocked_by_cost_trust_guard": bool_observed(first_observed(row.get("would_be_blocked_by_cost_trust_guard"), row.get("would_block_by_cost_trust_guard"))),
+                "would_be_blocked_by_shadow_live_whitelist": bool_observed(first_observed(row.get("would_be_blocked_by_shadow_live_whitelist"), row.get("blocked_by_shadow_live_whitelist"))),
                 "cost_quality": flatten_value(row.get("cost_quality") or not_obs),
                 "cost_trusted_for_live": bool_observed(row.get("cost_trusted_for_live")),
                 "cost_trust_level": flatten_value(row.get("cost_trust_level") or not_obs),
-                "cost_trust_block_reasons": flatten_value(row.get("cost_trust_block_reasons") or not_obs),
-                "final_decision_before_guard": flatten_value(row.get("final_decision_before_guard") or not_obs),
-                "final_decision_after_guard": flatten_value(row.get("final_decision_after_guard") or not_obs),
-                "guard_mode": flatten_value(row.get("guard_mode") or not_obs),
-                "guard_enforced": bool_observed(row.get("guard_enforced")),
-                "would_block_by_cost_trust_guard": bool_observed(row.get("would_block_by_cost_trust_guard")),
-                "cost_trust_exception": bool_observed(row.get("cost_trust_exception")),
-                "paper_or_shadow_bypassed": bool_observed(row.get("paper_or_shadow_bypassed")),
+                "raw_permission_decision": flatten_value(row.get("raw_permission_decision") or not_obs),
+                "allowed_live_modes": flatten_value(row.get("allowed_live_modes") or not_obs),
+                "final_decision_actual": flatten_value(first_observed(row.get("final_decision_actual"), row.get("final_decision_after_guard"), not_obs)),
+                "guard_enforced": "false",
             })
         if quant_lab_is_fallback(row):
             quant_lab_fallback_rows.append({
@@ -8169,7 +8164,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     write_csv(
         "summaries/live_guard_impact.csv",
         live_guard_impact_rows,
-        ["run_id", "ts_utc", "symbol", "strategy_candidate", "intent", "would_have_opened_live", "blocked_by_quant_lab_no_live_modes", "blocked_by_cost_trust_guard", "blocked_by_shadow_live_whitelist", "whitelist_strategy_match", "cost_quality", "cost_trusted_for_live", "cost_trust_level", "cost_trust_block_reasons", "final_decision_before_guard", "final_decision_after_guard", "guard_mode", "guard_enforced", "would_block_by_cost_trust_guard", "cost_trust_exception", "paper_or_shadow_bypassed"],
+        ["run_id", "ts_utc", "symbol", "strategy_candidate", "intent", "would_have_opened_live", "would_be_blocked_by_quant_lab_no_live_modes", "would_be_blocked_by_cost_trust_guard", "would_be_blocked_by_shadow_live_whitelist", "cost_quality", "cost_trusted_for_live", "cost_trust_level", "raw_permission_decision", "allowed_live_modes", "final_decision_actual", "guard_enforced"],
     )
     write_csv(
         "summaries/quant_lab_fallbacks.csv",
@@ -9324,14 +9319,34 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     if provenance_meta.get("code_provenance") == "degraded":
         data_quality_warnings.append(f"dirty_worktree: {provenance_meta.get('provenance_status', not_obs)}")
 
-    live_guard_blocked_by_reason_mix = Counter()
+    def live_guard_would_block(row):
+        return (
+            truthy_observed(row.get("would_be_blocked_by_quant_lab_no_live_modes"))
+            or truthy_observed(row.get("would_be_blocked_by_cost_trust_guard"))
+            or truthy_observed(row.get("would_be_blocked_by_shadow_live_whitelist"))
+        )
+
+    live_guard_would_block_rows = [row for row in live_guard_impact_rows if live_guard_would_block(row)]
+    live_guard_would_block_strategy_mix = Counter()
+    live_guard_would_block_symbol_mix = Counter()
     for row in live_guard_impact_rows:
-        if not truthy_observed(row.get("would_block_by_cost_trust_guard")) and not truthy_observed(row.get("blocked_by_cost_trust_guard")):
+        if not live_guard_would_block(row):
             continue
-        for reason in flatten_value(row.get("cost_trust_block_reasons") or "").split(";"):
-            reason = reason.strip()
-            if reason and reason != not_obs:
-                live_guard_blocked_by_reason_mix[reason] += 1
+        live_guard_would_block_strategy_mix[flatten_value(row.get("strategy_candidate") or not_obs)] += 1
+        live_guard_would_block_symbol_mix[flatten_value(row.get("symbol") or not_obs)] += 1
+    profitable_open_symbols = {
+        flatten_value(row.get("symbol") or "")
+        for row in open_position_rows
+        if as_float(row.get("unrealized_net_bps")) is not None and as_float(row.get("unrealized_net_bps")) > 0
+    }
+    live_guard_profitable_blocked_keys = {
+        (
+            flatten_value(row.get("symbol") or not_obs),
+            flatten_value(row.get("strategy_candidate") or not_obs),
+        )
+        for row in live_guard_would_block_rows
+        if flatten_value(row.get("symbol") or "") in profitable_open_symbols
+    }
 
     window_summary = {
         "sampled_at_utc": NOW.isoformat(),
@@ -9412,11 +9427,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "quant_lab_request_error_count": quant_lab_request_error_count,
         "quant_lab_actual_fallback_count": len(quant_lab_fallback_rows),
         "quant_lab_fallback_count": len(quant_lab_fallback_rows),
-        "live_guard_would_block_count": sum(1 for row in live_guard_impact_rows if truthy_observed(row.get("would_block_by_cost_trust_guard"))),
-        "live_guard_actual_block_count": sum(1 for row in live_guard_impact_rows if truthy_observed(row.get("blocked_by_cost_trust_guard"))),
-        "whitelist_allowed_count": sum(1 for row in live_guard_impact_rows if truthy_observed(row.get("cost_trust_exception"))),
-        "paper_or_shadow_redirected_count": sum(1 for row in live_guard_impact_rows if truthy_observed(row.get("paper_or_shadow_bypassed"))),
-        "blocked_by_reason_mix": dict(live_guard_blocked_by_reason_mix),
+        "live_guard_would_block_count": len(live_guard_would_block_rows),
+        "would_block_count": len(live_guard_would_block_rows),
+        "live_guard_actual_block_count": 0,
+        "would_block_but_profitable_open_positions_count": len(live_guard_profitable_blocked_keys),
+        "would_block_strategy_mix": dict(live_guard_would_block_strategy_mix),
+        "would_block_symbol_mix": dict(live_guard_would_block_symbol_mix),
+        "guard_enforced": False,
         "cost_usage_legacy_rows": len(legacy_cost_rows),
         "cost_usage_current_contract_rows": len(current_contract_cost_rows),
         "cost_usage_latest_24h_rows": len(latest_24h_cost_rows),
@@ -10094,13 +10111,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- post_deployment_global_default_cost_count: {window_summary.get('post_deployment_global_default_cost_count', not_obs)}",
         f"- readiness rows: post_deployment={window_summary.get('post_deployment_cost_usage_rows', not_obs)}, scope={window_summary.get('cost_usage_post_deployment_scope', not_obs)}",
         "",
-        "## Live cost trust guard",
-        f"- live_guard_would_block_count: {window_summary.get('live_guard_would_block_count', not_obs)}",
-        f"- live_guard_actual_block_count: {window_summary.get('live_guard_actual_block_count', not_obs)}",
-        f"- whitelist_allowed_count: {window_summary.get('whitelist_allowed_count', not_obs)}",
-        f"- paper_or_shadow_redirected_count: {window_summary.get('paper_or_shadow_redirected_count', not_obs)}",
-        f"- blocked_by_reason_mix: {window_summary.get('blocked_by_reason_mix', not_obs)}",
-        "- rule: exits and paper/shadow telemetry are never blocked; BTC_STRICT_PROBE canary exceptions are audited.",
+        "## Quant Lab guard observe-only impact",
+        f"- guard_enforced: {str(window_summary.get('guard_enforced', False)).lower()}",
+        f"- would_block_count: {window_summary.get('would_block_count', not_obs)}",
+        f"- would_block_but_profitable_open_positions_count: {window_summary.get('would_block_but_profitable_open_positions_count', not_obs)}",
+        f"- would_block_strategy_mix: {window_summary.get('would_block_strategy_mix', not_obs)}",
+        f"- would_block_symbol_mix: {window_summary.get('would_block_symbol_mix', not_obs)}",
+        "- rule: Quant Lab guard is diagnostic only; it does not change live order decisions.",
         "",
         "## Strategy advisory source health",
         f"- selected_source: {advisory_source_health.get('selected_source', not_obs)}",

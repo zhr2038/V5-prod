@@ -613,10 +613,10 @@ quant_lab:
     enforce: block
   live_cost_trust_guard:
     enabled: true
-    mode: block_non_whitelist_only
+    mode: observe_only
     block_only_new_open: true
     never_block_exits: true
-  quant_lab_shadow_live_canary_whitelist_enabled: true
+  quant_lab_shadow_live_canary_whitelist_enabled: false
   quant_lab_shadow_live_canary_whitelist:
     - BTC_STRICT_PROBE
 

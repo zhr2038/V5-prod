@@ -281,12 +281,17 @@ def test_live_cost_trust_guard_observe_only_records_would_block(tmp_path: Path) 
 
     assert len(kept) == 1
     impact = guard.live_guard_rows[-1]
-    assert impact["would_block_by_cost_trust_guard"] is True
+    assert impact["would_be_blocked_by_quant_lab_no_live_modes"] is True
+    assert impact["would_be_blocked_by_cost_trust_guard"] is True
+    assert impact["would_be_blocked_by_shadow_live_whitelist"] is True
     assert impact["blocked_by_cost_trust_guard"] is False
+    assert impact["allowed_live_modes"] == "[]"
+    assert impact["final_decision_actual"] == "ALLOW"
+    assert impact["guard_enforced"] is False
     assert impact["guard_mode"] == "observe_only"
 
 
-def test_live_cost_trust_guard_blocks_non_whitelist_untrusted_open(tmp_path: Path) -> None:
+def test_live_cost_trust_guard_block_mode_still_observe_only(tmp_path: Path) -> None:
     cfg = AppConfig()
     cfg.quant_lab.enabled = True
     cfg.quant_lab.mode = "shadow"
@@ -305,11 +310,13 @@ def test_live_cost_trust_guard_blocks_non_whitelist_untrusted_open(tmp_path: Pat
         cfg,
     )
 
-    assert kept == []
-    assert rows[0]["filter_reason"] == "live_cost_trust_guard"
+    assert len(kept) == 1
+    assert rows[0]["filter_reason"] == "cost_gate_passed"
     impact = guard.live_guard_rows[-1]
-    assert impact["blocked_by_cost_trust_guard"] is True
-    assert impact["blocked_by_shadow_live_whitelist"] is True
+    assert impact["would_be_blocked_by_cost_trust_guard"] is True
+    assert impact["would_be_blocked_by_shadow_live_whitelist"] is True
+    assert impact["blocked_by_cost_trust_guard"] is False
+    assert impact["guard_enforced"] is False
     assert "strategy_not_in_canary_whitelist" in impact["cost_trust_block_reasons"]
 
 
@@ -345,6 +352,7 @@ def test_live_cost_trust_guard_allows_btc_strict_probe_exception(tmp_path: Path)
     impact = guard.live_guard_rows[-1]
     assert impact["whitelist_strategy_match"] is True
     assert impact["cost_trust_exception"] is True
+    assert impact["would_be_blocked_by_shadow_live_whitelist"] is False
     assert impact["blocked_by_cost_trust_guard"] is False
 
 
@@ -373,8 +381,10 @@ def test_live_cost_trust_guard_never_blocks_close_or_paper_shadow(tmp_path: Path
     assert [order.intent for order in kept] == ["CLOSE_LONG", "OPEN_LONG"]
     close_impact, paper_impact = guard.live_guard_rows[-2:]
     assert close_impact["blocked_by_cost_trust_guard"] is False
+    assert close_impact["would_be_blocked_by_cost_trust_guard"] is False
     assert "exit_bypass" in close_impact["cost_trust_block_reasons"]
     assert paper_impact["blocked_by_cost_trust_guard"] is False
+    assert paper_impact["would_be_blocked_by_cost_trust_guard"] is False
     assert paper_impact["paper_or_shadow_bypassed"] is True
 
 

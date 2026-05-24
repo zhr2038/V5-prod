@@ -194,6 +194,13 @@ def _list_value(value: Any) -> Optional[List[Any]]:
     return None
 
 
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
 def _permission_would_block(permission: str) -> bool:
     normalized = normalize_permission(permission, allow_local=True)
     return normalized in {ABORT, SELL_ONLY}
@@ -477,20 +484,21 @@ class QuantLabGuard:
         is_open = _is_live_open_candidate(order)
         paper_or_shadow = _is_paper_or_shadow_order(order)
         would_have_opened_live = bool(is_open and not paper_or_shadow and not cost_filtered_before_guard)
-        whitelist_enabled = bool(_get_cfg(qcfg, "quant_lab_shadow_live_canary_whitelist_enabled", True))
         whitelist = _get_cfg(qcfg, "quant_lab_shadow_live_canary_whitelist", ["BTC_STRICT_PROBE"]) or []
-        whitelist_match = bool(whitelist_enabled and _strategy_matches_whitelist(order, whitelist))
+        whitelist_match = bool(_strategy_matches_whitelist(order, whitelist))
         trusted_live = getattr(estimate, "cost_trusted_for_live", None)
         if trusted_live is None:
             trusted_live = getattr(gate, "cost_trusted_for_live", None)
         untrusted_live = trusted_live is not True
-        raw_allowed_live_modes = (
-            (getattr(estimate, "raw_response", {}) or {}).get("allowed_live_modes")
-            or (getattr(estimate, "raw_response", {}) or {}).get("live_modes")
-            or dict(meta.get("quant_lab") or {}).get("allowed_live_modes")
+        raw_response = getattr(estimate, "raw_response", {}) or {}
+        raw_allowed_live_modes = _first_present(
+            raw_response.get("allowed_live_modes"),
+            raw_response.get("live_modes"),
+            dict(meta.get("quant_lab") or {}).get("allowed_live_modes"),
         )
         allowed_live_modes = _list_value(raw_allowed_live_modes)
         no_live_modes = allowed_live_modes == []
+        raw_permission = self.permission_result.raw_permission_decision or self.permission_result.permission
 
         reasons: list[str] = []
         if trusted_live is False:
@@ -510,23 +518,18 @@ class QuantLabGuard:
         if block_only_new_open and not is_open:
             reasons.append("not_new_open_bypass")
 
-        guard_condition = False
-        if enabled and would_have_opened_live:
-            if mode == "block_non_whitelist_only":
-                guard_condition = bool(not whitelist_match and (untrusted_live or no_live_modes))
-            elif mode == "block_all_untrusted_open":
-                guard_condition = bool(untrusted_live)
-            else:
-                guard_condition = bool(untrusted_live or no_live_modes)
-
-        guard_enforced = bool(enabled and mode != "observe_only" and not paper_or_shadow)
-        if never_block_exits and is_exit:
-            guard_enforced = False
-        if block_only_new_open and not is_open:
-            guard_enforced = False
-        blocked = bool(guard_condition and guard_enforced)
+        would_be_blocked_by_no_live_modes = bool(would_have_opened_live and no_live_modes)
+        would_be_blocked_by_cost_trust = bool(would_have_opened_live and untrusted_live)
+        would_be_blocked_by_whitelist = bool(would_have_opened_live and not whitelist_match and (untrusted_live or no_live_modes))
+        guard_condition = bool(
+            would_be_blocked_by_no_live_modes
+            or would_be_blocked_by_cost_trust
+            or would_be_blocked_by_whitelist
+        )
+        guard_enforced = False
+        blocked = False
         before = "BLOCKED_COST_GATE" if cost_filtered_before_guard else "ALLOW"
-        after = "BLOCKED_COST_TRUST_GUARD" if blocked else before
+        after = before
         cost_trust_exception = bool(would_have_opened_live and whitelist_match and (untrusted_live or no_live_modes))
         return {
             "event_type": "live_guard_impact",
@@ -537,9 +540,12 @@ class QuantLabGuard:
             "side": getattr(order, "side", None),
             "would_have_opened_live": would_have_opened_live,
             "would_block_by_cost_trust_guard": bool(guard_condition),
-            "blocked_by_quant_lab_no_live_modes": bool(would_have_opened_live and no_live_modes and not whitelist_match),
+            "would_be_blocked_by_quant_lab_no_live_modes": would_be_blocked_by_no_live_modes,
+            "would_be_blocked_by_cost_trust_guard": would_be_blocked_by_cost_trust,
+            "would_be_blocked_by_shadow_live_whitelist": would_be_blocked_by_whitelist,
+            "blocked_by_quant_lab_no_live_modes": False,
             "blocked_by_cost_trust_guard": blocked,
-            "blocked_by_shadow_live_whitelist": bool(would_have_opened_live and not whitelist_match and (trusted_live is False or no_live_modes)),
+            "blocked_by_shadow_live_whitelist": False,
             "whitelist_strategy_match": whitelist_match,
             "cost_trust_exception": cost_trust_exception,
             "paper_or_shadow_bypassed": bool(paper_or_shadow),
@@ -547,6 +553,9 @@ class QuantLabGuard:
             "cost_trusted_for_live": trusted_live,
             "cost_trust_level": (getattr(estimate, "raw_response", {}) or {}).get("cost_trust_level"),
             "cost_trust_block_reasons": ";".join(dict.fromkeys(reasons)),
+            "raw_permission_decision": raw_permission,
+            "allowed_live_modes": json.dumps(allowed_live_modes) if allowed_live_modes is not None else "",
+            "final_decision_actual": before,
             "final_decision_before_guard": before,
             "final_decision_after_guard": after,
             "guard_mode": mode,
@@ -1261,9 +1270,9 @@ class QuantLabGuard:
                 cost_filtered_before_guard=cost_filtered_before_guard,
                 cfg=cfg,
             )
-            live_guard_blocked = bool(live_guard_row.get("blocked_by_cost_trust_guard"))
-            actually_filtered = bool(cost_filtered_before_guard or live_guard_blocked)
-            filter_reason = "live_cost_trust_guard" if live_guard_blocked else gate.reason
+            live_guard_blocked = False
+            actually_filtered = bool(cost_filtered_before_guard)
+            filter_reason = gate.reason
             degraded_cost_model = _degraded_cost_model(estimate)
             fallback_used_for_cost_model = bool(fallback_used or degraded_cost_model)
             required_edge_bps = estimate.required_edge_bps if estimate.required_edge_bps is not None else gate.min_required_edge_bps
@@ -1507,9 +1516,7 @@ class QuantLabGuard:
         cost_fallback = len([row for row in self.cost_rows if row.get("fallback_used")])
         live_guard_would_block = len([row for row in self.live_guard_rows if row.get("would_block_by_cost_trust_guard")])
         live_guard_actual_block = len([row for row in self.live_guard_rows if row.get("blocked_by_cost_trust_guard")])
-        live_guard_whitelist_allowed = len(
-            [row for row in self.live_guard_rows if row.get("whitelist_strategy_match") and row.get("cost_trust_exception")]
-        )
+        live_guard_whitelist_allowed = 0
         live_guard_paper_or_shadow = len([row for row in self.live_guard_rows if row.get("paper_or_shadow_bypassed")])
         final_permission = self.final_permission or (
             "LOCAL_ONLY" if self.mode == QuantLabMode.LOCAL_ONLY else permission.effective_permission_decision or permission.permission

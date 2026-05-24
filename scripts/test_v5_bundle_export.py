@@ -540,6 +540,25 @@ def fixture_quant_lab_summary_root(root):
             "fallback_reason": "quant_lab_unavailable_sell_only",
             "action_taken": "sell_only",
         },
+        {
+            "ts": iso(window_end + 3),
+            "run_id": run_id,
+            "event_type": "live_guard_impact",
+            "symbol": "BNB/USDT",
+            "strategy_candidate": "f3_dominant_entry",
+            "intent": "OPEN_LONG",
+            "would_have_opened_live": True,
+            "would_be_blocked_by_quant_lab_no_live_modes": True,
+            "would_be_blocked_by_cost_trust_guard": True,
+            "would_be_blocked_by_shadow_live_whitelist": True,
+            "cost_quality": "degraded",
+            "cost_trusted_for_live": False,
+            "cost_trust_level": "low",
+            "raw_permission_decision": "ALLOW",
+            "allowed_live_modes": "[]",
+            "final_decision_actual": "ALLOW",
+            "guard_enforced": False,
+        },
     ]
     write_text(root / "reports/quant_lab_usage.jsonl", "\n".join(json.dumps(row) for row in usage_rows) + "\n")
 
@@ -3106,8 +3125,14 @@ def main():
             with tarfile.open(bundle, "r:gz") as tf:
                 fallback_text = tf.extractfile(extract_member(tf, "summaries/quant_lab_fallbacks.csv")).read().decode()
                 fallback_rows = list(csv.DictReader(fallback_text.splitlines()))
+                live_guard_rows = list(
+                    csv.DictReader(
+                        tf.extractfile(extract_member(tf, "summaries/live_guard_impact.csv")).read().decode().splitlines()
+                    )
+                )
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 readiness = json.loads(tf.extractfile(extract_member(tf, "summaries/enforce_readiness_snapshot.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
 
             assert "/v1/health" not in fallback_text, fallback_text
             assert "/v1/risk/live-permission" not in fallback_text, fallback_text
@@ -3120,6 +3145,21 @@ def main():
             assert window["quant_lab_actual_fallback_count"] == 2, window
             assert window["quant_lab_fallback_count"] == 2, window
             assert window["quant_lab_fallback_rows"] == 2, window
+            assert len(live_guard_rows) == 1, live_guard_rows
+            live_guard = live_guard_rows[0]
+            assert live_guard["would_be_blocked_by_quant_lab_no_live_modes"] == "true", live_guard
+            assert live_guard["would_be_blocked_by_cost_trust_guard"] == "true", live_guard
+            assert live_guard["would_be_blocked_by_shadow_live_whitelist"] == "true", live_guard
+            assert live_guard["allowed_live_modes"] == "[]", live_guard
+            assert live_guard["final_decision_actual"] == "ALLOW", live_guard
+            assert live_guard["guard_enforced"] == "false", live_guard
+            assert window["would_block_count"] == 1, window
+            assert window["live_guard_actual_block_count"] == 0, window
+            assert window["guard_enforced"] is False, window
+            assert window["would_block_strategy_mix"] == {"f3_dominant_entry": 1}, window
+            assert window["would_block_symbol_mix"] == {"BNB/USDT": 1}, window
+            assert "## Quant Lab guard observe-only impact" in readme, readme
+            assert "guard_enforced: false" in readme, readme
             assert window["global_default_cost_count"] == 1, window
             assert window["legacy_global_default_cost_count"] == 1, window
             assert window["current_contract_global_default_cost_count"] == 0, window
