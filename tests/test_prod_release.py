@@ -312,6 +312,7 @@ class _FakeSFTP:
         self.chmod_calls: list[tuple[str, int]] = []
         self.utime_calls: list[tuple[str, tuple[int, int]]] = []
         self.created_dirs: list[str] = []
+        self.listdir_calls: list[str] = []
 
     def _norm(self, path: str) -> str:
         parts = [part for part in path.replace("\\", "/").split("/") if part]
@@ -331,6 +332,7 @@ class _FakeSFTP:
 
     def listdir_attr(self, path: str):
         normalized = self._norm(path).rstrip("/")
+        self.listdir_calls.append(normalized)
         prefix = normalized + "/"
         if not self._is_dir(normalized):
             raise FileNotFoundError(normalized)
@@ -452,6 +454,27 @@ def test_prune_remote_files_removes_stale_production_files_only(tmp_path: Path) 
     assert fake_sftp.removed == ["/remote/docs/STALE.md", "/remote/scripts/old.py"]
     assert "/remote/reports/runtime.json" in fake_sftp.files
     assert "/remote/data/cache.csv" in fake_sftp.files
+
+
+def test_prune_remote_files_skips_remote_node_modules(tmp_path: Path) -> None:
+    (tmp_path / "web" / "dashboard" / "src").mkdir(parents=True)
+    (tmp_path / "web" / "dashboard" / "src" / "App.tsx").write_text("export {}", encoding="utf-8")
+
+    fake_sftp = _FakeSFTP(
+        {
+            "/remote/web/dashboard/src/App.tsx": b"export {}",
+            "/remote/web/dashboard/node_modules/pkg/index.js": b"old dependency",
+            "/remote/web/dashboard/node_modules/pkg/deep/file.js": b"old nested dependency",
+        }
+    )
+
+    pruned = _prune_remote_files(fake_sftp, tmp_path, "/remote", items=("web",))
+
+    assert pruned == []
+    assert fake_sftp.removed == []
+    assert "/remote/web/dashboard/node_modules" not in fake_sftp.listdir_calls
+    assert "/remote/web/dashboard/node_modules/pkg" not in fake_sftp.listdir_calls
+    assert "/remote/web/dashboard/node_modules/pkg/index.js" in fake_sftp.files
 
 
 def test_prune_remote_files_honors_shadow_sync_items(tmp_path: Path) -> None:

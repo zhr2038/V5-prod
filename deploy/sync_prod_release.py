@@ -6,7 +6,7 @@ from collections.abc import Iterable
 import posixpath
 import shlex
 import stat
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import sys
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +20,7 @@ except ImportError as exc:  # pragma: no cover - exercised operationally
     raise SystemExit("missing dependency: paramiko") from exc
 
 from deploy.prod_release import (
+    PRODUCTION_SYNC_EXCLUDES,
     PRODUCTION_SYNC_ITEMS,
     iter_production_files,
     production_snapshot,
@@ -167,17 +168,34 @@ def _upload_files(
     return uploaded, skipped, rel_paths
 
 
-def _iter_remote_files(sftp: paramiko.SFTPClient, remote_dir: str) -> list[str]:
+def _remote_rel_is_excluded(rel_path: str) -> bool:
+    rel_text = str(rel_path or "").replace("\\", "/").lstrip("/")
+    if not rel_text:
+        return False
+    for prefix in PRODUCTION_SYNC_EXCLUDES:
+        if rel_text == prefix or rel_text.startswith(prefix + "/"):
+            return True
+    return any(
+        part in {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "node_modules"}
+        for part in PurePosixPath(rel_text).parts
+    )
+
+
+def _iter_remote_files(sftp: paramiko.SFTPClient, remote_dir: str, remote_root: str) -> list[str]:
     try:
         attrs = sftp.listdir_attr(remote_dir)
     except FileNotFoundError:
         return []
 
     files: list[str] = []
+    normalized_root = remote_root.rstrip("/")
     for attr in attrs:
         child = posixpath.join(remote_dir.rstrip("/"), attr.filename)
+        rel_child = posixpath.relpath(child, normalized_root)
+        if _remote_rel_is_excluded(rel_child):
+            continue
         if stat.S_ISDIR(int(attr.st_mode)):
-            files.extend(_iter_remote_files(sftp, child))
+            files.extend(_iter_remote_files(sftp, child, normalized_root))
         else:
             files.append(child)
     return files
@@ -200,7 +218,7 @@ def _collect_remote_sync_files(
         except FileNotFoundError:
             continue
         if stat.S_ISDIR(int(attr.st_mode)):
-            for child in _iter_remote_files(sftp, remote_path):
+            for child in _iter_remote_files(sftp, remote_path, normalized_root):
                 remote_files.add(posixpath.relpath(child, normalized_root))
         else:
             remote_files.add(rel_path.as_posix())
