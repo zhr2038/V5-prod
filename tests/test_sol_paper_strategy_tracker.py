@@ -1426,6 +1426,70 @@ def test_alpha_factory_advisory_reader_is_read_only(tmp_path: Path) -> None:
     assert by_family["other"]["display_only_count"] == "1"
 
 
+def test_risk_on_multi_buy_shadow_is_read_only(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_risk_on_multi_buy"
+    run_dir.mkdir(parents=True)
+    (run_dir / "trades.csv").write_text(
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n"
+        "2026-05-15T00:00:00Z,r_risk_on_multi_buy,SOL/USDT,OPEN_LONG,buy,1,100,100,0.01\n",
+        encoding="utf-8",
+    )
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "strategy_candidate": "v5.risk_on_multi_buy_top2_shadow",
+                "decision": "KEEP_SHADOW",
+                "recommended_mode": "shadow",
+                "regime_state": "ALT_IMPULSE",
+                "selected_symbols": '["ETH-USDT","SOL-USDT"]',
+                **_fresh_meta(start_s),
+            },
+            {
+                "strategy_candidate": "v5.risk_on_multi_buy_top3_shadow",
+                "decision": "KEEP_SHADOW",
+                "recommended_mode": "shadow",
+                "regime_state": "ALT_IMPULSE",
+                "would_buy_symbols": "ETH/USDT;SOL/USDT;BNB/USDT",
+                **_fresh_meta(start_s),
+            },
+            {
+                "strategy_candidate": "v5.f4_volume_expansion_entry",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "symbol": "SOL-USDT",
+                **_fresh_meta(start_s),
+            },
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_risk_on_multi_buy", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert cfg.symbols == ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+    assert result["risk_on_multi_buy_shadow_rows"] == 2
+    rows = _read_csv(tmp_path / "reports" / "summaries" / "risk_on_multi_buy_shadow.csv")
+    assert len(rows) == 2
+    top2, top3 = rows
+    assert top2["regime_state"] == "ALT_IMPULSE"
+    assert json.loads(top2["selected_symbols"]) == ["ETH/USDT", "SOL/USDT"]
+    assert json.loads(top2["would_buy_symbols"]) == ["ETH/USDT", "SOL/USDT"]
+    assert json.loads(top2["actual_bought_symbols"]) == ["SOL/USDT"]
+    assert json.loads(top2["missed_symbols"]) == ["ETH/USDT"]
+    assert json.loads(top3["would_buy_symbols"]) == ["ETH/USDT", "SOL/USDT", "BNB/USDT"]
+    assert json.loads(top3["missed_symbols"]) == ["ETH/USDT", "BNB/USDT"]
+    assert all(row["response_action"] == "shadow_tracking" for row in rows)
+    assert all(row["live_order_effect"] == "read_only_no_live_order" for row in rows)
+
+
 def test_strategy_advisory_uses_fresh_local_without_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cfg = _cfg()
     cfg.quant_lab.enabled = True

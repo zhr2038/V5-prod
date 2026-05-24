@@ -167,6 +167,17 @@ ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS = (
     "live_order_effect",
     "strategy_candidates",
 )
+RISK_ON_MULTI_BUY_SHADOW_FIELDS = (
+    "run_id",
+    "ts_utc",
+    "regime_state",
+    "selected_symbols",
+    "would_buy_symbols",
+    "actual_bought_symbols",
+    "missed_symbols",
+    "response_action",
+    "live_order_effect",
+)
 STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = (
     "run_id",
     "ts_utc",
@@ -961,6 +972,11 @@ def copy_current_reports():
             "reports/summaries/alpha_factory_family_summary.csv",
             "summaries/alpha_factory_family_summary.csv",
             ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS,
+        ),
+        (
+            "reports/summaries/risk_on_multi_buy_shadow.csv",
+            "summaries/risk_on_multi_buy_shadow.csv",
+            RISK_ON_MULTI_BUY_SHADOW_FIELDS,
         ),
     ):
         if (ROOT / src_rel).is_file():

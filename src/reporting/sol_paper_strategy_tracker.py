@@ -55,6 +55,10 @@ ALPHA_FACTORY_SECOND_STAGE_CANDIDATES = {
     "v5.btc_strict_probe_exit_policy_review",
     "v5.pair_trade_eth_btc_shadow",
 }
+RISK_ON_MULTI_BUY_SHADOW_CANDIDATES = {
+    "v5.risk_on_multi_buy_top2_shadow",
+    "v5.risk_on_multi_buy_top3_shadow",
+}
 
 DEFAULT_PAPER_STRATEGY_CONFIGS = [
     {
@@ -380,6 +384,18 @@ ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS = [
     "strategy_candidates",
 ]
 
+RISK_ON_MULTI_BUY_SHADOW_FIELDS = [
+    "run_id",
+    "ts_utc",
+    "regime_state",
+    "selected_symbols",
+    "would_buy_symbols",
+    "actual_bought_symbols",
+    "missed_symbols",
+    "response_action",
+    "live_order_effect",
+]
+
 
 @dataclass
 class AdvisoryReadResult:
@@ -677,6 +693,29 @@ def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict
             )
         ),
         "would_enter": _normalize_bool(_advisory_first(row, ("would_enter", "would_enter_if_enabled"))),
+        "selected_symbols": _advisory_first(
+            row,
+            (
+                "selected_symbols",
+                "selected_symbol_list",
+                "top_symbols",
+                "top_n_symbols",
+                "symbols",
+            ),
+        ),
+        "would_buy_symbols": _advisory_first(
+            row,
+            (
+                "would_buy_symbols",
+                "would_enter_symbols",
+                "would_open_symbols",
+                "paper_buy_symbols",
+            ),
+        ),
+        "regime_state": str(
+            _advisory_first(row, ("regime_state", "market_regime", "risk_regime"))
+            or ""
+        ).strip(),
         "no_sample_reason": str(
             _advisory_first(row, ("no_sample_reason", "no_entry_reason", "not_observable_reason"))
             or ""
@@ -1958,6 +1997,120 @@ def _alpha_factory_family_summary_rows(
     return out
 
 
+def _symbol_list(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    raw_items: list[Any]
+    if isinstance(value, (list, tuple, set)):
+        raw_items = list(value)
+    else:
+        text = str(value or "").strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, (list, tuple)):
+            raw_items = list(parsed)
+        else:
+            cleaned = text.strip("[]")
+            for old, new in ((";", ","), ("|", ","), ("\n", ",")):
+                cleaned = cleaned.replace(old, new)
+            raw_items = [item.strip().strip("'\"") for item in cleaned.split(",")]
+    symbols = [_symbol_text(item) for item in raw_items]
+    return [symbol for symbol in dict.fromkeys(symbols) if symbol]
+
+
+def _symbol_list_from_row(row: Mapping[str, Any], names: Iterable[str]) -> list[str]:
+    for name in names:
+        symbols = _symbol_list(row.get(name))
+        if symbols:
+            return symbols
+    return []
+
+
+def _json_symbol_list(symbols: Iterable[str]) -> str:
+    return json.dumps(list(dict.fromkeys(symbols)), ensure_ascii=False)
+
+
+def _actual_bought_symbols_for_run(run_path: Path, candidate_rows: Iterable[Mapping[str, Any]]) -> list[str]:
+    bought: set[str] = set()
+    trades_path = run_path / "trades.csv"
+    if trades_path.is_file():
+        try:
+            with trades_path.open("r", encoding="utf-8", newline="") as fh:
+                for row in csv.DictReader(fh):
+                    intent = str(row.get("intent") or "").strip().upper()
+                    side = str(row.get("side") or "").strip().lower()
+                    if intent in {"OPEN_LONG", "BUY", "OPEN"} or (not intent and side == "buy"):
+                        symbol = _symbol_text(row.get("symbol"))
+                        if symbol:
+                            bought.add(symbol)
+        except Exception:
+            pass
+    for row in candidate_rows:
+        decision = str(row.get("final_decision") or "").strip().upper()
+        if decision in {"OPEN_LONG", "BUY", "ALLOW_OPEN_LONG"}:
+            symbol = _symbol_text(row.get("symbol"))
+            if symbol:
+                bought.add(symbol)
+    return sorted(bought)
+
+
+def _risk_on_multi_buy_advisory(row: Mapping[str, Any]) -> bool:
+    keys = {
+        str(row.get("strategy_candidate") or "").strip().lower(),
+        str(row.get("strategy_id") or "").strip().lower(),
+        str(row.get("experiment_name") or "").strip().lower(),
+    }
+    return any(key in RISK_ON_MULTI_BUY_SHADOW_CANDIDATES for key in keys if key)
+
+
+def _risk_on_multi_buy_shadow_rows(
+    advisory_rows: Iterable[Mapping[str, Any]],
+    *,
+    run_id: str,
+    asof_ts_ms: int,
+    audit: DecisionAudit,
+    run_path: Path,
+    candidate_rows: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    ts_utc = _iso_from_ms(asof_ts_ms)
+    candidates = list(candidate_rows)
+    actual_bought = _actual_bought_symbols_for_run(run_path, candidates)
+    out: list[dict[str, Any]] = []
+    for row in advisory_rows:
+        if not _risk_on_multi_buy_advisory(row):
+            continue
+        selected = _symbol_list_from_row(
+            row,
+            ("selected_symbols", "would_buy_symbols", "symbol"),
+        )
+        would_buy = _symbol_list_from_row(
+            row,
+            ("would_buy_symbols", "selected_symbols", "symbol"),
+        )
+        missed = [symbol for symbol in would_buy if symbol not in set(actual_bought)]
+        regime_state = str(row.get("regime_state") or "").strip()
+        if not regime_state:
+            regime_state = str(getattr(audit, "regime_state", "") or getattr(audit, "risk_level", "") or "").strip()
+        out.append(
+            {
+                "run_id": run_id,
+                "ts_utc": ts_utc,
+                "regime_state": regime_state,
+                "selected_symbols": _json_symbol_list(selected),
+                "would_buy_symbols": _json_symbol_list(would_buy),
+                "actual_bought_symbols": _json_symbol_list(actual_bought),
+                "missed_symbols": _json_symbol_list(missed),
+                "response_action": "shadow_tracking",
+                "live_order_effect": "read_only_no_live_order",
+            }
+        )
+    return out
+
+
 def _record_key(record: Mapping[str, Any]) -> str:
     return "|".join(
         [
@@ -3089,6 +3242,14 @@ def update_sol_paper_strategy_tracker(
         run_id=str(getattr(audit, "run_id", "") or ""),
         asof_ts_ms=asof_ts_ms,
     )
+    risk_on_multi_buy_rows = _risk_on_multi_buy_shadow_rows(
+        advisory_rows,
+        run_id=str(getattr(audit, "run_id", "") or ""),
+        asof_ts_ms=asof_ts_ms,
+        audit=audit,
+        run_path=run_path,
+        candidate_rows=candidate_rows,
+    )
     advisory_index = _advisory_by_strategy(advisory_rows)
     records_by_key = _load_existing_records(labels_path)
     new_records = _collect_candidates(
@@ -3185,6 +3346,11 @@ def update_sol_paper_strategy_tracker(
         alpha_factory_family_rows,
         ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS,
     )
+    _write_csv(
+        summaries_dir / "risk_on_multi_buy_shadow.csv",
+        risk_on_multi_buy_rows,
+        RISK_ON_MULTI_BUY_SHADOW_FIELDS,
+    )
 
     return {
         "enabled": True,
@@ -3196,6 +3362,7 @@ def update_sol_paper_strategy_tracker(
         "expanded_universe_paper_rows": int(len(expanded_paper_rows)),
         "alpha_factory_advisory_rows": int(len(alpha_factory_rows)),
         "alpha_factory_family_rows": int(len(alpha_factory_family_rows)),
+        "risk_on_multi_buy_shadow_rows": int(len(risk_on_multi_buy_rows)),
         "proposal_rows": int(len(proposal_rows)),
         "labels_path": str(labels_path),
         "summaries_dir": str(summaries_dir),

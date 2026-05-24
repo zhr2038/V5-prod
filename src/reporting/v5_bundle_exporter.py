@@ -37,6 +37,7 @@ from src.reporting.sol_paper_strategy_tracker import (
     PAPER_DAILY_FIELDS,
     PAPER_RUN_FIELDS,
     PAPER_SLIPPAGE_FIELDS,
+    RISK_ON_MULTI_BUY_SHADOW_FIELDS,
     STRATEGY_ADVISORY_FIELDS,
     STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS,
 )
@@ -899,6 +900,7 @@ def _copy_sol_paper_strategy_files(staging: Path, reports: Path) -> None:
         ("expanded_universe_paper_runs.csv", EXPANDED_UNIVERSE_PAPER_RUN_FIELDS),
         ("alpha_factory_advisory_reader.csv", ALPHA_FACTORY_ADVISORY_FIELDS),
         ("alpha_factory_family_summary.csv", ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS),
+        ("risk_on_multi_buy_shadow.csv", RISK_ON_MULTI_BUY_SHADOW_FIELDS),
     )
     for filename, fields in summary_specs:
         src = reports / "summaries" / filename
