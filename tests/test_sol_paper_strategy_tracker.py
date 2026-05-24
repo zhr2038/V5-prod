@@ -1441,18 +1441,26 @@ def test_risk_on_multi_buy_shadow_is_read_only(tmp_path: Path) -> None:
         tmp_path / "reports",
         [
             {
+                "strategy_candidate": "v5.risk_on_multi_buy_top1_shadow",
+                "decision": "KEEP_SHADOW",
+                "recommended_mode": "shadow",
+                "current_regime": "ALT_IMPULSE",
+                "selected_symbols": '["ETH-USDT","SOL-USDT","BNB-USDT"]',
+                **_fresh_meta(start_s),
+            },
+            {
                 "strategy_candidate": "v5.risk_on_multi_buy_top2_shadow",
                 "decision": "KEEP_SHADOW",
                 "recommended_mode": "shadow",
-                "regime_state": "ALT_IMPULSE",
-                "selected_symbols": '["ETH-USDT","SOL-USDT"]',
+                "current_regime": "ALT_IMPULSE",
+                "selected_symbols": '["ETH-USDT","SOL-USDT","BNB-USDT"]',
                 **_fresh_meta(start_s),
             },
             {
                 "strategy_candidate": "v5.risk_on_multi_buy_top3_shadow",
                 "decision": "KEEP_SHADOW",
                 "recommended_mode": "shadow",
-                "regime_state": "ALT_IMPULSE",
+                "current_regime": "ALT_IMPULSE",
                 "would_buy_symbols": "ETH/USDT;SOL/USDT;BNB/USDT",
                 **_fresh_meta(start_s),
             },
@@ -1475,15 +1483,22 @@ def test_risk_on_multi_buy_shadow_is_read_only(tmp_path: Path) -> None:
     )
 
     assert cfg.symbols == ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
-    assert result["risk_on_multi_buy_shadow_rows"] == 2
+    assert result["risk_on_multi_buy_shadow_rows"] == 3
     rows = _read_csv(tmp_path / "reports" / "summaries" / "risk_on_multi_buy_shadow.csv")
-    assert len(rows) == 2
-    top2, top3 = rows
-    assert top2["regime_state"] == "ALT_IMPULSE"
+    assert len(rows) == 3
+    top1, top2, top3 = rows
+    assert top1["current_regime"] == "ALT_IMPULSE"
+    assert top1["top_k"] == "1"
+    assert json.loads(top1["selected_symbols"]) == ["ETH/USDT"]
+    assert json.loads(top1["would_buy_symbols"]) == ["ETH/USDT"]
+    assert json.loads(top1["missed_symbols"]) == ["ETH/USDT"]
+    assert top2["current_regime"] == "ALT_IMPULSE"
+    assert top2["top_k"] == "2"
     assert json.loads(top2["selected_symbols"]) == ["ETH/USDT", "SOL/USDT"]
     assert json.loads(top2["would_buy_symbols"]) == ["ETH/USDT", "SOL/USDT"]
     assert json.loads(top2["actual_bought_symbols"]) == ["SOL/USDT"]
     assert json.loads(top2["missed_symbols"]) == ["ETH/USDT"]
+    assert top3["top_k"] == "3"
     assert json.loads(top3["would_buy_symbols"]) == ["ETH/USDT", "SOL/USDT", "BNB/USDT"]
     assert json.loads(top3["missed_symbols"]) == ["ETH/USDT", "BNB/USDT"]
     assert all(row["response_action"] == "shadow_tracking" for row in rows)

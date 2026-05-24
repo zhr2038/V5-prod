@@ -170,7 +170,8 @@ ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS = (
 RISK_ON_MULTI_BUY_SHADOW_FIELDS = (
     "run_id",
     "ts_utc",
-    "regime_state",
+    "current_regime",
+    "top_k",
     "selected_symbols",
     "would_buy_symbols",
     "actual_bought_symbols",
@@ -248,6 +249,11 @@ ENTRY_QUALITY_STRATEGY_CANDIDATES = {
     "v5.pullback_reversal_shadow_sol",
     "v5.pullback_reversal_shadow_eth",
     "v5.pullback_reversal_shadow_bnb",
+}
+RISK_ON_MULTI_BUY_SHADOW_CANDIDATES = {
+    "v5.risk_on_multi_buy_top1_shadow",
+    "v5.risk_on_multi_buy_top2_shadow",
+    "v5.risk_on_multi_buy_top3_shadow",
 }
 SECRET_KEY_RE = re.compile(
     r"(?i)(authorization|api[_-]?(?:key|secret)|secret|token|cookie|pass(?:word|phrase)|private[_-]?key|ok-access-(?:key|sign|passphrase))"
@@ -8576,6 +8582,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 return value
         return ""
 
+    def risk_on_multi_buy_strategy_key(row):
+        values = [
+            flatten_value(row.get("strategy_candidate")),
+            flatten_value(row.get("advisory_strategy_candidate")),
+            flatten_value(row.get("strategy_id")),
+            flatten_value(row.get("advisory_strategy_id")),
+            flatten_value(row.get("experiment_name")),
+        ]
+        normalized = [value.strip().lower() for value in values if value and value != not_obs]
+        for value in normalized:
+            if value in RISK_ON_MULTI_BUY_SHADOW_CANDIDATES:
+                return value
+        return ""
+
     def entry_quality_strategy_module(key):
         if "missed_low" in key:
             return "missed_low"
@@ -8690,6 +8710,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "live_block_reasons": flatten_value(first_observed(row.get("live_block_reasons"), row.get("live_block_reason"), "")),
             "would_block_if_enabled": flatten_value(first_observed(row.get("would_block_if_enabled"), row.get("would_block_if_enforced"), row.get("would_block"), row.get("would_filter"), "")),
             "would_enter": flatten_value(first_observed(row.get("would_enter"), row.get("would_enter_if_enabled"), "")),
+            "current_regime": flatten_value(first_observed(row.get("current_regime"), row.get("regime_state"), row.get("market_regime"), row.get("risk_regime"), "")),
+            "top_k": flatten_value(first_observed(row.get("top_k"), row.get("k"), row.get("rank_k"), "")),
+            "selected_symbols": flatten_value(first_observed(row.get("selected_symbols"), row.get("selected_symbol_list"), row.get("top_symbols"), row.get("top_n_symbols"), row.get("symbols"), "")),
+            "would_buy_symbols": flatten_value(first_observed(row.get("would_buy_symbols"), row.get("would_enter_symbols"), row.get("would_open_symbols"), row.get("paper_buy_symbols"), "")),
             "no_sample_reason": flatten_value(first_observed(row.get("no_sample_reason"), row.get("no_entry_reason"), row.get("not_observable_reason"), "")),
         }
 
@@ -8719,7 +8743,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 continue
             for item in extract_strategy_advisory_items(payload):
                 normalized = normalize_strategy_advisory_api_row(item, endpoint)
-                if entry_quality_strategy_key(normalized):
+                if entry_quality_strategy_key(normalized) or risk_on_multi_buy_strategy_key(normalized):
                     out_rows.append(normalized)
             if out_rows:
                 break
@@ -8735,7 +8759,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
 
     def strategy_advisory_summary_rows():
         rows = load_csv_dicts(OUT / "summaries" / "strategy_opportunity_advisory_reader.csv")
-        if rows and any(entry_quality_strategy_key(row) for row in rows):
+        if rows and any(entry_quality_strategy_key(row) or risk_on_multi_buy_strategy_key(row) for row in rows):
             return rows
         raw_paths = [
             OUT / "raw" / "reports" / "strategy_opportunity_advisory.csv",
@@ -8750,7 +8774,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 payload.setdefault("source_path", path.as_posix())
                 payload.setdefault("advisory_source", "local")
                 raw_rows.append(payload)
-        if raw_rows and any(entry_quality_strategy_key(row) for row in raw_rows):
+        if raw_rows and any(entry_quality_strategy_key(row) or risk_on_multi_buy_strategy_key(row) for row in raw_rows):
             return raw_rows
         api_rows = entry_quality_api_fallback_rows()
         if api_rows:
@@ -8816,8 +8840,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             return "pullback_reversal_shadow_only"
         return "entry_quality_advisory_only"
 
+    strategy_advisory_rows_for_modules = list(strategy_advisory_summary_rows())
     entry_quality_strategy_rows = []
-    for advisory_row in strategy_advisory_summary_rows():
+    for advisory_row in strategy_advisory_rows_for_modules:
         strategy_key = entry_quality_strategy_key(advisory_row)
         if not strategy_key:
             continue
@@ -9043,6 +9068,120 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "raw_json",
         ],
     )
+
+    def risk_on_symbol_list(value):
+        text = flatten_value(value)
+        if not text or text == not_obs:
+            return []
+        try:
+            parsed = json.loads(text)
+            raw = parsed if isinstance(parsed, list) else [text]
+        except Exception:
+            cleaned = text.strip("[]")
+            for old, new in ((";", ","), ("|", ","), ("\n", ",")):
+                cleaned = cleaned.replace(old, new)
+            raw = [part.strip().strip("'\"") for part in cleaned.split(",")]
+        out = []
+        seen = set()
+        for item in raw:
+            symbol = normalize_multi_symbol_text(item)
+            if not symbol or symbol in seen:
+                continue
+            seen.add(symbol)
+            out.append(symbol)
+        return out
+
+    def risk_on_symbols_from_row(row, names):
+        for name in names:
+            symbols = risk_on_symbol_list(row.get(name))
+            if symbols:
+                return symbols
+        return []
+
+    def risk_on_top_k(row, strategy_key):
+        explicit = as_int(advisory_value(row, "top_k", "k", "rank_k", default=""))
+        if explicit is not None and explicit > 0:
+            return explicit
+        match = re.search(r"risk_on_multi_buy_top(\d+)", flatten_value(strategy_key).lower())
+        return int(match.group(1)) if match else None
+
+    def risk_on_actual_bought_symbols():
+        bought = set()
+        for event in raw_trade_events:
+            intent = flatten_value(event.get("intent")).strip().upper()
+            side = flatten_value(event.get("side")).strip().lower()
+            if intent in {"OPEN_LONG", "BUY", "OPEN"} or (not intent and side == "buy"):
+                symbol = normalize_multi_symbol_text(event.get("symbol"))
+                if symbol:
+                    bought.add(symbol)
+        for row in candidate_snapshot_rows:
+            decision = flatten_value(row.get("final_decision")).strip().upper()
+            if decision in {"OPEN_LONG", "BUY", "ALLOW_OPEN_LONG"}:
+                symbol = normalize_multi_symbol_text(row.get("symbol"))
+                if symbol:
+                    bought.add(symbol)
+        return sorted(bought)
+
+    def risk_on_source_advisory_rows():
+        raw_paths = [
+            OUT / "raw" / "reports" / "strategy_opportunity_advisory.csv",
+            OUT / "raw" / "reports" / "quant_lab" / "strategy_opportunity_advisory.csv",
+            OUT / "raw" / "reports" / "quant_lab_latest" / "strategy_opportunity_advisory.csv",
+            OUT / "raw" / "reports" / "quant_lab" / "latest" / "reports" / "strategy_opportunity_advisory.csv",
+        ]
+        raw_rows = []
+        for path in raw_paths:
+            for row in load_csv_dicts(path):
+                if not risk_on_multi_buy_strategy_key(row):
+                    continue
+                payload = dict(row)
+                payload.setdefault("source_path", path.as_posix())
+                raw_rows.append(payload)
+        if raw_rows:
+            return raw_rows
+        quant_lab_section = live_section_text("quant_lab")
+        token_env = parse_yaml_scalar(quant_lab_section, "api_token_env", "QUANT_LAB_API_TOKEN") or "QUANT_LAB_API_TOKEN"
+        token = os.environ.get(token_env, "").strip()
+        if not token:
+            token = quant_lab_token_from_env_file(parse_yaml_scalar(quant_lab_section, "api_env_path", ""), token_env)
+        api_rows = [row for row in entry_quality_api_fallback_rows() if risk_on_multi_buy_strategy_key(row)] if token else []
+        if api_rows:
+            return api_rows
+        return [row for row in strategy_advisory_rows_for_modules if risk_on_multi_buy_strategy_key(row)]
+
+    existing_risk_on_rows = load_csv_dicts(OUT / "summaries" / "risk_on_multi_buy_shadow.csv")
+    if not existing_risk_on_rows:
+        actual_bought_symbols = risk_on_actual_bought_symbols()
+        risk_on_rows = []
+        default_run_id = copied_runs[-1] if copied_runs else f"bundle_{STAMP}"
+        for advisory_row in risk_on_source_advisory_rows():
+            strategy_key = risk_on_multi_buy_strategy_key(advisory_row)
+            top_k = risk_on_top_k(advisory_row, strategy_key)
+            selected_symbols = risk_on_symbols_from_row(
+                advisory_row,
+                ("selected_symbols", "selected_symbol_list", "top_symbols", "top_n_symbols", "would_buy_symbols", "symbol"),
+            )
+            would_buy_symbols = risk_on_symbols_from_row(
+                advisory_row,
+                ("would_buy_symbols", "would_enter_symbols", "would_open_symbols", "paper_buy_symbols", "selected_symbols", "symbol"),
+            )
+            if top_k is not None and top_k > 0:
+                selected_symbols = selected_symbols[:top_k]
+                would_buy_symbols = would_buy_symbols[:top_k]
+            missed_symbols = [symbol for symbol in would_buy_symbols if symbol not in set(actual_bought_symbols)]
+            risk_on_rows.append({
+                "run_id": flatten_value(advisory_value(advisory_row, "run_id", default=default_run_id)),
+                "ts_utc": flatten_value(advisory_value(advisory_row, "ts_utc", "generated_at", "as_of_ts", default=NOW.strftime("%Y-%m-%dT%H:%M:%SZ"))),
+                "current_regime": flatten_value(advisory_value(advisory_row, "current_regime", "regime_state", "market_regime", "risk_regime", default=not_obs)),
+                "top_k": top_k if top_k is not None else not_obs,
+                "selected_symbols": json.dumps(selected_symbols, ensure_ascii=False),
+                "would_buy_symbols": json.dumps(would_buy_symbols, ensure_ascii=False),
+                "actual_bought_symbols": json.dumps(actual_bought_symbols, ensure_ascii=False),
+                "missed_symbols": json.dumps(missed_symbols, ensure_ascii=False),
+                "response_action": "shadow_tracking",
+                "live_order_effect": "read_only_no_live_order",
+            })
+        write_csv("summaries/risk_on_multi_buy_shadow.csv", risk_on_rows, RISK_ON_MULTI_BUY_SHADOW_FIELDS)
 
     high_count = sum(1 for item in issues if item.get("severity") == "high")
     medium_count = sum(1 for item in issues if item.get("severity") == "medium")

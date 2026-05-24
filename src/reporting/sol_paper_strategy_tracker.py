@@ -56,6 +56,7 @@ ALPHA_FACTORY_SECOND_STAGE_CANDIDATES = {
     "v5.pair_trade_eth_btc_shadow",
 }
 RISK_ON_MULTI_BUY_SHADOW_CANDIDATES = {
+    "v5.risk_on_multi_buy_top1_shadow",
     "v5.risk_on_multi_buy_top2_shadow",
     "v5.risk_on_multi_buy_top3_shadow",
 }
@@ -387,7 +388,8 @@ ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS = [
 RISK_ON_MULTI_BUY_SHADOW_FIELDS = [
     "run_id",
     "ts_utc",
-    "regime_state",
+    "current_regime",
+    "top_k",
     "selected_symbols",
     "would_buy_symbols",
     "actual_bought_symbols",
@@ -693,6 +695,7 @@ def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict
             )
         ),
         "would_enter": _normalize_bool(_advisory_first(row, ("would_enter", "would_enter_if_enabled"))),
+        "top_k": _normalize_float(_advisory_first(row, ("top_k", "k", "rank_k"))),
         "selected_symbols": _advisory_first(
             row,
             (
@@ -712,8 +715,12 @@ def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict
                 "paper_buy_symbols",
             ),
         ),
+        "current_regime": str(
+            _advisory_first(row, ("current_regime", "regime_state", "market_regime", "risk_regime"))
+            or ""
+        ).strip(),
         "regime_state": str(
-            _advisory_first(row, ("regime_state", "market_regime", "risk_regime"))
+            _advisory_first(row, ("regime_state", "current_regime", "market_regime", "risk_regime"))
             or ""
         ).strip(),
         "no_sample_reason": str(
@@ -2067,6 +2074,27 @@ def _risk_on_multi_buy_advisory(row: Mapping[str, Any]) -> bool:
     return any(key in RISK_ON_MULTI_BUY_SHADOW_CANDIDATES for key in keys if key)
 
 
+def _risk_on_multi_buy_top_k(row: Mapping[str, Any]) -> Optional[int]:
+    explicit = _normalize_float(row.get("top_k") or row.get("k"))
+    if explicit is not None and explicit > 0:
+        return int(explicit)
+    for key in ("strategy_candidate", "strategy_id", "experiment_name"):
+        text = str(row.get(key) or "").strip().lower()
+        marker = "risk_on_multi_buy_top"
+        if marker not in text:
+            continue
+        tail = text.split(marker, 1)[1]
+        digits = ""
+        for char in tail:
+            if char.isdigit():
+                digits += char
+                continue
+            break
+        if digits:
+            return int(digits)
+    return None
+
+
 def _risk_on_multi_buy_shadow_rows(
     advisory_rows: Iterable[Mapping[str, Any]],
     *,
@@ -2091,15 +2119,20 @@ def _risk_on_multi_buy_shadow_rows(
             row,
             ("would_buy_symbols", "selected_symbols", "symbol"),
         )
+        top_k = _risk_on_multi_buy_top_k(row)
+        if top_k is not None and top_k > 0:
+            selected = selected[:top_k]
+            would_buy = would_buy[:top_k]
         missed = [symbol for symbol in would_buy if symbol not in set(actual_bought)]
-        regime_state = str(row.get("regime_state") or "").strip()
-        if not regime_state:
-            regime_state = str(getattr(audit, "regime_state", "") or getattr(audit, "risk_level", "") or "").strip()
+        current_regime = str(row.get("current_regime") or row.get("regime_state") or "").strip()
+        if not current_regime:
+            current_regime = str(getattr(audit, "regime_state", "") or getattr(audit, "risk_level", "") or "").strip()
         out.append(
             {
                 "run_id": run_id,
                 "ts_utc": ts_utc,
-                "regime_state": regime_state,
+                "current_regime": current_regime,
+                "top_k": top_k,
                 "selected_symbols": _json_symbol_list(selected),
                 "would_buy_symbols": _json_symbol_list(would_buy),
                 "actual_bought_symbols": _json_symbol_list(actual_bought),

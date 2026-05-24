@@ -3009,6 +3009,18 @@ def fixture_entry_quality_advisory_root(root):
         + "\n",
     )
     write_text(
+        root / "reports/strategy_opportunity_advisory.csv",
+        "\n".join(
+            [
+                "strategy_candidate,decision,recommended_mode,current_regime,selected_symbols,would_buy_symbols,generated_at,contract_version",
+                "v5.risk_on_multi_buy_top1_shadow,KEEP_SHADOW,shadow,ALT_IMPULSE,ETH-USDT;SOL-USDT;BNB-USDT,,2026-05-24T00:00:00Z,v5.quant_lab.telemetry.v2",
+                "v5.risk_on_multi_buy_top2_shadow,KEEP_SHADOW,shadow,ALT_IMPULSE,ETH-USDT;SOL-USDT;BNB-USDT,,2026-05-24T00:00:00Z,v5.quant_lab.telemetry.v2",
+                "v5.risk_on_multi_buy_top3_shadow,KEEP_SHADOW,shadow,ALT_IMPULSE,,ETH/USDT;SOL/USDT;BNB/USDT,2026-05-24T00:00:00Z,v5.quant_lab.telemetry.v2",
+            ]
+        )
+        + "\n",
+    )
+    write_text(
         root / "reports/summaries/expanded_universe_advisory_reader.csv",
         "run_id,ts_utc,universe_type,symbol,response_action,live_order_effect\n"
         "r_expanded,2026-05-20T00:00:00Z,expanded_paper,TRX/USDT,paper_tracking,read_only_no_live_order\n",
@@ -4519,6 +4531,7 @@ def main():
                 expanded_runs = tf.extractfile(extract_member(tf, "summaries/expanded_universe_paper_runs.csv")).read().decode()
                 alpha_factory = tf.extractfile(extract_member(tf, "summaries/alpha_factory_advisory_reader.csv")).read().decode()
                 alpha_factory_family = tf.extractfile(extract_member(tf, "summaries/alpha_factory_family_summary.csv")).read().decode()
+                risk_on_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/risk_on_multi_buy_shadow.csv")).read().decode().splitlines()))
                 raw_missed_low = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/missed_low_audit.csv")).read().decode()
                 raw_missed_by_symbol = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/missed_low_by_symbol.csv")).read().decode()
                 raw_late_sensitivity = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/late_entry_chase_threshold_sensitivity.csv")).read().decode()
@@ -4569,6 +4582,14 @@ def main():
             assert "v5.expanded_relative_strength_top1_shadow" in alpha_factory, alpha_factory
             assert "read_only_no_live_order" in alpha_factory, alpha_factory
             assert "expanded" in alpha_factory_family, alpha_factory_family
+            assert len(risk_on_rows) == 3, risk_on_rows
+            by_top_k = {row["top_k"]: row for row in risk_on_rows}
+            assert by_top_k["1"]["current_regime"] == "ALT_IMPULSE", risk_on_rows
+            assert json.loads(by_top_k["1"]["would_buy_symbols"]) == ["ETH/USDT"], by_top_k["1"]
+            assert json.loads(by_top_k["2"]["would_buy_symbols"]) == ["ETH/USDT", "SOL/USDT"], by_top_k["2"]
+            assert json.loads(by_top_k["3"]["would_buy_symbols"]) == ["ETH/USDT", "SOL/USDT", "BNB/USDT"], by_top_k["3"]
+            assert all(row["response_action"] == "shadow_tracking" for row in risk_on_rows), risk_on_rows
+            assert all(row["live_order_effect"] == "read_only_no_live_order" for row in risk_on_rows), risk_on_rows
             assert raw_pullback["rows"][0]["ready_for_paper"] is True, raw_pullback
             assert "## Entry quality advisory" in readme, readme
             assert "missed_low late_chase_loss_count: 1" in readme, readme
