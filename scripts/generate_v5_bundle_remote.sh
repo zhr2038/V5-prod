@@ -138,6 +138,35 @@ EXPANDED_UNIVERSE_PAPER_RUN_FIELDS = (
     "live_block_reasons",
     "live_order_effect",
 )
+ALPHA_FACTORY_ADVISORY_FIELDS = (
+    "run_id",
+    "ts_utc",
+    "strategy_candidate",
+    "symbol",
+    "decision",
+    "recommended_mode",
+    "promotion_state",
+    "alpha_factory_score",
+    "advisory_source",
+    "advisory_fresh",
+    "advisory_age_sec",
+    "response_action",
+    "max_live_notional_usdt_ignored",
+    "live_order_effect",
+)
+ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS = (
+    "run_id",
+    "ts_utc",
+    "family",
+    "row_count",
+    "display_only_count",
+    "shadow_tracking_count",
+    "paper_tracking_count",
+    "negative_advisory_count",
+    "max_live_notional_usdt_ignored",
+    "live_order_effect",
+    "strategy_candidates",
+)
 ENTRY_QUALITY_REPORT_FILES = [
     ("missed_low_audit.csv", "raw/reports/entry_quality/missed_low_audit.csv", "csv"),
     ("missed_low_by_symbol.csv", "raw/reports/entry_quality/missed_low_by_symbol.csv", "csv"),
@@ -900,6 +929,16 @@ def copy_current_reports():
             "reports/summaries/expanded_universe_paper_runs.csv",
             "summaries/expanded_universe_paper_runs.csv",
             EXPANDED_UNIVERSE_PAPER_RUN_FIELDS,
+        ),
+        (
+            "reports/summaries/alpha_factory_advisory_reader.csv",
+            "summaries/alpha_factory_advisory_reader.csv",
+            ALPHA_FACTORY_ADVISORY_FIELDS,
+        ),
+        (
+            "reports/summaries/alpha_factory_family_summary.csv",
+            "summaries/alpha_factory_family_summary.csv",
+            ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS,
         ),
     ):
         if (ROOT / src_rel).is_file():

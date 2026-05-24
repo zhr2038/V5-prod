@@ -1340,6 +1340,92 @@ def test_expanded_paper_universe_advisory_is_read_only(tmp_path: Path) -> None:
     assert all(row["live_symbols_unchanged"] == "True" for row in runs)
 
 
+def test_alpha_factory_advisory_reader_is_read_only(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_alpha_factory"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "source_module": "alpha_factory",
+                "strategy_candidate": "v5.expanded_relative_strength_top1_shadow",
+                "symbol": "TRX-USDT",
+                "decision": "KEEP_SHADOW",
+                "recommended_mode": "shadow",
+                "promotion_state": "stage2_shadow",
+                "alpha_factory_score": "0.77",
+                "max_live_notional_usdt": "100",
+                **_fresh_meta(start_s),
+            },
+            {
+                "strategy_candidate": "v5.af.factory_research_only",
+                "symbol": "SUI-USDT",
+                "decision": "KEEP_RESEARCH",
+                "recommended_mode": "research",
+                "promotion_state": "research",
+                "alpha_factory_score": "0.51",
+                **_fresh_meta(start_s),
+            },
+            {
+                "strategy_candidate": "v5.futures_downtrend_short_proxy_shadow",
+                "symbol": "BTC-USDT",
+                "decision": "KILL",
+                "recommended_mode": "shadow",
+                "promotion_state": "killed",
+                "alpha_factory_score": "0.12",
+                **_fresh_meta(start_s),
+            },
+            {
+                "strategy_candidate": "v5.btc_strict_probe_exit_policy_review",
+                "symbol": "BTC-USDT",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "promotion_state": "review",
+                "alpha_factory_score": "0.63",
+                **_fresh_meta(start_s),
+            },
+            {
+                "strategy_candidate": "v5.not_alpha_factory",
+                "symbol": "SOL-USDT",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                **_fresh_meta(start_s),
+            },
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_alpha_factory", start_s),
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["alpha_factory_advisory_rows"] == 4
+    assert result["alpha_factory_family_rows"] == 4
+    reader = _read_csv(tmp_path / "reports" / "summaries" / "alpha_factory_advisory_reader.csv")
+    by_candidate = {row["strategy_candidate"]: row for row in reader}
+    assert by_candidate["v5.expanded_relative_strength_top1_shadow"]["response_action"] == "shadow_tracking"
+    assert by_candidate["v5.expanded_relative_strength_top1_shadow"]["alpha_factory_score"] == "0.77"
+    assert by_candidate["v5.af.factory_research_only"]["response_action"] == "display_only"
+    assert by_candidate["v5.futures_downtrend_short_proxy_shadow"]["response_action"] == "negative_advisory"
+    assert by_candidate["v5.btc_strict_probe_exit_policy_review"]["response_action"] == "paper_tracking"
+    assert "v5.not_alpha_factory" not in by_candidate
+    assert all(row["max_live_notional_usdt_ignored"] == "True" for row in reader)
+    assert all(row["live_order_effect"] == "read_only_no_live_order" for row in reader)
+
+    families = _read_csv(tmp_path / "reports" / "summaries" / "alpha_factory_family_summary.csv")
+    by_family = {row["family"]: row for row in families}
+    assert by_family["expanded"]["shadow_tracking_count"] == "1"
+    assert by_family["futures"]["negative_advisory_count"] == "1"
+    assert by_family["exit_policy"]["paper_tracking_count"] == "1"
+    assert by_family["other"]["display_only_count"] == "1"
+
+
 def test_strategy_advisory_uses_fresh_local_without_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cfg = _cfg()
     cfg.quant_lab.enabled = True

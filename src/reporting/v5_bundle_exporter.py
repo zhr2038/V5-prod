@@ -30,6 +30,8 @@ from src.reporting.order_lifecycle import (
     ORDER_LIFECYCLE_SCHEMA_VERSION,
 )
 from src.reporting.sol_paper_strategy_tracker import (
+    ALPHA_FACTORY_ADVISORY_FIELDS,
+    ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS,
     EXPANDED_UNIVERSE_ADVISORY_FIELDS,
     EXPANDED_UNIVERSE_PAPER_RUN_FIELDS,
     PAPER_DAILY_FIELDS,
@@ -874,6 +876,8 @@ def _copy_sol_paper_strategy_files(staging: Path, reports: Path) -> None:
         ("strategy_opportunity_advisory_reader.csv", STRATEGY_ADVISORY_FIELDS),
         ("expanded_universe_advisory_reader.csv", EXPANDED_UNIVERSE_ADVISORY_FIELDS),
         ("expanded_universe_paper_runs.csv", EXPANDED_UNIVERSE_PAPER_RUN_FIELDS),
+        ("alpha_factory_advisory_reader.csv", ALPHA_FACTORY_ADVISORY_FIELDS),
+        ("alpha_factory_family_summary.csv", ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS),
     )
     for filename, fields in summary_specs:
         src = reports / "summaries" / filename

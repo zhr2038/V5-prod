@@ -2999,6 +2999,16 @@ def fixture_entry_quality_advisory_root(root):
         "run_id,ts_utc,paper_date,universe_type,symbol,tracking_mode,would_enter,live_order_effect\n"
         "r_expanded,2026-05-20T00:00:00Z,2026-05-20,expanded_paper,TRX/USDT,paper,True,read_only_no_live_order\n",
     )
+    write_text(
+        root / "reports/summaries/alpha_factory_advisory_reader.csv",
+        "run_id,ts_utc,strategy_candidate,symbol,decision,recommended_mode,promotion_state,alpha_factory_score,advisory_source,advisory_fresh,advisory_age_sec,response_action,max_live_notional_usdt_ignored,live_order_effect\n"
+        "r_af,2026-05-20T00:00:00Z,v5.expanded_relative_strength_top1_shadow,TRX/USDT,KEEP_SHADOW,shadow,stage2_shadow,0.77,api,True,10,shadow_tracking,True,read_only_no_live_order\n",
+    )
+    write_text(
+        root / "reports/summaries/alpha_factory_family_summary.csv",
+        "run_id,ts_utc,family,row_count,display_only_count,shadow_tracking_count,paper_tracking_count,negative_advisory_count,max_live_notional_usdt_ignored,live_order_effect,strategy_candidates\n"
+        "r_af,2026-05-20T00:00:00Z,expanded,1,0,1,0,0,True,read_only_no_live_order,\"[\"\"v5.expanded_relative_strength_top1_shadow\"\"]\"\n",
+    )
     return run_id
 
 
@@ -4467,6 +4477,8 @@ def main():
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
                 expanded_advisory = tf.extractfile(extract_member(tf, "summaries/expanded_universe_advisory_reader.csv")).read().decode()
                 expanded_runs = tf.extractfile(extract_member(tf, "summaries/expanded_universe_paper_runs.csv")).read().decode()
+                alpha_factory = tf.extractfile(extract_member(tf, "summaries/alpha_factory_advisory_reader.csv")).read().decode()
+                alpha_factory_family = tf.extractfile(extract_member(tf, "summaries/alpha_factory_family_summary.csv")).read().decode()
                 raw_missed_low = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/missed_low_audit.csv")).read().decode()
                 raw_missed_by_symbol = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/missed_low_by_symbol.csv")).read().decode()
                 raw_late_sensitivity = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/late_entry_chase_threshold_sensitivity.csv")).read().decode()
@@ -4514,6 +4526,9 @@ def main():
             assert "threshold_bps" in raw_late_sensitivity, raw_late_sensitivity
             assert "TRX/USDT" in expanded_advisory, expanded_advisory
             assert "read_only_no_live_order" in expanded_runs, expanded_runs
+            assert "v5.expanded_relative_strength_top1_shadow" in alpha_factory, alpha_factory
+            assert "read_only_no_live_order" in alpha_factory, alpha_factory
+            assert "expanded" in alpha_factory_family, alpha_factory_family
             assert raw_pullback["rows"][0]["ready_for_paper"] is True, raw_pullback
             assert "## Entry quality advisory" in readme, readme
             assert "missed_low late_chase_loss_count: 1" in readme, readme

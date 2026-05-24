@@ -5,7 +5,7 @@ import io
 import json
 import tarfile
 import zipfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
@@ -46,6 +46,14 @@ PRIMARY_HORIZON = 24
 LIVE_SMALL_READY_COST_SOURCES = {"actual_fills", "mixed_actual_proxy"}
 ADVISORY_ALLOWED_RECOMMENDED_MODES = {"paper", "shadow"}
 ADVISORY_DISPLAY_ONLY_RECOMMENDED_MODES = {"research"}
+ALPHA_FACTORY_SECOND_STAGE_CANDIDATES = {
+    "v5.expanded_relative_strength_top1_shadow",
+    "v5.expanded_relative_strength_top3_shadow",
+    "v5.futures_risk_off_hedge_proxy_shadow",
+    "v5.futures_downtrend_short_proxy_shadow",
+    "v5.btc_strict_probe_exit_policy_review",
+    "v5.pair_trade_eth_btc_shadow",
+}
 
 DEFAULT_PAPER_STRATEGY_CONFIGS = [
     {
@@ -322,6 +330,37 @@ EXPANDED_UNIVERSE_PAPER_RUN_FIELDS = [
     "live_order_effect",
 ]
 
+ALPHA_FACTORY_ADVISORY_FIELDS = [
+    "run_id",
+    "ts_utc",
+    "strategy_candidate",
+    "symbol",
+    "decision",
+    "recommended_mode",
+    "promotion_state",
+    "alpha_factory_score",
+    "advisory_source",
+    "advisory_fresh",
+    "advisory_age_sec",
+    "response_action",
+    "max_live_notional_usdt_ignored",
+    "live_order_effect",
+]
+
+ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS = [
+    "run_id",
+    "ts_utc",
+    "family",
+    "row_count",
+    "display_only_count",
+    "shadow_tracking_count",
+    "paper_tracking_count",
+    "negative_advisory_count",
+    "max_live_notional_usdt_ignored",
+    "live_order_effect",
+    "strategy_candidates",
+]
+
 
 def _diagnostics_cfg(cfg: Any) -> DiagnosticsConfig:
     diagnostics = getattr(cfg, "diagnostics", None)
@@ -584,9 +623,14 @@ def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict
         "strategy_id": strategy_id,
         "strategy_candidate": strategy_candidate,
         "experiment_name": experiment_name,
+        "source_module": str(_advisory_first(row, ("source_module", "module", "origin_module")) or "").strip().lower(),
         "symbol": _symbol_text(_advisory_first(row, ("symbol", "instId", "instrument", "normalized_symbol"))),
         "decision": decision,
         "recommended_mode": recommended_mode,
+        "promotion_state": str(_advisory_first(row, ("promotion_state", "promotion", "promoted_state")) or "").strip(),
+        "alpha_factory_score": _normalize_float(
+            _advisory_first(row, ("alpha_factory_score", "factory_score", "advisory_score", "score"))
+        ),
         "universe_type": str(_advisory_first(row, ("universe_type", "paper_universe_type", "universe")) or "").strip().lower(),
         "horizon_hours": _parse_horizon_hours(row.get("horizon_hours") or row.get("suggested_horizon")),
         "sample_count": _normalize_float(row.get("sample_count")),
@@ -1596,6 +1640,121 @@ def _expanded_universe_paper_rows(expanded_rows: Iterable[Mapping[str, Any]]) ->
                 "advisory_contract_match": row.get("advisory_contract_match"),
                 "live_block_reasons": row.get("live_block_reasons"),
                 "live_order_effect": "read_only_no_live_order",
+            }
+        )
+    return out
+
+
+def _is_alpha_factory_advisory(row: Mapping[str, Any]) -> bool:
+    source_module = str(row.get("source_module") or "").strip().lower()
+    candidate = str(row.get("strategy_candidate") or "").strip().lower()
+    strategy_id = str(row.get("strategy_id") or "").strip().lower()
+    experiment = str(row.get("experiment_name") or "").strip().lower()
+    keys = {candidate, strategy_id, experiment}
+    return bool(
+        source_module == "alpha_factory"
+        or candidate.startswith("v5.af.")
+        or any(key in ALPHA_FACTORY_SECOND_STAGE_CANDIDATES for key in keys if key)
+    )
+
+
+def _alpha_factory_response_action(row: Mapping[str, Any]) -> str:
+    decision = str(row.get("decision") or "").strip().upper()
+    mode = str(row.get("recommended_mode") or "").strip().lower().replace("-", "_")
+    if decision == "KILL":
+        return "negative_advisory"
+    if mode == "shadow":
+        return "shadow_tracking"
+    if mode == "paper":
+        return "paper_tracking"
+    return "display_only"
+
+
+def _alpha_factory_family(row: Mapping[str, Any]) -> str:
+    text = " ".join(
+        str(row.get(key) or "").strip().lower()
+        for key in ("strategy_candidate", "strategy_id", "experiment_name")
+    )
+    if "futures_" in text or "future" in text:
+        return "futures"
+    if "exit_policy" in text or "probe_exit" in text or "strict_probe_exit" in text:
+        return "exit_policy"
+    if "expanded_" in text or "relative_strength" in text:
+        return "expanded"
+    if "pair_trade" in text:
+        return "pair_trade"
+    return "other"
+
+
+def _alpha_factory_advisory_rows(
+    advisory_rows: Iterable[Mapping[str, Any]],
+    *,
+    run_id: str,
+    asof_ts_ms: int,
+) -> list[dict[str, Any]]:
+    ts_utc = _iso_from_ms(asof_ts_ms)
+    out: list[dict[str, Any]] = []
+    for row in advisory_rows:
+        if not _is_alpha_factory_advisory(row):
+            continue
+        out.append(
+            {
+                "run_id": run_id,
+                "ts_utc": ts_utc,
+                "strategy_candidate": row.get("strategy_candidate") or row.get("strategy_id") or row.get("experiment_name"),
+                "symbol": row.get("symbol"),
+                "decision": row.get("decision"),
+                "recommended_mode": row.get("recommended_mode"),
+                "promotion_state": row.get("promotion_state"),
+                "alpha_factory_score": row.get("alpha_factory_score"),
+                "advisory_source": row.get("advisory_source"),
+                "advisory_fresh": row.get("advisory_fresh"),
+                "advisory_age_sec": row.get("advisory_age_sec"),
+                "response_action": _alpha_factory_response_action(row),
+                "max_live_notional_usdt_ignored": True,
+                "live_order_effect": "read_only_no_live_order",
+            }
+        )
+    return out
+
+
+def _alpha_factory_family_summary_rows(
+    alpha_rows: Iterable[Mapping[str, Any]],
+    advisory_rows: Iterable[Mapping[str, Any]],
+    *,
+    run_id: str,
+    asof_ts_ms: int,
+) -> list[dict[str, Any]]:
+    by_candidate: dict[str, Mapping[str, Any]] = {}
+    for row in advisory_rows:
+        if not _is_alpha_factory_advisory(row):
+            continue
+        for key in ("strategy_candidate", "strategy_id", "experiment_name"):
+            value = str(row.get(key) or "").strip()
+            if value:
+                by_candidate[value] = row
+    buckets: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for row in alpha_rows:
+        original = by_candidate.get(str(row.get("strategy_candidate") or "")) or row
+        buckets[_alpha_factory_family(original)].append(row)
+    ts_utc = _iso_from_ms(asof_ts_ms)
+    out: list[dict[str, Any]] = []
+    for family, rows in sorted(buckets.items()):
+        actions = Counter(str(row.get("response_action") or "") for row in rows)
+        candidates = sorted({str(row.get("strategy_candidate") or "") for row in rows if str(row.get("strategy_candidate") or "")})
+        out.append(
+            {
+                "run_id": run_id,
+                "ts_utc": ts_utc,
+                "family": family,
+                "row_count": len(rows),
+                "display_only_count": actions.get("display_only", 0),
+                "shadow_tracking_count": actions.get("shadow_tracking", 0),
+                "paper_tracking_count": actions.get("paper_tracking", 0),
+                "negative_advisory_count": actions.get("negative_advisory", 0),
+                "max_live_notional_usdt_ignored": True,
+                "live_order_effect": "read_only_no_live_order",
+                "strategy_candidates": json.dumps(candidates, ensure_ascii=False),
             }
         )
     return out
@@ -2720,6 +2879,17 @@ def update_sol_paper_strategy_tracker(
         asof_ts_ms=asof_ts_ms,
     )
     expanded_paper_rows = _expanded_universe_paper_rows(expanded_advisory_rows)
+    alpha_factory_rows = _alpha_factory_advisory_rows(
+        advisory_rows,
+        run_id=str(getattr(audit, "run_id", "") or ""),
+        asof_ts_ms=asof_ts_ms,
+    )
+    alpha_factory_family_rows = _alpha_factory_family_summary_rows(
+        alpha_factory_rows,
+        advisory_rows,
+        run_id=str(getattr(audit, "run_id", "") or ""),
+        asof_ts_ms=asof_ts_ms,
+    )
     advisory_index = _advisory_by_strategy(advisory_rows)
     records_by_key = _load_existing_records(labels_path)
     new_records = _collect_candidates(
@@ -2801,6 +2971,16 @@ def update_sol_paper_strategy_tracker(
         expanded_paper_rows,
         EXPANDED_UNIVERSE_PAPER_RUN_FIELDS,
     )
+    _write_csv(
+        summaries_dir / "alpha_factory_advisory_reader.csv",
+        alpha_factory_rows,
+        ALPHA_FACTORY_ADVISORY_FIELDS,
+    )
+    _write_csv(
+        summaries_dir / "alpha_factory_family_summary.csv",
+        alpha_factory_family_rows,
+        ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS,
+    )
 
     return {
         "enabled": True,
@@ -2809,6 +2989,8 @@ def update_sol_paper_strategy_tracker(
         "advisory_rows": int(len(advisory_rows)),
         "expanded_universe_advisory_rows": int(len(expanded_advisory_rows)),
         "expanded_universe_paper_rows": int(len(expanded_paper_rows)),
+        "alpha_factory_advisory_rows": int(len(alpha_factory_rows)),
+        "alpha_factory_family_rows": int(len(alpha_factory_family_rows)),
         "proposal_rows": int(len(proposal_rows)),
         "labels_path": str(labels_path),
         "summaries_dir": str(summaries_dir),
