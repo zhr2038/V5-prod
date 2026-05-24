@@ -5,7 +5,7 @@ import shutil
 import tarfile
 import csv
 import io
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -149,11 +149,14 @@ def test_timeout_request_and_fallback_keep_stable_ids_in_bundle(tmp_path: Path) 
     reports.mkdir(parents=True)
     request_id = "fixture-run-001:permission:v5:5.0.0"
     request_event_id = "fixture-timeout-request-event"
+    base_ts = datetime.now(timezone.utc).replace(microsecond=0)
+    request_ts = base_ts.isoformat().replace("+00:00", "Z")
+    fallback_ts = (base_ts + timedelta(seconds=1)).isoformat().replace("+00:00", "Z")
     append_quant_lab_request(
         reports / "quant_lab_requests.jsonl",
         {
             "run_id": "fixture-run-001",
-            "ts_utc": "2026-05-14T00:07:00Z",
+            "ts_utc": request_ts,
             "event_type": "request",
             "event_id": request_event_id,
             "request_id": request_id,
@@ -169,7 +172,7 @@ def test_timeout_request_and_fallback_keep_stable_ids_in_bundle(tmp_path: Path) 
         reports / "quant_lab_usage.jsonl",
         {
             "run_id": "fixture-run-001",
-            "ts_utc": "2026-05-14T00:07:01Z",
+            "ts_utc": fallback_ts,
             "event_type": "fallback",
             "request_id": request_id,
             "original_request_id": request_id,

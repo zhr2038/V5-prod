@@ -1,3 +1,7 @@
+export type UnknownRecord = Record<string, unknown>;
+export type MetricValue = string | number | boolean | null | undefined;
+export type MetricRecord = Record<string, MetricValue>;
+
 export interface AccountData {
   totalEquity: number;
   cash: number;
@@ -124,10 +128,10 @@ export interface DashboardData {
   systemStatus: SystemStatus;
   equityCurve: EquityPoint[];
   timers: { timers: TimerData[] };
-  costCalibration: any;
-  icDiagnostics: any;
+  costCalibration: unknown;
+  icDiagnostics: unknown;
   mlTraining: MLTrainingData;
-  reflectionReports: any;
+  reflectionReports: unknown;
   apiTelemetry?: ApiTelemetryData | null;
   slippageInsights?: SlippageInsightsData | null;
 }
@@ -143,7 +147,7 @@ export interface MarketVote {
   weight?: number;
   probs?: Record<string, number>;
   summary?: string;
-  raw?: any;
+  raw?: unknown;
 }
 
 export interface MarketStateData {
@@ -156,8 +160,8 @@ export interface MarketStateData {
     rss?: MarketVote;
   };
   signal_health?: {
-    funding?: any;
-    rss?: any;
+    funding?: unknown;
+    rss?: unknown;
   };
   alerts?: string[];
   history_24h?: MarketHistoryPoint[];
@@ -171,19 +175,19 @@ export interface MarketHistoryPoint {
     confidence: number;
     score: number;
   };
-  votes?: any;
+  votes?: UnknownRecord;
 }
 
 export interface RiskGuardData {
   current_level: string;
-  config: Record<string, any>;
-  history: any[];
+  config: UnknownRecord;
+  history: unknown[];
   metrics: {
     dd_pct?: number;
     last_dd_pct?: number;
     conversion_rate?: number;
     last_conversion_rate?: number;
-    [k: string]: any;
+    [k: string]: MetricValue;
   };
   reason: string;
   last_update: string;
@@ -196,7 +200,7 @@ export interface StrategySignal {
   total_signals?: number;
   buy_signals?: number;
   sell_signals?: number;
-  signals?: any[];
+  signals?: unknown[];
 }
 
 export interface DecisionAuditData {
@@ -206,13 +210,13 @@ export interface DecisionAuditData {
     selected?: number;
     orders_rebalance?: number;
     orders_exit?: number;
-    [k: string]: any;
+    [k: string]: MetricValue;
   };
   strategy_signal_source?: string;
-  ml_signal_overview?: any;
-  execution_summary?: any;
-  rejected_summary?: any;
-  orders?: any[];
+  ml_signal_overview?: UnknownRecord;
+  execution_summary?: MetricRecord;
+  rejected_summary?: MetricRecord;
+  orders?: UnknownRecord[];
 }
 
 export interface HealthCheckItem {
@@ -249,7 +253,7 @@ export interface MLTrainingData {
   ml_live_overlay_status?: string;
   research_only?: boolean;
   message?: string;
-  [k: string]: any;
+  [k: string]: unknown;
 }
 
 export interface MLStages {
@@ -276,9 +280,9 @@ export interface ShadowMLData {
       topn_delta_mean_bps?: number;
       points?: number;
     };
-    [k: string]: any;
+    [k: string]: unknown;
   };
-  [k: string]: any;
+  [k: string]: unknown;
 }
 
 export interface ShadowMLSymbol {

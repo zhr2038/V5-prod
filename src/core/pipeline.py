@@ -5883,8 +5883,20 @@ class V5Pipeline:
             market_data=market_data_1h,
             regime_state=str(regime.state.value if hasattr(regime.state, 'value') else regime.state),
         )
+        policy_exit_symbols_before_profit_filter = {str(o.symbol) for o in exit_orders}
         # Filter out symbols already handled by profit/stop
         exit_orders = [o for o in exit_orders if o.symbol not in profit_symbols]
+        non_protect_soft_exit_symbols = {
+            str(o.symbol)
+            for o in (
+                probe_exit_orders
+                + profit_orders
+                + fixed_stop_orders
+                + ranking_exit_orders
+                + market_impulse_time_stop_orders
+                + exit_orders
+            )
+        } | policy_exit_symbols_before_profit_filter
 
         # qlib hold-threshold migration: optional minimum hold before regime-exit.
         min_hold_regime_exit = int(getattr(self.cfg.execution, 'min_hold_minutes_before_regime_exit', 0) or 0)
@@ -8070,6 +8082,101 @@ class V5Pipeline:
                             "bypass_turnover_cap_for_exit": True,
                         }
                     )
+
+        if (
+            protect_entry_gate_active
+            and protect_replacement_close_guard_enabled
+            and protect_hold_current_when_replacement_blocked
+            and not is_risk_off_close_only
+            and exit_orders
+        ):
+            replacement_candidate_symbols = set(replacement_open_candidates or set())
+            blocked_candidate_symbols = set(blocked_replacement_reasons.keys())
+            all_replacements_blocked = (
+                bool(replacement_candidate_symbols)
+                and not bool(replacement_candidate_symbols & successful_replacement_symbols)
+                and replacement_candidate_symbols.issubset(blocked_candidate_symbols)
+            )
+            if all_replacements_blocked:
+                kept_exit_orders: list[Order] = []
+                held_by_symbol = {
+                    str(p.symbol): p
+                    for p in positions
+                    if float(getattr(p, "qty", 0.0) or 0.0) > 0
+                }
+                held_soft_exit_symbols: set[str] = set()
+                for order in exit_orders:
+                    sym = str(getattr(order, "symbol", "") or "")
+                    meta = dict(getattr(order, "meta", {}) or {})
+                    reason = str(meta.get("exit_reason") or meta.get("reason") or "")
+                    can_hold_soft_exit = bool(meta.get("protect_profit_lock_exit", False)) or reason == "protect_profit_lock_trailing"
+                    if not can_hold_soft_exit or sym not in held_by_symbol or sym in non_protect_soft_exit_symbols:
+                        kept_exit_orders.append(order)
+                        continue
+                    held_score = None
+                    try:
+                        held_score = float((alpha.scores or {}).get(sym))
+                    except Exception:
+                        held_score = None
+                    safe_to_hold = (
+                        held_score is not None
+                        and float(held_score) >= float(protect_replacement_hold_min_score)
+                        and not self._held_symbol_has_negative_expectancy_hard_block(sym)
+                    )
+                    if not safe_to_hold:
+                        kept_exit_orders.append(order)
+                        continue
+                    held_soft_exit_symbols.add(sym)
+                    if audit:
+                        audit.record_count("hold_current_no_valid_replacement_count", symbol=sym)
+                        audit.add_note(
+                            "Hold current instead of protect soft exit: "
+                            f"{sym} exit_reason={reason} replacements_blocked={sorted(blocked_candidate_symbols)}"
+                        )
+                        if reason == "protect_profit_lock_trailing":
+                            audit.counts["protect_profit_lock_trailing_exit_count"] = max(
+                                0,
+                                int(audit.counts.get("protect_profit_lock_trailing_exit_count", 0) or 0) - 1,
+                            )
+                        router_decisions.append(
+                            {
+                                "symbol": sym,
+                                "action": "skip",
+                                "reason": "hold_current_no_valid_replacement",
+                                "held_symbol": sym,
+                                "blocked_exit_reason": reason,
+                                "blocked_replacement_symbols": sorted(blocked_candidate_symbols),
+                                "blocked_replacement_reasons": {
+                                    candidate: blocked_replacement_reasons[candidate]
+                                    for candidate in sorted(blocked_candidate_symbols)
+                                },
+                                "held_symbol_score": float(held_score),
+                                "protect_replacement_hold_min_score": float(protect_replacement_hold_min_score),
+                            }
+                        )
+                if held_soft_exit_symbols:
+                    exit_orders = kept_exit_orders
+                    exit_symbols = {o.symbol for o in exit_orders}
+                    profit_symbols.difference_update(held_soft_exit_symbols)
+                    router_decisions = [
+                        decision
+                        for decision in router_decisions
+                        if not (
+                            str(decision.get("symbol") or "") in held_soft_exit_symbols
+                            and str(decision.get("reason") or "") == "exit_signal_priority"
+                            and str(decision.get("source_reason") or "") == "protect_profit_lock_trailing"
+                        )
+                    ]
+                    if audit:
+                        audit.counts["orders_exit"] = len(exit_orders)
+                        audit.exit_signals = [
+                            signal
+                            for signal in (audit.exit_signals or [])
+                            if not (
+                                str(signal.get("symbol") or "") in held_soft_exit_symbols
+                                and str(signal.get("reason") or "") == "protect_profit_lock_trailing"
+                            )
+                        ]
 
         # qlib migration: proactive per-cycle rebalance turnover cap.
         try:

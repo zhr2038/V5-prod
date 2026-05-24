@@ -83,7 +83,10 @@ export function BundleExportPanel() {
   }, [generating, refreshBundles]);
 
   useEffect(() => {
-    void refreshBundles();
+    const timer = window.setTimeout(() => {
+      void refreshBundles();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [refreshBundles]);
 
   return (

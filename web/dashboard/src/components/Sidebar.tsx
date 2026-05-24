@@ -1,4 +1,5 @@
 import { Clock, Route, BarChart3, Receipt, HeartPulse, Gauge } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { fmtUsd, fmtNum, fmtPct, statusLabels, sideLabels } from '../lib/format';
 import { SignalsPanel } from './SignalsPanel';
 import type { TimerData, AlphaScore, Trade, HealthData, DecisionAuditData, ApiTelemetryData } from '../types';
@@ -19,7 +20,7 @@ function Section({
   children,
   tone,
 }: {
-  icon: any;
+  icon: LucideIcon;
   title: string;
   children: React.ReactNode;
   tone?: string;
