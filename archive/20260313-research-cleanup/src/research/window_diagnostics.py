@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable
 
 import numpy as np
 
@@ -389,6 +389,7 @@ def run_window_diagnostic(
                 "exec_px": float(px),
                 "fee_bps": float(fee_bps),
                 "slippage_bps": float(slippage_bps),
+                "cost_meta": dict(cost_meta_event or {}),
                 "meta": dict(order.meta or {}),
             }
 
