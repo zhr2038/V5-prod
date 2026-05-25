@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -84,6 +84,12 @@ def test_load_active_config_fails_fast_when_runtime_config_is_missing(monkeypatc
         raise AssertionError("expected FileNotFoundError")
 
 
+def test_run_id_epoch_is_utc() -> None:
+    expected = datetime(2026, 4, 8, 2, tzinfo=timezone.utc).timestamp()
+
+    assert smart_alert_module._run_id_epoch("20260408_02") == expected
+
+
 def test_check_signal_no_trade_ignores_exit_only_rounds(tmp_path: Path) -> None:
     engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
     engine._load_recent_run_audits = lambda limit, max_age_hours=None: [
@@ -104,9 +110,9 @@ def test_load_recent_run_audits_ignores_stale_runs(tmp_path: Path) -> None:
     (fresh / "decision_audit.json").write_text('{"counts": {}}', encoding="utf-8")
     (stale / "decision_audit.json").write_text('{"counts": {}}', encoding="utf-8")
 
-    now = datetime.now().timestamp()
+    now = datetime.now(timezone.utc).timestamp()
     fresh_ts = now - 1800
-    stale_ts = (datetime.now() - timedelta(hours=8)).timestamp()
+    stale_ts = (datetime.now(timezone.utc) - timedelta(hours=8)).timestamp()
     import os
     os.utime(fresh / "decision_audit.json", (fresh_ts, fresh_ts))
     os.utime(stale / "decision_audit.json", (stale_ts, stale_ts))
@@ -152,7 +158,7 @@ def test_load_recent_run_audits_prefers_run_id_epoch_when_file_mtime_is_misleadi
     runs_dir = engine.paths.runs_dir
     runs_dir.mkdir(parents=True, exist_ok=True)
 
-    now = smart_alert_module.datetime.now()
+    now = smart_alert_module.datetime.now(timezone.utc)
     older_run_name = (now - smart_alert_module.timedelta(hours=1)).strftime("%Y%m%d_%H")
     newer_run_name = now.strftime("%Y%m%d_%H")
     older_run = runs_dir / older_run_name
@@ -165,7 +171,7 @@ def test_load_recent_run_audits_prefers_run_id_epoch_when_file_mtime_is_misleadi
     older_audit.write_text(json.dumps({"run_id": older_run_name, "counts": {"selected": 1}}), encoding="utf-8")
     newer_audit.write_text(json.dumps({"run_id": newer_run_name, "counts": {"selected": 2}}), encoding="utf-8")
 
-    now_ts = smart_alert_module.datetime.now().timestamp()
+    now_ts = smart_alert_module.datetime.now(timezone.utc).timestamp()
     os.utime(older_audit, (now_ts - 100, now_ts - 100))
     os.utime(newer_audit, (now_ts - 13 * 3600, now_ts - 13 * 3600))
 
@@ -180,7 +186,7 @@ def test_load_recent_run_audits_limits_audit_file_reads_before_parsing(tmp_path:
     runs_dir = engine.paths.runs_dir
     runs_dir.mkdir(parents=True, exist_ok=True)
 
-    now = smart_alert_module.datetime.now()
+    now = smart_alert_module.datetime.now(timezone.utc)
     for offset in range(20):
         run_name = (now - smart_alert_module.timedelta(hours=19 - offset)).strftime("%Y%m%d_%H")
         run_dir = runs_dir / run_name

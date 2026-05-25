@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -145,6 +145,14 @@ def _kill_switch_enabled(data: Any) -> bool:
     return _to_bool(nested)
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _run_id_epoch(run_id: str) -> float:
+    return datetime.strptime(str(run_id), "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp()
+
+
 class SmartAlertEngine:
     """Emit only actionable anomaly alerts."""
 
@@ -171,7 +179,7 @@ class SmartAlertEngine:
             json.dump(self.state, f, indent=2, ensure_ascii=False)
 
     def _should_alert(self, alert_type: str, cooldown_minutes: int = 60) -> bool:
-        now = datetime.now().timestamp()
+        now = _utc_now().timestamp()
         last_alert = self.state.get(f"last_{alert_type}", 0)
         if now - last_alert > cooldown_minutes * 60:
             self.state[f"last_{alert_type}"] = now
@@ -185,7 +193,7 @@ class SmartAlertEngine:
 
         def _candidate_sort_epoch(run_dir: Path) -> float:
             try:
-                return datetime.strptime(run_dir.name, "%Y%m%d_%H").timestamp()
+                return _run_id_epoch(run_dir.name)
             except Exception:
                 audit_file = run_dir / "decision_audit.json"
                 try:
@@ -206,7 +214,7 @@ class SmartAlertEngine:
 
             run_id = str(payload.get("run_id") or run_dir.name) if isinstance(payload, dict) else run_dir.name
             try:
-                return datetime.strptime(run_id, "%Y%m%d_%H").timestamp()
+                return _run_id_epoch(run_id)
             except Exception:
                 try:
                     return audit_file.stat().st_mtime
@@ -215,7 +223,7 @@ class SmartAlertEngine:
 
         cutoff_ts = None
         if max_age_hours is not None:
-            cutoff_ts = (datetime.now() - timedelta(hours=float(max_age_hours))).timestamp()
+            cutoff_ts = (_utc_now() - timedelta(hours=float(max_age_hours))).timestamp()
 
         run_dirs = [
             run_dir
@@ -323,7 +331,7 @@ class SmartAlertEngine:
             return None
 
     def _count_recent_buy_fills(self, hours: int = 6) -> int:
-        cutoff_ts = int((datetime.now() - timedelta(hours=hours)).timestamp() * 1000)
+        cutoff_ts = int((_utc_now() - timedelta(hours=hours)).timestamp() * 1000)
         fills_count = self._count_recent_buy_fills_from_fill_store(cutoff_ts)
         if fills_count and fills_count > 0:
             return fills_count
