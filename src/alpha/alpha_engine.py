@@ -1002,6 +1002,15 @@ class AlphaEngine:
                 blended[str(sym)] = base_score
         return blended
 
+    @staticmethod
+    def _model_artifact_age_hours(latest_mtime_ns: int, *, now: Optional[datetime] = None) -> float:
+        now_dt = now or datetime.now(timezone.utc)
+        if now_dt.tzinfo is None:
+            now_dt = now_dt.replace(tzinfo=timezone.utc)
+        else:
+            now_dt = now_dt.astimezone(timezone.utc)
+        return max(0.0, (now_dt.timestamp() - (int(latest_mtime_ns) / 1_000_000_000.0)) / 3600.0)
+
     def _compute_ml_overlay_scores(self, market_data: Dict[str, MarketSeries]) -> tuple[Dict[str, float], Dict[str, float], Dict[str, Any]]:
         ml_cfg = getattr(self.cfg, "ml_factor", None)
         status: Dict[str, Any] = {
@@ -1092,7 +1101,7 @@ class AlphaEngine:
             self._write_ml_runtime_status(status)
             return {}, {}, status
         max_age_hours = float(getattr(ml_cfg, "max_model_age_hours", 72) or 72)
-        model_age_hours = max(0.0, (datetime.now().timestamp() - (latest_mtime_ns / 1_000_000_000.0)) / 3600.0)
+        model_age_hours = self._model_artifact_age_hours(latest_mtime_ns)
         status["model_age_hours"] = model_age_hours
         if model_age_hours > max_age_hours:
             status["reason"] = "model_too_old"

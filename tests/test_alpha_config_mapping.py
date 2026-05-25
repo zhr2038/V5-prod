@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -345,6 +346,17 @@ def test_alpha_engine_latest_model_artifact_mtime_ignores_newer_config_file(tmp_
     latest_mtime_ns = AlphaEngine._latest_model_artifact_mtime_ns(base_path)
 
     assert latest_mtime_ns == model_file.stat().st_mtime_ns
+
+
+def test_alpha_engine_model_artifact_age_uses_utc_now() -> None:
+    model_mtime_ns = int(datetime(2026, 4, 26, 1, tzinfo=timezone.utc).timestamp() * 1_000_000_000)
+
+    age_hours = AlphaEngine._model_artifact_age_hours(
+        model_mtime_ns,
+        now=datetime(2026, 4, 26, 4, tzinfo=timezone.utc),
+    )
+
+    assert age_hours == pytest.approx(3.0)
 
 
 def test_disabled_ml_overlay_does_not_resolve_model_pointer(monkeypatch):
