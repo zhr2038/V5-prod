@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from pathlib import Path
 
 from configs.schema import ExecutionConfig
@@ -27,6 +28,19 @@ def test_multi_level_stop_loss_resolves_default_state_path_from_project_root(mon
     monkeypatch.setattr(multi_level_stop_loss, "PROJECT_ROOT", tmp_path)
     manager = multi_level_stop_loss.MultiLevelStopLoss()
     assert manager.state_file == (tmp_path / "reports" / "stop_loss_state.json").resolve()
+
+
+def test_multi_level_stop_loss_initializes_utc_entry_time(tmp_path: Path) -> None:
+    state_path = tmp_path / "stop_loss_state.json"
+    manager = multi_level_stop_loss.MultiLevelStopLoss(state_path=str(state_path))
+
+    manager.initialize_position("BTC/USDT", 100.0)
+
+    state = manager.positions["BTC/USDT"]
+    assert state.entry_time.tzinfo is not None
+    assert state.entry_time.utcoffset() == timedelta(0)
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    assert payload["BTC/USDT"]["entry_time"].endswith("+00:00")
 
 
 def test_position_builder_resolves_default_state_path_from_project_root(monkeypatch, tmp_path: Path) -> None:

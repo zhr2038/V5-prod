@@ -8,7 +8,7 @@ from typing import Dict, Tuple
 from enum import Enum
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -150,7 +150,7 @@ class MultiLevelStopLoss:
         self.positions[symbol] = PositionStopState(
             symbol=symbol,
             entry_price=entry_price,
-            entry_time=datetime.now(),
+            entry_time=datetime.now(timezone.utc),
             highest_price=entry_price,
             current_stop_price=stop_price,
             current_stop_type=stop_type,
