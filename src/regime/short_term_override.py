@@ -13,7 +13,7 @@
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, Optional
 from dataclasses import dataclass
@@ -36,16 +36,17 @@ def _latest_funding_composite_file(cache_dir: Path) -> Optional[Path]:
     if not files:
         return None
 
-    def _sort_epoch(path: Path) -> float:
-        match = re.search(r'(?<!\d)(20\d{6}_\d{2})(?!\d)', path.stem)
-        if match:
-            try:
-                return datetime.strptime(match.group(1), '%Y%m%d_%H').timestamp()
-            except Exception:
-                pass
-        return path.stat().st_mtime
+    return max(files, key=_funding_composite_sort_epoch)
 
-    return max(files, key=_sort_epoch)
+
+def _funding_composite_sort_epoch(path: Path) -> float:
+    match = re.search(r'(?<!\d)(20\d{6}_\d{2})(?!\d)', path.stem)
+    if match:
+        try:
+            return datetime.strptime(match.group(1), '%Y%m%d_%H').replace(tzinfo=timezone.utc).timestamp()
+        except Exception:
+            pass
+    return path.stat().st_mtime
 
 
 def check_short_term_opportunity(

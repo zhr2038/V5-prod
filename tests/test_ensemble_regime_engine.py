@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import time
+from datetime import datetime, timezone
 
 from configs.schema import RegimeConfig
 from src.regime.ensemble_regime_engine import EnsembleRegimeEngine
@@ -25,6 +26,15 @@ def test_latest_fresh_file_prefers_filename_timestamp_over_mtime(tmp_path) -> No
     latest = engine._latest_fresh_file("funding_COMPOSITE_*.json", max_age_minutes=10_000_000)
 
     assert latest == newer
+
+
+def test_latest_fresh_file_sort_epoch_uses_utc_filename_timestamp(tmp_path) -> None:
+    path = tmp_path / "rss_MARKET_20260419_23.json"
+    path.write_text("{}", encoding="utf-8")
+
+    expected = datetime(2026, 4, 19, 23, tzinfo=timezone.utc).timestamp()
+
+    assert EnsembleRegimeEngine._fresh_file_sort_epoch(path) == expected
 
 
 def test_latest_fresh_file_uses_filename_timestamp_for_freshness(tmp_path) -> None:

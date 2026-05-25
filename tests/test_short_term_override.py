@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
-from src.regime.short_term_override import check_short_term_opportunity
+from src.regime.short_term_override import check_short_term_opportunity, _funding_composite_sort_epoch
 
 
 def test_check_short_term_opportunity_prefers_filename_timestamp_over_mtime(tmp_path: Path) -> None:
@@ -31,3 +32,12 @@ def test_check_short_term_opportunity_prefers_filename_timestamp_over_mtime(tmp_
 
     assert result.should_override is True
     assert "资金费率乐观" in result.reason
+
+
+def test_funding_composite_sort_epoch_uses_utc_filename_timestamp(tmp_path: Path) -> None:
+    path = tmp_path / "funding_COMPOSITE_20260419_23.json"
+    path.write_text("{}", encoding="utf-8")
+
+    expected = datetime(2026, 4, 19, 23, tzinfo=timezone.utc).timestamp()
+
+    assert _funding_composite_sort_epoch(path) == expected

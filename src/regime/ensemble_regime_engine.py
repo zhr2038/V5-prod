@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Optional, Dict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import importlib.util
 import json
@@ -370,22 +370,23 @@ class EnsembleRegimeEngine:
         if not files:
             return None
 
-        def _sort_epoch(path: Path) -> float:
-            match = re.search(r'(?<!\d)(20\d{6}_\d{2})(?!\d)', path.stem)
-            if match:
-                try:
-                    return datetime.strptime(match.group(1), '%Y%m%d_%H').timestamp()
-                except Exception:
-                    pass
-            return path.stat().st_mtime
-
-        candidate = max(files, key=_sort_epoch)
-        candidate_epoch = _sort_epoch(candidate)
+        candidate = max(files, key=self._fresh_file_sort_epoch)
+        candidate_epoch = self._fresh_file_sort_epoch(candidate)
         max_age_sec = max(int(max_age_minutes), 1) * 60
         age_sec = max(0.0, time.time() - candidate_epoch)
         if age_sec > max_age_sec:
             return None
         return candidate
+
+    @staticmethod
+    def _fresh_file_sort_epoch(path: Path) -> float:
+        match = re.search(r'(?<!\d)(20\d{6}_\d{2})(?!\d)', path.stem)
+        if match:
+            try:
+                return datetime.strptime(match.group(1), '%Y%m%d_%H').replace(tzinfo=timezone.utc).timestamp()
+            except Exception:
+                pass
+        return path.stat().st_mtime
 
     def _get_hmm_vote(self, btc_data: MarketSeries) -> dict:
         """HMM vote built from the detector's canonical price features."""
