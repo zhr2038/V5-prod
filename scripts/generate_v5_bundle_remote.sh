@@ -6653,19 +6653,19 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         )
 
     def swing_required_hold_hours(row):
-        value = as_float(first_value(row, ("swing_min_hold_hours", "required_hold_hours"), not_obs))
+        value = as_float(first_value(row, ("swing_min_hold_hours", "required_hold_hours", "min_hold_hours"), not_obs))
         if value is not None and value > 0:
             return value
         payload = roundtrip_payload(row)
         for item in iter_roundtrip_payload_dicts(row):
-            value = as_float(first_value(item, ("swing_min_hold_hours", "required_hold_hours"), not_obs))
+            value = as_float(first_value(item, ("swing_min_hold_hours", "required_hold_hours", "min_hold_hours"), not_obs))
             if value is not None and value > 0:
                 return value
             for meta_key in ("meta_json", "raw_meta", "meta", "metadata", "order_meta"):
                 meta = parse_json_obj(item.get(meta_key), {}) if isinstance(item, dict) else {}
                 if not isinstance(meta, dict):
                     continue
-                value = as_float(first_value(meta, ("swing_min_hold_hours", "required_hold_hours"), not_obs))
+                value = as_float(first_value(meta, ("swing_min_hold_hours", "required_hold_hours", "min_hold_hours"), not_obs))
                 if value is not None and value > 0:
                     return value
         configured = config_number("swing_min_hold_hours")
@@ -6995,6 +6995,172 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "observable_24h_count": len(swing_early_exit_better_24_rows),
                 "would_have_been_better_to_hold_24h_rate": fmt_num(swing_early_exit_better_24_rate, 6),
                 "by_reason": swing_early_exit_by_reason,
+            },
+        )
+
+    POST_MIN_HOLD_ATR_HORIZONS = (6, 12, 24)
+
+    def post_min_hold_hold_hours(row, entry_dt=None, exit_dt=None):
+        hold_hours = as_float(row.get("hold_hours"))
+        if hold_hours is not None:
+            return hold_hours
+        hold_minutes = as_float(row.get("hold_minutes"))
+        if hold_minutes is not None:
+            return hold_minutes / 60.0
+        if entry_dt is not None and exit_dt is not None:
+            return (exit_dt - entry_dt).total_seconds() / 3600.0
+        return None
+
+    def price_and_net_if_held_after_exit(symbol, entry_px, exit_dt, horizon_hours, rt_cost_bps):
+        entry_price = as_float(entry_px)
+        if exit_dt is None or entry_price is None or entry_price <= 0:
+            return not_obs, not_obs
+        horizon_dt = exit_dt + dt.timedelta(hours=int(horizon_hours))
+        if horizon_dt > NOW:
+            return "pending", "pending"
+        future_px, _future_source, _future_reason = future_price_for_symbol(symbol, horizon_dt)
+        if future_px is None:
+            return not_obs, not_obs
+        net_bps = ((future_px / entry_price) - 1.0) * 10000.0 - rt_cost_bps
+        return fmt_num(future_px, 10), fmt_num(net_bps, 6)
+
+    def post_min_hold_atr_diagnosis(row):
+        observable = [
+            row.get(f"would_have_been_better_{horizon}h")
+            for horizon in POST_MIN_HOLD_ATR_HORIZONS
+            if row.get(f"would_have_been_better_{horizon}h") in {"true", "false"}
+        ]
+        if not observable:
+            return "post_min_hold_atr_exit_not_observable"
+        if any(value == "true" for value in observable):
+            return "post_min_hold_atr_exit_better_to_hold"
+        return "post_min_hold_atr_exit_saved_loss"
+
+    post_min_hold_atr_exit_rows = []
+    for row in closed_roundtrip_rows:
+        symbol = row.get("symbol", not_obs)
+        exit_reason = flatten_value(row.get("exit_reason")).strip().lower()
+        if exit_reason != "atr_trailing":
+            continue
+        if not row_has_truthy_key(row, "swing_hold_position"):
+            continue
+        entry_dt = parse_dt_utc(row.get("entry_ts"))
+        exit_dt = parse_dt_utc(row.get("exit_ts"))
+        hold_hours = post_min_hold_hold_hours(row, entry_dt, exit_dt)
+        min_hold_hours = swing_required_hold_hours(row)
+        if hold_hours is None or min_hold_hours is None:
+            continue
+        hours_after_min_hold = hold_hours - min_hold_hours
+        if hold_hours < min_hold_hours or hours_after_min_hold > 6.0:
+            continue
+        realized_net_bps = first_observed(row.get("net_bps"), row.get("realized_net_bps"), not_obs)
+        price_after = {}
+        net_if_held = {}
+        better_if_held = {}
+        for horizon in POST_MIN_HOLD_ATR_HORIZONS:
+            price_value, net_value = price_and_net_if_held_after_exit(
+                symbol,
+                row.get("entry_px"),
+                exit_dt,
+                horizon,
+                swing_rt_cost_bps,
+            )
+            price_after[horizon] = price_value
+            net_if_held[horizon] = net_value
+            better_if_held[horizon] = better_to_hold_text(net_value, realized_net_bps)
+        post_row = {
+            "symbol": symbol,
+            "entry_ts": row.get("entry_ts", not_obs),
+            "exit_ts": row.get("exit_ts", not_obs),
+            "entry_px": row.get("entry_px", not_obs),
+            "exit_px": row.get("exit_px", not_obs),
+            "exit_reason": exit_reason,
+            "hold_hours": fmt_num(hold_hours, 6),
+            "min_hold_hours": fmt_num(min_hold_hours, 6),
+            "hours_after_min_hold": fmt_num(hours_after_min_hold, 6),
+            "realized_net_bps": flatten_value(realized_net_bps),
+            "realized_net_pnl_usdt": first_observed(row.get("net_pnl_usdt"), row.get("realized_net_pnl_usdt"), not_obs),
+            "price_at_exit": row.get("exit_px", not_obs),
+            "price_after_6h": price_after[6],
+            "price_after_12h": price_after[12],
+            "price_after_24h": price_after[24],
+            "net_bps_if_held_6h_after_exit": net_if_held[6],
+            "net_bps_if_held_12h_after_exit": net_if_held[12],
+            "net_bps_if_held_24h_after_exit": net_if_held[24],
+            "would_have_been_better_6h": better_if_held[6],
+            "would_have_been_better_12h": better_if_held[12],
+            "would_have_been_better_24h": better_if_held[24],
+            "f4_at_entry": flatten_value(first_nested_value_from_row(row, ("f4_volume_expansion", "f4"))),
+            "f5_at_entry": flatten_value(first_nested_value_from_row(row, ("f5_rsi_trend_confirm", "f5"))),
+            "dominant_factor": flatten_value(first_nested_value_from_row(row, ("dominant_factor",))),
+            "dominant_factor_contribution_pct": flatten_value(first_nested_value_from_row(row, ("dominant_factor_contribution_pct", "contribution_pct", "dominant_contribution_pct"))),
+        }
+        post_row["diagnosis"] = post_min_hold_atr_diagnosis(post_row)
+        post_min_hold_atr_exit_rows.append(post_row)
+
+    def post_min_hold_atr_aggregate_by_symbol(rows):
+        grouped = defaultdict(list)
+        for row in rows:
+            grouped[row.get("symbol") or not_obs].append(row)
+        out = []
+        for symbol, group_rows in sorted(grouped.items()):
+            payload = {
+                "symbol": symbol,
+                "sample_count": len(group_rows),
+                "avg_realized_net_bps": fmt_num(swing_avg_numeric_field(group_rows, "realized_net_bps"), 6),
+                "diagnosis_mix": json.dumps(dict(sorted(Counter(row.get("diagnosis") or not_obs for row in group_rows).items())), ensure_ascii=False, sort_keys=True),
+            }
+            for horizon in POST_MIN_HOLD_ATR_HORIZONS:
+                better_rows = [
+                    row for row in group_rows
+                    if row.get(f"would_have_been_better_{horizon}h") in {"true", "false"}
+                ]
+                better_count = sum(
+                    1 for row in better_rows
+                    if row.get(f"would_have_been_better_{horizon}h") == "true"
+                )
+                payload[f"observable_{horizon}h_count"] = len(better_rows)
+                payload[f"better_to_hold_{horizon}h_count"] = better_count
+                payload[f"better_to_hold_{horizon}h_rate"] = fmt_num(
+                    better_count / len(better_rows) if better_rows else None,
+                    6,
+                )
+                payload[f"avg_net_bps_if_held_{horizon}h_after_exit"] = fmt_num(
+                    swing_avg_numeric_field(group_rows, f"net_bps_if_held_{horizon}h_after_exit"),
+                    6,
+                )
+            out.append(payload)
+        return out
+
+    post_min_hold_atr_exit_outcomes_by_symbol = post_min_hold_atr_aggregate_by_symbol(post_min_hold_atr_exit_rows)
+    post_min_hold_atr_better_12_rows = [
+        row for row in post_min_hold_atr_exit_rows
+        if row.get("would_have_been_better_12h") in {"true", "false"}
+    ]
+    post_min_hold_atr_better_12_count = sum(
+        1 for row in post_min_hold_atr_better_12_rows
+        if row.get("would_have_been_better_12h") == "true"
+    )
+    post_min_hold_atr_better_12_rate = (
+        post_min_hold_atr_better_12_count / len(post_min_hold_atr_better_12_rows)
+        if post_min_hold_atr_better_12_rows
+        else None
+    )
+    if (
+        len(post_min_hold_atr_exit_rows) >= 3
+        and len(post_min_hold_atr_better_12_rows) >= 3
+        and post_min_hold_atr_better_12_rate is not None
+        and post_min_hold_atr_better_12_rate > 0.6
+    ):
+        add_issue(
+            "medium",
+            "post_min_hold_atr_exit_may_be_premature",
+            "Swing positions exited by ATR shortly after min-hold and most observable 12h hold outcomes would have been better.",
+            {
+                "sample_count": len(post_min_hold_atr_exit_rows),
+                "observable_12h_count": len(post_min_hold_atr_better_12_rows),
+                "would_have_been_better_12h_rate": fmt_num(post_min_hold_atr_better_12_rate, 6),
+                "by_symbol": post_min_hold_atr_exit_outcomes_by_symbol,
             },
         )
 
@@ -8234,6 +8400,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         ["exit_reason", "count", "early_exit_count", "avg_net_bps_at_exit", "avg_future_24h_net_bps_from_entry", "avg_future_48h_net_bps_from_entry", "better_to_hold_24h_count", "better_to_hold_24h_rate", "better_to_hold_48h_count", "better_to_hold_48h_rate"],
     )
     write_csv(
+        "summaries/post_min_hold_atr_exit_audit.csv",
+        post_min_hold_atr_exit_rows,
+        ["symbol", "entry_ts", "exit_ts", "entry_px", "exit_px", "exit_reason", "hold_hours", "min_hold_hours", "hours_after_min_hold", "realized_net_bps", "realized_net_pnl_usdt", "price_at_exit", "price_after_6h", "price_after_12h", "price_after_24h", "net_bps_if_held_6h_after_exit", "net_bps_if_held_12h_after_exit", "net_bps_if_held_24h_after_exit", "would_have_been_better_6h", "would_have_been_better_12h", "would_have_been_better_24h", "f4_at_entry", "f5_at_entry", "dominant_factor", "dominant_factor_contribution_pct", "diagnosis"],
+    )
+    write_csv(
+        "summaries/post_min_hold_atr_exit_outcomes_by_symbol.csv",
+        post_min_hold_atr_exit_outcomes_by_symbol,
+        ["symbol", "sample_count", "avg_realized_net_bps", "avg_net_bps_if_held_6h_after_exit", "avg_net_bps_if_held_12h_after_exit", "avg_net_bps_if_held_24h_after_exit", "observable_6h_count", "better_to_hold_6h_count", "better_to_hold_6h_rate", "observable_12h_count", "better_to_hold_12h_count", "better_to_hold_12h_rate", "observable_24h_count", "better_to_hold_24h_count", "better_to_hold_24h_rate", "diagnosis_mix"],
+    )
+    write_csv(
         "summaries/factor_contribution_audit.csv",
         factor_contribution_rows,
         ["ts_utc", "run_id", "symbol", "final_score", "alpha6_score", "raw_factors", "z_factors", "effective_factor_weights", "contribution_f1_mom_5d", "contribution_f2_mom_20d", "contribution_f3_vol_adj_ret", "contribution_f4_volume_expansion", "contribution_f5_rsi_trend_confirm", "dominant_factor", "dominant_factor_contribution_pct", "router_action", "router_reason", *[f"forward_{int(h)}h_net_bps" for h in label_horizons]],
@@ -9253,6 +9429,46 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         item.get("code") == "swing_soft_exit_before_min_hold_historical_or_unknown"
         for item in issues
     )
+    post_min_hold_atr_exit_count = len(post_min_hold_atr_exit_rows)
+    post_min_hold_atr_better_6_count = sum(
+        1 for row in post_min_hold_atr_exit_rows
+        if row.get("would_have_been_better_6h") == "true"
+    )
+    post_min_hold_atr_better_24_rows = [
+        row for row in post_min_hold_atr_exit_rows
+        if row.get("would_have_been_better_24h") in {"true", "false"}
+    ]
+    post_min_hold_atr_better_24_count = sum(
+        1 for row in post_min_hold_atr_better_24_rows
+        if row.get("would_have_been_better_24h") == "true"
+    )
+    post_min_hold_atr_better_6_text = (
+        f"yes / {post_min_hold_atr_better_6_count}"
+        if post_min_hold_atr_better_6_count
+        else "no"
+    )
+    post_min_hold_atr_better_12_text = (
+        f"{fmt_num(post_min_hold_atr_better_12_rate, 6)} ({post_min_hold_atr_better_12_count}/{len(post_min_hold_atr_better_12_rows)})"
+        if post_min_hold_atr_better_12_rate is not None
+        else not_obs
+    )
+    post_min_hold_atr_better_24_text = (
+        f"{fmt_num(post_min_hold_atr_better_24_count / len(post_min_hold_atr_better_24_rows), 6)} ({post_min_hold_atr_better_24_count}/{len(post_min_hold_atr_better_24_rows)})"
+        if post_min_hold_atr_better_24_rows
+        else not_obs
+    )
+    post_min_hold_atr_by_symbol_text = (
+        "; ".join(
+            f"{row.get('symbol')}: count={row.get('sample_count')}, better_12h_rate={row.get('better_to_hold_12h_rate')}, avg_realized_net_bps={row.get('avg_realized_net_bps')}"
+            for row in post_min_hold_atr_exit_outcomes_by_symbol[:12]
+        )
+        if post_min_hold_atr_exit_outcomes_by_symbol
+        else not_obs
+    )
+    post_min_hold_atr_medium_issue_present = any(
+        item.get("code") == "post_min_hold_atr_exit_may_be_premature"
+        for item in issues
+    )
     high_score_block_category_counts = dict(sorted(Counter(row.get("high_score_block_category") or not_obs for row in high_score_blocked_rows).items()))
     high_score_recent_24h_rows = [
         row for row in high_score_blocked_rows
@@ -9651,6 +9867,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "swing_early_exit_better_to_hold_24h_rate": swing_early_exit_better_24_rate if swing_early_exit_better_24_rate is not None else not_obs,
         "swing_early_exit_medium_issue": bool(swing_early_exit_medium_issue_present),
         "swing_early_exit_historical_or_unknown_issue": bool(swing_early_exit_historical_or_unknown_issue_present),
+        "post_min_hold_atr_exit_audit_rows": len(post_min_hold_atr_exit_rows),
+        "post_min_hold_atr_exit_count": post_min_hold_atr_exit_count,
+        "post_min_hold_atr_better_to_hold_12h_rate": post_min_hold_atr_better_12_rate if post_min_hold_atr_better_12_rate is not None else not_obs,
+        "post_min_hold_atr_better_to_hold_12h_count": post_min_hold_atr_better_12_count,
+        "post_min_hold_atr_observable_12h_count": len(post_min_hold_atr_better_12_rows),
+        "post_min_hold_atr_medium_issue": bool(post_min_hold_atr_medium_issue_present),
         "high_score_blocked_target_count": len(high_score_blocked_rows),
         "high_score_blocked_labelable_target_count": len(high_score_labelable_rows),
         "high_score_blocked_non_entry_management_count": len(high_score_non_entry_management_rows),
@@ -10354,6 +10576,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- medium issue present: {'yes' if swing_early_exit_medium_issue_present else 'no'}",
         f"- historical/unknown fix-state issue present: {'yes' if swing_early_exit_historical_or_unknown_issue_present else 'no'}",
         "",
+        "## Post-min-hold ATR exit audit",
+        f"- just-after-min-hold ATR exits: {post_min_hold_atr_exit_count}",
+        f"- better if held 6h after exit: {post_min_hold_atr_better_6_text}",
+        f"- better_to_hold_12h_rate: {post_min_hold_atr_better_12_text}",
+        f"- better_to_hold_24h_rate: {post_min_hold_atr_better_24_text}",
+        f"- by_symbol: {post_min_hold_atr_by_symbol_text}",
+        f"- medium issue present: {'yes' if post_min_hold_atr_medium_issue_present else 'no'}",
+        "- output: summaries/post_min_hold_atr_exit_audit.csv and summaries/post_min_hold_atr_exit_outcomes_by_symbol.csv",
+        "",
         "## PROTECT SOL exception shadow",
         f"- experiment_name: {flatten_value(find_config_value(effective_data, 'protect_sol_exception_experiment_name') or 'protect_sol_exception_v1')}",
         f"- shadow_only: {str(config_bool('protect_sol_exception_enabled_shadow_only', True)).lower()}",
@@ -10778,6 +11009,7 @@ sanity = {
     "contains raw/reports/quant_lab_requests.jsonl": (OUT / "raw/reports/quant_lab_requests.jsonl").is_file(),
     "contains summaries/probe_lifecycle_audit.csv": (OUT / "summaries/probe_lifecycle_audit.csv").is_file(),
     "contains summaries/open_probe_watch.csv": (OUT / "summaries/open_probe_watch.csv").is_file(),
+    "contains summaries/post_min_hold_atr_exit_audit.csv": (OUT / "summaries/post_min_hold_atr_exit_audit.csv").is_file(),
     "contains summaries/quant_lab_compliance.csv": (OUT / "summaries/quant_lab_compliance.csv").is_file(),
     "contains summaries/quant_lab_permission_audit.csv": (OUT / "summaries/quant_lab_permission_audit.csv").is_file(),
     "contains summaries/quant_lab_mode_audit.csv": (OUT / "summaries/quant_lab_mode_audit.csv").is_file(),
@@ -10815,6 +11047,7 @@ failure_check_names = [
     "contains raw/reports/quant_lab_requests.jsonl",
     "contains summaries/probe_lifecycle_audit.csv",
     "contains summaries/open_probe_watch.csv",
+    "contains summaries/post_min_hold_atr_exit_audit.csv",
     "contains summaries/quant_lab_compliance.csv",
     "contains summaries/quant_lab_permission_audit.csv",
     "contains summaries/quant_lab_mode_audit.csv",

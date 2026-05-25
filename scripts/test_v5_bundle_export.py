@@ -2016,6 +2016,96 @@ def fixture_swing_early_exit_root(root):
     return run_id
 
 
+def fixture_post_min_hold_atr_exit_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    window_end = int(now.timestamp())
+    run_id = now.strftime("%Y%m%d_%H")
+    entry_ts = window_end - 60 * 3600
+    exit_ts = entry_ts + int(24.1 * 3600)
+
+    write_text(
+        root / "configs/live_prod.yaml",
+        "execution:\n"
+        "  swing_hold_enabled: true\n"
+        "  swing_min_hold_hours: 24\n"
+        "  fee_bps: 0\n"
+        "  slippage_bps: 0\n",
+    )
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    run_dir = root / "reports/runs/prod" / run_id
+    symbols = ("BNB/USDT", "ETH/USDT", "SOL/USDT")
+    router_decisions = []
+    trade_lines = ["ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,raw_meta"]
+    entry_prices = {"BNB/USDT": 100.0, "ETH/USDT": 200.0, "SOL/USDT": 50.0}
+    exit_prices = {"BNB/USDT": 99.0, "ETH/USDT": 198.0, "SOL/USDT": 49.5}
+    future_prices = {
+        "BNB/USDT": (101.0, 102.0, 103.0),
+        "ETH/USDT": (202.0, 204.0, 206.0),
+        "SOL/USDT": (50.5, 51.0, 52.0),
+    }
+    for symbol in symbols:
+        router_decisions.append({
+            "symbol": symbol,
+            "action": "create",
+            "intent": "OPEN_LONG",
+            "side": "buy",
+            "reason": "normal_entry",
+            "entry_reason": "normal_entry",
+            "swing_hold_position": True,
+            "swing_min_hold_hours": 24,
+            "f4_volume_expansion": 0.62,
+            "f5_rsi_trend_confirm": 0.58,
+            "dominant_factor": "f3_vol_adj_ret",
+            "dominant_factor_contribution_pct": 0.7,
+        })
+        router_decisions.append({
+            "symbol": symbol,
+            "action": "create",
+            "intent": "CLOSE_LONG",
+            "side": "sell",
+            "reason": "atr_trailing",
+            "source_reason": "atr_trailing",
+            "exit_priority": "soft",
+            "min_hold_hours": 24,
+        })
+        entry_px = entry_prices[symbol]
+        exit_px = exit_prices[symbol]
+        raw_meta = '{"swing_hold_position": true, "swing_min_hold_hours": 24}'.replace('"', '""')
+        trade_lines.append(f"{iso(entry_ts)},{run_id},{symbol},OPEN_LONG,buy,1,{entry_px},{entry_px},0,\"{raw_meta}\"")
+        trade_lines.append(f"{iso(exit_ts)},{run_id},{symbol},CLOSE_LONG,sell,1,{exit_px},{exit_px},0,")
+        write_ohlcv_cache(
+            root,
+            symbol,
+            [
+                (exit_ts + 6 * 3600, future_prices[symbol][0]),
+                (exit_ts + 12 * 3600, future_prices[symbol][1]),
+                (exit_ts + 24 * 3600, future_prices[symbol][2]),
+            ],
+        )
+
+    write_json(run_dir / "decision_audit.json", {
+        "now_ts": window_end + 15,
+        "window_end_ts": window_end,
+        "current_level": "PROTECT",
+        "regime": "Trending",
+        "router_decisions": router_decisions,
+    })
+    write_text(run_dir / "trades.csv", "\n".join(trade_lines) + "\n")
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id})
+    return run_id
+
+
 def fixture_swing_post_fix_early_exit_root(root):
     now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
     window_end = int(now.timestamp())
@@ -3769,6 +3859,54 @@ def main():
             assert raw_payload["entry_router_decision"]["swing_hold_position"] == "not_observable", raw_payload
             nested_router = json.loads(json.loads(raw_payload["entry_router_decision"]["raw_json"])["raw_json"])
             assert nested_router["swing_hold_position"] is True, raw_payload
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-post-min-hold-atr-exit-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_post_min_hold_atr_exit_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/post_min_hold_atr_exit_audit.csv")).read().decode().splitlines()))
+                by_symbol = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/post_min_hold_atr_exit_outcomes_by_symbol.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert len(rows) == 3, rows
+            bnb = next(row for row in rows if row["symbol"] == "BNB/USDT")
+            assert bnb["exit_reason"] == "atr_trailing", bnb
+            assert bnb["hold_hours"] == "24.1", bnb
+            assert bnb["min_hold_hours"] == "24", bnb
+            assert bnb["hours_after_min_hold"] == "0.1", bnb
+            assert bnb["realized_net_bps"] == "-100", bnb
+            assert bnb["price_after_6h"] == "101", bnb
+            assert bnb["price_after_12h"] == "102", bnb
+            assert bnb["price_after_24h"] == "103", bnb
+            assert bnb["net_bps_if_held_12h_after_exit"] == "200", bnb
+            assert bnb["would_have_been_better_12h"] == "true", bnb
+            assert bnb["f4_at_entry"] == "0.62", bnb
+            assert bnb["f5_at_entry"] == "0.58", bnb
+            assert bnb["dominant_factor"] == "f3_vol_adj_ret", bnb
+            assert bnb["dominant_factor_contribution_pct"] == "0.7", bnb
+            assert bnb["diagnosis"] == "post_min_hold_atr_exit_better_to_hold", bnb
+            by_symbol_map = {row["symbol"]: row for row in by_symbol}
+            assert by_symbol_map["BNB/USDT"]["sample_count"] == "1", by_symbol
+            assert by_symbol_map["BNB/USDT"]["better_to_hold_12h_rate"] == "1", by_symbol
+            medium_issues = [
+                item for item in issues["issues"]
+                if item.get("severity") == "medium" and item.get("code") == "post_min_hold_atr_exit_may_be_premature"
+            ]
+            assert len(medium_issues) == 1, issues
+            assert window["post_min_hold_atr_exit_audit_rows"] == 3, window
+            assert window["post_min_hold_atr_exit_count"] == 3, window
+            assert window["post_min_hold_atr_better_to_hold_12h_rate"] == 1.0, window
+            assert window["post_min_hold_atr_medium_issue"] is True, window
+            assert "## Post-min-hold ATR exit audit" in readme, readme
+            assert "just-after-min-hold ATR exits: 3" in readme, readme
+            assert "better_to_hold_12h_rate: 1 (3/3)" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
