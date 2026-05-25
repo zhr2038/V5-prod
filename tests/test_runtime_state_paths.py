@@ -62,6 +62,47 @@ def test_position_builder_resolves_default_state_path_from_project_root(monkeypa
     assert builder.state_file == (tmp_path / "reports" / "position_builder_state.json").resolve()
 
 
+def test_position_builder_records_utc_fill_time(tmp_path: Path) -> None:
+    state_path = tmp_path / "position_builder_state.json"
+    builder = position_builder.PositionBuilder(state_path=str(state_path))
+
+    notional = builder.get_build_notional("BTC/USDT", 100.0, 50_000.0, [49_000.0, 50_000.0])
+
+    assert notional == 30.0
+    filled_time = builder.position_states["BTC/USDT"].filled_time
+    assert filled_time is not None
+    assert filled_time.tzinfo is not None
+    assert filled_time.utcoffset() == timedelta(0)
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    assert payload["BTC/USDT"]["filled_time"].endswith("+00:00")
+
+
+def test_position_builder_normalizes_legacy_naive_fill_time(tmp_path: Path) -> None:
+    state_path = tmp_path / "position_builder_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "BTC/USDT": {
+                    "stage": 0,
+                    "target_pct": 0.3,
+                    "filled": True,
+                    "filled_notional": 30.0,
+                    "filled_price": 50_000.0,
+                    "filled_time": "2026-04-26T01:00:00",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    builder = position_builder.PositionBuilder(state_path=str(state_path))
+
+    filled_time = builder.position_states["BTC/USDT"].filled_time
+    assert filled_time is not None
+    assert filled_time.tzinfo is not None
+    assert filled_time.utcoffset() == timedelta(0)
+
+
 def test_highest_price_tracker_resolves_default_state_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(highest_px_tracker, "PROJECT_ROOT", tmp_path)
     tracker = highest_px_tracker.HighestPriceTracker()

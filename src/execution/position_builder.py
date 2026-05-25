@@ -5,7 +5,7 @@ Position Builder - 分批建仓系统
 
 from dataclasses import dataclass
 from typing import Dict, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 
@@ -55,6 +55,25 @@ class PositionBuilder:
         if not path.is_absolute():
             path = (PROJECT_ROOT / path).resolve()
         return path
+
+    @staticmethod
+    def _utc_now() -> datetime:
+        return datetime.now(timezone.utc)
+
+    @staticmethod
+    def _parse_time(value: object) -> Optional[datetime]:
+        try:
+            raw = str(value or "").strip()
+            if not raw:
+                return None
+            if raw.endswith("Z"):
+                raw = raw[:-1] + "+00:00"
+            parsed = datetime.fromisoformat(raw)
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except Exception:
+            return None
     
     def _load_state(self):
         """加载建仓状态"""
@@ -69,7 +88,7 @@ class PositionBuilder:
                             filled=state['filled'],
                             filled_notional=state['filled_notional'],
                             filled_price=state['filled_price'],
-                            filled_time=datetime.fromisoformat(state['filled_time']) if state['filled_time'] else None
+                            filled_time=self._parse_time(state.get('filled_time'))
                         )
             except Exception:
                 pass
@@ -122,7 +141,7 @@ class PositionBuilder:
         if current_stage > 0:
             last_fill_time = self._get_last_fill_time(symbol)
             if last_fill_time:
-                hours_since = (datetime.now() - last_fill_time).total_seconds() / 3600
+                hours_since = (self._utc_now() - last_fill_time).total_seconds() / 3600
                 if hours_since > self.max_stage_interval_hours:
                     # 超时，强制完成建仓
                     self._complete_position(symbol, current_stage, target_notional, current_price)
@@ -184,7 +203,7 @@ class PositionBuilder:
             filled=True,
             filled_notional=notional,
             filled_price=price,
-            filled_time=datetime.now()
+            filled_time=self._utc_now()
         )
         self._save_state()
     
