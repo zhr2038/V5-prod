@@ -11,6 +11,9 @@ from src.monitoring.api_telemetry import classify_api_status, is_rate_limited, r
 from .market_data_provider import MarketDataProvider
 
 
+QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "BTC", "ETH", "OKB")
+
+
 class OKXCCXTProvider(MarketDataProvider):
     """OKX spot data provider.
 
@@ -137,7 +140,18 @@ class OKXCCXTProvider(MarketDataProvider):
                 return market_id
         except Exception:
             pass
-        return str(symbol or "").replace("/", "-").strip()
+        raw = str(symbol or "").strip().upper().replace("_", "-").replace("/", "-")
+        if not raw:
+            return ""
+        if ":" in raw:
+            raw = raw.rsplit(":", 1)[-1].strip()
+        if "-" in raw:
+            parts = [part for part in raw.split("-") if part]
+            return "-".join(parts) if parts else raw
+        for quote in QUOTE_SUFFIXES:
+            if raw.endswith(quote) and len(raw) > len(quote):
+                return f"{raw[:-len(quote)]}-{quote}"
+        return raw
 
     def _fetch_history_candles(
         self,
