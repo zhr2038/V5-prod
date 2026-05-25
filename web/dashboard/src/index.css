@@ -1414,31 +1414,31 @@ body {
   }
 
   .material-surface .text-amber-300,
-  .material-surface .text-[var(--accent-2)],
+  .material-surface .text-\[var\(--accent-2\)\],
   .liquid-glass .text-amber-300,
-  .liquid-glass .text-[var(--accent-2)],
+  .liquid-glass .text-\[var\(--accent-2\)\],
   .liquid-glass-thick .text-amber-300,
-  .liquid-glass-thick .text-[var(--accent-2)],
+  .liquid-glass-thick .text-\[var\(--accent-2\)\],
   .liquid-glass-thin .text-amber-300,
-  .liquid-glass-thin .text-[var(--accent-2)],
+  .liquid-glass-thin .text-\[var\(--accent-2\)\],
   .liquid-glass-inset .text-amber-300,
-  .liquid-glass-inset .text-[var(--accent-2)] {
+  .liquid-glass-inset .text-\[var\(--accent-2\)\] {
     color: #996317 !important;
   }
 
-  .material-surface .text-[var(--accent-3)],
-  .liquid-glass .text-[var(--accent-3)],
-  .liquid-glass-thick .text-[var(--accent-3)],
-  .liquid-glass-thin .text-[var(--accent-3)],
-  .liquid-glass-inset .text-[var(--accent-3)] {
+  .material-surface .text-\[var\(--accent-3\)\],
+  .liquid-glass .text-\[var\(--accent-3\)\],
+  .liquid-glass-thick .text-\[var\(--accent-3\)\],
+  .liquid-glass-thin .text-\[var\(--accent-3\)\],
+  .liquid-glass-inset .text-\[var\(--accent-3\)\] {
     color: #285b94 !important;
   }
 
-  .material-surface .text-[var(--accent)],
-  .liquid-glass .text-[var(--accent)],
-  .liquid-glass-thick .text-[var(--accent)],
-  .liquid-glass-thin .text-[var(--accent)],
-  .liquid-glass-inset .text-[var(--accent)] {
+  .material-surface .text-\[var\(--accent\)\],
+  .liquid-glass .text-\[var\(--accent\)\],
+  .liquid-glass-thick .text-\[var\(--accent\)\],
+  .liquid-glass-thin .text-\[var\(--accent\)\],
+  .liquid-glass-inset .text-\[var\(--accent\)\] {
     color: #0d9878 !important;
   }
 
