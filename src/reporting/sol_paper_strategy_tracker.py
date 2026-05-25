@@ -37,6 +37,7 @@ SOL_SYMBOL = "SOL/USDT"
 ETH_SYMBOL = "ETH/USDT"
 ETH_F3_DOMINANT_STRATEGY_ID = "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1"
 ETH_F3_DOMINANT_MIN_48H_COMPLETE_COUNT = 30
+ETH_F3_ALPHA6_NOT_BUY_REASON = "eth_f3_alpha6_side_not_buy_no_new_entry"
 ETH_F3_DOMINANT_LIVE_BLOCK_REASONS = [
     "cost_source_not_actual_or_mixed",
     "f3_global_evidence_negative",
@@ -1441,7 +1442,7 @@ def _eth_f3_proposal_to_spec(row: Mapping[str, Any]) -> Optional[dict[str, Any]]
         "symbol": ETH_SYMBOL,
         "primary_horizon_hours": _proposal_horizon_hours(row) or 48,
         "require_protect_level": False,
-        "require_alpha6_buy": False,
+        "require_alpha6_buy": True,
         "require_no_cooldown": False,
         "min_f4_volume_expansion": None,
         "extra_live_block_reasons": list(ETH_F3_DOMINANT_LIVE_BLOCK_REASONS),
@@ -2458,6 +2459,8 @@ def _condition_block_reason(
     if _spec_bool(spec, "require_no_cooldown", True) and bool(diagnostics.get("cooldown_active")):
         return "cooldown_active"
     if _spec_bool(spec, "require_alpha6_buy", True) and not _is_alpha6_buy(diagnostics.get("alpha6_side")):
+        if str(spec.get("strategy_id") or "") == ETH_F3_DOMINANT_STRATEGY_ID:
+            return ETH_F3_ALPHA6_NOT_BUY_REASON
         return "alpha6_not_buy"
     min_f4 = _normalize_float(spec.get("min_f4_volume_expansion"))
     f4 = _normalize_float(diagnostics.get("f4_volume_expansion"))

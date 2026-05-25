@@ -788,7 +788,7 @@ def test_paper_strategy_tracker_tracks_eth_f3_dominant_48h_candidate(tmp_path: P
             "strategy_candidate": "f3_dominant_entry",
             "target_weight_raw": "0.10",
             "risk_level": "NORMAL",
-            "alpha6_side": "sell",
+            "alpha6_side": "buy",
             "f4_volume_expansion": "-0.2",
             "regime_state": "Trending",
         },
@@ -844,6 +844,59 @@ def test_paper_strategy_tracker_tracks_eth_f3_dominant_48h_candidate(tmp_path: P
     assert eth["paper_pnl_bps_48h"] == "570.0"
     assert eth["paper_pnl_bps"] == "570.0"
     assert "f3_global_evidence_negative" in eth["live_block_reason"]
+
+
+def test_paper_strategy_tracker_blocks_eth_f3_when_alpha6_side_not_buy(tmp_path: Path) -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_eth_f3_alpha6_sell"
+    _write_single_sol_candidate(
+        run_dir,
+        run_id="r_eth_f3_alpha6_sell",
+        overrides={
+            "candidate_id": "eth_f3_sell",
+            "symbol": "ETH/USDT",
+            "strategy_candidate": "f3_dominant_entry",
+            "final_decision": "no_order",
+            "target_weight_raw": "0.10",
+            "risk_level": "NORMAL",
+            "alpha6_side": "sell",
+            "f4_volume_expansion": "0.4",
+            "regime_state": "Trending",
+        },
+    )
+    _write_paper_strategy_proposals(
+        tmp_path / "reports",
+        [
+            {
+                "proposal_id": "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+                "strategy_candidate": "v5.f3_dominant_entry",
+                "symbol": "ETH-USDT",
+                "recommended_mode": "paper",
+                "suggested_horizon": "48h",
+            }
+        ],
+    )
+
+    update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_eth_f3_alpha6_sell", start_s),
+        market_data_1h={"ETH/USDT": _series("ETH/USDT", start_s, {0: 100.0, 48: 106.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    eth = next(row for row in runs if row["strategy_id"] == "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1")
+    assert eth["would_enter"] == "False"
+    assert eth["alpha6_side"] == "sell"
+    assert eth["final_decision"] == "heartbeat"
+    assert eth["no_sample_reason"] == "eth_f3_alpha6_side_not_buy_no_new_entry"
+    assert eth["label_status"] == "heartbeat"
+
+    daily = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_daily.csv")
+    eth_daily = next(row for row in daily if row["strategy_id"] == "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1")
+    assert eth_daily["entry_count"] == "0"
 
 
 def test_paper_strategy_tracker_blocks_eth_f3_when_risk_off(tmp_path: Path) -> None:
