@@ -29,8 +29,8 @@ def _load_env_file(env_path: Path):
     try:
         if not env_path.exists():
             return
-        for line in env_path.read_text(encoding='utf-8', errors='ignore').splitlines():
-            line = line.strip()
+        for raw_line in env_path.read_text(encoding='utf-8', errors='ignore').splitlines():
+            line = raw_line.strip()
             if not line or line.startswith('#') or '=' not in line:
                 continue
             k, v = line.split('=', 1)

@@ -73,8 +73,8 @@ def rollup_day(day_ymd: str, snapshots_dir: Path, out_dir: Path) -> Path:
 
     by_symbol: Dict[str, List[Dict[str, Any]]] = {}
     if path.exists():
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
             if not line:
                 continue
             try:

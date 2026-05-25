@@ -54,6 +54,7 @@ def _get_unit_load_state(unit: str) -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
     except Exception:
         return ""
@@ -79,8 +80,8 @@ def load_env_file(path: Path) -> None:
     if not path.exists():
         return
 
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = line.strip()
+    for raw_line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
@@ -269,6 +270,7 @@ class HealthChecker:
                     capture_output=True,
                     text=True,
                     timeout=5,
+                    check=False,
                 )
                 props, last_trigger_text, last_trigger_at = self._parse_timer_show_output(result.stdout)
                 load_state = props.get("LoadState", "")

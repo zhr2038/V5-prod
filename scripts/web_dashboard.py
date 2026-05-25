@@ -1408,6 +1408,7 @@ def _run_systemctl_user(*args: str, timeout: int = 5) -> subprocess.CompletedPro
         capture_output=True,
         text=True,
         timeout=timeout,
+        check=False,
     )
 
 
@@ -1667,8 +1668,8 @@ def _load_avg_cost_from_fills(symbol: str, current_qty: float, reports_dir: Opti
     quote_symbol = inst_id.split('-', 1)[1].upper() if '-' in inst_id else 'USDT'
     queue: List[List[float]] = []
 
-    for side, fill_px, fill_sz, fill_notional, fee, fee_ccy in rows:
-        side = str(side or '').lower()
+    for raw_side, fill_px, fill_sz, fill_notional, fee, fee_ccy in rows:
+        side = str(raw_side or '').lower()
         qty = float(fill_sz or 0.0)
         if qty <= 0:
             continue
@@ -3759,9 +3760,9 @@ def api_positions():
             rows = cur.fetchall()
             conn.close()
 
-            for symbol_raw, qty, avg_px, last_mark_px in rows:
+            for raw_symbol, qty, avg_px, last_mark_px in rows:
                 try:
-                    symbol_raw = str(symbol_raw or '')
+                    symbol_raw = str(raw_symbol or '')
                     base = symbol_raw.split('/')[0] if '/' in symbol_raw else symbol_raw.split('-')[0]
                     if base == 'USDT' or base in hidden_symbols:
                         continue
@@ -4799,8 +4800,8 @@ def _load_equity_points(limit: int = 800, runtime_paths: Optional[DashboardRunti
         eq_file = run_dir / 'equity.jsonl'
         try:
             with open(eq_file, 'r', encoding='utf-8', errors='ignore') as f:
-                for line in f:
-                    line = line.strip()
+                for raw_line in f:
+                    line = raw_line.strip()
                     if not line:
                         continue
                     try:

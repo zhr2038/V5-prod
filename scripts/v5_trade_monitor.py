@@ -396,8 +396,8 @@ def _load_telegram_settings(paths: MonitorPaths) -> tuple[str | None, str]:
     if not paths.env_path.exists():
         return bot_token, chat_id
 
-    for line in paths.env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = line.strip()
+    for raw_line in paths.env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)

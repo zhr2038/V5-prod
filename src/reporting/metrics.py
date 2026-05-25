@@ -39,8 +39,8 @@ def read_equity_jsonl(path: str) -> List[Dict[str, Any]]:
     if not p.exists():
         return []
     out = []
-    for idx, line in enumerate(p.read_text(encoding="utf-8").splitlines()):
-        line = line.strip()
+    for idx, raw_line in enumerate(p.read_text(encoding="utf-8").splitlines()):
+        line = raw_line.strip()
         if not line:
             continue
         try:

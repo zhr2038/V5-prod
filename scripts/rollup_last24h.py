@@ -72,8 +72,8 @@ def _read_equity_jsonl(path: Path) -> List[Dict]:
     if not path.exists():
         return []
     rows: List[Dict] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         try:

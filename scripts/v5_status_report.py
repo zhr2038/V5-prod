@@ -244,6 +244,7 @@ def _unit_is_active(unit: str) -> bool:
         capture_output=True,
         text=True,
         timeout=5,
+        check=False,
     )
     return result.returncode == 0
 
@@ -257,6 +258,7 @@ def _get_unit_load_state(unit: str) -> str:
         capture_output=True,
         text=True,
         timeout=5,
+        check=False,
     )
     for line in result.stdout.splitlines():
         if line.startswith("LoadState="):

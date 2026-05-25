@@ -4244,8 +4244,8 @@ class V5Pipeline:
         history_rows: List[Dict[str, Any]] = []
         if history_path.exists():
             try:
-                for line in history_path.read_text(encoding="utf-8").splitlines():
-                    line = line.strip()
+                for raw_line in history_path.read_text(encoding="utf-8").splitlines():
+                    line = raw_line.strip()
                     if not line:
                         continue
                     row = json.loads(line)

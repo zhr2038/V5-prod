@@ -422,11 +422,11 @@ def _load_positions_snapshot(
         try:
             with open(legacy_portfolio_path) as f:
                 portfolio = json.load(f)
-            for sym, data in (portfolio.get('positions', {}) or {}).items():
+            for raw_sym, data in (portfolio.get('positions', {}) or {}).items():
                 qty = float((data or {}).get('quantity', 0.0) or 0.0)
                 if qty <= 0:
                     continue
-                sym = str(sym or '')
+                sym = str(raw_sym or '')
                 if not sym:
                     continue
                 positions[sym] = {
@@ -689,6 +689,7 @@ def get_live_execution_service_state(service_unit: str) -> str:
         capture_output=True,
         text=True,
         timeout=10,
+        check=False,
     )
     return (st.stdout or '').strip().lower()
 
@@ -714,7 +715,7 @@ def trigger_live_execution_service(service_unit: str):
             }
 
         cmd = ['systemctl', '--user', 'start', service_unit]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=45, check=False)
         ok = proc.returncode == 0
         return {
             'ok': ok,
@@ -1115,12 +1116,12 @@ def _read_recent_event_stats(log_path: Path, lookback: int = 12):
             return items
         with log_path.open('r', encoding='utf-8', errors='ignore') as f:
             lines = f.readlines()[-max(1, int(lookback)):]
-        for ln in lines:
-            ln = ln.strip()
-            if not ln:
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line:
                 continue
             try:
-                items.append(json.loads(ln))
+                items.append(json.loads(line))
             except Exception:
                 continue
     except Exception:

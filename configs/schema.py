@@ -1918,11 +1918,11 @@ class AppConfig(BaseModel):
     @classmethod
     def _symbols_format(cls, v: List[str]) -> List[str]:
         out = []
-        for s in v or []:
-            s = str(s)
-            if "/" not in s:
-                raise ValueError(f"invalid symbol format: {s}")
-            out.append(s)
+        for raw_symbol in v or []:
+            symbol = str(raw_symbol)
+            if "/" not in symbol:
+                raise ValueError(f"invalid symbol format: {symbol}")
+            out.append(symbol)
         if not out:
             raise ValueError("symbols cannot be empty")
         return out
