@@ -223,23 +223,19 @@ def _load_pending_rows(
     as_of_ms: int,
     symbol: str | None = None,
 ) -> pd.DataFrame:
-    params: list[object] = [int(as_of_ms) - 24 * ONE_HOUR_MS]
-    symbol_filter = ""
-    if symbol:
-        symbol_filter = "AND symbol = ?"
-        params.append(str(symbol))
-
-    query = f"""
+    symbol_param = str(symbol) if symbol else None
+    params: list[object] = [int(as_of_ms) - 24 * ONE_HOUR_MS, symbol_param, symbol_param]
+    query = """
         SELECT id, timestamp, symbol
         FROM feature_snapshots
         WHERE timestamp <= ?
+          AND (? IS NULL OR symbol = ?)
           AND (
                 label_filled != 1
              OR future_return_6h IS NULL
              OR future_return_12h IS NULL
              OR future_return_24h IS NULL
           )
-          {symbol_filter}
         ORDER BY symbol, timestamp
     """
     return pd.read_sql_query(query, conn, params=params)

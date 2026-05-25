@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pandas as pd
@@ -60,3 +61,40 @@ def test_compute_future_returns_sorts_unsorted_candles_before_searchsorted() -> 
     assert out.loc[0, "future_return_6h"] == 0.10
     assert out.loc[0, "future_return_12h"] == 0.20
     assert out.loc[0, "future_return_24h"] == 0.30
+
+
+def test_load_pending_rows_binds_symbol_filter(tmp_path: Path) -> None:
+    db_path = tmp_path / "ml.sqlite"
+    as_of_ms = 1_710_086_400_000
+    mature_ts_ms = as_of_ms - 25 * multihorizon.ONE_HOUR_MS
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE feature_snapshots (
+                id INTEGER PRIMARY KEY,
+                timestamp INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                label_filled INTEGER DEFAULT 0,
+                future_return_6h REAL,
+                future_return_12h REAL,
+                future_return_24h REAL
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO feature_snapshots (
+                id, timestamp, symbol, label_filled, future_return_6h, future_return_12h, future_return_24h
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (1, mature_ts_ms, "BTC/USDT", 0, None, None, None),
+                (2, mature_ts_ms, "ETH/USDT", 0, None, None, None),
+            ],
+        )
+
+        rows = multihorizon._load_pending_rows(conn, as_of_ms=as_of_ms, symbol="BTC/USDT' OR 1=1 --")
+        assert rows.empty
+
+        rows = multihorizon._load_pending_rows(conn, as_of_ms=as_of_ms, symbol="BTC/USDT")
+        assert rows["id"].tolist() == [1]
