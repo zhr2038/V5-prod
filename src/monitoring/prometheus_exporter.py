@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -332,19 +332,20 @@ def _append_fill_metrics(builder: PrometheusTextBuilder, fills_db: Path) -> None
         )
 
 
+def _run_dir_sort_epoch(path: Path) -> float:
+    try:
+        return datetime.strptime(path.name, "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp()
+    except Exception:
+        return (path / "trades.csv").stat().st_mtime
+
+
 def _find_latest_run_dir(runs_dir: Path) -> Optional[Path]:
     if not runs_dir.exists():
         return None
     candidates = [path for path in runs_dir.iterdir() if path.is_dir() and (path / "trades.csv").exists()]
     if not candidates:
         return None
-    def _sort_epoch(path: Path) -> float:
-        try:
-            return datetime.strptime(path.name, "%Y%m%d_%H").timestamp()
-        except Exception:
-            return (path / "trades.csv").stat().st_mtime
-
-    candidates.sort(key=_sort_epoch, reverse=True)
+    candidates.sort(key=_run_dir_sort_epoch, reverse=True)
     return candidates[0]
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -231,3 +232,17 @@ def test_render_prometheus_metrics_prefers_latest_run_by_run_id_epoch_when_trade
     )
 
     assert 'v5_latest_run_realized_pnl_usdt{run_id="20260416_01"} 1.1' in body
+
+
+def test_prometheus_latest_run_dir_sort_epoch_uses_utc_run_id(tmp_path: Path) -> None:
+    run_dir = tmp_path / "20260416_01"
+    run_dir.mkdir()
+    (run_dir / "trades.csv").write_text("ts,run_id\n", encoding="utf-8")
+
+    assert prometheus_exporter._run_dir_sort_epoch(run_dir) == datetime(
+        2026,
+        4,
+        16,
+        1,
+        tzinfo=timezone.utc,
+    ).timestamp()
