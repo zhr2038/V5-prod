@@ -16,7 +16,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 # Setup logging
@@ -36,6 +36,18 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 def _systemctl_bin() -> str:
     return shutil.which('systemctl') or 'systemctl'
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_timestamp_ms() -> int:
+    return int(_utc_now().timestamp() * 1000)
+
+
+def _utc_iso_now() -> str:
+    return _utc_now().isoformat()
 
 # Import event-driven components
 try:
@@ -174,7 +186,7 @@ def _parse_live_run_id(run_id: str) -> Optional[datetime]:
     if not LIVE_RUN_ID_RE.match(str(run_id or '')):
         return None
     try:
-        return datetime.strptime(str(run_id), '%Y%m%d_%H')
+        return datetime.strptime(str(run_id), '%Y%m%d_%H').replace(tzinfo=timezone.utc)
     except ValueError:
         return None
 
@@ -658,7 +670,7 @@ def load_current_state(cfg=None, config_path: Path = None):
                             direction=direction,
                             score=abs(score),
                             rank=normalize_signal_rank(rank),
-                            timestamp_ms=int(datetime.now().timestamp() * 1000)
+                            timestamp_ms=_utc_timestamp_ms()
                         )
                     logger.info(f"Loaded {len(signals)} signals from alpha snapshot (fallback)")
 
@@ -670,7 +682,7 @@ def load_current_state(cfg=None, config_path: Path = None):
             selected = []
 
         return {
-            'timestamp_ms': int(datetime.now().timestamp() * 1000),
+            'timestamp_ms': _utc_timestamp_ms(),
             'regime': regime,
             'prices': prices,
             'positions': positions,
@@ -785,7 +797,7 @@ def _load_fused_signal_states(sig_data: dict, tradeable_symbols: set[str]):
         ranked_rows = sorted(rows, key=lambda row: (row[2], row[0]), reverse=True)
         rank_lookup = {sym: idx + 1 for idx, (sym, *_rest) in enumerate(ranked_rows)}
 
-    timestamp_ms = int(datetime.now().timestamp() * 1000)
+    timestamp_ms = _utc_timestamp_ms()
     for sym, data, score, _raw_rank, rank in rows:
         signals[sym] = SignalState(
             symbol=sym,
@@ -825,14 +837,16 @@ def _load_decision_audit_signal_states(audit_data: dict, tradeable_symbols: set[
             direction=direction,
             score=abs(score),
             rank=rank,
-            timestamp_ms=int(datetime.now().timestamp() * 1000)
+            timestamp_ms=_utc_timestamp_ms()
         )
     return signals
 
 
 def get_current_live_window_run_id(now: datetime = None) -> str:
     """Return the run_id used by the hourly live wrapper for the current hour."""
-    dt = now or datetime.now()
+    dt = now if now is not None else _utc_now()
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc)
     return dt.strftime('%Y%m%d_%H')
 
 
@@ -1106,7 +1120,7 @@ def build_riskoff_shadow_plan(state: dict, cfg: dict, watchlist: list, *, equity
         })
 
     return {
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': _utc_iso_now(),
         'regime': regime,
         'current_pos_mult_risk_off': current_mult,
         'equity_estimate_usdt': round(equity, 6),
@@ -1219,7 +1233,7 @@ def compute_adaptive_event_cfg(
 
     try:
         (adaptive_state_path or (REPORTS_DIR / 'event_adaptive_state.json')).write_text(
-            json.dumps({'timestamp': datetime.now().isoformat(), **meta}, ensure_ascii=False, indent=2),
+            json.dumps({'timestamp': _utc_iso_now(), **meta}, ensure_ascii=False, indent=2),
             encoding='utf-8',
         )
     except Exception:
@@ -1491,7 +1505,7 @@ def run_event_param_scan(state: dict, last_state: dict, ev_cfg: dict):
     best = grid[0] if grid else None
 
     return {
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': _utc_iso_now(),
         'base': base,
         'best': best,
         'top5': grid[:5],
@@ -1615,7 +1629,7 @@ def main():
     paths.event_candidates_path.write_text(
         json.dumps(
             {
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': _utc_iso_now(),
                 'regime': state.get('regime'),
                 'count': len(watchlist),
                 'candidates': watchlist,
@@ -1826,7 +1840,7 @@ def main():
     # Log to file for monitoring
     effective_log = _build_effective_event_log_values(result, execution)
     log_entry = {
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': _utc_iso_now(),
         'should_trade': effective_log['should_trade'],
         'reason': effective_log['reason'],
         'actions': effective_log['actions'],
@@ -1861,7 +1875,7 @@ def main():
     # Save signal history for next comparison
     history_path = paths.event_driven_signals_path
     signal_history = {
-        'timestamp': int(datetime.now().timestamp() * 1000),
+        'timestamp': _utc_timestamp_ms(),
         'signals': {sym: sig.to_dict() if hasattr(sig, 'to_dict') else sig
                    for sym, sig in state['signals'].items()},
         'prices': state['prices'],
