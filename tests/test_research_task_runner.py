@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pandas as pd
 
-from src.research.task_runner import _split_holdout_by_groups
+from src.research.task_runner import _now_utc_iso, _split_holdout_by_groups
+
+
+def test_task_runner_timestamp_helper_emits_utc_z() -> None:
+    assert _now_utc_iso().endswith("Z")
 
 
 def test_split_holdout_by_groups_sorts_groups_before_selecting_validation() -> None:

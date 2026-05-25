@@ -29,6 +29,20 @@ def _json_default(value: Any) -> Any:
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
+def _run_id_timestamp(run_id: str) -> float | None:
+    match = re.search(r"(20\d{6}_\d{6}_\d{6})$", str(run_id or ""))
+    if not match:
+        return None
+    try:
+        return (
+            datetime.strptime(match.group(1), "%Y%m%d_%H%M%S_%f")
+            .replace(tzinfo=timezone.utc)
+            .timestamp()
+        )
+    except Exception:
+        return None
+
+
 @dataclass
 class ResearchRun:
     run_id: str
@@ -139,12 +153,9 @@ def find_latest_task_run(task_name: str, *, base_dir: str | Path = "reports/runs
                 pass
         else:
             run_id = str(meta.get("run_id") or child.name or "")
-            match = re.search(r"(20\d{6}_\d{6}_\d{6})$", run_id)
-            if match:
-                try:
-                    sort_key = datetime.strptime(match.group(1), "%Y%m%d_%H%M%S_%f").timestamp()
-                except Exception:
-                    pass
+            run_id_ts = _run_id_timestamp(run_id)
+            if run_id_ts is not None:
+                sort_key = run_id_ts
         candidates.append((sort_key, child))
     if not candidates:
         return None

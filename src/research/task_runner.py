@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -25,6 +25,10 @@ from src.research.recorder import ResearchRecorder
 if TYPE_CHECKING:
     from src.execution.ml_factor_model import MLFactorConfig, MLFactorModel
     from src.execution.ml_time_series_cv import GroupedTimeSeriesSplit
+
+
+def _now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def load_task_config(path: str | Path) -> dict[str, Any]:
@@ -331,7 +335,7 @@ def _build_signal_analysis_record(
     target_series = pd.Series(y_valid).reset_index(drop=True)
     return {
         "run_id": run_id,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": _now_utc_iso(),
         "status": "completed",
         "validation": {
             "rows": int(len(target_series)),
@@ -635,7 +639,7 @@ def run_ml_training_task(
         }
         history_entry = {
             "run_id": run.run_id,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": _now_utc_iso(),
             "samples": int(len(X)),
             "train_ic": float(best["train_ic"]),
             "valid_ic": float(best["valid_ic"]),
@@ -863,6 +867,8 @@ def run_walk_forward_optimizer_task(
     project_root: str | Path,
     task_config: dict[str, Any],
 ) -> dict[str, Any]:
-    from src.research.walk_forward_optimizer import run_walk_forward_optimizer_task as _run
+    from src.research.walk_forward_optimizer import (
+        run_walk_forward_optimizer_task as _run,
+    )
 
     return _run(project_root=project_root, task_config=task_config)
