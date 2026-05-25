@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 import pytest
 
@@ -78,6 +79,18 @@ def test_load_cached_market_data_prefers_logically_newer_cache_file_for_duplicat
     market_data = load_cached_market_data(cache_dir, ["BTC/USDT"], "1h")
 
     assert market_data["BTC/USDT"].close == [100.0, 999.0, 103.0]
+
+
+def test_cache_file_epoch_uses_utc_for_filename_tokens(tmp_path) -> None:
+    hourly = tmp_path / "BTC_USDT_1H_20260101_03.csv"
+    daily = tmp_path / "BTC_USDT_1H_2026-01-02.csv"
+
+    assert cache_loader._cache_file_epoch(hourly, prefix="BTC_USDT_1H_") == datetime.fromisoformat(
+        "2026-01-01T03:00:00+00:00"
+    ).timestamp()
+    assert cache_loader._cache_file_epoch(daily, prefix="BTC_USDT_1H_") == datetime.fromisoformat(
+        "2026-01-02T00:00:00+00:00"
+    ).timestamp()
 
 
 def test_load_symbol_cache_frame_uses_stable_timestamp_sort_for_duplicate_rows(tmp_path, monkeypatch) -> None:

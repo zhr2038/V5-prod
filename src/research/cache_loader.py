@@ -30,7 +30,7 @@ def _cache_file_epoch(path: Path, *, prefix: str) -> float:
     hourly_match = re.search(r"(20\d{6}_\d{2})$", suffix)
     if hourly_match:
         try:
-            return datetime.strptime(hourly_match.group(1), "%Y%m%d_%H").timestamp()
+            return datetime.strptime(hourly_match.group(1), "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp()
         except Exception:
             pass
 
@@ -39,7 +39,7 @@ def _cache_file_epoch(path: Path, *, prefix: str) -> float:
         token = date_tokens[-1]
         try:
             fmt = "%Y-%m-%d" if "-" in token else "%Y%m%d"
-            return datetime.strptime(token, fmt).timestamp()
+            return datetime.strptime(token, fmt).replace(tzinfo=timezone.utc).timestamp()
         except Exception:
             pass
 
