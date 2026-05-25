@@ -709,12 +709,13 @@ def _dedupe_fill_rows(rows: Iterable[Mapping[str, Any]]) -> list[Mapping[str, An
     out: list[Mapping[str, Any]] = []
     seen: set[tuple[str, str, str, str, str, str]] = set()
     for row in rows:
+        symbol = row.get("symbol") or row.get("normalized_symbol")
         key = (
             _identity(row.get("run_id")),
             _identity(row.get("order_id")),
             _identity(row.get("trade_id")),
             _identity(row.get("ts_utc")),
-            _identity(row.get("symbol")),
+            "" if _is_nullish(symbol) else _normalized_symbol(symbol),
             _identity(row.get("qty")),
         )
         if key in seen:

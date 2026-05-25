@@ -9,6 +9,7 @@ from pathlib import Path
 
 from src.reporting.v5_bundle_exporter import (
     GIT_COMMAND_TIMEOUT_SEC,
+    _dedupe_fill_rows,
     _git_command,
     _normalized_symbol,
     export_v5_bundle,
@@ -21,6 +22,32 @@ def test_bundle_export_normalized_symbol_handles_runtime_variants() -> None:
     assert _normalized_symbol("BNBUSDT") == "BNB-USDT"
     assert _normalized_symbol("OKX:BNB-USDT") == "BNB-USDT"
     assert _normalized_symbol("okx:bnb_usdt") == "BNB-USDT"
+
+
+def test_bundle_export_fill_dedupe_uses_normalized_symbol() -> None:
+    rows = [
+        {
+            "run_id": "r1",
+            "order_id": "ord-1",
+            "trade_id": "trade-1",
+            "ts_utc": "2026-05-25T00:00:01Z",
+            "symbol": "BNB/USDT",
+            "qty": "0.02",
+        },
+        {
+            "run_id": "r1",
+            "order_id": "ord-1",
+            "trade_id": "trade-1",
+            "ts_utc": "2026-05-25T00:00:01Z",
+            "symbol": "OKX:BNB-USDT",
+            "qty": "0.02",
+        },
+    ]
+
+    deduped = _dedupe_fill_rows(rows)
+
+    assert len(deduped) == 1
+    assert deduped[0]["symbol"] == "BNB/USDT"
 
 
 def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
