@@ -137,7 +137,7 @@ class BacktestLiveConsistencyChecker:
         try:
             try:
                 cursor.execute(
-                    f"""
+                    """
                     SELECT state, COUNT(*)
                     FROM orders
                     WHERE created_ts > ?

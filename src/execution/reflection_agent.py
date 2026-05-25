@@ -672,14 +672,14 @@ class ReflectionAgentV2:
         print("="*70)
         
         summary = report['summary']
-        print(f"\n📈 绩效概览")
+        print("\n📈 绩效概览")
         print(f"  已实现盈亏: ${summary['total_realized_pnl']:.2f}")
         print(f"  交易笔数: {summary['total_trades']}")
         print(f"  涉及币种: {summary['total_symbols']}")
         print(f"  胜率: {summary['win_rate']*100:.1f}%")
         
         # 告警
-        print(f"\n🚨 关键告警")
+        print("\n🚨 关键告警")
         critical = [a for a in report['alerts'] if a['level'] == 'critical']
         warnings = [a for a in report['alerts'] if a['level'] == 'warning']
         
@@ -697,19 +697,19 @@ class ReflectionAgentV2:
             print("  ✅ 暂无告警")
         
         # 执行质量
-        print(f"\n⚙️ 执行质量")
+        print("\n⚙️ 执行质量")
         eq = report['execution_quality']
         print(f"  滑点: {eq['avg_slippage_bps']} bps ({eq['status']})")
         print(f"  费率: {eq['avg_fee_bps']} bps")
         print(f"  成交率: {eq['fill_rate']*100:.1f}%")
         
         # 归因
-        print(f"\n💰 盈亏归因")
+        print("\n💰 盈亏归因")
         attr = report['pnl_attribution']
         if attr['top_gainers']:
-            print(f"  盈利: " + ", ".join([f"{g['symbol']}(+${g['pnl']})" for g in attr['top_gainers']]))
+            print("  盈利: " + ", ".join([f"{g['symbol']}(+${g['pnl']})" for g in attr['top_gainers']]))
         if attr['top_losers']:
-            print(f"  亏损: " + ", ".join([f"{l['symbol']}(${l['pnl']})" for l in attr['top_losers']]))
+            print("  亏损: " + ", ".join([f"{l['symbol']}(${l['pnl']})" for l in attr['top_losers']]))
         
         print("\n" + "="*70)
 

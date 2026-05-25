@@ -534,6 +534,30 @@ def _load_existing_records(path: Path) -> dict[str, dict[str, Any]]:
     return records
 
 
+def _apply_eth_f3_alpha6_entry_gate(record: dict[str, Any]) -> bool:
+    if str(record.get("strategy_id") or "") != ETH_F3_DOMINANT_STRATEGY_ID:
+        return False
+    alpha6_side = str(record.get("alpha6_side") or "").strip()
+    source_candidate = str(record.get("source_strategy_candidate") or "").strip()
+    final_decision = str(record.get("final_decision") or "").strip().lower()
+    if not alpha6_side and source_candidate == "heartbeat" and final_decision == "heartbeat":
+        return False
+    if _is_alpha6_buy(record.get("alpha6_side")):
+        return False
+    changed = bool(record.get("would_enter")) or str(record.get("no_sample_reason") or "") != ETH_F3_ALPHA6_NOT_BUY_REASON
+    record["would_enter"] = False
+    record["would_exit"] = False
+    record["would_size_notional"] = 0.0
+    record["would_size_usdt"] = 0.0
+    record["no_sample_reason"] = ETH_F3_ALPHA6_NOT_BUY_REASON
+    record["skip_reason"] = ETH_F3_ALPHA6_NOT_BUY_REASON
+    record["label_status"] = "heartbeat"
+    record["label_not_observable_reason"] = ""
+    record["paper_pnl_bps"] = None
+    record["paper_pnl_usdt"] = None
+    return changed
+
+
 def _read_candidate_snapshot(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
@@ -3310,6 +3334,11 @@ def update_sol_paper_strategy_tracker(
                 if existing.get(preserve_key) in (None, "") and value not in (None, ""):
                     existing[preserve_key] = value
 
+    eth_f3_alpha6_gate_rewrites = 0
+    for record in records_by_key.values():
+        if _apply_eth_f3_alpha6_entry_gate(record):
+            eth_f3_alpha6_gate_rewrites += 1
+
     records = list(records_by_key.values())
     if ohlcv_provider is None:
         ohlcv_provider = _default_ohlcv_provider_for_cfg(cfg)
@@ -3400,6 +3429,7 @@ def update_sol_paper_strategy_tracker(
         "alpha_factory_family_rows": int(len(alpha_factory_family_rows)),
         "risk_on_multi_buy_shadow_rows": int(len(risk_on_multi_buy_rows)),
         "proposal_rows": int(len(proposal_rows)),
+        "eth_f3_alpha6_gate_rewrites": int(eth_f3_alpha6_gate_rewrites),
         "labels_path": str(labels_path),
         "summaries_dir": str(summaries_dir),
     }

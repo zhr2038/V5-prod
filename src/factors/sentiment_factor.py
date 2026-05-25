@@ -153,8 +153,6 @@ class SentimentFactor:
         TODO: 实际接入Twitter/Reddit API
         当前使用模拟数据演示
         """
-        keywords = self.symbol_keywords.get(symbol, [symbol.split('-')[0].lower()])
-        
         # 模拟文本数据（实际使用时替换为API调用）
         mock_texts = self._generate_mock_texts(symbol)
         

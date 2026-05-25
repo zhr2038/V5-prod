@@ -142,7 +142,7 @@ def parse_rss_feed(url: str, max_items: int = 5) -> list:
                         'published': pub_date,
                         'source': urlparse(url).netloc
                     })
-            except Exception as e:
+            except Exception:
                 continue
                 
     except Exception as e:

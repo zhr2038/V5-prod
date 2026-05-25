@@ -344,7 +344,6 @@ class _FakeSFTP:
             child_name = remainder.split("/", 1)[0]
             if child_name in children:
                 continue
-            child_path = prefix + child_name
             children[child_name] = _FakeAttr(
                 child_name,
                 is_dir="/" in remainder,

@@ -655,10 +655,10 @@ class AlphaEngine:
         # 创建适配器
         self.multi_strategy_adapter = MultiStrategyAdapter(orchestrator)
         self._apply_multi_strategy_regime_weights()
-        print(f"[AlphaEngine] 多策略融合已启用:")
-        print(f"              - 趋势跟踪: 20%")
+        print("[AlphaEngine] 多策略融合已启用:")
+        print("              - 趋势跟踪: 20%")
         print(f"              - 均值回归: {mean_base_allocation * 100:.0f}%")
-        print(f"              - 6因子Alpha: 55%")
+        print("              - 6因子Alpha: 55%")
 
     def set_run_id(self, run_id: Optional[str]) -> None:
         self.run_id = str(run_id or "").strip()

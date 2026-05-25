@@ -275,13 +275,13 @@ def main(argv: list[str] | None = None):
         total_bars += len(data)
         print(f"  保存 {len(data)} 条K线数据")
     
-    print(f"\n✅ 数据收集完成")
+    print("\n✅ 数据收集完成")
     print(f"   币种数量: {len(symbols)}")
     print(f"   K线数据条数: {total_bars}")
     print(f"   数据库: {db_path}")
     
     # 验证数据
-    print(f"\n🔍 数据验证:")
+    print("\n🔍 数据验证:")
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     

@@ -192,9 +192,6 @@ class MultiLevelStopLoss:
         # 计算当前盈利
         profit_pct = (current_price - entry_price) / entry_price
         
-        # 计算从最高点回撤
-        drawdown_from_high = (state.highest_price - current_price) / state.highest_price if state.highest_price > 0 else 0
-        
         new_stop_price = state.current_stop_price
         new_stop_type = state.current_stop_type
         triggered = False
@@ -266,7 +263,6 @@ class MultiLevelStopLoss:
         if symbol not in self.positions:
             return False, "", 0.0
         
-        state = self.positions[symbol]
         stop_price, stop_type, triggered = self.update_stop_price(symbol, current_price)
         
         if triggered:

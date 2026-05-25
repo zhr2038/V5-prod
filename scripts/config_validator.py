@@ -141,7 +141,7 @@ class ConfigValidator:
         config_path = CONFIG_DIR / config_name
         if not config_path.exists():
             self.errors.append(f"配置文件不存在: {config_path}")
-            self.log(f"配置文件不存在", 'FAIL')
+            self.log("配置文件不存在", 'FAIL')
             return None
         
         try:
@@ -149,7 +149,7 @@ class ConfigValidator:
                 config = yaml.safe_load(f)
             
             self.checks_passed += 1
-            self.log(f"YAML格式正确", 'PASS')
+            self.log("YAML格式正确", 'PASS')
             
             # 检查关键配置项
             required_keys = ['execution', 'account']

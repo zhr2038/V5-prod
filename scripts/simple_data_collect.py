@@ -52,7 +52,7 @@ def fetch_okx_ohlcv(symbol: str, timeframe: str = '1h', limit: int = 168) -> pd.
     # 转换 symbol: BTC/USDT -> BTC-USDT
     inst_id = symbol.replace('/', '-')
     
-    url = f"https://www.okx.com/api/v5/market/candles"
+    url = "https://www.okx.com/api/v5/market/candles"
     # OKX API 需要大写的时间框架
     tf_map = {'1h': '1H', '4h': '4H', '1d': '1D'}
     okx_timeframe = tf_map.get(timeframe, timeframe.upper())
@@ -135,7 +135,7 @@ def main():
         df = fetch_okx_ohlcv(symbol, '1h', 168)  # 最近7天
         
         if df.empty:
-            print(f"  ⚠️  无数据")
+            print("  ⚠️  无数据")
             continue
         
         # 计算 returns
@@ -184,7 +184,7 @@ def main():
         print(f"  ✅ {len(df)} 条记录")
     
     # 验证
-    print(f"\n✅ 收集完成")
+    print("\n✅ 收集完成")
     print(f"   总记录数: {total_rows}")
     
     conn = sqlite3.connect(db_path)

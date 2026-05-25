@@ -459,6 +459,7 @@ def run_window_diagnostic(
                     "exec_px": float(px),
                     "fee_bps": float(fee_bps),
                     "slippage_bps": float(slippage_bps),
+                    "cost_meta": _cost_meta_to_dict(cost_meta_event),
                     "meta": dict(order.meta or {}),
                 }
 

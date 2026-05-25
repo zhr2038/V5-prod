@@ -5894,7 +5894,6 @@ def test_health_api_uses_active_runtime_orders_db(monkeypatch, tmp_path):
 
     workspace = tmp_path / "ws"
     reports_dir = workspace / "reports"
-    runtime_dir = reports_dir / "shadow_runtime"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(module, "WORKSPACE", workspace)
@@ -8167,6 +8166,8 @@ def test_api_positions_uses_runtime_runs_and_fill_db(monkeypatch, tmp_path):
         payload = module.api_positions().get_json()
 
     assert [row["symbol"] for row in payload["positions"]] == ["ETH"]
+    assert payload["source"] == "positions_jsonl:20260408_01"
+    assert payload["authoritative_snapshot_seen"] is False
     assert seen["fills_db"] == runtime_dir / "fills.sqlite"
 
 

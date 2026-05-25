@@ -4482,8 +4482,6 @@ class V5Pipeline:
         Returns:
             流水线输出 (Alpha, Regime, Portfolio, Orders)
         """
-        # mark first
-        store = None
         # 严谨的类型检查：确保positions是列表且元素有symbol属性
         if positions is not None and isinstance(positions, (list, tuple)) and len(positions) > 0:
             first_pos = positions[0]

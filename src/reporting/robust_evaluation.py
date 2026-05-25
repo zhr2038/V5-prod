@@ -236,7 +236,7 @@ def probabilistic_backtest_overfitting(
     
     for i in range(n_strategies // 2):
         # 前半（训练集表现好）在测试集的排名
-        train_best_idx = sorted_indices[i]
+        _ = sorted_indices[i]
         # 在实际中，我们需要样本外表现，这里简化
         # 假设排名随机化作为保守估计
         rank_loss += (n_strategies - i - 1) / n_strategies

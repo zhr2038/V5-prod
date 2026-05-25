@@ -2487,7 +2487,6 @@ def _load_quant_lab_api_status(
     now_epoch = time.time()
     window_seconds = max(1, int(lookback_minutes or 120)) * 60
     recent_rows: List[Dict[str, Any]] = []
-    latest_any: Optional[Dict[str, Any]] = None
     latest_any_epoch = float('-inf')
     for row in request_rows:
         epoch = _coerce_timestamp_epoch(row.get('ts_utc') or row.get('ts') or row.get('timestamp'))
@@ -2495,7 +2494,6 @@ def _load_quant_lab_api_status(
             continue
         if epoch > latest_any_epoch:
             latest_any_epoch = epoch
-            latest_any = row
         if epoch >= now_epoch - window_seconds:
             recent_rows.append(row)
 
@@ -3677,6 +3675,7 @@ def api_positions():
 
         pos_db = runtime_paths.positions_db
         positions = []
+        positions_source = "missing"
         avg_price_hints: Dict[str, float] = {}
 
         if pos_db.exists():
@@ -3700,6 +3699,7 @@ def api_positions():
                 data = _load_okx_account_balance(key, sec, pp)
                 if data.get('code') == '0' and data.get('data'):
                     authoritative_snapshot_seen = True
+                    positions_source = "okx_account"
                     details = data['data'][0].get('details', [])
                     for d in details:
                         try:
@@ -3723,15 +3723,15 @@ def api_positions():
                 ccy_eq_usd = exchange_snapshot.get('ccy_eqUsd') or {}
                 if isinstance(ccy_cash_bal, dict):
                     authoritative_snapshot_seen = True
+                    positions_source = "reconcile_status"
                     for ccy, qty in ccy_cash_bal.items():
                         eq_usd = ccy_eq_usd.get(ccy) if isinstance(ccy_eq_usd, dict) else 0
                         append_position(ccy, qty, eq_usd)
             except Exception:
                 pass
 
-        fallback_source = None
         if not authoritative_snapshot_seen and not positions and pos_db.exists():
-            fallback_source = "positions.sqlite"
+            positions_source = "positions.sqlite"
             conn = sqlite3.connect(str(pos_db))
             cur = conn.cursor()
             cur.execute("SELECT symbol, qty, avg_px, last_mark_px FROM positions")
@@ -3811,6 +3811,7 @@ def api_positions():
                     except Exception:
                         continue
                     if positions:
+                        positions_source = f"positions_jsonl:{run_dir.name}"
                         break
 
         positions.sort(key=lambda x: x.get('value_usdt', 0), reverse=True)
@@ -3843,7 +3844,11 @@ def api_positions():
             p['value'] = p.get('value_usdt', 0)
             p['quantity'] = p.get('qty', 0)
         
-        return jsonify({'positions': positions})
+        return jsonify({
+            'positions': positions,
+            'source': positions_source,
+            'authoritative_snapshot_seen': authoritative_snapshot_seen,
+        })
     except Exception as e:
         return _json_internal_error_response(e, positions=[])
 
@@ -4071,7 +4076,7 @@ def api_sentiment():
                     'cache_file': latest.name,
                     'cache_mtime': datetime.fromtimestamp(logical_epoch).strftime('%Y-%m-%d %H:%M:%S')
                 }
-            except Exception as e:
+            except Exception:
                 results[symbol] = {'error': 'cache_error'}
 
         valid_scores = [r['sentiment'] for r in results.values() if 'sentiment' in r]
@@ -5508,7 +5513,6 @@ def api_ic_diagnostics():
         
         # 解析IC数据 - 旧版结构在overall_tradable.ic下
         overall_tradable = ic_data.get('overall_tradable', {})
-        overall_raw = ic_data.get('overall_raw', {})
         
         # 获取IC数据
         ic_by_factor = overall_tradable.get('ic', {})
@@ -6091,7 +6095,7 @@ def api_decision_chain():
                     'block_reasons': block_reasons,
                     'blocked_top': blocked_signals[:3]
                 })
-            except Exception as e:
+            except Exception:
                 # 保留可观测性，避免静默失败导致前端长期显示空白
                 rounds.append({
                     'run_id': run_dir.name,
@@ -6544,7 +6548,6 @@ def api_decision_audit():
                     stale_audit = stale_item.get('audit')
                     if not isinstance(stale_audit, dict):
                         continue
-                    fallback_default_ts = float(stale_item.get('sort_epoch', 0.0) or 0.0)
                 else:
                     stale_run_dir = stale_item
                     try:
@@ -6552,7 +6555,6 @@ def api_decision_audit():
                             stale_audit = json.load(f)
                     except Exception:
                         continue
-                    fallback_default_ts = (stale_run_dir / 'decision_audit.json').stat().st_mtime
                 fallback_signals, fallback_source, fallback_ts = _load_run_strategy_payload(stale_run_dir, stale_audit)
                 if not fallback_signals:
                     continue
@@ -7277,7 +7279,7 @@ if __name__ == '__main__':
     print("="*60)
     print("V5 Web Dashboard 启动中...")
     print("="*60)
-    print(f"访问地址: http://0.0.0.0:5000")
+    print("访问地址: http://0.0.0.0:5000")
     print("="*60)
     host = "0.0.0.0"
     port = int(os.getenv("V5_WEB_PORT", "5000") or 5000)

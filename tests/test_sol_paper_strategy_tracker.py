@@ -899,6 +899,54 @@ def test_paper_strategy_tracker_blocks_eth_f3_when_alpha6_side_not_buy(tmp_path:
     assert eth_daily["entry_count"] == "0"
 
 
+def test_paper_strategy_tracker_rewrites_legacy_eth_f3_alpha6_sell_entries(tmp_path: Path) -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True)
+    legacy = {
+        "strategy_id": "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+        "experiment_name": "v5.eth_f3_dominant_entry",
+        "run_id": "r_eth_f3_legacy_sell",
+        "ts_utc": "2026-05-25T00:00:00Z",
+        "entry_ts_ms": start_s * 1000,
+        "paper_date": "2026-05-25",
+        "symbol": "ETH/USDT",
+        "source_strategy_candidate": "f3_dominant_entry",
+        "candidate_id": "eth_f3_legacy_sell",
+        "final_decision": "no_order",
+        "alpha6_side": "sell",
+        "would_enter": True,
+        "would_size_notional": 25.0,
+        "would_size_usdt": 25.0,
+        "label_status": "pending",
+        "paper_pnl_bps_48h": 120.0,
+    }
+    (reports_dir / "sol_paper_strategy_labels.jsonl").write_text(json.dumps(legacy) + "\n", encoding="utf-8")
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=reports_dir / "runs" / "r_eth_f3_followup",
+        audit=_audit("r_eth_f3_followup", start_s + 3600),
+        market_data_1h={"ETH/USDT": _series("ETH/USDT", start_s, {0: 100.0, 48: 106.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["eth_f3_alpha6_gate_rewrites"] == 1
+    runs = _read_csv(reports_dir / "summaries" / "paper_strategy_runs.csv")
+    eth = next(row for row in runs if row["strategy_id"] == "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1")
+    assert eth["would_enter"] == "False"
+    assert eth["alpha6_side"] == "sell"
+    assert eth["final_decision"] == "no_order"
+    assert eth["no_sample_reason"] == "eth_f3_alpha6_side_not_buy_no_new_entry"
+    assert eth["label_status"] == "heartbeat"
+    assert eth["paper_pnl_bps_48h"] == ""
+
+    daily = _read_csv(reports_dir / "summaries" / "paper_strategy_daily.csv")
+    eth_daily = next(row for row in daily if row["strategy_id"] == "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1")
+    assert eth_daily["entry_count"] == "0"
+
+
 def test_paper_strategy_tracker_blocks_eth_f3_when_risk_off(tmp_path: Path) -> None:
     cfg = _cfg()
     start_s = 1_779_000_000
