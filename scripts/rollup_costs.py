@@ -196,9 +196,9 @@ def rollup_day(
 
     for (sym, regime, action, nb), rows in groups.items():
 
-        def _get_f(name: str) -> List[float]:
+        def _get_f(name: str, group_rows: List[Dict[str, Any]] = rows) -> List[float]:
             out = []
-            for r in rows:
+            for r in group_rows:
                 v = r.get(name)
                 if v is None:
                     continue

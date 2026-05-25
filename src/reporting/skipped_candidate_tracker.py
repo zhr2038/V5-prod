@@ -528,13 +528,18 @@ def _aggregate_records_by_horizon(records: list[dict[str, Any]], *, horizons: li
         status_key = f"{HORIZON_PREFIX}{h}h_status"
         values = [_normalize_float(row.get(net_key)) for row in records]
         usable = [value for value in values if value is not None]
-        def row_horizon_status(row: dict[str, Any]) -> str:
-            status = str(row.get(status_key) or "")
+        def row_horizon_status(
+            row: dict[str, Any],
+            *,
+            status_field: str = status_key,
+            net_field: str = net_key,
+        ) -> str:
+            status = str(row.get(status_field) or "")
             if status in {"pending", "not_observable", "complete"}:
                 return status
-            if _normalize_float(row.get(net_key)) is not None:
+            if _normalize_float(row.get(net_field)) is not None:
                 return "complete"
-            value_text = str(row.get(net_key) or "")
+            value_text = str(row.get(net_field) or "")
             if value_text in {"pending", "not_observable"}:
                 return value_text
             return ""

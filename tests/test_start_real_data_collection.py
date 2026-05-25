@@ -18,6 +18,9 @@ def test_create_monitoring_script_writes_under_project_root(tmp_path: Path) -> N
 
     assert monitor_path == (tmp_path / "scripts" / "monitor_real_data.py").resolve()
     assert monitor_path.exists()
+    monitor_text = monitor_path.read_text(encoding="utf-8")
+    assert "def main()" in monitor_text
+    assert "orders_count" in monitor_text
 
 
 def test_main_prints_repo_root_main_entrypoint(capsys, monkeypatch, tmp_path: Path) -> None:

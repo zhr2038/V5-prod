@@ -142,7 +142,7 @@ def check_prerequisites():
         print(f"  {item}: {check}")
         # 这里应该添加实际检查逻辑
         # 暂时标记为需要手动确认
-        print(f"    ⚠️ 需要手动确认")
+        print("    ⚠️ 需要手动确认")
     
     return all_ok
 
@@ -153,16 +153,49 @@ def create_monitoring_script(*, project_root: Path | None = None):
     print("\n📊 创建实盘数据监控脚本")
     print("-" * 40)
     
-    monitor_script = """#!/usr/bin/env python3
-"""
-    
     monitor_path = root / "scripts" / "monitor_real_data.py"
     monitor_path.parent.mkdir(parents=True, exist_ok=True)
-    # 简化的监控脚本
     monitor_script = """#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CONFIG_PATH = PROJECT_ROOT / "configs" / "live_20u_real_data.yaml"
+ORDERS_DB = PROJECT_ROOT / "reports" / "orders_real.sqlite"
+
+
+def _count_orders() -> int:
+    if not ORDERS_DB.exists():
+        return 0
+    conn = sqlite3.connect(str(ORDERS_DB))
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM orders")
+        row = cur.fetchone()
+        return int(row[0] or 0) if row else 0
+    except sqlite3.Error:
+        return 0
+    finally:
+        conn.close()
+
+
+def main() -> None:
+    print(json.dumps({
+        "config_exists": CONFIG_PATH.exists(),
+        "orders_db_exists": ORDERS_DB.exists(),
+        "orders_count": _count_orders(),
+    }, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()
 """
-    
-    monitor_path.write_text("", encoding="utf-8")
+
+    monitor_path.write_text(monitor_script, encoding="utf-8")
     print(f"✅ 监控脚本框架创建: {monitor_path}")
     
     return monitor_path
@@ -180,6 +213,7 @@ def main():
     
     # 1. 创建配置
     config_path = create_real_trading_config(project_root=PROJECT_ROOT)
+    monitor_path = create_monitoring_script(project_root=PROJECT_ROOT)
     
     # 2. 检查前提条件
     print("\n" + "=" * 60)
@@ -200,7 +234,9 @@ def main():
     print("4. 启动实盘交易:")
     print("   python3 main.py --config configs/live_20u_real_data.yaml --start")
     print("5. 监控数据积累")
+    print(f"   python3 {monitor_path.relative_to(PROJECT_ROOT)}")
     print("6. 达到目标后停止")
+    print(f"\n配置文件: {config_path}")
     
     # 4. 数据质量对比
     print("\n📊 数据质量对比:")
