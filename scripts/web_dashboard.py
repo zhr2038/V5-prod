@@ -1579,6 +1579,7 @@ def _pick_timer_name() -> str:
 
 # 排除测试/异常数据
 EXCLUDED_SYMBOLS = ['PEPE-USDT', 'MERL-USDT', 'SPACE-USDT']
+EXCLUDED_SYMBOL_PARAMS = tuple(EXCLUDED_SYMBOLS)
 POSITION_HIDDEN_BASE_SYMBOLS = {
     'PROMPT', 'XAUT', 'WLFI', 'SPACE', 'KITE', 'AGLD', 'MERL', 'USDG', 'J', 'PEPE'
 }
@@ -3317,17 +3318,16 @@ def api_account():
                 conn = None
         if conn:
             cursor = conn.cursor()
-            placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
-            query = f"""
+            query = """
                 SELECT 
                     SUM(CASE WHEN state='FILLED' THEN 1 ELSE 0 END) as total_trades,
                     SUM(CASE WHEN side='buy' AND state='FILLED' THEN notional_usdt ELSE 0 END) as total_buy,
                     SUM(CASE WHEN side='sell' AND state='FILLED' THEN notional_usdt ELSE 0 END) as total_sell
                 FROM orders
-                WHERE inst_id NOT IN ({placeholders})
+                WHERE inst_id NOT IN (?, ?, ?)
                 AND notional_usdt < 1000
             """
-            cursor.execute(query, EXCLUDED_SYMBOLS)
+            cursor.execute(query, EXCLUDED_SYMBOL_PARAMS)
             row = cursor.fetchone()
             conn.close()
 
@@ -3500,31 +3500,30 @@ def api_trades():
                 conn = sqlite3.connect(str(runtime_paths.orders_db))
             if conn:
                 cursor = conn.cursor()
-                placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
                 try:
-                    cursor.execute(f"""
+                    cursor.execute("""
                         SELECT 
                             inst_id, side, notional_usdt, fee, state, avg_px,
                             datetime(COALESCE(NULLIF(updated_ts, 0), created_ts)/1000, 'unixepoch', '+8 hours') as time
                         FROM orders 
                         WHERE state='FILLED'
-                        AND inst_id NOT IN ({placeholders})
+                        AND inst_id NOT IN (?, ?, ?)
                         AND notional_usdt < 1000
                         ORDER BY COALESCE(NULLIF(updated_ts, 0), created_ts) DESC
                         LIMIT 100
-                    """, EXCLUDED_SYMBOLS)
+                    """, EXCLUDED_SYMBOL_PARAMS)
                 except sqlite3.OperationalError:
-                    cursor.execute(f"""
+                    cursor.execute("""
                         SELECT 
                             inst_id, side, notional_usdt, fee, state, avg_px,
                             datetime(created_ts/1000, 'unixepoch', '+8 hours') as time
                         FROM orders 
                         WHERE state='FILLED'
-                        AND inst_id NOT IN ({placeholders})
+                        AND inst_id NOT IN (?, ?, ?)
                         AND notional_usdt < 1000
                         ORDER BY created_ts DESC
                         LIMIT 100
-                    """, EXCLUDED_SYMBOLS)
+                    """, EXCLUDED_SYMBOL_PARAMS)
 
                 for row in cursor.fetchall():
                     try:

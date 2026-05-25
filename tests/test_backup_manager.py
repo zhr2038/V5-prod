@@ -210,6 +210,25 @@ def test_backup_manager_restore_rejects_path_traversal(tmp_path) -> None:
     assert not (tmp_path / "escape.txt").exists()
 
 
+def test_backup_manager_restore_rejects_link_members(tmp_path) -> None:
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = backup_dir / "link.tar.gz"
+
+    with tarfile.open(archive_path, "w:gz") as archive:
+        info = tarfile.TarInfo(name="configs/link")
+        info.type = tarfile.SYMTYPE
+        info.linkname = "../escape.txt"
+        archive.addfile(info)
+
+    manager = backup_manager.BackupManager(workspace=tmp_path)
+
+    with pytest.raises(RuntimeError, match="unsupported backup link member"):
+        manager.restore_backup("link.tar.gz")
+
+    assert not any(path.name == "link" for path in tmp_path.rglob("*"))
+
+
 def test_backup_manager_cleanup_prefers_backup_name_timestamp_over_mtime(monkeypatch, tmp_path) -> None:
     backup_dir = tmp_path / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)

@@ -332,9 +332,15 @@ class HealthChecker:
                 continue
 
             try:
-                conn = sqlite3.connect(str(db_path))
-                count = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
-                conn.close()
+                with sqlite3.connect(str(db_path)) as conn:
+                    if table_name == "orders":
+                        count = conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+                    elif table_name == "positions":
+                        count = conn.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
+                    elif table_name == "fills":
+                        count = conn.execute("SELECT COUNT(*) FROM fills").fetchone()[0]
+                    else:
+                        raise ValueError(f"unsupported health table: {table_name}")
                 checks.append(
                     {
                         "db": db_name,

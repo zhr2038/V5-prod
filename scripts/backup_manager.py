@@ -87,10 +87,11 @@ def _safe_extract_backup(archive: tarfile.TarFile, destination: Path) -> None:
         if member.issym() or member.islnk():
             raise RuntimeError(f"unsupported backup link member: {member.name}")
 
-    try:
-        archive.extractall(path=destination, filter="data")
-    except TypeError:
-        archive.extractall(path=destination, members=members)
+    for member in members:
+        try:
+            archive.extract(member, path=destination, filter="data")
+        except TypeError:
+            archive.extract(member, path=destination)
 
 
 class BackupManager:

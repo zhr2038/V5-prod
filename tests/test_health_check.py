@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 
@@ -127,6 +128,21 @@ def test_resolve_live_timer_unit_name_ignores_retired_live_20u(monkeypatch) -> N
     )
 
     assert health_check.resolve_live_timer_unit_name() == "v5-prod.user.timer"
+
+
+def test_database_health_rejects_unknown_table_name(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "health.sqlite"
+    with sqlite3.connect(str(db_path)) as con:
+        con.execute("CREATE TABLE orders (id INTEGER)")
+
+    monkeypatch.setattr(health_check, "_resolve_health_database_paths", lambda: [(db_path, "orders; DROP TABLE orders")])
+
+    result = health_check.HealthChecker().check_database_health()
+
+    assert result["status"] == "critical"
+    assert "unsupported health table" in result["details"][0]["detail"]
+    with sqlite3.connect(str(db_path)) as con:
+        assert con.execute("SELECT name FROM sqlite_master WHERE name='orders'").fetchone() is not None
 
 
 def test_parse_timer_show_output_accepts_systemd_duration_monotonic() -> None:
