@@ -1404,6 +1404,26 @@ class DiagnosticsConfig(BaseModel):
         default=True,
         description="Enable read-only shadow selection diagnostics for market impulse probe candidates",
     )
+    swing_atr_soft_exit_shadow_enabled: bool = Field(
+        default=True,
+        description="Enable read-only shadow diagnostics for delaying swing ATR soft exits; never changes live orders",
+    )
+    swing_atr_soft_exit_shadow_grace_hours: List[int] = Field(
+        default_factory=lambda: [3, 6, 12],
+        description="Delay horizons (hours) used to label swing ATR soft-exit shadow outcomes",
+    )
+    swing_atr_soft_exit_shadow_min_net_bps_hard_exit: float = Field(
+        default=-180.0,
+        ge=-10000.0,
+        le=10000.0,
+        description="Net bps at or below this threshold is treated as a hard exit in swing ATR soft-exit shadow diagnostics",
+    )
+    swing_atr_soft_exit_shadow_require_f5_breakdown: float = Field(
+        default=-0.30,
+        ge=-10.0,
+        le=10.0,
+        description="f5_rsi_trend_confirm at or below this threshold is treated as momentum breakdown in swing ATR soft-exit shadow diagnostics",
+    )
     protect_sol_exception_experiment_name: str = Field(
         default="protect_sol_exception_v1",
         description="Read-only experiment name for SOL-only PROTECT exception shadow labels",

@@ -233,6 +233,10 @@ diagnostics:
   multi_position_swing_shadow_horizons_hours: [24, 48, 72]
   multi_position_swing_shadow_rt_cost_bps: 30
   market_impulse_selection_shadow_enabled: true
+  swing_atr_soft_exit_shadow_enabled: true
+  swing_atr_soft_exit_shadow_grace_hours: [3, 6, 12]
+  swing_atr_soft_exit_shadow_min_net_bps_hard_exit: -180
+  swing_atr_soft_exit_shadow_require_f5_breakdown: -0.30
   protect_sol_exception_experiment_name: protect_sol_exception_v1
   protect_sol_exception_enabled_shadow_only: true
   protect_sol_exception_enable_live_experiment: false

@@ -1498,6 +1498,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "alt_impulse_shadow_",
         "protect_sol_exception_",
         "paper_strategy_",
+        "swing_atr_soft_exit_shadow_",
     )
 
     def key_pattern(key):
@@ -1555,6 +1556,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         for scan_dir in scan_dirs:
             if scan_dir.is_dir():
                 candidates.extend(sorted(scan_dir.rglob("*.py")))
+        bundle_script = ROOT / "scripts" / "generate_v5_bundle_remote.sh"
+        if bundle_script.is_file():
+            candidates.append(bundle_script)
         seen = set()
         excluded_parts = {"__pycache__", "research"}
         for path in candidates:
@@ -1578,7 +1582,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         rel = str(rel)
         if rel == "main.py" or rel.startswith("src/core/") or rel.startswith("src/execution/") or rel.startswith("src/risk/"):
             return "live_runtime"
-        if rel.startswith("src/reporting/") or rel.startswith("src/backtest/"):
+        if rel.startswith("src/reporting/") or rel.startswith("src/backtest/") or rel == "scripts/generate_v5_bundle_remote.sh":
             return "diagnostics"
         return "diagnostics"
 
@@ -7164,6 +7168,82 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             },
         )
 
+    swing_atr_soft_exit_shadow_enabled = config_bool("swing_atr_soft_exit_shadow_enabled", True)
+    swing_atr_soft_exit_shadow_grace_hours = [
+        horizon for horizon in normalize_horizon_list(
+            config_int_list("swing_atr_soft_exit_shadow_grace_hours"),
+            [3, 6, 12],
+        )
+        if horizon in {3, 6, 12}
+    ] or [3, 6, 12]
+    swing_atr_soft_exit_shadow_min_net_bps_hard_exit = (
+        config_number("swing_atr_soft_exit_shadow_min_net_bps_hard_exit")
+    )
+    if swing_atr_soft_exit_shadow_min_net_bps_hard_exit is None:
+        swing_atr_soft_exit_shadow_min_net_bps_hard_exit = -180.0
+    swing_atr_soft_exit_shadow_require_f5_breakdown = (
+        config_number("swing_atr_soft_exit_shadow_require_f5_breakdown")
+    )
+    if swing_atr_soft_exit_shadow_require_f5_breakdown is None:
+        swing_atr_soft_exit_shadow_require_f5_breakdown = -0.30
+
+    def swing_atr_soft_exit_hard_reasons(net_bps, f5_value):
+        reasons = []
+        net_value = as_float(net_bps)
+        f5_float = as_float(f5_value)
+        if (
+            net_value is not None
+            and net_value <= swing_atr_soft_exit_shadow_min_net_bps_hard_exit
+        ):
+            reasons.append("net_bps_hard_exit")
+        if (
+            f5_float is not None
+            and f5_float <= swing_atr_soft_exit_shadow_require_f5_breakdown
+        ):
+            reasons.append("f5_momentum_breakdown")
+        return reasons
+
+    swing_atr_soft_exit_shadow_rows = []
+    if swing_atr_soft_exit_shadow_enabled:
+        for row in closed_roundtrip_rows:
+            symbol = row.get("symbol", not_obs)
+            exit_reason = flatten_value(row.get("exit_reason")).strip().lower()
+            if exit_reason != "atr_trailing":
+                continue
+            if not row_has_truthy_key(row, "swing_hold_position"):
+                continue
+            exit_dt = parse_dt_utc(row.get("exit_ts"))
+            net_bps_at_exit = first_observed(row.get("net_bps"), row.get("realized_net_bps"), not_obs)
+            f5_value = flatten_value(first_nested_value_from_row(row, ("f5_rsi_trend_confirm", "f5")))
+            hard_reasons = swing_atr_soft_exit_hard_reasons(net_bps_at_exit, f5_value)
+            would_delay = not hard_reasons
+            shadow_row = {
+                "symbol": symbol,
+                "exit_ts": row.get("exit_ts", not_obs),
+                "exit_px": row.get("exit_px", not_obs),
+                "net_bps_at_exit": flatten_value(net_bps_at_exit),
+                "f5_rsi_trend_confirm": f5_value,
+                "would_delay_exit_if_enabled": str(bool(would_delay)).lower(),
+                "hard_exit_reason": ";".join(hard_reasons) if hard_reasons else "none",
+            }
+            for horizon in (3, 6, 12):
+                if horizon not in swing_atr_soft_exit_shadow_grace_hours:
+                    delayed_net = not_obs
+                else:
+                    _delayed_px, delayed_net = price_and_net_if_held_after_exit(
+                        symbol,
+                        row.get("entry_px"),
+                        exit_dt,
+                        horizon,
+                        swing_rt_cost_bps,
+                    )
+                shadow_row[f"net_bps_if_delayed_{horizon}h"] = delayed_net
+                shadow_row[f"better_to_delay_{horizon}h"] = better_to_hold_text(
+                    delayed_net,
+                    net_bps_at_exit,
+                )
+            swing_atr_soft_exit_shadow_rows.append(shadow_row)
+
     SOL_SWING_SYMBOL = "SOL/USDT"
 
     def is_sol_symbol(value):
@@ -8408,6 +8488,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "summaries/post_min_hold_atr_exit_outcomes_by_symbol.csv",
         post_min_hold_atr_exit_outcomes_by_symbol,
         ["symbol", "sample_count", "avg_realized_net_bps", "avg_net_bps_if_held_6h_after_exit", "avg_net_bps_if_held_12h_after_exit", "avg_net_bps_if_held_24h_after_exit", "observable_6h_count", "better_to_hold_6h_count", "better_to_hold_6h_rate", "observable_12h_count", "better_to_hold_12h_count", "better_to_hold_12h_rate", "observable_24h_count", "better_to_hold_24h_count", "better_to_hold_24h_rate", "diagnosis_mix"],
+    )
+    write_csv(
+        "summaries/swing_atr_soft_exit_shadow.csv",
+        swing_atr_soft_exit_shadow_rows,
+        ["symbol", "exit_ts", "exit_px", "net_bps_at_exit", "f5_rsi_trend_confirm", "would_delay_exit_if_enabled", "hard_exit_reason", "net_bps_if_delayed_3h", "net_bps_if_delayed_6h", "net_bps_if_delayed_12h", "better_to_delay_3h", "better_to_delay_6h", "better_to_delay_12h"],
     )
     write_csv(
         "summaries/factor_contribution_audit.csv",
@@ -9873,6 +9958,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "post_min_hold_atr_better_to_hold_12h_count": post_min_hold_atr_better_12_count,
         "post_min_hold_atr_observable_12h_count": len(post_min_hold_atr_better_12_rows),
         "post_min_hold_atr_medium_issue": bool(post_min_hold_atr_medium_issue_present),
+        "swing_atr_soft_exit_shadow_rows": len(swing_atr_soft_exit_shadow_rows),
+        "swing_atr_soft_exit_shadow_would_delay_count": sum(
+            1 for row in swing_atr_soft_exit_shadow_rows
+            if row.get("would_delay_exit_if_enabled") == "true"
+        ),
         "high_score_blocked_target_count": len(high_score_blocked_rows),
         "high_score_blocked_labelable_target_count": len(high_score_labelable_rows),
         "high_score_blocked_non_entry_management_count": len(high_score_non_entry_management_rows),
@@ -11010,6 +11100,7 @@ sanity = {
     "contains summaries/probe_lifecycle_audit.csv": (OUT / "summaries/probe_lifecycle_audit.csv").is_file(),
     "contains summaries/open_probe_watch.csv": (OUT / "summaries/open_probe_watch.csv").is_file(),
     "contains summaries/post_min_hold_atr_exit_audit.csv": (OUT / "summaries/post_min_hold_atr_exit_audit.csv").is_file(),
+    "contains summaries/swing_atr_soft_exit_shadow.csv": (OUT / "summaries/swing_atr_soft_exit_shadow.csv").is_file(),
     "contains summaries/quant_lab_compliance.csv": (OUT / "summaries/quant_lab_compliance.csv").is_file(),
     "contains summaries/quant_lab_permission_audit.csv": (OUT / "summaries/quant_lab_permission_audit.csv").is_file(),
     "contains summaries/quant_lab_mode_audit.csv": (OUT / "summaries/quant_lab_mode_audit.csv").is_file(),
@@ -11048,6 +11139,7 @@ failure_check_names = [
     "contains summaries/probe_lifecycle_audit.csv",
     "contains summaries/open_probe_watch.csv",
     "contains summaries/post_min_hold_atr_exit_audit.csv",
+    "contains summaries/swing_atr_soft_exit_shadow.csv",
     "contains summaries/quant_lab_compliance.csv",
     "contains summaries/quant_lab_permission_audit.csv",
     "contains summaries/quant_lab_mode_audit.csv",
