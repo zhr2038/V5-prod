@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import random
+import secrets
 import time
 from dataclasses import dataclass
 from typing import Callable, Optional, TypeVar
@@ -21,7 +21,7 @@ class RetryConfig:
 def _sleep_with_jitter(delay: float, jitter_frac: float) -> None:
     delay = max(0.0, float(delay))
     jf = max(0.0, float(jitter_frac))
-    jitter = delay * jf * random.random()
+    jitter = delay * jf * (secrets.randbits(53) / float(1 << 53))
     time.sleep(delay + jitter)
 
 

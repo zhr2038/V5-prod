@@ -3,10 +3,11 @@ from __future__ import annotations
 import hashlib
 import csv
 import json
+import subprocess
 import tarfile
 from pathlib import Path
 
-from src.reporting.v5_bundle_exporter import export_v5_bundle
+from src.reporting.v5_bundle_exporter import GIT_COMMAND_TIMEOUT_SEC, _git_command, export_v5_bundle
 
 
 def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
@@ -487,3 +488,28 @@ def test_bundle_export_flags_missing_order_lifecycle_when_trades_exist(tmp_path:
     assert manifest["order_lifecycle_trade_metric_fill_count"] == 1
     assert manifest["order_lifecycle_missing_high_issue"] is True
     assert window["order_lifecycle_missing_high_issue"] is True
+
+
+def test_bundle_git_command_uses_timeout(monkeypatch, tmp_path: Path) -> None:
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr("src.reporting.v5_bundle_exporter.shutil.which", lambda name: "/usr/bin/git")
+
+    def fake_run(cmd, **kwargs):
+        calls.append({"cmd": cmd, **kwargs})
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="abc123\n", stderr="")
+
+    monkeypatch.setattr("src.reporting.v5_bundle_exporter.subprocess.run", fake_run)
+
+    assert _git_command(tmp_path, ["rev-parse", "--short", "HEAD"]) == "abc123"
+    assert calls[0]["timeout"] == GIT_COMMAND_TIMEOUT_SEC
+
+
+def test_bundle_git_command_timeout_returns_empty(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("src.reporting.v5_bundle_exporter.shutil.which", lambda name: "/usr/bin/git")
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr("src.reporting.v5_bundle_exporter.subprocess.run", fake_run)
+
+    assert _git_command(tmp_path, ["status", "--porcelain"]) == ""

@@ -51,6 +51,9 @@ from src.reporting.quant_lab_audit import (
 )
 
 
+GIT_COMMAND_TIMEOUT_SEC = 10
+
+
 SECRET_MARKERS = (
     "api_key",
     "apiSecret",
@@ -1901,15 +1904,18 @@ def _git_command(root: Path, args: list[str]) -> str:
     git_bin = shutil.which("git")
     if git_bin is None:
         return ""
+    if not args or any("\0" in str(arg) for arg in args):
+        return ""
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603 - executable is resolved by shutil.which and args are fixed repo-internal git probes.
             [git_bin, *args],
             cwd=root,
             check=False,
             capture_output=True,
             text=True,
+            timeout=GIT_COMMAND_TIMEOUT_SEC,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return ""
     if result.returncode != 0:
         return ""

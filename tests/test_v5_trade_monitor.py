@@ -207,7 +207,36 @@ def test_send_telegram_alert_persists_local_file_when_telegram_succeeds(monkeypa
             return False
 
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
-    monkeypatch.setattr(trade_monitor.request, "urlopen", lambda req, timeout=10: Response())
+    requested_urls: list[str] = []
+
+    def fake_urlopen(req, timeout=10):
+        requested_urls.append(req.full_url)
+        return Response()
+
+    monkeypatch.setattr(trade_monitor.request, "urlopen", fake_urlopen)
+
+    assert trade_monitor.send_telegram_alert("fresh alert", paths=paths) is True
+    assert "fresh alert" in paths.alert_file.read_text(encoding="utf-8")
+    assert requested_urls == ["https://api.telegram.org/bottoken/sendMessage"]
+
+
+def test_send_telegram_alert_rejects_invalid_token_but_keeps_local_alert(monkeypatch, tmp_path: Path) -> None:
+    paths = trade_monitor.MonitorPaths(
+        project_root=tmp_path,
+        reports_dir=(tmp_path / "reports").resolve(),
+        logs_dir=(tmp_path / "logs").resolve(),
+        fills_db_path=(tmp_path / "reports" / "fills.sqlite").resolve(),
+        orders_db_path=(tmp_path / "reports" / "orders.sqlite").resolve(),
+        env_path=(tmp_path / ".env").resolve(),
+        alert_file=(tmp_path / "reports" / "monitor_alert.txt").resolve(),
+    )
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "https://example.invalid/token")
+    monkeypatch.setattr(
+        trade_monitor.request,
+        "urlopen",
+        lambda req, timeout=10: pytest.fail("invalid Telegram token should not be requested"),
+    )
 
     assert trade_monitor.send_telegram_alert("fresh alert", paths=paths) is True
     assert "fresh alert" in paths.alert_file.read_text(encoding="utf-8")

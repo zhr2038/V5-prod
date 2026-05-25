@@ -34,6 +34,8 @@ from src.risk.auto_risk_guard import extract_risk_level
 
 
 TELEGRAM_CHAT_ID = "5065024131"
+TELEGRAM_API_BASE = "https://api.telegram.org"
+TELEGRAM_TOKEN_RE = re.compile(r"^[A-Za-z0-9:_-]+$")
 LIVE_SERVICE_UNITS = ("v5-prod.user.service",)
 ALERT_THRESHOLDS = {
     "no_trade_hours": 6,
@@ -407,6 +409,13 @@ def _load_telegram_settings(paths: MonitorPaths) -> tuple[str | None, str]:
     return bot_token, chat_id
 
 
+def _telegram_send_message_url(bot_token: str) -> str:
+    token = str(bot_token or "").strip()
+    if not TELEGRAM_TOKEN_RE.fullmatch(token):
+        raise ValueError("Telegram bot token contains unexpected characters")
+    return f"{TELEGRAM_API_BASE}/bot{token}/sendMessage"
+
+
 def send_telegram_alert(message: str, priority: str = "normal", paths: MonitorPaths = DEFAULT_PATHS) -> bool:
     icon = "[CRITICAL]" if priority == "critical" else "[WARN]" if priority == "warning" else "[INFO]"
     full_message = (
@@ -428,12 +437,12 @@ def send_telegram_alert(message: str, priority: str = "normal", paths: MonitorPa
     if bot_token:
         try:
             payload = parse.urlencode({"chat_id": chat_id, "text": full_message}).encode("utf-8")
-            req = request.Request(
-                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            req = request.Request(  # noqa: S310 - fixed HTTPS Telegram API after token validation.
+                _telegram_send_message_url(bot_token),
                 data=payload,
                 method="POST",
             )
-            with request.urlopen(req, timeout=10):
+            with request.urlopen(req, timeout=10):  # noqa: S310 - fixed HTTPS Telegram API after token validation.
                 pass
             print("[INFO] alert sent to Telegram")
             return True
