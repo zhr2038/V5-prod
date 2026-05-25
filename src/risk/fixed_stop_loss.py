@@ -8,7 +8,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 import json
-from typing import Dict, Optional
+from typing import Dict
 from datetime import datetime
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]

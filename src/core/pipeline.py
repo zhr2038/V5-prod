@@ -251,13 +251,12 @@ from src.risk.exit_policy import ExitPolicy, ExitConfig
 from src.risk.risk_engine import RiskEngine
 from src.risk.fixed_stop_loss import FixedStopLossManager, FixedStopLossConfig
 from src.risk.profit_taking import PeakDrawdownLevel, ProfitTakingManager  # 程序化利润管理
-from src.risk.auto_risk_guard import AutoRiskGuard, extract_risk_level, get_auto_risk_guard  # 自动风险档位
+from src.risk.auto_risk_guard import extract_risk_level, get_auto_risk_guard  # 自动风险档位
 from src.risk.negative_expectancy_cooldown import (
     NegativeExpectancyCooldown,
     NegativeExpectancyConfig,
     negative_expectancy_config_fingerprint,
 )
-from src.core.models import PositionState
 from src.reporting.decision_audit import DecisionAudit
 
 

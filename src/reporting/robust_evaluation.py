@@ -7,7 +7,6 @@ from __future__ import annotations
 import numpy as np
 from typing import List, Dict, Any, Tuple
 from scipy import stats
-import warnings
 
 
 def purged_time_series_split(

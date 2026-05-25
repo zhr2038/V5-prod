@@ -4,7 +4,7 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from src.execution.account_store import AccountStore
 from src.execution.okx_private_client import OKXPrivateClient

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -17,7 +16,6 @@ from src.reporting.skipped_candidate_tracker import (
     _ensure_provider_series,
     _find_close_at_or_after,
     _iso_from_ms,
-    _load_cache_ohlcv,
     _normalize_float,
     _normalize_horizons,
     _record_entry_ts_ms,

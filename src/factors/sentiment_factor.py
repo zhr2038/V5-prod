@@ -11,7 +11,6 @@ pip install transformers torch textblob tweepy praw
 """
 
 import json
-import re
 from datetime import datetime, timedelta
 from typing import Dict, List
 from pathlib import Path

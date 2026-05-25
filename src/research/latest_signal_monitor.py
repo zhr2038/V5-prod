@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from collections import Counter
 from contextlib import redirect_stderr, redirect_stdout
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
-import json
 from pathlib import Path
 from typing import Any
 

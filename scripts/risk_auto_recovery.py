@@ -10,7 +10,6 @@ V5 风控自动恢复机制
 """
 
 import json
-import sqlite3
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -21,7 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from configs.runtime_config import resolve_runtime_path
 from src.execution.fill_store import (
     derive_runtime_auto_risk_guard_path,
     derive_runtime_named_json_path,

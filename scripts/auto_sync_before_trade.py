@@ -336,7 +336,6 @@ def main():
         from src.execution.okx_private_client import OKXPrivateClient
         from src.execution.position_store import PositionStore
         from src.execution.account_store import AccountStore
-        from src.execution.bootstrap_patch import controlled_patch_from_okx_balance
         
         # Load config (prefer active V5_CONFIG)
         cfg_path = str(_resolve_active_config_path())

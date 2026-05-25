@@ -15,7 +15,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Dict, Optional
+from typing import TYPE_CHECKING, Dict, Optional
 from dataclasses import dataclass
 
 if TYPE_CHECKING:

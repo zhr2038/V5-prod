@@ -12,9 +12,8 @@ import os
 import sqlite3
 import sys
 import time
-from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict
 import pandas as pd
 import numpy as np
 import yaml
@@ -199,7 +198,6 @@ def main(argv: list[str] | None = None):
     
     # 初始化数据提供者
     # 注意：cfg.data 可能不存在，使用默认配置
-    from src.data.okx_ccxt_provider import OKXCCXTProvider
     provider = OKXCCXTProvider({
         'exchange': 'okx',
         'timeframe_main': '1h',

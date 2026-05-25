@@ -36,7 +36,6 @@ if _BOOTSTRAP_WORKSPACE_STR not in sys.path:
 
 from flask import Flask, g, has_app_context, has_request_context, render_template, jsonify, request, send_from_directory
 import pandas as pd
-import yaml
 import requests
 from configs.loader import load_config as load_app_config
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path

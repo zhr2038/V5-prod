@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from src.alpha.alpha_engine import AlphaSnapshot
 from src.core.models import ExecutionReport

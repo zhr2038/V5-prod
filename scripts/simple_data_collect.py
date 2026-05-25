@@ -3,11 +3,8 @@
 简化版数据收集 - 先建立基础市场数据
 """
 
-import os
 import sqlite3
-import time
 import pandas as pd
-import numpy as np
 import requests
 
 

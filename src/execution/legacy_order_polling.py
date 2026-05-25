@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from configs.runtime_config import load_runtime_config
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]

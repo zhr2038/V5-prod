@@ -9,7 +9,7 @@
 5. 归因分析 - 盈亏来自择时、选股还是执行
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
@@ -17,8 +17,6 @@ import json
 import sqlite3
 from pathlib import Path
 import pandas as pd
-import numpy as np
-from decimal import Decimal
 
 from configs.runtime_config import load_runtime_config, resolve_runtime_path
 from src.execution.fill_store import (

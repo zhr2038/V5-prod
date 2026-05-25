@@ -8,10 +8,10 @@ import json
 import time
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Set
-from dataclasses import dataclass, asdict
+from typing import Dict, Optional
+from dataclasses import dataclass
 
-from src.execution.event_types import EventPriority, TradingEvent
+from src.execution.event_types import EventPriority
 
 logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]

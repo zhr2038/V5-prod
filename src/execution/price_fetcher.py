@@ -5,7 +5,6 @@ Fetches real-time prices from OKX API.
 """
 from __future__ import print_function
 
-import json
 import logging
 from typing import Dict, Optional
 

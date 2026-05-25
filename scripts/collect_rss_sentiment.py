@@ -6,7 +6,6 @@ V5 RSS情报收集器 + DeepSeek情绪分析
 """
 
 import argparse
-import os
 import sys
 import json
 import re

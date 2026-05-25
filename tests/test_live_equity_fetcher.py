@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 
 from src.risk import live_equity_fetcher
 

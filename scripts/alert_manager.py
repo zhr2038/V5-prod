@@ -8,7 +8,6 @@ V5 Telegram 分级告警系统
 - 支持告警静音时段
 """
 
-import os
 import json
 import asyncio
 import sys

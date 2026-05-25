@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Callable, Tuple
 from dataclasses import dataclass
 
 from src.execution.event_types import (
-    EventType, EventPriority, TradingEvent, MarketState, SignalState
+    EventType, EventPriority, TradingEvent, MarketState
 )
 from src.execution.cooldown_manager import CooldownManager
 from src.execution.event_monitor import EventMonitor

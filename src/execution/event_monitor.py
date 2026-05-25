@@ -7,11 +7,11 @@ import json
 import time
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+from dataclasses import dataclass
 
 from src.execution.event_types import (
-    EventType, TradingEvent, MarketState, SignalState, normalize_signal_rank
+    EventType, TradingEvent, MarketState, normalize_signal_rank
 )
 
 logger = logging.getLogger(__name__)

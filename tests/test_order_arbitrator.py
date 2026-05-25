@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from src.core.models import Order
 from src.execution.order_arbitrator import arbitrate_orders

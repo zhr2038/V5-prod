@@ -6,7 +6,7 @@ V5 GPT情绪分析模块
 
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List
 from pathlib import Path
 import requests

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict
 from datetime import datetime
 from pathlib import Path
+import importlib.util
 import json
 import re
 import sqlite3
@@ -15,12 +16,7 @@ from src.core.models import MarketSeries
 from src.regime.funding_vote_utils import build_funding_vote, summarize_funding_rows
 from src.regime.rss_vote_utils import build_rss_vote
 
-# 导入HMM检测器
-try:
-    from src.regime.hmm_regime_detector import HMMRegimeDetector
-    HMM_AVAILABLE = True
-except ImportError:
-    HMM_AVAILABLE = False
+HMM_AVAILABLE = importlib.util.find_spec("src.regime.hmm_regime_detector") is not None
 
 
 def _coalesce(value, default):

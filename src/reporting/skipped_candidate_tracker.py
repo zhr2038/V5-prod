@@ -6,7 +6,7 @@ import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Dict, Iterable, Mapping, Optional
 
 from configs.schema import AppConfig, DiagnosticsConfig
 from src.core.models import MarketSeries

@@ -4,7 +4,7 @@ Multi-Level Stop Loss - 多级动态止损系统
 """
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 from enum import Enum
 import json
 from pathlib import Path

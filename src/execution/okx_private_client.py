@@ -8,7 +8,7 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 
 import httpx

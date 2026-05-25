@@ -8,11 +8,10 @@ Auto Risk Guard - 自动风险档位管理器
 from __future__ import annotations
 
 import json
-import time
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 

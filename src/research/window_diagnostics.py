@@ -10,7 +10,7 @@ import json
 import math
 import os
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable
 
 import numpy as np
 

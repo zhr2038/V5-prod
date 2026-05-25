@@ -353,8 +353,8 @@ def run_ml_training_task(
     task_config: dict[str, Any],
 ) -> dict[str, Any]:
     from src.execution.ml_data_collector import MLDataCollector
-    from src.execution.ml_factor_model import MLFactorConfig, MLFactorModel
-    from src.execution.ml_time_series_cv import GroupedTimeSeriesSplit, cross_sectional_ic
+    from src.execution.ml_factor_model import MLFactorConfig
+    from src.execution.ml_time_series_cv import GroupedTimeSeriesSplit
 
     project_root = Path(project_root)
     task_meta = task_config.get("task") or {}

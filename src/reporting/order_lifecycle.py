@@ -6,7 +6,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from src.execution.fill_store import derive_fill_store_path
 from src.reporting.trade_log import normalize_symbol

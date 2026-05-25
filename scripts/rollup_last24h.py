@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_config_path, resolve_runtime_path
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
 from src.execution.fill_store import derive_runtime_reports_dir, derive_runtime_runs_dir
 from src.reporting.summary_writer import write_summary
 

@@ -1193,7 +1193,6 @@ class AlphaEngine:
             (display_scores, raw_scores)
         """
         import pandas as pd
-        from datetime import datetime
 
         self._apply_multi_strategy_regime_weights()
 

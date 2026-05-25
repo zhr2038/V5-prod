@@ -19,7 +19,6 @@ from src.reporting.skipped_candidate_tracker import (
     _iso_from_ms,
     _load_existing_records,
     _label_horizons,
-    _merge_series,
     _normalize_bool,
     _normalize_float,
     _record_entry_ts_ms,

@@ -56,7 +56,7 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
     from configs.loader import load_config
-    from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
+    from configs.runtime_config import resolve_runtime_env_path, resolve_runtime_path
     from src.execution.account_store import AccountStore
     from src.execution.fill_store import derive_position_store_path
     from src.execution.okx_private_client import OKXPrivateClient
