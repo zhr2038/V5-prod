@@ -6,14 +6,15 @@ V5 RSS情报收集器 + DeepSeek情绪分析
 """
 
 import argparse
-import sys
 import json
 import re
-import requests
-from datetime import datetime
+import sys
+from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
-from html.parser import HTMLParser
+
+import requests
 
 try:
     from defusedxml import ElementTree as SAFE_XML_ET
@@ -23,9 +24,9 @@ except ImportError:
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
 from configs.runtime_config import resolve_runtime_env_path
 from src.factors.deepseek_sentiment_factor import DeepSeekSentimentFactor
-
 
 RSS_SOURCES = [
     {
@@ -52,6 +53,14 @@ RSS_SOURCES = [
 
 def get_cache_dir(project_root: Path | None = None) -> Path:
     return (project_root or PROJECT_ROOT).resolve() / "data" / "sentiment_cache"
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_iso() -> str:
+    return _utc_now().isoformat().replace("+00:00", "Z")
 
 
 class MLStripper(HTMLParser):
@@ -171,9 +180,9 @@ def collect_rss_sentiment(*, env_path: str = ".env", project_root: Path | None =
     cache_dir = get_cache_dir(root)
     cache_dir.mkdir(parents=True, exist_ok=True)
     
-    timestamp = datetime.now().strftime('%Y%m%d_%H')
-    
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 开始收集RSS情报...")
+    timestamp = _utc_now().strftime('%Y%m%d_%H')
+
+    print(f"[{_utc_now().strftime('%Y-%m-%d %H:%M:%S')}] 开始收集RSS情报...")
     
     all_articles = []
     for source in rss_sources:
@@ -245,7 +254,7 @@ def collect_rss_sentiment(*, env_path: str = ".env", project_root: Path | None =
             'rss_articles_count': len(all_articles),
             'rss_sources': list(set(a['source_name'] for a in all_articles)),
             'analyzed_texts': len(texts),
-            'collected_at': datetime.now().isoformat()
+            'collected_at': _utc_now_iso()
         }
         
         # 保存为通用市场情绪文件

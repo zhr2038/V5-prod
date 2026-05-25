@@ -7,7 +7,7 @@ The composite output is used by the regime engine and dashboard.
 
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -21,6 +21,14 @@ from src.regime.funding_vote_utils import (
     classify_funding_state,
     summarize_funding_rows,
 )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_iso() -> str:
+    return _utc_now().isoformat().replace("+00:00", "Z")
 
 
 def get_cache_dir() -> Path:
@@ -130,8 +138,8 @@ def collect_funding_sentiment():
     cache_dir = get_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H")
-    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] collecting funding sentiment for {len(all_symbols)} symbols...")
+    timestamp = _utc_now().strftime("%Y%m%d_%H")
+    print(f"[{_utc_now():%Y-%m-%d %H:%M:%S}] collecting funding sentiment for {len(all_symbols)} symbols...")
 
     tier_sentiments = {"large": [], "mid": [], "small": []}
 
@@ -154,7 +162,7 @@ def collect_funding_sentiment():
                 "raw_funding_rate": sentiment_data["raw_funding_rate"],
                 "tier": tier,
                 "weight": config["total_weight"],
-                "collected_at": datetime.now().isoformat(),
+                "collected_at": _utc_now_iso(),
             }
             cache_file = cache_dir / f"funding_{symbol_name}_{timestamp}.json"
             cache_file.write_text(json.dumps(cache_data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -174,7 +182,7 @@ def collect_funding_sentiment():
         except Exception as exc:
             print(f"  {symbol_name}: failed - {exc}")
 
-    print(f"\n[{datetime.now():%Y-%m-%d %H:%M:%S}] aggregating composite sentiment...")
+    print(f"\n[{_utc_now():%Y-%m-%d %H:%M:%S}] aggregating composite sentiment...")
 
     all_rows = []
     tier_breakdown = {}
@@ -234,12 +242,12 @@ def collect_funding_sentiment():
         "extreme_positive_weight_share": overall_metrics["extreme_positive_weight_share"],
         "extreme_negative_weight_share": overall_metrics["extreme_negative_weight_share"],
         "tier_breakdown": tier_breakdown,
-        "collected_at": datetime.now().isoformat(),
+        "collected_at": _utc_now_iso(),
     }
 
     overall_file = cache_dir / f"funding_COMPOSITE_{timestamp}.json"
     overall_file.write_text(json.dumps(overall_data, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] funding sentiment collection complete")
+    print(f"[{_utc_now():%Y-%m-%d %H:%M:%S}] funding sentiment collection complete")
 
 
 if __name__ == "__main__":

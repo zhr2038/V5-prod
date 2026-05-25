@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import xml.etree.ElementTree as stdlib_et
+from datetime import datetime, timezone
 
 import scripts.collect_rss_sentiment as rss_mod
 
 
 def test_collect_rss_sentiment_passes_runtime_env_to_deepseek(monkeypatch, tmp_path):
     captured = {}
+    fixed_now = datetime(2026, 5, 25, 4, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(rss_mod, "_utc_now", lambda: fixed_now)
 
     monkeypatch.setattr(
         rss_mod,
@@ -47,6 +50,8 @@ def test_collect_rss_sentiment_passes_runtime_env_to_deepseek(monkeypatch, tmp_p
     assert market_files
     payload = json.loads(market_files[-1].read_text(encoding="utf-8"))
     assert payload["f6_sentiment_source"] == "rss_deepseek"
+    assert market_files[-1].name == "rss_MARKET_20260525_04.json"
+    assert payload["collected_at"] == "2026-05-25T04:00:00Z"
 
 
 def test_collect_rss_sentiment_skips_disabled_sources(monkeypatch, tmp_path):

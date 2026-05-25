@@ -7,7 +7,7 @@ import sqlite3
 import sys
 from bisect import bisect_right
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -15,7 +15,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_config_path, resolve_runtime_path
+from configs.runtime_config import (
+    load_runtime_config,
+    resolve_runtime_config_path,
+    resolve_runtime_path,
+)
 from src.regime.rss_vote_utils import rss_vote_confidence, rss_vote_state
 
 
@@ -25,18 +29,28 @@ class RssCacheSnapshot:
     source_confidence: float
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_utc_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _parse_cache_time(path: Path, payload: dict) -> Optional[datetime]:
     raw = payload.get("collected_at")
     if raw:
         try:
-            return datetime.fromisoformat(str(raw))
+            return _as_utc_aware(datetime.fromisoformat(str(raw).replace("Z", "+00:00")))
         except ValueError:
             pass
 
     parts = path.stem.split("_")
     if len(parts) >= 3:
         try:
-            return datetime.strptime("_".join(parts[-2:]), "%Y%m%d_%H")
+            return datetime.strptime("_".join(parts[-2:]), "%Y%m%d_%H").replace(tzinfo=timezone.utc)
         except ValueError:
             return None
     return None
@@ -66,7 +80,7 @@ def _load_rss_cache_snapshots(cache_dir: Path) -> List[RssCacheSnapshot]:
 def _source_confidence_for(ts_ms: int, snapshots: List[RssCacheSnapshot]) -> float:
     if not snapshots:
         return 0.7
-    target = datetime.fromtimestamp(ts_ms / 1000)
+    target = datetime.fromtimestamp(ts_ms / 1000, timezone.utc)
     times = [item.collected_at for item in snapshots]
     idx = bisect_right(times, target) - 1
     if idx < 0:
@@ -112,7 +126,7 @@ def backfill_regime_history_rss(db_path: Path, cache_dir: Path, hours: int) -> d
     if latest_ts_ms > 0:
         cutoff_ms = max(0, latest_ts_ms - int(timedelta(hours=hours).total_seconds() * 1000))
     else:
-        cutoff_ms = int((datetime.now() - timedelta(hours=hours)).timestamp() * 1000)
+        cutoff_ms = int((_utc_now() - timedelta(hours=hours)).timestamp() * 1000)
     cur.execute(
         """
         SELECT id, ts_ms, rss_sentiment, rss_state, rss_confidence

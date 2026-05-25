@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -32,3 +33,17 @@ def test_resolve_main_paths_fails_fast_when_runtime_config_is_missing(monkeypatc
 
     with pytest.raises(FileNotFoundError, match="runtime config not found"):
         regime_rss._resolve_main_paths("configs/missing.yaml", None, None)
+
+
+def test_rss_backfill_cache_time_parsing_is_utc_aware(tmp_path: Path) -> None:
+    cache_file = tmp_path / "rss_MARKET_20260525_04.json"
+
+    assert regime_rss._parse_cache_time(cache_file, {"collected_at": "2026-05-25T04:30:00Z"}) == datetime(
+        2026,
+        5,
+        25,
+        4,
+        30,
+        tzinfo=timezone.utc,
+    )
+    assert regime_rss._parse_cache_time(cache_file, {}) == datetime(2026, 5, 25, 4, tzinfo=timezone.utc)
