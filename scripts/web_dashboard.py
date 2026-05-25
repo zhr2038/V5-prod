@@ -376,8 +376,8 @@ POSITION_KLINE_TIMEFRAMES: Dict[str, Dict[str, Any]] = {
     '1d': {'source_timeframe': '1h', 'resample_rule': '1D', 'source_limit_multiplier': 24, 'fresh_for_seconds': 7 * 24 * 3600},
 }
 POSITION_KLINE_DEFAULT_LIMIT = 96
-_OKX_PUBLIC_PROVIDER: Optional[OKXCCXTProvider] = None
-_WORKSPACE_PYTHON_BIN: Optional[str] = None
+_OKX_PUBLIC_PROVIDER_CACHE: Dict[str, Optional[OKXCCXTProvider]] = {'provider': None}
+_WORKSPACE_PYTHON_BIN_CACHE: Dict[str, str] = {'value': ''}
 
 
 def _normalize_dashboard_symbol(symbol: str) -> str:
@@ -554,10 +554,11 @@ def _position_market_series_is_fresh(series: Optional[MarketSeries], timeframe: 
 
 
 def _get_okx_public_provider() -> OKXCCXTProvider:
-    global _OKX_PUBLIC_PROVIDER
-    if _OKX_PUBLIC_PROVIDER is None:
-        _OKX_PUBLIC_PROVIDER = OKXCCXTProvider(rate_limit=True)
-    return _OKX_PUBLIC_PROVIDER
+    provider = _OKX_PUBLIC_PROVIDER_CACHE.get('provider')
+    if provider is None:
+        provider = OKXCCXTProvider(rate_limit=True)
+        _OKX_PUBLIC_PROVIDER_CACHE['provider'] = provider
+    return provider
 
 
 def _load_position_market_series(symbol: str, timeframe: str, limit: int) -> tuple[MarketSeries, str]:
@@ -2815,9 +2816,9 @@ def _can_execute_python(candidate: str) -> bool:
 
 
 def _resolve_workspace_python() -> str:
-    global _WORKSPACE_PYTHON_BIN
-    if _WORKSPACE_PYTHON_BIN:
-        return _WORKSPACE_PYTHON_BIN
+    cached = _WORKSPACE_PYTHON_BIN_CACHE.get('value')
+    if cached:
+        return cached
 
     candidates = []
     env_python = os.getenv('V5_PYTHON_BIN')
@@ -2831,11 +2832,11 @@ def _resolve_workspace_python() -> str:
 
     for candidate in candidates:
         if _can_execute_python(candidate):
-            _WORKSPACE_PYTHON_BIN = candidate
+            _WORKSPACE_PYTHON_BIN_CACHE['value'] = candidate
             return candidate
 
-    _WORKSPACE_PYTHON_BIN = 'python3'
-    return _WORKSPACE_PYTHON_BIN
+    _WORKSPACE_PYTHON_BIN_CACHE['value'] = 'python3'
+    return _WORKSPACE_PYTHON_BIN_CACHE['value']
 
 
 def _load_live_okx_balance_snapshot() -> Dict[str, Any]:
