@@ -68,11 +68,11 @@ def robust_zscore_cross_section(values: Dict[str, float], winsorize_pct: float =
     
     # 3. 标准化：MAD -> 标准差近似 (MAD * 1.4826 ≈ std for normal)
     if mad < 1e-12:
-        clipped_values = {k: float(x) for k, x in zip(keys, xs)}
+        clipped_values = {k: float(x) for k, x in zip(keys, xs, strict=False)}
         return zscore_cross_section(clipped_values)
     
     zs = (xs - med) / (mad * 1.4826)
-    return {k: float(z) for k, z in zip(keys, zs)}
+    return {k: float(z) for k, z in zip(keys, zs, strict=False)}
 
 
 def compute_quote_volume(volume: List[float], close: List[float]) -> float:
@@ -92,7 +92,7 @@ def calculate_forward_returns(
     # 简化实现：需要时间序列对齐
     # 实际实现需要根据时间戳对齐数据
     returns = {}
-    for sym, data in market_data.items():
+    for sym, _data in market_data.items():
         # 这里需要根据时间戳找到未来价格
         # 暂时返回0，需要完善数据接口
         returns[sym] = 0.0

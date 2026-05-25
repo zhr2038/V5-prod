@@ -179,9 +179,9 @@ def main() -> None:
         base_name="kill_switch",
         legacy_default="reports/kill_switch.json",
     )
-    setattr(cfg.execution, "reconcile_status_path", reconcile_status_path)
-    setattr(cfg.execution, "reconcile_failure_state_path", reconcile_failure_state_path)
-    setattr(cfg.execution, "kill_switch_path", kill_switch_path)
+    cfg.execution.reconcile_status_path = reconcile_status_path
+    cfg.execution.reconcile_failure_state_path = reconcile_failure_state_path
+    cfg.execution.kill_switch_path = kill_switch_path
 
     ps = PositionStore(path=positions_db_path)
     ac = AccountStore(path=positions_db_path)

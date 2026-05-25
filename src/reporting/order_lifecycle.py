@@ -89,7 +89,7 @@ def annotate_orders_with_arrival(
         if not isinstance(meta, dict):
             meta = {}
             try:
-                setattr(order, "meta", meta)
+                order.meta = meta
             except Exception:
                 continue
 

@@ -72,7 +72,7 @@ def test_trade_log_writer_resolves_relative_run_dir_from_project_root(monkeypatc
             slippage_usdt=None,
         )
     )
-    row = dict(zip(header, writer.path.read_text(encoding="utf-8").splitlines()[1].split(",")))
+    row = dict(zip(header, writer.path.read_text(encoding="utf-8").splitlines()[1].split(","), strict=False))
     assert row["ts_utc"] == "2026-05-13T00:00:00Z"
     assert row["normalized_symbol"] == "BNB-USDT"
     assert row["fee_usdt"] == "null"

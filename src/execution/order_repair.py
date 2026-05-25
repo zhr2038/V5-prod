@@ -85,7 +85,7 @@ def repair_unknown_orders(*, db_path: str = "reports/orders.sqlite", limit: int 
     )
     rows = cur.fetchall()
 
-    for clid, state, ack_json, last_error_code in rows:
+    for clid, _state, ack_json, last_error_code in rows:
         st.scanned += 1
 
         # idempotency: already repaired once

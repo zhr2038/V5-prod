@@ -1137,7 +1137,7 @@ class AlphaEngine:
 
         raw_preds = {
             str(sym): float(pred)
-            for sym, pred in zip(inference_df["symbol"].tolist(), preds.tolist())
+            for sym, pred in zip(inference_df["symbol"].tolist(), preds.tolist(), strict=False)
             if np.isfinite(float(pred))
         }
         if not raw_preds:

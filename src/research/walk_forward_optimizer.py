@@ -125,7 +125,7 @@ def build_parameter_candidates(
     for idx, combo in enumerate(combos):
         if max_candidates is not None and idx >= max_candidates:
             break
-        out.append({key: value for key, value in zip(keys, combo)})
+        out.append({key: value for key, value in zip(keys, combo, strict=False)})
     return out
 
 

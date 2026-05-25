@@ -179,7 +179,7 @@ class DecisionAudit:
         seen = getattr(self, "_count_seen", None)
         if seen is None:
             seen = set()
-            setattr(self, "_count_seen", seen)
+            self._count_seen = seen
 
         dedupe_key = (norm_reason, str(symbol or "").strip())
         if dedupe_key in seen:

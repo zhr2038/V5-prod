@@ -115,7 +115,7 @@ class SimpleGaussianHMM:
         
         log_likelihood_old = -np.inf
         
-        for iteration in range(self.n_iter):
+        for _iteration in range(self.n_iter):
             # E-step
             alpha, scale = self._forward(X)
             beta = self._backward(X, scale)

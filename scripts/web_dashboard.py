@@ -460,7 +460,7 @@ def _normalize_market_series(series: MarketSeries) -> MarketSeries:
             series.high or [],
             series.low or [],
             series.close or [],
-            series.volume or [],
+            series.volume or [], strict=False,
         )
     ):
         ts_ms, open_px, high_px, low_px, close_px, volume = values
@@ -3882,7 +3882,7 @@ def api_position_kline():
             series.high,
             series.low,
             series.close,
-            series.volume,
+            series.volume, strict=False,
         ):
             ts_value = int(ts_ms)
             if abs(ts_value) < 10_000_000_000:
@@ -5014,7 +5014,7 @@ def api_dashboard():
             })
 
         alpha_scores = []
-        for i, score in enumerate(scores_data.get('scores', [])[:10]):
+        for score in scores_data.get('scores', [])[:10]:
             alpha_scores.append({
                 'symbol': score.get('symbol', '').replace('-USDT', '/USDT'),
                 'score': score.get('score', 0),
@@ -5241,7 +5241,7 @@ def api_cost_calibration():
                     day_fee = []
                     day_trade_count = 0
                     
-                    for bucket_name, bucket_data in buckets.items():
+                    for _bucket_name, bucket_data in buckets.items():
                         slippage_data = bucket_data.get('slippage_bps', {})
                         fee_data = bucket_data.get('fee_bps', {})
                         

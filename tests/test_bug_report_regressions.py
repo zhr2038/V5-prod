@@ -61,7 +61,7 @@ def test_event_monitor_uses_last_state_signals_even_if_stale_signatures_exists(t
         signals={"BTC/USDT": SignalState("BTC/USDT", "buy", 0.8, 1, 1)},
         selected_symbols=["BTC/USDT"],
     )
-    setattr(last, "signatures", {"BTC/USDT": SignalState("BTC/USDT", "hold", 0.1, 9, 1)})
+    last.signatures = {"BTC/USDT": SignalState("BTC/USDT", "hold", 0.1, 9, 1)}
     monitor.last_state = last
 
     events = monitor._check_signal_events(

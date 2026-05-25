@@ -84,7 +84,7 @@ def run_data_quality_checks(paths: QualityCheckPaths | None = None) -> dict[str,
         average = 0
         need_improvement = 0
 
-        for symbol, count, earliest, latest, hours, coverage, quality in results:
+        for _symbol, _count, _earliest, _latest, _hours, _coverage, quality in results:
             if quality == "优秀":
                 excellent += 1
             elif quality == "良好":
@@ -94,7 +94,7 @@ def run_data_quality_checks(paths: QualityCheckPaths | None = None) -> dict[str,
             else:
                 need_improvement += 1
 
-        for symbol, count, earliest, latest, hours, coverage, quality in results[:10]:
+        for symbol, count, _earliest, _latest, _hours, coverage, quality in results[:10]:
             print(f"{symbol:<15} {count:<8} {coverage:<8.1f}% {quality:<8}")
 
         if len(results) > 10:
@@ -209,7 +209,7 @@ def run_data_quality_checks(paths: QualityCheckPaths | None = None) -> dict[str,
 
         if need_optimization > 0:
             print("\n需要优化的币种 (缺口 > 5):")
-            for symbol, total_gaps, large_gaps, max_gap, avg_gap, status in continuity_results:
+            for symbol, total_gaps, large_gaps, max_gap, _avg_gap, status in continuity_results:
                 if status != "需优化":
                     continue
                 print(f"  {symbol}: 总缺口 {total_gaps} 个, 大缺口 {large_gaps} 个, 最大缺口 {max_gap} 秒")

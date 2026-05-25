@@ -49,7 +49,7 @@ def _normalize_market_series(series: MarketSeries) -> MarketSeries:
             series.high or [],
             series.low or [],
             series.close or [],
-            series.volume or [],
+            series.volume or [], strict=False,
         )
     ):
         ts_value, open_px, high_px, low_px, close_px, volume = values

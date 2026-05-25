@@ -482,7 +482,7 @@ class EnsembleRegimeEngine:
                 'weight': self.weights['funding'],
                 'sentiment': avg_sentiment,
                 'composite': False,
-                'details': {sym: v for sym, v in zip(['BTC','ETH','SOL','BNB'], vals)}
+                'details': {sym: v for sym, v in zip(['BTC','ETH','SOL','BNB'], vals, strict=False)}
             }
         except Exception as e:
             print(f"[EnsembleRegime] 资金费率投票失败: {e}")

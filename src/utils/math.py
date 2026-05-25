@@ -25,7 +25,7 @@ def zscore_cross_section(values: Dict[str, float], eps: float = 1e-12) -> Dict[s
     if sd < eps:
         return {k: 0.0 for k in keys}
     zs = (xs - mu) / sd
-    return {k: float(z) for k, z in zip(keys, zs)}
+    return {k: float(z) for k, z in zip(keys, zs, strict=False)}
 
 
 def clamp(x: float, lo: float, hi: float) -> float:

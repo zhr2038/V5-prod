@@ -169,9 +169,9 @@ def _text_value(value: Any) -> str:
     if value is None:
         return ""
     if hasattr(value, "value"):
-        value = getattr(value, "value")
+        value = value.value
     if hasattr(value, "name") and not isinstance(value, str):
-        value = getattr(value, "name")
+        value = value.name
     return str(value or "").strip()
 
 

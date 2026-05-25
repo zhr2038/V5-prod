@@ -72,7 +72,7 @@ class DataArchiver:
     def get_dir_size(self, path):
         """获取目录大小（MB）"""
         total = 0
-        for dirpath, dirnames, filenames in os.walk(path):
+        for dirpath, _dirnames, filenames in os.walk(path):
             for f in filenames:
                 fp = Path(dirpath) / f
                 if fp.exists():

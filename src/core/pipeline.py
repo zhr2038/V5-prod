@@ -95,7 +95,7 @@ def _normalize_market_series(series: MarketSeries) -> MarketSeries:
             series.high or [],
             series.low or [],
             series.close or [],
-            series.volume or [],
+            series.volume or [], strict=False,
         )
     ):
         ts_value, open_px, high_px, low_px, close_px, volume = values
@@ -479,7 +479,7 @@ class V5Pipeline:
                 lookback_hours=int(getattr(cfg.execution, 'negative_expectancy_lookback_hours', 24) or 24),
                 min_closed_cycles=int(getattr(cfg.execution, 'negative_expectancy_min_closed_cycles', 4) or 4),
                 expectancy_threshold_bps=(
-                    float(getattr(cfg.execution, 'negative_expectancy_threshold_bps'))
+                    float(cfg.execution.negative_expectancy_threshold_bps)
                     if getattr(cfg.execution, 'negative_expectancy_threshold_bps', None) is not None
                     else None
                 ),
@@ -918,7 +918,7 @@ class V5Pipeline:
 
         entry_ts = str(tags.get("entry_ts") or "").strip()
         if not entry_ts and state is not None and getattr(state, "entry_time", None) is not None:
-            entry_ts = getattr(state, "entry_time").isoformat()
+            entry_ts = state.entry_time.isoformat()
         if not entry_ts and market_probe_payload is not None:
             entry_ts = str(market_probe_payload.get("entry_ts") or "").strip()
             if not entry_ts:

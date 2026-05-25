@@ -269,7 +269,7 @@ def _series_from_market_data(series: Optional[MarketSeries]) -> list[dict[str, f
     if series is None:
         return []
     rows: dict[int, dict[str, float | int]] = {}
-    for ts_raw, close_raw in zip(getattr(series, "ts", []) or [], getattr(series, "close", []) or []):
+    for ts_raw, close_raw in zip(getattr(series, "ts", []) or [], getattr(series, "close", []) or [], strict=False):
         ts_ms = _coerce_epoch_ms(ts_raw)
         close = _normalize_float(close_raw)
         if ts_ms is None or close is None:
