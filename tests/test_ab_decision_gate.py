@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,12 @@ def test_resolve_ab_gate_output_path_uses_suffixed_runtime_file(tmp_path: Path) 
     path = ab_decision_gate._resolve_ab_gate_output_path(reports_dir)
 
     assert path == (reports_dir / "ab_gate_status_accelerated.json").resolve()
+
+
+def test_run_id_epoch_is_utc() -> None:
+    expected = datetime(2026, 4, 8, 2, tzinfo=timezone.utc).timestamp()
+
+    assert ab_decision_gate._run_id_epoch("20260408_02") == expected
 
 
 def test_resolve_deadband_params_uses_runtime_config(monkeypatch, tmp_path: Path) -> None:

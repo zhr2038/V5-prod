@@ -5,7 +5,7 @@ import argparse
 import json
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -99,12 +99,21 @@ def _resolve_ab_gate_output_path(reports_dir: Path) -> Path:
     return (reports_dir / "ab_gate_status.json").resolve()
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _run_id_epoch(run_id: str) -> float:
+    return datetime.strptime(str(run_id), "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp()
+
+
 def load_runs(runs_dir: Path, limit: int = 120):
     if not runs_dir.exists():
         return []
+
     def _candidate_sort_epoch(run_dir: Path) -> float:
         try:
-            return datetime.strptime(run_dir.name, "%Y%m%d_%H").timestamp()
+            return _run_id_epoch(run_dir.name)
         except Exception:
             audit_path = run_dir / "decision_audit.json"
             try:
@@ -130,7 +139,7 @@ def load_runs(runs_dir: Path, limit: int = 120):
 
         run_id = str(payload.get("run_id") or run_dir.name) if isinstance(payload, dict) else run_dir.name
         try:
-            return datetime.strptime(run_id, "%Y%m%d_%H").timestamp()
+            return _run_id_epoch(run_id)
         except Exception:
             try:
                 return audit_path.stat().st_mtime
@@ -211,7 +220,7 @@ def main() -> None:
     switch, detail = decide(cur, sim)
 
     out = {
-        "ts": datetime.now().isoformat(),
+        "ts": _utc_now().isoformat(),
         "window_runs": cur.rounds,
         "current": {
             "selected": cur.selected,
