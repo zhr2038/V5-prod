@@ -14,6 +14,8 @@ def test_execute_recovery_writes_guard_schema_compatible_state(monkeypatch, tmp_
     workspace = tmp_path
     reports_dir = workspace / "reports" / "shadow_runtime"
     reports_dir.mkdir(parents=True, exist_ok=True)
+    fixed_now = datetime(2026, 5, 25, 4, 0, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(risk_auto_recovery, "_utc_now", lambda: fixed_now)
 
     monkeypatch.setattr(
         risk_auto_recovery.RiskAutoRecovery,
@@ -44,6 +46,9 @@ def test_execute_recovery_writes_guard_schema_compatible_state(monkeypatch, tmp_
     assert state["history"][-1]["from"] == "PROTECT"
     assert state["history"][-1]["to"] == "DEFENSE"
     assert state["history"][-1]["reason"] == "[AUTO] recovery"
+    assert state["history"][-1]["ts"] == "2026-05-25T04:00:01Z"
+    assert state["last_update"] == "2026-05-25T04:00:01Z"
+    assert state["since"] == "2026-05-25T04:00:01Z"
     assert state["level"] == "DEFENSE"
 
     guard = AutoRiskGuard(state_path=manager.risk_state_file)

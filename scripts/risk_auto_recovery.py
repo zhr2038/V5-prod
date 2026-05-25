@@ -12,8 +12,9 @@ V5 风控自动恢复机制
 import json
 import sys
 from dataclasses import asdict
-from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +41,14 @@ RECOVERY_THRESHOLDS = {
         'target_level': 'NEUTRAL'
     }
 }
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_iso() -> str:
+    return _utc_now().isoformat().replace("+00:00", "Z")
 
 
 class RiskAutoRecovery:
@@ -132,7 +141,7 @@ class RiskAutoRecovery:
                             state.get('since')
                             or state.get('last_update')
                             or latest_history_ts
-                            or datetime.now().isoformat()
+                            or _utc_now_iso()
                         )
                         state['current_level'] = current_level
                         state['level'] = current_level
@@ -140,14 +149,14 @@ class RiskAutoRecovery:
                         return state
             except Exception:
                 pass
-        now_iso = datetime.now().isoformat()
+        now_iso = _utc_now_iso()
         return {'current_level': 'NEUTRAL', 'level': 'NEUTRAL', 'since': now_iso, 'last_update': now_iso}
     
     def get_drawdown_history(self, hours=24):
         """获取回撤历史"""
         try:
             points = []
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+            cutoff = _utc_now() - timedelta(hours=hours)
 
             def _candidate_sort_epoch(run_dir: Path) -> float:
                 try:
@@ -267,7 +276,7 @@ class RiskAutoRecovery:
             since = self._parse_state_datetime(state.get('since'))
             if since is None:
                 raise ValueError("missing since")
-            return (datetime.now(timezone.utc) - since).total_seconds() / 3600  # 小时
+            return (_utc_now() - since).total_seconds() / 3600  # 小时
         except Exception:
             return 999  # 如果解析失败，假设已停留很久
     
@@ -276,7 +285,7 @@ class RiskAutoRecovery:
         # 检查是否被手动暂停
         if self.config.get('manual_override_until'):
             until = self._parse_state_datetime(self.config['manual_override_until'])
-            if until is not None and datetime.now(timezone.utc) < until:
+            if until is not None and _utc_now() < until:
                 return {'action': 'paused', 'reason': f'手动暂停至 {until}'}
         
         # 检查是否启用
@@ -318,7 +327,7 @@ class RiskAutoRecovery:
         try:
             state = self.get_current_risk_state()
             old_level = str(state.get('current_level') or state.get('level') or 'NEUTRAL').upper()
-            now_iso = datetime.now().isoformat()
+            now_iso = _utc_now_iso()
             metrics = state.get('metrics') if isinstance(state.get('metrics'), dict) else {}
             history = list(state.get('history') or []) if isinstance(state.get('history'), list) else []
             history.append({
@@ -353,7 +362,7 @@ class RiskAutoRecovery:
         print("=" * 60)
         print("🛡️  V5 风控自动恢复评估")
         print("=" * 60)
-        print(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"时间: {_utc_now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"自动恢复: {'✅ 启用' if self.config.get('enabled') else '❌ 禁用'}")
         print()
         
@@ -411,8 +420,8 @@ def main():
         return
     
     if args.pause_hours:
-        until = datetime.now() + timedelta(hours=args.pause_hours)
-        manager.config['manual_override_until'] = until.isoformat()
+        until = _utc_now() + timedelta(hours=args.pause_hours)
+        manager.config['manual_override_until'] = until.isoformat().replace("+00:00", "Z")
         manager.save_config()
         print(f"⏸️  已暂停自动恢复至 {until.strftime('%Y-%m-%d %H:%M')}")
         return
