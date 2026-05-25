@@ -27,4 +27,4 @@ research = [
 
 [tool.pytest.ini_options]
 addopts = "-q"
-testpaths = ["tests", "archive/20260313-research-cleanup/tests"]
+testpaths = ["tests"]

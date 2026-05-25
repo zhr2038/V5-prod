@@ -1014,7 +1014,7 @@ def fixture_config_runtime_consumption_root(root):
 
 
 def fixture_rank_exit_consistency_root(root):
-    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0) - dt.timedelta(hours=2)
     open_run_dt = now - dt.timedelta(hours=1)
     open_run_id = open_run_dt.strftime("%Y%m%d_%H")
     close_run_id = now.strftime("%Y%m%d_%H")
@@ -1070,7 +1070,7 @@ def fixture_rank_exit_consistency_root(root):
 
 
 def fixture_rank_exit_log_only_consistency_root(root):
-    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0) - dt.timedelta(hours=2)
     open_run_dt = now - dt.timedelta(hours=1)
     open_run_id = open_run_dt.strftime("%Y%m%d_%H")
     close_run_id = now.strftime("%Y%m%d_%H")
