@@ -5,7 +5,7 @@ import os
 import shlex
 import shutil
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -354,7 +354,11 @@ def test_check_and_alert_suppresses_no_trade_alert_when_protect(monkeypatch, tmp
     sent: list[tuple[str, str]] = []
 
     monkeypatch.setattr(trade_monitor, "get_current_risk_level", lambda _paths=paths: "PROTECT")
-    monkeypatch.setattr(trade_monitor, "get_last_trade_time", lambda _paths=paths, service_unit=None: datetime.now() - timedelta(hours=13))
+    monkeypatch.setattr(
+        trade_monitor,
+        "get_last_trade_time",
+        lambda _paths=paths, service_unit=None: datetime.now(timezone.utc) - timedelta(hours=13),
+    )
     monkeypatch.setattr(trade_monitor, "get_recent_trades_count", lambda service_unit=None: (1, 1))
     monkeypatch.setattr(trade_monitor, "get_recent_errors", lambda service_unit=None: [])
     monkeypatch.setattr(trade_monitor, "resolve_live_service_unit_name", lambda: "v5-prod.user.service")
@@ -489,7 +493,11 @@ def test_check_and_alert_keeps_zero_fill_info_outside_protect(monkeypatch, tmp_p
     sent: list[tuple[str, str]] = []
 
     monkeypatch.setattr(trade_monitor, "get_current_risk_level", lambda _paths=paths: "DEFENSE")
-    monkeypatch.setattr(trade_monitor, "get_last_trade_time", lambda _paths=paths, service_unit=None: datetime.now())
+    monkeypatch.setattr(
+        trade_monitor,
+        "get_last_trade_time",
+        lambda _paths=paths, service_unit=None: datetime.now(timezone.utc),
+    )
     monkeypatch.setattr(trade_monitor, "get_recent_trades_count", lambda service_unit=None: (6, 0))
     monkeypatch.setattr(trade_monitor, "get_recent_errors", lambda service_unit=None: [])
     monkeypatch.setattr(trade_monitor, "resolve_live_service_unit_name", lambda: "v5-prod.user.service")

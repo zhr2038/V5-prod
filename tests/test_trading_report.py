@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -56,7 +56,7 @@ def test_load_regime_history_prefers_audit_timestamp_over_file_mtime(tmp_path: P
     stale_run.mkdir(parents=True, exist_ok=True)
     fresh_run.mkdir(parents=True, exist_ok=True)
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     stale_ts = (now - timedelta(days=8)).timestamp()
     fresh_ts = (now - timedelta(hours=1)).timestamp()
 
@@ -103,7 +103,7 @@ def test_load_regime_history_limits_audit_file_reads_before_parsing(tmp_path: Pa
     runs_dir = reports_dir / "runs"
     runs_dir.mkdir(parents=True, exist_ok=True)
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     recent_hours = {19, 18, 17, 16}
     for hour in range(20):
         day_offset = 0 if hour in recent_hours else 10
@@ -146,7 +146,7 @@ def test_load_equity_data_limits_recent_equity_file_reads_before_parsing(tmp_pat
     runs_dir = reports_dir / "runs"
     runs_dir.mkdir(parents=True, exist_ok=True)
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     recent_hours = {19, 18, 17, 16}
     for hour in range(20):
         day_offset = 0 if hour in recent_hours else 10

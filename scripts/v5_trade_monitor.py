@@ -5,19 +5,18 @@ Trade monitor for the V5 production workspace.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import sqlite3
 import subprocess
 import sys
-import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 from urllib import parse, request
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -32,7 +31,6 @@ from src.execution.fill_store import (
 )
 from src.risk.auto_risk_guard import extract_risk_level
 
-
 TELEGRAM_CHAT_ID = "5065024131"
 TELEGRAM_API_BASE = "https://api.telegram.org"
 TELEGRAM_TOKEN_RE = re.compile(r"^[A-Za-z0-9:_-]+$")
@@ -44,6 +42,14 @@ ALERT_THRESHOLDS = {
 FILL_SYNC_RE = re.compile(r"new_fills=(\d+)")
 LIVE_RUN_COMPLETED_MARKER = "V5 live run completed"
 JOURNAL_TS_RE = re.compile(r"^(?P<month>[A-Z][a-z]{2})\s+(?P<day>\d{1,2})\s+(?P<clock>\d{2}:\d{2}:\d{2})")
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _local_tzinfo():
+    return _utc_now().astimezone().tzinfo or timezone.utc
 
 
 @dataclass(frozen=True)
@@ -226,14 +232,15 @@ def _parse_journal_timestamp(line: str) -> datetime | None:
     if not match:
         return None
     try:
-        current_year = datetime.now().year
+        local_tz = _local_tzinfo()
+        current_year = datetime.now(local_tz).year
         date_text = "{month} {day} {clock} {year}".format(
             month=match.group("month"),
             day=match.group("day"),
             clock=match.group("clock"),
             year=current_year,
         )
-        return datetime.strptime(date_text, "%b %d %H:%M:%S %Y")
+        return datetime.strptime(date_text, "%b %d %H:%M:%S %Y").replace(tzinfo=local_tz)
     except Exception:
         return None
 
@@ -298,7 +305,7 @@ def get_last_trade_time(paths: MonitorPaths = DEFAULT_PATHS, *, service_unit: st
         default=None,
     )
     if latest_ts_ms is not None:
-        return datetime.fromtimestamp(latest_ts_ms / 1000)
+        return datetime.fromtimestamp(latest_ts_ms / 1000, timezone.utc)
 
     unit = service_unit or resolve_live_service_unit_name()
     try:
@@ -423,7 +430,7 @@ def send_telegram_alert(message: str, priority: str = "normal", paths: MonitorPa
     full_message = (
         f"{icon} V5 trade monitor\n\n"
         f"{message}\n\n"
-        f"time: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        f"time: {_utc_now().strftime('%Y-%m-%d %H:%M')}"
     )
 
     file_ok = False
@@ -476,7 +483,7 @@ def check_and_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
     trade_runs, total_fills = get_recent_trades_count(service_unit=service_unit)
 
     if last_trade is not None:
-        hours_since_trade = (datetime.now() - last_trade).total_seconds() / 3600
+        hours_since_trade = (_utc_now() - last_trade.astimezone(timezone.utc)).total_seconds() / 3600
         if not (risk_level == "PROTECT" and hours_since_trade >= ALERT_THRESHOLDS["no_trade_hours"]):
             if hours_since_trade >= ALERT_THRESHOLDS["no_trade_critical"]:
                 alerts.append(f"critical: no trade for {hours_since_trade:.1f} hours")
@@ -514,7 +521,7 @@ def check_and_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
         send_telegram_alert(summary, priority=priority, paths=paths)
         return True
 
-    print(f"[OK] {datetime.now().strftime('%H:%M')} monitor check passed")
+    print(f"[OK] {_utc_now().strftime('%H:%M')} monitor check passed")
     clear_stale_alert(paths)
     return False
 

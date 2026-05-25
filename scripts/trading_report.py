@@ -5,10 +5,10 @@ import argparse
 import json
 import sqlite3
 import sys
-from contextlib import closing
 from collections import defaultdict
+from contextlib import closing
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,10 @@ from src.execution.fill_store import (
     derive_runtime_reports_dir,
     derive_runtime_runs_dir,
 )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 @dataclass(frozen=True)
@@ -137,9 +141,9 @@ def _parse_equity_ts(raw_value: Any) -> datetime | None:
         ts = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
         return None
-    if ts.tzinfo is not None:
-        return ts.astimezone().replace(tzinfo=None)
-    return ts
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc)
 
 
 def _decision_audit_sort_epoch(run_dir: Path, payload: Any) -> float:
@@ -157,7 +161,7 @@ def _decision_audit_sort_epoch(run_dir: Path, payload: Any) -> float:
         run_id = run_dir.name
 
     try:
-        return datetime.strptime(run_id, "%Y%m%d_%H").timestamp()
+        return datetime.strptime(run_id, "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp()
     except Exception:
         audit_file = run_dir / "decision_audit.json"
         try:
@@ -177,12 +181,12 @@ class TradingReportGenerator:
 
     def load_equity_data(self, days: int = 7) -> list[dict[str, Any]]:
         points: list[dict[str, Any]] = []
-        cutoff = datetime.now() - timedelta(days=days)
+        cutoff = _utc_now() - timedelta(days=days)
 
         def _candidate_sort_epoch(run_dir: Path) -> float:
             try:
                 # Use the end of the run hour as a lightweight upper bound for cutoff filtering.
-                return datetime.strptime(run_dir.name, "%Y%m%d_%H").timestamp() + 3600.0
+                return datetime.strptime(run_dir.name, "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp() + 3600.0
             except Exception:
                 equity_file = run_dir / "equity.jsonl"
                 try:
@@ -198,7 +202,7 @@ class TradingReportGenerator:
                 equity_file = run_dir / "equity.jsonl"
                 if not equity_file.exists():
                     continue
-                if datetime.fromtimestamp(_candidate_sort_epoch(run_dir)) <= cutoff:
+                if datetime.fromtimestamp(_candidate_sort_epoch(run_dir), timezone.utc) <= cutoff:
                     continue
                 try:
                     with equity_file.open(encoding="utf-8") as handle:
@@ -233,7 +237,7 @@ class TradingReportGenerator:
         return unique
 
     def load_trade_data(self, days: int = 7) -> list[dict[str, Any]]:
-        cutoff_ts = int((datetime.now() - timedelta(days=days)).timestamp() * 1000)
+        cutoff_ts = int((_utc_now() - timedelta(days=days)).timestamp() * 1000)
 
         if self.paths.fills_db.exists():
             with closing(sqlite3.connect(str(self.paths.fills_db))) as conn:
@@ -269,7 +273,7 @@ class TradingReportGenerator:
                         "state": "FILLED",
                         "notional": notional,
                         "fee": _signed_fee_usdt_from_fee_fields(str(inst_id or ""), fill_px, fee, fee_ccy),
-                        "ts": datetime.fromtimestamp(int(ts_ms or 0) / 1000),
+                        "ts": datetime.fromtimestamp(int(ts_ms or 0) / 1000, timezone.utc),
                     }
                 )
             return trades
@@ -313,19 +317,19 @@ class TradingReportGenerator:
                     "state": state,
                     "notional": float(notional_usdt or 0),
                     "fee": _signed_fee_usdt_from_order_fee(str(inst_id or ""), avg_px, fee),
-                    "ts": datetime.fromtimestamp(float(ts_ms) / 1000),
+                    "ts": datetime.fromtimestamp(float(ts_ms) / 1000, timezone.utc),
                 }
             )
         return trades
 
     def load_regime_history(self, days: int = 7) -> list[dict[str, Any]]:
         regimes: list[dict[str, Any]] = []
-        cutoff = datetime.now() - timedelta(days=days)
+        cutoff = _utc_now() - timedelta(days=days)
 
         def _candidate_sort_epoch(run_dir: Path) -> float:
             try:
                 # Use the end of the run hour as a lightweight upper bound for cutoff filtering.
-                return datetime.strptime(run_dir.name, "%Y%m%d_%H").timestamp() + 3600.0
+                return datetime.strptime(run_dir.name, "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp() + 3600.0
             except Exception:
                 audit_file = run_dir / "decision_audit.json"
                 try:
@@ -340,12 +344,12 @@ class TradingReportGenerator:
                 audit_file = run_dir / "decision_audit.json"
                 if not audit_file.exists():
                     continue
-                if datetime.fromtimestamp(_candidate_sort_epoch(run_dir)) <= cutoff:
+                if datetime.fromtimestamp(_candidate_sort_epoch(run_dir), timezone.utc) <= cutoff:
                     skipped_candidates.append(run_dir)
                     continue
                 try:
                     data = json.loads(audit_file.read_text(encoding="utf-8"))
-                    modified_at = datetime.fromtimestamp(_decision_audit_sort_epoch(run_dir, data))
+                    modified_at = datetime.fromtimestamp(_decision_audit_sort_epoch(run_dir, data), timezone.utc)
                     if modified_at <= cutoff:
                         continue
                 except Exception:
@@ -362,7 +366,7 @@ class TradingReportGenerator:
                     audit_file = run_dir / "decision_audit.json"
                     try:
                         data = json.loads(audit_file.read_text(encoding="utf-8"))
-                        modified_at = datetime.fromtimestamp(_decision_audit_sort_epoch(run_dir, data))
+                        modified_at = datetime.fromtimestamp(_decision_audit_sort_epoch(run_dir, data), timezone.utc)
                         if modified_at <= cutoff:
                             continue
                     except Exception:
@@ -382,7 +386,7 @@ class TradingReportGenerator:
         self.log("=" * 60)
         self.log("V5 交易日报")
         self.log("=" * 60)
-        self.log(f"报告时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        self.log(f"报告时间: {_utc_now().strftime('%Y-%m-%d %H:%M')}")
         self.log("报告周期: 最近 24 小时")
         self.log()
 
@@ -438,7 +442,7 @@ class TradingReportGenerator:
         self.log("=" * 60)
         self.log("V5 交易周报")
         self.log("=" * 60)
-        self.log(f"报告时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        self.log(f"报告时间: {_utc_now().strftime('%Y-%m-%d %H:%M')}")
         self.log("报告周期: 最近 7 天")
         self.log()
 

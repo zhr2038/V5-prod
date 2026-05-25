@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -61,7 +61,7 @@ def test_load_equity_data_limits_recent_equity_file_reads_before_parsing(tmp_pat
     )
     monkeypatch.setattr(detector, "build_paths", lambda workspace=None: paths)
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     recent_hours = {19, 18, 17, 16}
     for hour in range(20):
         day_offset = 0 if hour in recent_hours else 10

@@ -9,12 +9,11 @@ import argparse
 import json
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -22,6 +21,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from configs.runtime_config import load_runtime_config, resolve_runtime_path
 from src.execution.fill_store import derive_runtime_reports_dir, derive_runtime_runs_dir
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 @dataclass(frozen=True)
@@ -76,9 +79,12 @@ def _parse_equity_timestamp(raw: str) -> datetime | None:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00").replace("+00:00", ""))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except Exception:
         return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 class EquityAnomalyDetector:
@@ -88,16 +94,16 @@ class EquityAnomalyDetector:
         self.stats = {"total_points": 0, "anomalies": 0}
 
     def log(self, msg: str) -> None:
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+        print(f"[{_utc_now().strftime('%H:%M:%S')}] {msg}")
 
     def load_equity_data(self, days: int = 7) -> list[dict[str, Any]]:
         points: list[dict[str, Any]] = []
-        cutoff = datetime.now() - timedelta(days=days)
+        cutoff = _utc_now() - timedelta(days=days)
 
         def _candidate_sort_epoch(run_dir: Path) -> float:
             try:
                 # Use the end of the run hour as a lightweight upper bound for cutoff filtering.
-                return datetime.strptime(run_dir.name, "%Y%m%d_%H").timestamp() + 3600.0
+                return datetime.strptime(run_dir.name, "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp() + 3600.0
             except Exception:
                 equity_file = run_dir / "equity.jsonl"
                 try:
@@ -113,7 +119,7 @@ class EquityAnomalyDetector:
                 equity_file = run_dir / "equity.jsonl"
                 if not equity_file.exists():
                     continue
-                if datetime.fromtimestamp(_candidate_sort_epoch(run_dir)) <= cutoff:
+                if datetime.fromtimestamp(_candidate_sort_epoch(run_dir), timezone.utc) <= cutoff:
                     continue
                 try:
                     for line in equity_file.read_text(encoding="utf-8", errors="ignore").splitlines():
@@ -253,10 +259,10 @@ class EquityAnomalyDetector:
         return all_anomalies
 
     def save_report(self, anomalies: list[dict[str, Any]]) -> Path:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = _utc_now().strftime("%Y%m%d_%H%M%S")
         report_file = _derive_anomaly_report_path(self.paths.orders_db, timestamp)
         report = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": _utc_now().isoformat().replace("+00:00", "Z"),
             "stats": self.stats,
             "anomalies": anomalies,
         }
