@@ -32,9 +32,8 @@ from src.execution.fill_store import (
 )
 from src.execution.position_store import PositionStore
 from src.reporting.reporting import dump_run_artifacts
-from src.core.models import MarketSeries, Order, PositionState
+from src.core.models import MarketSeries, Order
 from src.risk.negative_expectancy_cooldown import negative_expectancy_config_fingerprint
-from src.risk.risk_engine import RiskEngine
 
 # 棰勭畻闄愬埗锛?0 USDT纭檺鍒讹級
 try:

@@ -161,7 +161,7 @@ if __name__ == "__main__":
         print(f"\n场景: {desc}")
         print(f"  市场状态: {market}")
         print(f"  情绪得分: {sentiment:+.2f}")
-        print(f"  权重分配:")
+        print("  权重分配:")
         for factor, weight in result['weights'].items():
             bar = '█' * int(weight * 50)
             print(f"    {factor:20s}: {weight:.2%} {bar}")

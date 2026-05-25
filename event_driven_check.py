@@ -34,7 +34,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 # Import event-driven components
 try:
-    from src.execution.event_types import MarketState, SignalState, normalize_signal_rank, top_selected_symbols
+    from src.execution.event_types import SignalState, normalize_signal_rank, top_selected_symbols
     from src.execution.event_driven_integration import create_event_driven_trader
     from src.execution.event_action_bridge import clear_event_actions, persist_event_actions
     from src.execution.fill_store import (
