@@ -6,6 +6,26 @@ from types import SimpleNamespace
 import scripts.config_validator as config_validator
 
 
+class _FakeTextStream:
+    def __init__(self) -> None:
+        self.reconfigure_calls = []
+
+    def reconfigure(self, **kwargs) -> None:
+        self.reconfigure_calls.append(kwargs)
+
+
+def test_ensure_utf8_stdio_reconfigures_legacy_console_streams(monkeypatch) -> None:
+    stdout = _FakeTextStream()
+    stderr = _FakeTextStream()
+    monkeypatch.setattr(config_validator.sys, "stdout", stdout)
+    monkeypatch.setattr(config_validator.sys, "stderr", stderr)
+
+    config_validator._ensure_utf8_stdio()
+
+    assert stdout.reconfigure_calls == [{"encoding": "utf-8", "errors": "replace"}]
+    assert stderr.reconfigure_calls == [{"encoding": "utf-8", "errors": "replace"}]
+
+
 def test_resolve_workspace_defaults_to_repo_root(monkeypatch) -> None:
     monkeypatch.delenv("V5_WORKSPACE", raising=False)
 
@@ -83,6 +103,23 @@ def test_run_all_checks_defaults_to_live_prod_config() -> None:
     assert config_validator.ConfigValidator.run_all_checks.__defaults__ == ("live_prod.yaml",)
 
 
+def test_check_yaml_config_reads_utf8_config(monkeypatch, tmp_path) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / "live_prod.yaml").write_text(
+        "execution:\n  note: 生产配置\nexchange: {}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config_validator, "CONFIG_DIR", configs_dir)
+
+    validator = config_validator.ConfigValidator()
+    config = validator.check_yaml_config("live_prod.yaml")
+
+    assert config["execution"]["note"] == "生产配置"
+    assert validator.errors == []
+    assert validator.warnings == []
+
+
 def test_check_database_uses_runtime_db_paths_from_active_config(monkeypatch, tmp_path) -> None:
     workspace = tmp_path
     configs_dir = workspace / "configs"
@@ -96,7 +133,7 @@ def test_check_database_uses_runtime_db_paths_from_active_config(monkeypatch, tm
             [
                 "execution:",
                 "  order_store_path: reports/shadow_runtime/orders.sqlite",
-                "account: {}",
+                "exchange: {}",
                 "",
             ]
         ),

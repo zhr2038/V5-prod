@@ -34,6 +34,19 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _ensure_utf8_stdio() -> None:
+    """Keep validation output usable on Windows consoles with legacy encodings."""
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def resolve_workspace() -> Path:
     raw = os.getenv('V5_WORKSPACE', '').strip()
     if raw:
@@ -151,14 +164,14 @@ class ConfigValidator:
             return None
         
         try:
-            with open(config_path) as f:
+            with config_path.open(encoding='utf-8') as f:
                 config = yaml.safe_load(f)
             
             self.checks_passed += 1
             self.log("YAML格式正确", 'PASS')
             
             # 检查关键配置项
-            required_keys = ['execution', 'account']
+            required_keys = ['execution', 'exchange']
             for key in required_keys:
                 if key in config:
                     self.checks_passed += 1
@@ -289,6 +302,7 @@ class ConfigValidator:
     
     def run_all_checks(self, config_name='live_prod.yaml'):
         """运行所有检查"""
+        _ensure_utf8_stdio()
         print("=" * 60)
         print("🔍 V5 配置验证")
         print("=" * 60)
