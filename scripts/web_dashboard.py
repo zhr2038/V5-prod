@@ -2139,22 +2139,34 @@ def _load_okx_account_balance(key: str, sec: str, pp: str) -> Dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _load_okx_public_ticker_last_price(symbol: str) -> float:
+def _okx_public_ticker_inst_id(symbol: str) -> str:
     symbol_key = str(symbol or '').strip().upper()
     if not symbol_key:
+        return ''
+    if symbol_key.startswith('OKX:'):
+        symbol_key = symbol_key[len('OKX:'):]
+    symbol_key = symbol_key.replace('/', '-')
+    if '-' in symbol_key:
+        return symbol_key
+    return f'{symbol_key}-USDT'
+
+
+def _load_okx_public_ticker_last_price(symbol: str) -> float:
+    inst_id = _okx_public_ticker_inst_id(symbol)
+    if not inst_id:
         return 0.0
 
     ttl = _okx_public_ticker_cache_ttl_seconds()
     now = time.time()
     if ttl > 0:
         with _OKX_PUBLIC_TICKER_CACHE_LOCK:
-            cached = _OKX_PUBLIC_TICKER_CACHE.get(symbol_key)
+            cached = _OKX_PUBLIC_TICKER_CACHE.get(inst_id)
             if cached and cached[0] > now:
                 return float(cached[1] or 0.0)
 
     response = requests.get(
         'https://www.okx.com/api/v5/market/ticker',
-        params={'instId': f'{symbol_key}-USDT'},
+        params={'instId': inst_id},
         timeout=5,
     )
     payload = response.json()
@@ -2162,7 +2174,7 @@ def _load_okx_public_ticker_last_price(symbol: str) -> float:
         price = float(payload['data'][0].get('last') or 0)
         if price > 0 and ttl > 0:
             with _OKX_PUBLIC_TICKER_CACHE_LOCK:
-                _OKX_PUBLIC_TICKER_CACHE[symbol_key] = (time.time() + ttl, price)
+                _OKX_PUBLIC_TICKER_CACHE[inst_id] = (time.time() + ttl, price)
         return price
     return 0.0
 
