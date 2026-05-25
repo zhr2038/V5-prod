@@ -44,4 +44,16 @@ def test_evaluate_persists_metrics_when_level_does_not_change(tmp_path) -> None:
     assert saved["metrics"]["last_dd_pct"] == 0.19
     assert saved["metrics"]["last_conversion_rate"] == 0.0
     assert saved["last_update"] != "2026-04-26T01:00:00"
+    assert saved["last_update"].endswith("Z")
     assert len(saved["history"]) == 1
+
+
+def test_force_level_persists_utc_history_timestamp(tmp_path) -> None:
+    state_path = tmp_path / "auto_risk_guard.json"
+    guard = AutoRiskGuard(state_path=str(state_path))
+
+    guard.force_level("DEFENSE", reason="test")
+
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+    assert saved["last_update"].endswith("Z")
+    assert saved["history"][-1]["ts"].endswith("Z")

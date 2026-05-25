@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, asdict
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
+
+from src.utils.time import utc_now_iso
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -148,7 +149,7 @@ class AutoRiskGuard:
                     'current_config': asdict(self.LEVELS[self.current_level]),
                     'metrics': self.metrics,
                     'history': self.history[-50:],  # 保留最近50条
-                    'last_update': datetime.now().isoformat(),
+                    'last_update': utc_now_iso(),
                 }, f, indent=2, default=str)
         except Exception as e:
             print(f"[AutoRiskGuard] 保存状态失败: {e}")
@@ -214,7 +215,7 @@ class AutoRiskGuard:
         if new_level != old_level:
             self.current_level = new_level
             self.history.append({
-                'ts': datetime.now().isoformat(),
+                'ts': utc_now_iso(),
                 'from': old_level,
                 'to': new_level,
                 'reason': '; '.join(reasons),
@@ -243,7 +244,7 @@ class AutoRiskGuard:
         old = self.current_level
         self.current_level = level
         self.history.append({
-            'ts': datetime.now().isoformat(),
+            'ts': utc_now_iso(),
             'from': old,
             'to': level,
             'reason': f"[FORCE] {reason}",
