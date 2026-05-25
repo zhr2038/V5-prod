@@ -549,6 +549,45 @@ def test_rank_exit_buffer_positions_delays_streak_start(tmp_path):
     assert pm.positions["DOT/USDT"].rank_exit_streak == 1
 
 
+def test_profit_taking_zulu_entry_time_summary_uses_utc_state(tmp_path):
+    pm = ProfitTakingManager(state_path=str(tmp_path / "profit_taking_state.json"))
+
+    pm.register_position(
+        "ETH/USDT",
+        100.0,
+        current_price=101.0,
+        entry_ts="2026-03-09T00:00:00Z",
+    )
+
+    summary = pm.get_position_summary("ETH/USDT", 101.0)
+    state = pm.positions["ETH/USDT"]
+    payload = json.loads((tmp_path / "profit_taking_state.json").read_text(encoding="utf-8"))
+    assert summary is not None
+    assert isinstance(summary["days_held"], int)
+    assert state.entry_time.tzinfo is not None
+    assert state.entry_time.utcoffset() == timedelta(0)
+    assert payload["ETH/USDT"]["entry_time"].endswith("+00:00")
+
+
+def test_profit_taking_action_timestamps_are_utc(tmp_path):
+    pm = ProfitTakingManager(
+        rank_exit_strict_mode=True,
+        state_path=str(tmp_path / "profit_taking_state.json"),
+    )
+    pm.register_position("ETH/USDT", 100.0, current_price=100.0)
+
+    pm.evaluate("ETH/USDT", 120.0)
+    action, _, _ = pm.evaluate("ETH/USDT", 120.0)
+    assert action == "sell_partial"
+    assert pm.positions["ETH/USDT"].partial_sell_time is not None
+    assert pm.positions["ETH/USDT"].partial_sell_time.utcoffset() == timedelta(0)
+
+    should_exit, _ = pm.should_exit_by_rank("ETH/USDT", current_rank=5, max_rank=3, confirm_rounds=1)
+    assert should_exit is True
+    assert pm.positions["ETH/USDT"].last_rank_exit_time is not None
+    assert pm.positions["ETH/USDT"].last_rank_exit_time.utcoffset() == timedelta(0)
+
+
 def test_peak_drawdown_exit_generates_partial_sell_order(tmp_path):
     cfg = AppConfig(symbols=["BTC/USDT", "OKB/USDT"])
     cfg.alpha.use_fused_score_for_weighting = False

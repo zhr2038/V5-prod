@@ -4,7 +4,7 @@ Profit-taking and rank-exit state manager.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -121,9 +121,16 @@ class ProfitTakingManager:
                 return None
             if raw.endswith("Z"):
                 raw = raw[:-1] + "+00:00"
-            return datetime.fromisoformat(raw)
+            parsed = datetime.fromisoformat(raw)
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
         except Exception:
             return None
+
+    @staticmethod
+    def _utc_now() -> datetime:
+        return datetime.now(timezone.utc)
 
     def _legacy_partial_action_key(self) -> Optional[str]:
         for level in self.profit_levels:
@@ -144,17 +151,17 @@ class ProfitTakingManager:
                 state = PositionProfitState(
                     symbol=str(raw.get("symbol") or sym),
                     entry_price=float(raw.get("entry_price", raw.get("entry_px"))),
-                    entry_time=datetime.fromisoformat(str(raw.get("entry_time") or raw.get("entry_ts"))),
+                    entry_time=self._parse_entry_time(str(raw.get("entry_time") or raw.get("entry_ts"))) or self._utc_now(),
                     highest_price=float(raw.get("highest_price") or raw.get("entry_price", raw.get("entry_px"))),
                     profit_high=float(raw.get("profit_high", 0.0) or 0.0),
                     current_stop=float(raw.get("current_stop", 0.0) or 0.0),
                     current_action=str(raw.get("current_action", "hold") or "hold"),
                     partial_sold=bool(raw.get("partial_sold", False)),
-                    partial_sell_time=datetime.fromisoformat(raw["partial_sell_time"]) if raw.get("partial_sell_time") else None,
+                    partial_sell_time=self._parse_entry_time(raw["partial_sell_time"]) if raw.get("partial_sell_time") else None,
                     triggered_actions=triggered,
                     rank_exit_streak=int(raw.get("rank_exit_streak", 0) or 0),
                     last_rank=int(raw["last_rank"]) if raw.get("last_rank") is not None else None,
-                    last_rank_exit_time=datetime.fromisoformat(raw["last_rank_exit_time"]) if raw.get("last_rank_exit_time") else None,
+                    last_rank_exit_time=self._parse_entry_time(raw["last_rank_exit_time"]) if raw.get("last_rank_exit_time") else None,
                     entry_reason=str(raw.get("entry_reason") or "") or None,
                     probe_type=str(raw.get("probe_type") or "") or None,
                     target_w=float(raw["target_w"]) if raw.get("target_w") is not None else None,
@@ -221,7 +228,7 @@ class ProfitTakingManager:
                 )
                 state = self.positions[symbol]
                 state.entry_price = entry_price
-                state.entry_time = self._parse_entry_time(entry_ts) or datetime.now()
+                state.entry_time = self._parse_entry_time(entry_ts) or self._utc_now()
                 state.highest_price = current_price or entry_price
                 state.profit_high = 0.0
                 state.current_stop = entry_price * 0.95
@@ -290,7 +297,7 @@ class ProfitTakingManager:
         self.positions[symbol] = PositionProfitState(
             symbol=symbol,
             entry_price=entry_price,
-            entry_time=self._parse_entry_time(entry_ts) or datetime.now(),
+            entry_time=self._parse_entry_time(entry_ts) or self._utc_now(),
             highest_price=highest_seed,
             current_stop=entry_price * 0.95,
             profit_high=max(0.0, (float(highest_seed) - float(entry_price)) / float(entry_price)) if float(entry_price or 0.0) > 0 else 0.0,
@@ -369,7 +376,7 @@ class ProfitTakingManager:
                 state.current_action = action_key
                 if float(level.sell_pct) < 0.999:
                     state.partial_sold = True
-                    state.partial_sell_time = datetime.now()
+                    state.partial_sell_time = self._utc_now()
                 self._save_state()
                 reason = (
                     f"peak_drawdown_{self._pct_token(level.profit_pct)}"
@@ -399,7 +406,7 @@ class ProfitTakingManager:
                     continue
                 state.triggered_actions.append(action_key)
                 state.partial_sold = True
-                state.partial_sell_time = datetime.now()
+                state.partial_sell_time = self._utc_now()
                 new_stop = entry * (1 + level.stop_pct)
                 if new_stop > state.current_stop:
                     state.current_stop = new_stop
@@ -458,7 +465,7 @@ class ProfitTakingManager:
             changed = True
 
             if state.rank_exit_streak >= confirm_rounds_i:
-                state.last_rank_exit_time = datetime.now()
+                state.last_rank_exit_time = self._utc_now()
                 self._save_state()
                 if state.profit_high > 0.20 and not self.rank_exit_strict_mode:
                     return True, f"rank_{current_rank_i}_exceeds_{trigger_rank}_with_profit_streak_{state.rank_exit_streak}"
@@ -500,7 +507,7 @@ class ProfitTakingManager:
             "stop_distance": (current_price - state.current_stop) / current_price if current_price > 0 else 0.0,
             "action": state.current_action,
             "triggered_actions": list(state.triggered_actions or []),
-            "days_held": (datetime.now() - state.entry_time).days,
+            "days_held": (self._utc_now() - state.entry_time).days,
         }
 
     def clear_position(self, symbol: str):
