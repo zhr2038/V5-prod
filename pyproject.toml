@@ -28,3 +28,13 @@ research = [
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"archive/**/*.py" = ["E402"]
+"deploy/**/*.py" = ["E402"]
+"main.py" = ["E402"]
+"scripts/**/*.py" = ["E402"]
+"src/core/pipeline.py" = ["E402"]
+"src/execution/kill_switch_guard.py" = ["E402"]
+"src/regime/hmm_regime_detector.py" = ["E402"]
+"tests/**/*.py" = ["E402"]
