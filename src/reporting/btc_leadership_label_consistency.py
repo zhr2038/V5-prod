@@ -37,12 +37,16 @@ def _is_btc_leadership_skip(row: Mapping[str, Any]) -> bool:
 
 def _parse_run_id_ts_ms(run_id: str) -> int:
     text = str(run_id or "").strip()
-    for fmt in ("%Y%m%d_%H", "%Y%m%d_%H%M", "%Y%m%dT%H", "%Y%m%dT%H%M"):
+    reference = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    for fmt in ("%Y%m%d_%H%M", "%Y%m%d_%H", "%Y%m%dT%H%M", "%Y%m%dT%H"):
+        token_len = len(reference.strftime(fmt))
+        if len(text) < token_len:
+            continue
         try:
-            dt = datetime.strptime(text[: len(datetime.now().strftime(fmt))], fmt)
+            dt = datetime.strptime(text[:token_len], fmt).replace(tzinfo=timezone.utc)
         except Exception:
             continue
-        return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
+        return int(dt.timestamp() * 1000)
     return 0
 
 

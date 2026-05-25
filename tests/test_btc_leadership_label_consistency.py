@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import csv
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.reporting.btc_leadership_label_consistency import (
     ISSUE_CODE,
+    _parse_run_id_ts_ms,
     update_btc_leadership_label_issues,
 )
 
@@ -24,6 +26,15 @@ def _write_audit(bundle_root: Path, run_id: str, *, now_ts: int, decisions: list
             indent=2,
         ),
         encoding="utf-8",
+    )
+
+
+def test_btc_leadership_run_id_timestamp_uses_utc() -> None:
+    assert _parse_run_id_ts_ms("20260421_15") == int(
+        datetime(2026, 4, 21, 15, tzinfo=timezone.utc).timestamp() * 1000
+    )
+    assert _parse_run_id_ts_ms("20260421T1530") == int(
+        datetime(2026, 4, 21, 15, 30, tzinfo=timezone.utc).timestamp() * 1000
     )
 
 
