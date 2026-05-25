@@ -14,7 +14,7 @@ import os
 import sqlite3
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,8 +30,15 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.loader import load_config
-from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
-from src.execution.fill_store import derive_position_store_path, derive_runtime_named_json_path
+from configs.runtime_config import (
+    resolve_runtime_config_path,
+    resolve_runtime_env_path,
+    resolve_runtime_path,
+)
+from src.execution.fill_store import (
+    derive_position_store_path,
+    derive_runtime_named_json_path,
+)
 from src.execution.okx_private_client import OKXPrivateClient
 
 
@@ -192,7 +199,7 @@ def sync_positions(*, config_path: str | None = None, env_path: str = ".env") ->
             columns = [col[1] for col in cursor.fetchall()]
 
             cursor.execute("DELETE FROM positions")
-            now_iso = datetime.now().isoformat()
+            now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             for pos in position_details:
                 if "avg_px" in columns and "entry_ts" in columns:
                     cursor.execute(

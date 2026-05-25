@@ -8,17 +8,21 @@ V5 Telegram 分级告警系统
 - 支持告警静音时段
 """
 
-import json
 import asyncio
+import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from datetime import datetime, timedelta
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_config_path, resolve_runtime_path
+from configs.runtime_config import (
+    load_runtime_config,
+    resolve_runtime_config_path,
+    resolve_runtime_path,
+)
 from src.execution.fill_store import derive_runtime_named_json_path
 
 # 告警级别
@@ -31,6 +35,35 @@ ALERT_LEVELS = {
 
 # 静音时段 (24小时制)
 QUIET_HOURS = (23, 8)  # 23:00 - 08:00 静音（除非CRITICAL）
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _local_tzinfo():
+    return _utc_now().astimezone().tzinfo or timezone.utc
+
+
+def _local_now() -> datetime:
+    return _utc_now().astimezone()
+
+
+def _utc_now_iso() -> str:
+    return _utc_now().isoformat().replace("+00:00", "Z")
+
+
+def _parse_alert_time(raw_value) -> datetime | None:
+    raw = str(raw_value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=_local_tzinfo())
+    return parsed
 
 
 class AlertManager:
@@ -79,7 +112,7 @@ class AlertManager:
     
     def is_quiet_hours(self):
         """检查是否在静音时段"""
-        hour = datetime.now().hour
+        hour = _local_now().hour
         start, end = QUIET_HOURS
         if start < end:
             return start <= hour < end
@@ -93,20 +126,21 @@ class AlertManager:
         # CRITICAL级别无视静音时段
         if level == 'CRITICAL':
             return True
-        
+
         # 静音时段不发送非紧急告警
         if self.is_quiet_hours():
             return False
-        
         # 检查冷却期
-        now = datetime.now()
+        now = _utc_now()
         key = f"{level}:{alert_type}"
         last_sent = self.state['last_alerts'].get(key)
-        
+
         if last_sent:
-            last_time = datetime.fromisoformat(last_sent)
+            last_time = _parse_alert_time(last_sent)
+            if last_time is None:
+                return True
             cooldown = timedelta(minutes=config['cooldown_minutes'])
-            if now - last_time < cooldown:
+            if now - last_time.astimezone(timezone.utc) < cooldown:
                 return False
         
         return True
@@ -114,7 +148,7 @@ class AlertManager:
     def record_sent(self, level, alert_type):
         """记录已发送告警"""
         key = f"{level}:{alert_type}"
-        self.state['last_alerts'][key] = datetime.now().isoformat()
+        self.state['last_alerts'][key] = _utc_now_iso()
         self.save_state()
     
     def format_message(self, level, title, message, details=None):
@@ -128,7 +162,7 @@ class AlertManager:
         if details:
             text += f"```\n{json.dumps(details, indent=2, ensure_ascii=False)}\n```"
         
-        text += f"\n_时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_"
+        text += f"\n_时间: {_local_now().strftime('%Y-%m-%d %H:%M:%S')}_"
         
         return text
     

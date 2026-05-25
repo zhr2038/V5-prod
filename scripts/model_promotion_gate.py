@@ -7,7 +7,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -22,6 +22,10 @@ from src.execution.fill_store import (
     derive_runtime_reports_dir,
     derive_runtime_runs_dir,
 )
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 @dataclass(frozen=True)
@@ -140,7 +144,7 @@ def _training_entry_sort_epoch(entry: dict) -> float:
         run_id = str(entry.get("run_id") or "")
         if run_id:
             try:
-                return datetime.strptime(run_id, "%Y%m%d_%H").timestamp()
+                return datetime.strptime(run_id, "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp()
             except Exception:
                 pass
     return 0.0
@@ -222,7 +226,7 @@ def main(workspace: str | Path | None = None) -> int:
     )
     if not hist:
         decision = {
-            "ts": datetime.now().isoformat(),
+            "ts": _utc_now_iso(),
             "passed": False,
             "reason": "no_training_history",
         }
@@ -264,7 +268,7 @@ def main(workspace: str | Path | None = None) -> int:
     passed = len(fail_reasons) == 0 and _model_artifact_exists(paths.model_path)
 
     decision = {
-        "ts": datetime.now().isoformat(),
+        "ts": _utc_now_iso(),
         "passed": passed,
         "selected_model_path": str(paths.model_path),
         "metrics": {

@@ -7,12 +7,11 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import requests
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -21,6 +20,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from configs.runtime_config import resolve_runtime_env_path
 from src.monitoring.smart_alert import SmartAlertEngine
+
+
+def _utc_now_text() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def load_env_file(path: Path) -> None:
@@ -102,7 +105,7 @@ def main() -> int:
 
     print(f"[SmartAlert] Found {len(alerts)} alert(s)")
     sent_count = 0
-    now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_text = _utc_now_text()
     for alert in alerts:
         alert["time"] = now_text
         if send_telegram_alert(alert, project_root=PROJECT_ROOT):

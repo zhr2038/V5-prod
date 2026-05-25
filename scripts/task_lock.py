@@ -8,13 +8,17 @@ V5 定时任务互斥锁工具
 - 支持强制解锁
 """
 
+import fcntl
 import os
 import time
-import fcntl
+from datetime import datetime, timezone
 from pathlib import Path
-from datetime import datetime
 
 LOCK_DIR = Path('/tmp/v5_locks')
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class TaskLock:
@@ -55,7 +59,7 @@ class TaskLock:
             # 写入锁信息
             self.fd.seek(0)
             self.fd.truncate()
-            self.fd.write(f"{os.getpid()}\n{datetime.now().isoformat()}\n")
+            self.fd.write(f"{os.getpid()}\n{_utc_now_iso()}\n")
             self.fd.flush()
             
             return True

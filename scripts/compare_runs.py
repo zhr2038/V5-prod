@@ -56,10 +56,13 @@ def _ts_to_epoch_sec(v: Any) -> Optional[int]:
         try:
             dt = datetime.fromisoformat(s)
         except ValueError:
-            for fmt in ("%Y-%m-%d %H:%M:%S%z", "%Y-%m-%d %H:%M:%S"):
+            try:
+                dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S%z")
+            except ValueError:
+                dt = None
+            if dt is None:
                 try:
-                    dt = datetime.strptime(s, fmt)
-                    break
+                    dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
                 except ValueError:
                     dt = None
             if dt is None:
@@ -67,6 +70,8 @@ def _ts_to_epoch_sec(v: Any) -> Optional[int]:
 
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
         return int(dt.timestamp())
 
     raise ValueError(f"Unsupported timestamp type: {type(v)}")

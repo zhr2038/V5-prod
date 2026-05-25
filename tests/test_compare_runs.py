@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts.compare_runs import compare
 from scripts import compare_runs
+from scripts.compare_runs import compare
 
 
 def test_compare_includes_negative_expectancy_counts() -> None:
