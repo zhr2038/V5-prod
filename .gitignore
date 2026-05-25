@@ -28,7 +28,12 @@ logs/*.log
 logs/*.txt
 
 # Runtime data
+reports/*.csv
 reports/*.sqlite
 reports/*.db
+reports/*.json
+reports/*.jsonl
+reports/*.md
+reports/*.txt
 reports/research/**/latest.*
 # data/cache/
