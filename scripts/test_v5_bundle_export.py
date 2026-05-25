@@ -2042,9 +2042,20 @@ def fixture_post_min_hold_atr_exit_root(root):
         "ledger_status",
         "ledger_state",
         "auto_risk_eval",
-        "negative_expectancy_cooldown",
     ):
         write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_json(root / "reports/negative_expectancy_cooldown.json", {
+        "stats": {
+            "BNB/USDT": {
+                "closed_cycles": 3,
+                "net_pnl_sum_usdt": -0.12,
+                "net_expectancy_bps": -123.56,
+                "fast_fail_closed_cycles": 3,
+                "fast_fail_net_expectancy_bps": -118.4,
+                "last_close_ts": iso(exit_ts),
+            }
+        }
+    })
     write_text(root / "logs/v5_runtime.log", "fixture log\n")
 
     run_dir = root / "reports/runs/prod" / run_id
@@ -2068,6 +2079,7 @@ def fixture_post_min_hold_atr_exit_root(root):
             "side": "buy",
             "reason": "normal_entry",
             "entry_reason": "normal_entry",
+            "current_px": 101.5 if symbol == "BNB/USDT" else future_prices[symbol][0],
             "swing_hold_position": True,
             "swing_min_hold_hours": 24,
             "f4_volume_expansion": 0.62,
@@ -3881,6 +3893,7 @@ def main():
                 rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/post_min_hold_atr_exit_audit.csv")).read().decode().splitlines()))
                 by_symbol = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/post_min_hold_atr_exit_outcomes_by_symbol.csv")).read().decode().splitlines()))
                 shadow = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/swing_atr_soft_exit_shadow.csv")).read().decode().splitlines()))
+                bnb_risk = json.loads(tf.extractfile(extract_member(tf, "summaries/bnb_risk_summary.json")).read().decode())
                 issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
@@ -3925,9 +3938,27 @@ def main():
             assert window["post_min_hold_atr_medium_issue"] is True, window
             assert window["swing_atr_soft_exit_shadow_rows"] == 4, window
             assert window["swing_atr_soft_exit_shadow_would_delay_count"] == 2, window
+            assert bnb_risk["closed_cycles"] == 3.0, bnb_risk
+            assert bnb_risk["net_expectancy_bps"] == -123.56, bnb_risk
+            assert bnb_risk["fast_fail_net_expectancy_bps"] == -118.4, bnb_risk
+            assert bnb_risk["latest_roundtrip_net_bps"] == -100.0, bnb_risk
+            assert bnb_risk["latest_roundtrip_exit_reason"] == "atr_trailing", bnb_risk
+            assert bnb_risk["latest_roundtrip_if_held_current_net_bps"] == 150.0, bnb_risk
+            assert bnb_risk["protect_alt_short_cycle_guard_active"] is True, bnb_risk
+            assert bnb_risk["recommendation"] == "keep_blocked", bnb_risk
+            assert window["bnb_risk_recommendation"] == "keep_blocked", window
+            assert window["bnb_negative_expectancy_bps"] == -123.56, window
+            bnb_issues = [
+                item for item in issues["issues"]
+                if item.get("severity") == "warning" and item.get("code") == "bnb_negative_expectancy_keep_blocked"
+            ]
+            assert len(bnb_issues) == 1, issues
             assert "## Post-min-hold ATR exit audit" in readme, readme
             assert "just-after-min-hold ATR exits: 4" in readme, readme
             assert "better_to_hold_12h_rate: 1 (4/4)" in readme, readme
+            assert "## BNB risk summary" in readme, readme
+            assert "recommendation: keep_blocked" in readme, readme
+            assert "do not add BNB to protect_recovery multi-position" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

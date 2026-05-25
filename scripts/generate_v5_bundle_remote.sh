@@ -7456,6 +7456,141 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "diagnosis": diagnosis,
         })
 
+    BNB_RISK_SYMBOL = "BNB/USDT"
+
+    def json_number_or_not_obs(value, digits=6):
+        number = as_float(value)
+        if number is None:
+            return not_obs
+        text = fmt_num(number, digits)
+        try:
+            return float(text)
+        except (TypeError, ValueError):
+            return not_obs
+
+    def latest_closed_roundtrip_for_symbol(symbol):
+        wanted = normalize_symbol_text(symbol)
+        rows = [
+            row for row in closed_roundtrip_rows
+            if normalize_symbol_text(row.get("symbol")) == wanted
+        ]
+        if not rows:
+            return {}
+        return sorted(
+            rows,
+            key=lambda row: (
+                parse_dt_utc(first_observed(row.get("exit_ts"), row.get("timestamp"), row.get("entry_ts")))
+                or dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+            ),
+        )[-1]
+
+    def latest_observed_current_price(symbol):
+        context_price = price_from_dict(symbol_map_get(latest_symbol_context, symbol), ("current_px", "latest_px", "last_px", "price", "px"))
+        if context_price is not None:
+            return context_price
+        event_price = price_from_dict(symbol_map_get(event_candidate_price_by_symbol, symbol), ("current_px", "latest_px", "last_px", "price", "px"))
+        if event_price is not None:
+            return event_price
+        observations = sorted(
+            price_observations_by_symbol.get(normalize_symbol_text(symbol), []) + price_observations_by_symbol.get(symbol, []),
+            key=lambda item: item.get("ts_dt") or dt.datetime.min.replace(tzinfo=dt.timezone.utc),
+        )
+        for obs in reversed(observations):
+            price = as_float(obs.get("price"))
+            if price is not None and price > 0:
+                return price
+        future_px, _source, _reason = future_price_for_symbol(symbol, NOW)
+        return future_px
+
+    def roundtrip_cost_bps_from_row(row):
+        gross = as_float(row.get("gross_bps"))
+        net = as_float(row.get("net_bps"))
+        if gross is not None and net is not None:
+            return max(0.0, gross - net)
+        fee_total = as_float(row.get("fee_total_usdt"))
+        entry_notional = roundtrip_entry_notional(row)
+        if fee_total is not None and entry_notional and entry_notional > 0:
+            return abs(fee_total) / entry_notional * 10000.0
+        return configured_roundtrip_cost_bps()
+
+    def if_held_to_current_net_bps(row, current_px):
+        entry_px = as_float(row.get("entry_px"))
+        if entry_px is None or entry_px <= 0 or current_px is None or current_px <= 0:
+            return None
+        return ((current_px / entry_px) - 1.0) * 10000.0 - roundtrip_cost_bps_from_row(row)
+
+    def protect_alt_short_cycle_guard_active_for_bnb(entry):
+        enabled = config_bool("protect_alt_short_cycle_guard_enabled", True)
+        symbols = {
+            normalize_symbol_text(symbol)
+            for symbol in config_string_list("protect_alt_short_cycle_symbols", ["BNB/USDT", "ETH/USDT"])
+        }
+        if not enabled or normalize_symbol_text(BNB_RISK_SYMBOL) not in symbols or not isinstance(entry, dict) or not entry:
+            return False
+        closed_cycles = as_float(first_value(entry, ("closed_cycles",), 0)) or 0.0
+        fast_fail_cycles = as_float(first_value(entry, ("fast_fail_closed_cycles",), 0)) or 0.0
+        min_cycles = config_number("protect_alt_short_cycle_min_cycles")
+        min_cycles = 2.0 if min_cycles is None else float(min_cycles)
+        net_floor = config_number("protect_alt_short_cycle_net_floor_bps")
+        net_floor = -20.0 if net_floor is None else float(net_floor)
+        fast_fail_floor = config_number("protect_alt_short_cycle_fast_fail_floor_bps")
+        fast_fail_floor = -30.0 if fast_fail_floor is None else float(fast_fail_floor)
+        net_bps = as_float(first_value(entry, ("net_expectancy_bps", "expectancy_bps"), not_obs))
+        fast_fail_bps = as_float(first_value(entry, ("fast_fail_net_expectancy_bps", "fast_fail_expectancy_bps"), not_obs))
+        return bool(
+            (closed_cycles >= min_cycles and net_bps is not None and net_bps <= net_floor)
+            or (fast_fail_cycles >= min_cycles and fast_fail_bps is not None and fast_fail_bps <= fast_fail_floor)
+        )
+
+    def bnb_risk_recommendation(entry, guard_active):
+        if not isinstance(entry, dict) or not entry:
+            return "shadow_only"
+        net_bps = as_float(first_value(entry, ("net_expectancy_bps", "expectancy_bps"), not_obs))
+        fast_fail_bps = as_float(first_value(entry, ("fast_fail_net_expectancy_bps", "fast_fail_expectancy_bps"), not_obs))
+        closed_cycles = as_float(first_value(entry, ("closed_cycles",), 0)) or 0.0
+        if guard_active or (closed_cycles > 0 and ((net_bps is not None and net_bps < 0) or (fast_fail_bps is not None and fast_fail_bps < 0))):
+            return "keep_blocked"
+        if closed_cycles > 0 and (net_bps is not None and net_bps >= 0) and (fast_fail_bps is None or fast_fail_bps >= 0):
+            return "eligible_for_review"
+        return "shadow_only"
+
+    bnb_negative_entry = negative_entries.get(BNB_RISK_SYMBOL) or multi_shadow_negative_expectancy_entry(BNB_RISK_SYMBOL)
+    latest_bnb_roundtrip = latest_closed_roundtrip_for_symbol(BNB_RISK_SYMBOL)
+    latest_bnb_current_px = latest_observed_current_price(BNB_RISK_SYMBOL)
+    bnb_if_held_current_net_bps = (
+        if_held_to_current_net_bps(latest_bnb_roundtrip, latest_bnb_current_px)
+        if latest_bnb_roundtrip
+        else None
+    )
+    bnb_guard_active = protect_alt_short_cycle_guard_active_for_bnb(bnb_negative_entry)
+    bnb_risk_summary = {
+        "closed_cycles": json_number_or_not_obs(first_value(bnb_negative_entry, ("closed_cycles",), not_obs), 0),
+        "net_expectancy_bps": json_number_or_not_obs(first_value(bnb_negative_entry, ("net_expectancy_bps", "expectancy_bps"), not_obs), 6),
+        "fast_fail_net_expectancy_bps": json_number_or_not_obs(first_value(bnb_negative_entry, ("fast_fail_net_expectancy_bps", "fast_fail_expectancy_bps"), not_obs), 6),
+        "latest_roundtrip_net_bps": json_number_or_not_obs(first_observed(latest_bnb_roundtrip.get("net_bps"), latest_bnb_roundtrip.get("realized_net_bps"), not_obs), 6) if latest_bnb_roundtrip else not_obs,
+        "latest_roundtrip_exit_reason": first_observed(latest_bnb_roundtrip.get("exit_reason"), not_obs) if latest_bnb_roundtrip else not_obs,
+        "latest_roundtrip_if_held_current_net_bps": json_number_or_not_obs(bnb_if_held_current_net_bps, 6),
+        "protect_alt_short_cycle_guard_active": bool(bnb_guard_active),
+        "recommendation": bnb_risk_recommendation(bnb_negative_entry, bnb_guard_active),
+    }
+    if bnb_risk_summary["recommendation"] == "keep_blocked":
+        add_issue(
+            "warning",
+            "bnb_negative_expectancy_keep_blocked",
+            "BNB remains a negative-expectancy symbol; a single if-held recovery observation must not relax protect recovery or f3/f4/f5 weak-entry guards.",
+            {
+                "closed_cycles": bnb_risk_summary["closed_cycles"],
+                "net_expectancy_bps": bnb_risk_summary["net_expectancy_bps"],
+                "fast_fail_net_expectancy_bps": bnb_risk_summary["fast_fail_net_expectancy_bps"],
+                "latest_roundtrip_net_bps": bnb_risk_summary["latest_roundtrip_net_bps"],
+                "latest_roundtrip_if_held_current_net_bps": bnb_risk_summary["latest_roundtrip_if_held_current_net_bps"],
+                "protect_alt_short_cycle_guard_active": bnb_risk_summary["protect_alt_short_cycle_guard_active"],
+                "recommendation": bnb_risk_summary["recommendation"],
+                "protect_recovery_allowed_symbols": multi_shadow_protect_recovery_allowed_symbols(),
+                "diagnostic_only": True,
+            },
+        )
+
     def is_rank_exit_reason(value):
         return flatten_value(value).startswith("rank_exit")
 
@@ -8378,6 +8513,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "summaries/negative_expectancy_consistency.csv",
         negative_consistency_rows,
         ["symbol", "roundtrip_closed_count", "roundtrip_net_pnl_sum_usdt", "roundtrip_weighted_net_bps", "negexp_closed_cycles", "negexp_net_pnl_sum_usdt", "negexp_net_expectancy_bps", "negexp_fast_fail_net_expectancy_bps", "pnl_mismatch_usdt", "bps_mismatch", "mismatch_suspected", "diagnosis"],
+    )
+    write_text(
+        "summaries/bnb_risk_summary.json",
+        json.dumps(bnb_risk_summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
     )
     write_csv(
         "summaries/summary_trade_count_mismatch.csv",
@@ -9851,6 +9990,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "data_quality_warnings": data_quality_warnings,
         "negative_expectancy_consistency_rows": len(negative_consistency_rows),
         "negative_expectancy_mismatch_count": negative_expectancy_mismatch_count,
+        "bnb_risk_recommendation": bnb_risk_summary.get("recommendation", not_obs),
+        "bnb_negative_expectancy_closed_cycles": bnb_risk_summary.get("closed_cycles", not_obs),
+        "bnb_negative_expectancy_bps": bnb_risk_summary.get("net_expectancy_bps", not_obs),
+        "bnb_fast_fail_net_expectancy_bps": bnb_risk_summary.get("fast_fail_net_expectancy_bps", not_obs),
+        "bnb_latest_roundtrip_net_bps": bnb_risk_summary.get("latest_roundtrip_net_bps", not_obs),
+        "bnb_latest_roundtrip_if_held_current_net_bps": bnb_risk_summary.get("latest_roundtrip_if_held_current_net_bps", not_obs),
+        "bnb_protect_alt_short_cycle_guard_active": bnb_risk_summary.get("protect_alt_short_cycle_guard_active", False),
         "config_runtime_consumption_rows": len(config_runtime_consumption_rows),
         "config_runtime_not_consumed_count": config_runtime_not_consumed_count,
         "split_order_runtime_active": False,
@@ -10689,6 +10835,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- mismatch_suspected_count: {negative_expectancy_mismatch_count}",
         f"- high issue present: {'yes' if negative_expectancy_mismatch_count else 'no'}",
         "",
+        "## BNB risk summary",
+        f"- closed_cycles: {bnb_risk_summary.get('closed_cycles', not_obs)}",
+        f"- net_expectancy_bps: {bnb_risk_summary.get('net_expectancy_bps', not_obs)}",
+        f"- fast_fail_net_expectancy_bps: {bnb_risk_summary.get('fast_fail_net_expectancy_bps', not_obs)}",
+        f"- latest_roundtrip_net_bps: {bnb_risk_summary.get('latest_roundtrip_net_bps', not_obs)}",
+        f"- latest_roundtrip_if_held_current_net_bps: {bnb_risk_summary.get('latest_roundtrip_if_held_current_net_bps', not_obs)}",
+        f"- protect_alt_short_cycle_guard_active: {str(bnb_risk_summary.get('protect_alt_short_cycle_guard_active', False)).lower()}",
+        f"- recommendation: {bnb_risk_summary.get('recommendation', not_obs)}",
+        "- interpretation: BNB remains negative expectancy; do not add BNB to protect_recovery multi-position based on one if-held recovery case.",
+        "- entry guard stance: high-score BNB with f3-dominant support and weak f4/f5 should stay blocked or shadow-only.",
+        "- output: summaries/bnb_risk_summary.json",
+        "",
         "## Summary trade metrics check",
         f"- summary_trade_count_mismatch rows: {len(summary_trade_count_mismatch_rows)}",
         f"- high issue present: {'yes' if any(str(row.get('diagnosis') or '').startswith('high_issue') for row in summary_trade_count_mismatch_rows) else 'no'}",
@@ -11101,6 +11259,7 @@ sanity = {
     "contains summaries/open_probe_watch.csv": (OUT / "summaries/open_probe_watch.csv").is_file(),
     "contains summaries/post_min_hold_atr_exit_audit.csv": (OUT / "summaries/post_min_hold_atr_exit_audit.csv").is_file(),
     "contains summaries/swing_atr_soft_exit_shadow.csv": (OUT / "summaries/swing_atr_soft_exit_shadow.csv").is_file(),
+    "contains summaries/bnb_risk_summary.json": (OUT / "summaries/bnb_risk_summary.json").is_file(),
     "contains summaries/quant_lab_compliance.csv": (OUT / "summaries/quant_lab_compliance.csv").is_file(),
     "contains summaries/quant_lab_permission_audit.csv": (OUT / "summaries/quant_lab_permission_audit.csv").is_file(),
     "contains summaries/quant_lab_mode_audit.csv": (OUT / "summaries/quant_lab_mode_audit.csv").is_file(),
@@ -11140,6 +11299,7 @@ failure_check_names = [
     "contains summaries/open_probe_watch.csv",
     "contains summaries/post_min_hold_atr_exit_audit.csv",
     "contains summaries/swing_atr_soft_exit_shadow.csv",
+    "contains summaries/bnb_risk_summary.json",
     "contains summaries/quant_lab_compliance.csv",
     "contains summaries/quant_lab_permission_audit.csv",
     "contains summaries/quant_lab_mode_audit.csv",
