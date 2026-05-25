@@ -65,8 +65,8 @@ def get_all_symbols():
 
 def get_okx_funding_rate(inst_id: str) -> dict:
     try:
-        url = f"https://www.okx.com/api/v5/public/funding-rate?instId={inst_id}"
-        response = requests.get(url, timeout=10)
+        url = "https://www.okx.com/api/v5/public/funding-rate"
+        response = requests.get(url, params={"instId": str(inst_id)}, timeout=10)
         data = response.json()
         if data.get("code") == "0" and data.get("data"):
             item = data["data"][0]

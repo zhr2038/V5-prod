@@ -24,8 +24,8 @@ class PriceFetcher:
             import requests
             
             # OKX API endpoint for tickers
-            url = "https://www.okx.com/api/v5/market/tickers?instType=SPOT"
-            response = requests.get(url, timeout=10)
+            url = "https://www.okx.com/api/v5/market/tickers"
+            response = requests.get(url, params={"instType": "SPOT"}, timeout=10)
             data = response.json()
 
             if data.get('code') != '0':
