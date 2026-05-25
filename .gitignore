@@ -27,6 +27,8 @@ Thumbs.db
 logs/*.log
 logs/*.txt
 
-# Runtime data (optional, keep if you want)
-# reports/*.sqlite
+# Runtime data
+reports/*.sqlite
+reports/*.db
+reports/research/**/latest.*
 # data/cache/
