@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -15,6 +15,7 @@ from src.strategy.multi_strategy_system import (
     BaseStrategy,
     Signal,
     StrategyOrchestrator,
+    StrategyPerformance,
     StrategyType,
 )
 
@@ -31,6 +32,18 @@ class StaticSignalStrategy(BaseStrategy):
         return Decimal("0")
 
 
+def test_strategy_performance_timestamps_are_utc() -> None:
+    strategy = StaticSignalStrategy([])
+
+    default_updated = StrategyPerformance(strategy_name="test").last_updated
+    assert default_updated.tzinfo is not None
+    assert default_updated.utcoffset() == timedelta(0)
+
+    strategy.update_performance(pnl=1.0, is_win=True)
+    assert strategy.performance.last_updated.tzinfo is not None
+    assert strategy.performance.last_updated.utcoffset() == timedelta(0)
+
+
 def test_strategy_signal_payload_writes_one_based_fused_ranks(tmp_path):
     orchestrator = StrategyOrchestrator(audit_root=tmp_path)
     orchestrator.set_run_id("rank-test")
@@ -43,7 +56,7 @@ def test_strategy_signal_payload_writes_one_based_fused_ranks(tmp_path):
                     score=0.25,
                     confidence=0.8,
                     strategy="StaticSignal",
-                    timestamp=datetime(2026, 4, 26),
+                    timestamp=datetime(2026, 4, 26, tzinfo=timezone.utc),
                 ),
                 Signal(
                     symbol="ETH/USDT",
@@ -51,7 +64,7 @@ def test_strategy_signal_payload_writes_one_based_fused_ranks(tmp_path):
                     score=0.75,
                     confidence=0.8,
                     strategy="StaticSignal",
-                    timestamp=datetime(2026, 4, 26),
+                    timestamp=datetime(2026, 4, 26, tzinfo=timezone.utc),
                 ),
             ]
         ),
@@ -61,6 +74,10 @@ def test_strategy_signal_payload_writes_one_based_fused_ranks(tmp_path):
     orchestrator.generate_combined_signals(pd.DataFrame({"symbol": ["BTC/USDT", "ETH/USDT"]}))
 
     payload = orchestrator.latest_strategy_signal_payload()
+    payload_ts = datetime.fromisoformat(payload["timestamp"].replace("Z", "+00:00"))
+    assert payload_ts.tzinfo is not None
+    assert payload_ts.utcoffset() == timedelta(0)
+
     fused = payload["fused"]
     assert fused["ETH/USDT"]["rank"] == 1
     assert fused["BTC/USDT"]["rank"] == 2

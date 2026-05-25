@@ -8,26 +8,28 @@
 4. 独立风控（每个策略有自己的止损）
 """
 
+import json
+import re
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
-from enum import Enum
-import pandas as pd
-import numpy as np
+from datetime import datetime, timezone
 from decimal import Decimal
-import json
-import re
-from datetime import datetime
+from enum import Enum
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
 
 from configs.schema import (
     ALPHA158_OVERLAY_FACTOR_KEYS,
     ALPHA_BASE_FACTOR_INPUT_TO_RUNTIME,
-    normalize_alpha_base_factor_mapping,
     normalize_alpha158_overlay_factor_mapping,
+    normalize_alpha_base_factor_mapping,
 )
 from src.alpha.qlib_factors import compute_alpha158_style_factors
+from src.utils.time import utc_now, utc_now_iso
 
 
 def _coalesce(value: Any, default: Any) -> Any:
@@ -63,7 +65,7 @@ class StrategyPerformance:
     max_drawdown: float = 0.0
     recent_7d_return: float = 0.0
     trade_count: int = 0
-    last_updated: datetime = field(default_factory=datetime.now)
+    last_updated: datetime = field(default_factory=utc_now)
 
 
 class BaseStrategy(ABC):
@@ -98,7 +100,7 @@ class BaseStrategy(ABC):
                 wins += 1
             self.performance.win_rate = wins / self.performance.trade_count
         
-        self.performance.last_updated = datetime.now()
+        self.performance.last_updated = utc_now()
     
     def get_recent_signals(self, n: int = 10) -> List[Signal]:
         """获取最近n个信号"""
@@ -173,7 +175,7 @@ class TrendFollowingStrategy(BaseStrategy):
                     score=score,
                     confidence=score * 0.8 + 0.2,
                     strategy=self.name,
-                    timestamp=datetime.now(),
+                    timestamp=utc_now(),
                     metadata={
                         'ma_fast': latest['ma_fast'],
                         'ma_slow': latest['ma_slow'],
@@ -191,7 +193,7 @@ class TrendFollowingStrategy(BaseStrategy):
                     score=score,
                     confidence=score * 0.8 + 0.2,
                     strategy=self.name,
-                    timestamp=datetime.now(),
+                    timestamp=utc_now(),
                     metadata={
                         'ma_fast': latest['ma_fast'],
                         'ma_slow': latest['ma_slow'],
@@ -300,7 +302,7 @@ class MeanReversionStrategy(BaseStrategy):
                     score=score,
                     confidence=min(score * 0.9 + 0.1, 1.0),
                     strategy=self.name,
-                    timestamp=datetime.now(),
+                    timestamp=utc_now(),
                     metadata={
                         'rsi': latest['rsi'],
                         'deviation': deviation,
@@ -324,7 +326,7 @@ class MeanReversionStrategy(BaseStrategy):
                     score=score,
                     confidence=min(score * 0.9 + 0.1, 1.0),
                     strategy=self.name,
-                    timestamp=datetime.now(),
+                    timestamp=utc_now(),
                     metadata={
                         'rsi': latest['rsi'],
                         'deviation': deviation,
@@ -717,7 +719,7 @@ class Alpha6FactorStrategy(BaseStrategy):
                 score=display_score,
                 confidence=confidence,
                 strategy=self.name,
-                timestamp=datetime.now(),
+                timestamp=utc_now(),
                 metadata={
                     'raw_factors': telemetry.get('raw_factors', factors),
                     'z_factors': telemetry.get('z_factors', z_factors),
@@ -748,7 +750,7 @@ class Alpha6FactorStrategy(BaseStrategy):
                         score=max(0.05, display_top),
                         confidence=0.35,
                         strategy=self.name,
-                        timestamp=datetime.now(),
+                        timestamp=utc_now(),
                         metadata={
                             'fallback_buy': True,
                             'raw_factors': telemetry.get('raw_factors', top[1]),
@@ -918,7 +920,7 @@ class Alpha6FactorStrategy(BaseStrategy):
             match = re.search(r'(?<!\d)(20\d{6}_\d{2})(?!\d)', path.stem)
             if match:
                 try:
-                    return datetime.strptime(match.group(1), '%Y%m%d_%H').timestamp()
+                    return datetime.strptime(match.group(1), '%Y%m%d_%H').replace(tzinfo=timezone.utc).timestamp()
                 except Exception:
                     pass
             return path.stat().st_mtime
@@ -951,7 +953,9 @@ class Alpha6FactorStrategy(BaseStrategy):
             # 4. 若该币种没有缓存，尝试用DeepSeek生成一次
             if data is None:
                 try:
-                    from src.factors.deepseek_sentiment_factor import DeepSeekSentimentFactor
+                    from src.factors.deepseek_sentiment_factor import (
+                        DeepSeekSentimentFactor,
+                    )
                     factor = DeepSeekSentimentFactor(cache_dir=str(self.sentiment_cache_dir))
                     factor.calculate(s)
                     # 重新尝试读取
@@ -1055,7 +1059,7 @@ class StrategyOrchestrator:
             score=display_score,
             confidence=max(0.0, min(avg_confidence, 1.0)),
             strategy="FUSED",
-            timestamp=datetime.now(),
+            timestamp=utc_now(),
             metadata=fused_metadata,
         )
     
@@ -1174,7 +1178,7 @@ class StrategyOrchestrator:
             item['rank'] = int(fused_rank_by_symbol.get(symbol, len(fused_audit) + 1))
 
         payload = {
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': utc_now_iso(),
             'run_id': self.run_id,
             'strategies': strategy_signal_audit,
             'fused': {s['symbol']: s for s in fused_audit},  # Add fused signals
@@ -1340,7 +1344,7 @@ class StrategyOrchestrator:
     def get_status_report(self) -> Dict:
         """获取策略状态报告"""
         report = {
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': utc_now_iso(),
             'total_capital': float(self.total_capital),
             'strategies': {}
         }
