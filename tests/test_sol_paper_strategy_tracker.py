@@ -90,6 +90,33 @@ def test_paper_strategy_daily_aggregates_horizon_pnl_when_primary_missing() -> N
     assert day_count_by_horizon["12h"] == 1
 
 
+def test_paper_strategy_daily_does_not_count_string_false_entry() -> None:
+    rows = _daily_rows(
+        [
+            {
+                "paper_date": "2026-05-25",
+                "strategy_id": "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+                "experiment_name": "eth_f3",
+                "symbol": "ETH/USDT",
+                "would_enter": "False",
+                "alpha6_side": "sell",
+                "final_decision": "no_order",
+                "no_sample_reason": "eth_f3_alpha6_side_not_buy_no_new_entry",
+                "label_status": "heartbeat",
+                "paper_pnl_bps_48h": 120.0,
+            }
+        ]
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["entry_count"] == 0
+    assert row["entry_day_count"] == 0
+    assert row["avg_paper_pnl_bps"] is None
+    observed_by_horizon = json.loads(row["paper_pnl_observed_count_by_horizon"])
+    assert observed_by_horizon["48h"] == 0
+
+
 def test_eth_f3_weak_short_horizon_but_positive_48h_stays_paper() -> None:
     readiness = _readiness_for_rows(
         [

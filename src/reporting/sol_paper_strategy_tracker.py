@@ -544,7 +544,7 @@ def _apply_eth_f3_alpha6_entry_gate(record: dict[str, Any]) -> bool:
         return False
     if _is_alpha6_buy(record.get("alpha6_side")):
         return False
-    changed = bool(record.get("would_enter")) or str(record.get("no_sample_reason") or "") != ETH_F3_ALPHA6_NOT_BUY_REASON
+    changed = _paper_would_enter(record) or str(record.get("no_sample_reason") or "") != ETH_F3_ALPHA6_NOT_BUY_REASON
     record["would_enter"] = False
     record["would_exit"] = False
     record["would_size_notional"] = 0.0
@@ -556,6 +556,10 @@ def _apply_eth_f3_alpha6_entry_gate(record: dict[str, Any]) -> bool:
     record["paper_pnl_bps"] = None
     record["paper_pnl_usdt"] = None
     return changed
+
+
+def _paper_would_enter(record: Mapping[str, Any]) -> bool:
+    return _normalize_bool(record.get("would_enter")) is True
 
 
 def _read_candidate_snapshot(path: Path) -> list[dict[str, Any]]:
@@ -2852,7 +2856,7 @@ def _collect_candidates(
 
 
 def _sync_paper_fields(record: dict[str, Any], horizons: Iterable[int]) -> None:
-    if not bool(record.get("would_enter")):
+    if not _paper_would_enter(record):
         reason = str(record.get("no_sample_reason") or record.get("skip_reason") or "no_sol_candidate")
         for horizon in horizons:
             h = int(horizon)
@@ -2946,7 +2950,7 @@ def _horizon_pnl_values(rows: Iterable[Mapping[str, Any]], horizon: int) -> list
         for value in (
             _normalize_float(row.get(f"paper_pnl_bps_{horizon}h"))
             for row in rows
-            if bool(row.get("would_enter"))
+            if _paper_would_enter(row)
         )
         if value is not None
     ]
@@ -2980,7 +2984,7 @@ def _readiness_for_rows(
         {
             str(row.get("paper_date") or "")
             for row in rows
-            if str(row.get("paper_date") or "") and bool(row.get("would_enter"))
+            if str(row.get("paper_date") or "") and _paper_would_enter(row)
         }
     )
     cost_mix = _cost_source_mix(rows)
@@ -3103,7 +3107,7 @@ def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         symbol = str(record.get("symbol") or "")
         paper_date = str(record.get("paper_date") or "")
         by_strategy_days[(strategy_id, symbol)].add(paper_date)
-        if bool(record.get("would_enter")) and paper_date:
+        if _paper_would_enter(record) and paper_date:
             entry_days_by_strategy[(strategy_id, symbol)].add(paper_date)
             for horizon in DEFAULT_HORIZONS:
                 if _normalize_float(record.get(f"paper_pnl_bps_{horizon}h")) is not None:
@@ -3119,7 +3123,7 @@ def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ].append(record)
     out: list[dict[str, Any]] = []
     for (paper_date, strategy_id, symbol), rows in sorted(buckets.items()):
-        entry_rows = [row for row in rows if bool(row.get("would_enter"))]
+        entry_rows = [row for row in rows if _paper_would_enter(row)]
         values = [_normalize_float(row.get("paper_pnl_bps")) for row in entry_rows]
         usable = [value for value in values if value is not None]
         horizon_values: dict[str, list[float]] = {}
@@ -3343,7 +3347,7 @@ def update_sol_paper_strategy_tracker(
     if ohlcv_provider is None:
         ohlcv_provider = _default_ohlcv_provider_for_cfg(cfg)
     if records:
-        labelable_records = [record for record in records if bool(record.get("would_enter"))]
+        labelable_records = [record for record in records if _paper_would_enter(record)]
         _update_labels(
             records=labelable_records,
             cache_dir=cache_root,
