@@ -14,7 +14,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -42,6 +42,25 @@ from src.risk.auto_risk_guard import extract_risk_level
 WORKSPACE = Path(__file__).resolve().parents[1]
 REPORTS_DIR = WORKSPACE / "reports"
 HEALTH_FILE = REPORTS_DIR / "health_status.json"
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_iso_now() -> str:
+    return _utc_now().isoformat(timespec="seconds")
+
+
+def _systemd_wallclock_timezone(text: str) -> timezone:
+    upper = str(text or "").upper()
+    if re.search(r"\b(?:UTC|GMT)\b", upper):
+        return timezone.utc
+    if re.search(r"\b(?:CST|HKT|SGT|AWST)\b", upper):
+        return timezone(timedelta(hours=8))
+    if re.search(r"\b(?:JST|KST)\b", upper):
+        return timezone(timedelta(hours=9))
+    return timezone.utc
 
 
 def _get_unit_load_state(unit: str) -> str:
@@ -215,7 +234,17 @@ class HealthChecker:
         if not match:
             return None
         try:
-            return datetime.strptime(f"{match.group(1)} {match.group(2)}", "%Y-%m-%d %H:%M:%S")
+            year, month, day = (int(part) for part in match.group(1).split("-"))
+            hour, minute, second = (int(part) for part in match.group(2).split(":"))
+            return datetime(
+                year,
+                month,
+                day,
+                hour,
+                minute,
+                second,
+                tzinfo=_systemd_wallclock_timezone(text),
+            )
         except ValueError:
             return None
 
@@ -303,7 +332,7 @@ class HealthChecker:
                     issues.append({"timer": timer_name, "status": "unknown", "detail": "no trigger time"})
                     continue
 
-                delay = max(0.0, (datetime.now() - last_trigger_at).total_seconds() / 60)
+                delay = max(0.0, (_utc_now() - last_trigger_at.astimezone(timezone.utc)).total_seconds() / 60)
                 if delay > max_delay_min:
                     issues.append(
                         {
@@ -460,7 +489,7 @@ class HealthChecker:
             self.status = "healthy"
 
         return {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "timestamp": _utc_iso_now(),
             "workspace": str(WORKSPACE),
             "overall_status": self.status,
             "checks": self.checks,

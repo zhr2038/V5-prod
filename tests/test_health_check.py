@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import scripts.health_check as health_check
@@ -160,7 +160,7 @@ def test_parse_timer_show_output_accepts_systemd_duration_monotonic() -> None:
 
     assert props["LoadState"] == "loaded"
     assert last_trigger_text == "Tue 2026-04-28 00:10:12 CST"
-    assert last_trigger_at == datetime(2026, 4, 28, 0, 10, 12)
+    assert last_trigger_at == datetime(2026, 4, 28, 0, 10, 12, tzinfo=timezone(timedelta(hours=8)))
 
 
 def test_check_timer_health_uses_wallclock_trigger_when_monotonic_is_duration(monkeypatch) -> None:
@@ -170,7 +170,7 @@ def test_check_timer_health_uses_wallclock_trigger_when_monotonic_is_duration(mo
         def __init__(self, stdout: str) -> None:
             self.stdout = stdout
 
-    now = datetime.now()
+    now = datetime.now(timezone(timedelta(hours=8)))
     timer_stdout = "\n".join(
         [
             "LoadState=loaded",
