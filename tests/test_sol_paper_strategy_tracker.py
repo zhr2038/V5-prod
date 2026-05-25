@@ -54,6 +54,7 @@ def test_paper_strategy_daily_aggregates_horizon_pnl_when_primary_missing() -> N
                 "experiment_name": "eth_f3",
                 "symbol": "ETH/USDT",
                 "would_enter": True,
+                "alpha6_side": "buy",
                 "label_status": "complete",
                 "paper_pnl_bps": None,
                 "paper_pnl_bps_4h": 12.5,
@@ -117,6 +118,33 @@ def test_paper_strategy_daily_does_not_count_string_false_entry() -> None:
     assert observed_by_horizon["48h"] == 0
 
 
+def test_paper_strategy_daily_does_not_count_eth_f3_alpha6_sell_legacy_true_entry() -> None:
+    rows = _daily_rows(
+        [
+            {
+                "paper_date": "2026-05-25",
+                "strategy_id": "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+                "experiment_name": "eth_f3",
+                "symbol": "ETH/USDT",
+                "would_enter": True,
+                "alpha6_side": "sell",
+                "final_decision": "no_order",
+                "label_status": "complete",
+                "paper_pnl_bps": 10.0,
+                "paper_pnl_bps_48h": 120.0,
+            }
+        ]
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["entry_count"] == 0
+    assert row["entry_day_count"] == 0
+    assert row["avg_paper_pnl_bps"] is None
+    observed_by_horizon = json.loads(row["paper_pnl_observed_count_by_horizon"])
+    assert observed_by_horizon["48h"] == 0
+
+
 def test_eth_f3_weak_short_horizon_but_positive_48h_stays_paper() -> None:
     readiness = _readiness_for_rows(
         [
@@ -125,6 +153,7 @@ def test_eth_f3_weak_short_horizon_but_positive_48h_stays_paper() -> None:
                 "strategy_id": "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
                 "symbol": "ETH/USDT",
                 "would_enter": True,
+                "alpha6_side": "buy",
                 "arrival_mid": 100,
                 "estimated_spread_bps": 2,
                 "slippage_covered": True,
@@ -155,6 +184,7 @@ def test_eth_f3_negative_48h_downgrades_to_keep_shadow() -> None:
                 "strategy_id": "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
                 "symbol": "ETH/USDT",
                 "would_enter": True,
+                "alpha6_side": "buy",
                 "arrival_mid": 100,
                 "estimated_spread_bps": 2,
                 "slippage_covered": True,
@@ -182,6 +212,7 @@ def test_eth_f3_positive_48h_sample_threshold_stays_paper_not_live() -> None:
             "strategy_id": "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
             "symbol": "ETH/USDT",
             "would_enter": True,
+            "alpha6_side": "buy",
             "arrival_mid": 100,
             "estimated_spread_bps": 2,
             "slippage_covered": True,

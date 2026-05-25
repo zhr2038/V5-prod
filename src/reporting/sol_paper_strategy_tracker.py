@@ -540,11 +540,18 @@ def _apply_eth_f3_alpha6_entry_gate(record: dict[str, Any]) -> bool:
     alpha6_side = str(record.get("alpha6_side") or "").strip()
     source_candidate = str(record.get("source_strategy_candidate") or "").strip()
     final_decision = str(record.get("final_decision") or "").strip().lower()
-    if not alpha6_side and source_candidate == "heartbeat" and final_decision == "heartbeat":
+    if (
+        not alpha6_side
+        and source_candidate == "heartbeat"
+        and final_decision == "heartbeat"
+    ):
         return False
-    if _is_alpha6_buy(record.get("alpha6_side")):
+    if not _eth_f3_alpha6_entry_blocked(record):
         return False
-    changed = _paper_would_enter(record) or str(record.get("no_sample_reason") or "") != ETH_F3_ALPHA6_NOT_BUY_REASON
+    changed = (
+        _normalize_bool(record.get("would_enter")) is True
+        or str(record.get("no_sample_reason") or "") != ETH_F3_ALPHA6_NOT_BUY_REASON
+    )
     record["would_enter"] = False
     record["would_exit"] = False
     record["would_size_notional"] = 0.0
@@ -558,7 +565,16 @@ def _apply_eth_f3_alpha6_entry_gate(record: dict[str, Any]) -> bool:
     return changed
 
 
+def _eth_f3_alpha6_entry_blocked(record: Mapping[str, Any]) -> bool:
+    return (
+        str(record.get("strategy_id") or "") == ETH_F3_DOMINANT_STRATEGY_ID
+        and not _is_alpha6_buy(record.get("alpha6_side"))
+    )
+
+
 def _paper_would_enter(record: Mapping[str, Any]) -> bool:
+    if _eth_f3_alpha6_entry_blocked(record):
+        return False
     return _normalize_bool(record.get("would_enter")) is True
 
 
