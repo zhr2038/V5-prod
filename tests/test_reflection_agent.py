@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -12,10 +12,17 @@ from src.execution import reflection_agent as reflection_module
 from src.execution.reflection_agent import ReflectionAgentV2
 
 
+def test_reflection_agent_utc_now_is_timezone_aware() -> None:
+    now = reflection_module._utc_now()
+
+    assert now.tzinfo is not None
+    assert now.utcoffset() == timedelta(0)
+
+
 def test_reflection_agent_load_recent_trades_uses_event_ts_and_fee_map(tmp_path: Path) -> None:
     db_path = tmp_path / "orders.sqlite"
-    now_ms = int(datetime.now().timestamp() * 1000)
-    stale_created_ts = int((datetime.now() - timedelta(days=10)).timestamp() * 1000)
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    stale_created_ts = int((datetime.now(timezone.utc) - timedelta(days=10)).timestamp() * 1000)
 
     conn = sqlite3.connect(str(db_path))
     conn.execute(

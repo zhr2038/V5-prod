@@ -9,13 +9,14 @@
 5. 归因分析 - 盈亏来自择时、选股还是执行
 """
 
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime, timedelta
-from enum import Enum
 import json
 import sqlite3
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from enum import Enum
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
 import pandas as pd
 
 from configs.runtime_config import load_runtime_config, resolve_runtime_path
@@ -28,6 +29,10 @@ from src.execution.fill_store import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 REPORTS_DIR = PROJECT_ROOT / 'reports'
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _resolve_reflection_runtime_paths() -> Tuple[Path, Path]:
@@ -218,7 +223,7 @@ class ReflectionAgentV2:
         
     def run_daily_reflection(self) -> Dict:
         """运行每日反思分析"""
-        print(f"[ReflectionAgent V2] 开始深度分析 ({datetime.now().strftime('%Y-%m-%d %H:%M')})")
+        print(f"[ReflectionAgent V2] 开始深度分析 ({_utc_now().strftime('%Y-%m-%d %H:%M')})")
         
         # 1. 加载数据
         trades_df = self._load_recent_trades()
@@ -245,7 +250,7 @@ class ReflectionAgentV2:
         # 7. 生成报告
         report = {
             'version': '2.0',
-            'generated_at': datetime.now().isoformat(),
+            'generated_at': _utc_now().isoformat().replace("+00:00", "Z"),
             'period_days': self.analysis_period_days,
             'summary': self._generate_summary(trades_df, attribution),
             'alerts': self._format_insights(),
@@ -584,7 +589,7 @@ class ReflectionAgentV2:
         """加载最近交易"""
         try:
             conn = sqlite3.connect(self.db_path)
-            start_time = datetime.now() - timedelta(days=days)
+            start_time = _utc_now() - timedelta(days=days)
             start_timestamp = int(start_time.timestamp() * 1000)
             
             query = """
@@ -655,7 +660,7 @@ class ReflectionAgentV2:
     
     def _save_report(self, report: Dict):
         """保存报告"""
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+        timestamp = _utc_now().strftime('%Y%m%d_%H%M')
         report_file = self.report_dir / f'reflection_{timestamp}.json'
         
         with open(report_file, 'w') as f:
