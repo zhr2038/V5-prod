@@ -24,6 +24,19 @@ def test_fixed_stop_loss_manager_resolves_default_state_path_from_project_root(m
     assert manager.state_file == (tmp_path / "reports" / "fixed_stop_loss_state.json").resolve()
 
 
+def test_fixed_stop_loss_registers_utc_entry_time(tmp_path: Path) -> None:
+    state_path = tmp_path / "fixed_stop_loss_state.json"
+    manager = fixed_stop_loss.FixedStopLossManager(state_path=str(state_path))
+
+    manager.register_position("BTC/USDT", 100.0)
+
+    entry_time = manager.entry_times["BTC/USDT"]
+    assert entry_time.tzinfo is not None
+    assert entry_time.utcoffset() == timedelta(0)
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    assert payload["BTC/USDT"]["entry_time"].endswith("+00:00")
+
+
 def test_multi_level_stop_loss_resolves_default_state_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(multi_level_stop_loss, "PROJECT_ROOT", tmp_path)
     manager = multi_level_stop_loss.MultiLevelStopLoss()

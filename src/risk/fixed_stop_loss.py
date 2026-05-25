@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import json
 from typing import Dict
-from datetime import datetime
+from datetime import datetime, timezone
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -92,7 +92,7 @@ class FixedStopLossManager:
             return
         
         self.entry_prices[symbol] = entry_price
-        self.entry_times[symbol] = datetime.now()
+        self.entry_times[symbol] = datetime.now(timezone.utc)
         self._save_state()
         stop_pct = self.config.get_stop_pct(symbol)
         stop_price = entry_price * (1 - stop_pct)
