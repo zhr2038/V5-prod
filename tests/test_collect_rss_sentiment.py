@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import xml.etree.ElementTree as stdlib_et
 
 import scripts.collect_rss_sentiment as rss_mod
 
@@ -96,3 +97,51 @@ def test_collect_rss_sentiment_main_passes_env(monkeypatch):
     rss_mod.main(["--env", ".env.runtime"])
 
     assert captured == {"env_path": ".env.runtime", "project_root": None}
+
+
+def test_parse_rss_feed_uses_safe_xml_parser(monkeypatch):
+    class _Response:
+        content = b"""
+        <rss>
+          <channel>
+            <item>
+              <title>BTC rallies</title>
+              <description>Constructive market tone</description>
+              <link>https://example.com/btc</link>
+              <pubDate>Mon, 25 May 2026 00:00:00 GMT</pubDate>
+            </item>
+          </channel>
+        </rss>
+        """
+
+        def raise_for_status(self):
+            return None
+
+    class _SafeParser:
+        called = False
+
+        @staticmethod
+        def fromstring(content):
+            _SafeParser.called = True
+            return stdlib_et.fromstring(content)
+
+    monkeypatch.setattr(rss_mod.requests, "get", lambda *args, **kwargs: _Response())
+    monkeypatch.setattr(rss_mod, "SAFE_XML_ET", _SafeParser)
+
+    articles = rss_mod.parse_rss_feed("https://example.com/rss", max_items=5)
+
+    assert _SafeParser.called is True
+    assert articles[0]["title"] == "BTC rallies"
+
+
+def test_parse_rss_feed_fails_closed_when_safe_parser_missing(monkeypatch):
+    class _Response:
+        content = b"<rss><channel><item><title>BTC</title></item></channel></rss>"
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(rss_mod.requests, "get", lambda *args, **kwargs: _Response())
+    monkeypatch.setattr(rss_mod, "SAFE_XML_ET", None)
+
+    assert rss_mod.parse_rss_feed("https://example.com/rss", max_items=5) == []

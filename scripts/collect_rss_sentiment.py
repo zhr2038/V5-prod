@@ -10,11 +10,15 @@ import sys
 import json
 import re
 import requests
-import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 from html.parser import HTMLParser
+
+try:
+    from defusedxml import ElementTree as SAFE_XML_ET
+except ImportError:
+    SAFE_XML_ET = None
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -85,6 +89,12 @@ def clean_text(text):
     return text.strip()
 
 
+def _parse_rss_xml(content: bytes):
+    if SAFE_XML_ET is None:
+        raise RuntimeError("defusedxml is required for safe RSS parsing; install requirements.txt")
+    return SAFE_XML_ET.fromstring(content)
+
+
 def parse_rss_feed(url: str, max_items: int = 5) -> list:
     """解析RSS feed，返回文章列表"""
     articles = []
@@ -96,7 +106,7 @@ def parse_rss_feed(url: str, max_items: int = 5) -> list:
         response.raise_for_status()
         
         # 解析XML
-        root = ET.fromstring(response.content)
+        root = _parse_rss_xml(response.content)
         
         # 处理RSS 2.0和Atom格式
         items = []
