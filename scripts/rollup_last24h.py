@@ -147,7 +147,7 @@ def main() -> None:
     )
     compare_out.parent.mkdir(parents=True, exist_ok=True)
 
-    subprocess.check_call(
+    subprocess.run(  # noqa: S603 - command is built from sys.executable and fixed repo script arguments.
         [
             sys.executable,
             str(Path(__file__).resolve().parents[0] / "compare_runs.py"),
@@ -157,7 +157,9 @@ def main() -> None:
             str(v5_summary),
             "--out",
             str(compare_out),
-        ]
+        ],
+        check=True,
+        timeout=600,
     )
 
     print(f"wrote {v5_summary}")

@@ -239,7 +239,7 @@ def _unit_is_active(unit: str) -> bool:
     systemctl = shutil.which("systemctl")
     if systemctl is None:
         return False
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 - systemctl path is resolved by shutil.which and arguments are fixed.
         [systemctl, "--user", "is-active", unit],
         capture_output=True,
         text=True,
@@ -252,7 +252,7 @@ def _get_unit_load_state(unit: str) -> str:
     systemctl = shutil.which("systemctl")
     if systemctl is None:
         return ""
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 - systemctl path is resolved by shutil.which and arguments are fixed.
         [systemctl, "--user", "show", unit, "--property=LoadState"],
         capture_output=True,
         text=True,

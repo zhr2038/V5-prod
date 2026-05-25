@@ -75,6 +75,17 @@ def test_load_config_surfaces_invalid_config(monkeypatch, tmp_path):
         module.load_config()
 
 
+def test_dashboard_rejects_invalid_subprocess_arguments(monkeypatch):
+    module = load_web_dashboard_module()
+
+    assert module._can_execute_python("") is False
+    assert module._can_execute_python("python\0bad") is False
+
+    monkeypatch.setattr(module, "SYSTEMCTL_BIN", "/bin/systemctl")
+    with pytest.raises(ValueError, match="NUL bytes"):
+        module._run_systemctl_user("show", "bad\0unit")
+
+
 def test_multi_strategy_score_transform_uses_dynamic_runtime_config(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     cfg_path = tmp_path / "configs" / "runtime.yaml"

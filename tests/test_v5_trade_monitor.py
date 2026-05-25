@@ -511,3 +511,8 @@ def test_resolve_live_service_unit_name_ignores_retired_live_20u(monkeypatch) ->
     )
 
     assert trade_monitor.resolve_live_service_unit_name() == "v5-prod.user.service"
+
+
+def test_run_command_rejects_nul_argument() -> None:
+    with pytest.raises(ValueError, match="NUL-containing"):
+        trade_monitor.run_command(["journalctl", "bad\0unit"])

@@ -174,8 +174,10 @@ def get_current_risk_level(paths: MonitorPaths = DEFAULT_PATHS) -> str:
 
 
 def run_command(cmd: Sequence[str], timeout: int = 30) -> str:
+    if not cmd or any("\0" in str(part) for part in cmd):
+        raise ValueError("refusing to run an empty or NUL-containing command")
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603 - command lists are built from fixed journalctl/systemctl probes.
             list(cmd),
             capture_output=True,
             text=True,
@@ -193,7 +195,7 @@ def _get_unit_load_state(unit: str) -> str:
     if systemctl is None:
         return ""
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603 - systemctl path is resolved by shutil.which and arguments are fixed.
             [systemctl, "--user", "show", unit, "--property=LoadState"],
             capture_output=True,
             text=True,

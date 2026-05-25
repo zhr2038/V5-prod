@@ -207,7 +207,7 @@ class ConfigValidator:
                 self.warnings.append("systemctl not available in current environment")
                 self.log("systemctl not available in current environment", 'WARN')
                 return
-            result = subprocess.run(
+            result = subprocess.run(  # noqa: S603 - systemctl path is resolved by shutil.which and arguments are fixed.
                 [systemctl, '--user', 'list-timers', '--all', '--no-pager'],
                 capture_output=True,
                 text=True,

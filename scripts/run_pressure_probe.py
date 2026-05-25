@@ -42,7 +42,7 @@ def _top_processes(limit: int = 8) -> list[str]:
     ps_bin = shutil.which("ps")
     if ps_bin is None:
         return []
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 - ps path is resolved by shutil.which and arguments are fixed.
         [ps_bin, "-eo", "pid,comm,%cpu,%mem", "--sort=-%cpu"],
         capture_output=True,
         text=True,
@@ -71,6 +71,8 @@ def main() -> int:
         command = command[1:]
     if not command:
         raise SystemExit("missing command after --")
+    if any("\0" in str(part) for part in command):
+        raise SystemExit("command arguments must not contain NUL bytes")
 
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -87,7 +89,7 @@ def main() -> int:
     samples: list[dict[str, Any]] = []
 
     with stdout_path.open("w", encoding="utf-8") as stdout_handle, stderr_path.open("w", encoding="utf-8") as stderr_handle:
-        process = subprocess.Popen(
+        process = subprocess.Popen(  # noqa: S603 - explicit CLI command is run without shell for pressure measurement.
             command,
             stdout=stdout_handle,
             stderr=stderr_handle,

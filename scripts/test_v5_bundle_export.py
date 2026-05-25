@@ -755,7 +755,7 @@ def fixture_git_provenance_root(root):
     fixture_provenance_root(root)
     root_posix = bash_path(root)
     bash_bin = require_executable("bash")
-    subprocess.run(
+    subprocess.run(  # noqa: S603 - test fixture uses local bash executable with quoted temporary path.
         [
             bash_bin,
             "-lc",
@@ -774,10 +774,12 @@ def fixture_git_provenance_root(root):
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        timeout=60,
     )
-    return subprocess.check_output(
+    return subprocess.check_output(  # noqa: S603 - test fixture uses local bash executable with quoted temporary path.
         [bash_bin, "-lc", f"cd {shlex.quote(root_posix)} && git rev-parse HEAD"],
         text=True,
+        timeout=30,
     ).strip()
 
 
@@ -3165,13 +3167,14 @@ def run_bundle(root):
     script_path = bash_path(SCRIPT)
     root_path = bash_path(root)
     bash_bin = require_executable("bash")
-    proc = subprocess.run(
+    proc = subprocess.run(  # noqa: S603 - test invokes the local bundle script with temporary fixture paths.
         [bash_bin, script_path, root_path],
         env=os.environ.copy(),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=True,
+        timeout=240,
     )
     bundle_path = None
     for line in proc.stdout.splitlines():
@@ -3179,7 +3182,11 @@ def run_bundle(root):
             raw_bundle_path = line.split("=", 1)[1]
             if os.name == "nt" and raw_bundle_path.startswith("/"):
                 wsl_bin = require_executable("wsl.exe")
-                converted = subprocess.check_output([wsl_bin, "wslpath", "-w", raw_bundle_path], text=True).strip()
+                converted = subprocess.check_output(  # noqa: S603 - wslpath executable is resolved by the test helper.
+                    [wsl_bin, "wslpath", "-w", raw_bundle_path],
+                    text=True,
+                    timeout=30,
+                ).strip()
                 bundle_path = pathlib.Path(converted)
             else:
                 bundle_path = pathlib.Path(raw_bundle_path)

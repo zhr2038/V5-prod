@@ -1401,7 +1401,9 @@ PRODUCTION_TIMER_CONFIGS = [
 def _run_systemctl_user(*args: str, timeout: int = 5) -> subprocess.CompletedProcess:
     if not SYSTEMCTL_BIN:
         raise FileNotFoundError('systemctl is not available')
-    return subprocess.run(
+    if any('\0' in str(arg) for arg in args):
+        raise ValueError('systemctl arguments must not contain NUL bytes')
+    return subprocess.run(  # noqa: S603 - systemctl path is resolved at startup and args are fixed dashboard probes.
         [SYSTEMCTL_BIN, '--user', *args],
         capture_output=True,
         text=True,
@@ -2778,8 +2780,11 @@ def _ic_diagnostic_sort_epoch(path: Path) -> float:
 
 
 def _can_execute_python(candidate: str) -> bool:
+    candidate = str(candidate or '').strip()
+    if not candidate or '\0' in candidate:
+        return False
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603 - candidate is validated and only probed with a fixed Python import command.
             [candidate, '-c', 'import sys'],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -3191,10 +3196,12 @@ def api_generate_live_followup_bundle():
         if not script.is_file():
             return jsonify({'ok': False, 'error': 'bundle script not found'}), 404
 
-        bash_bin = os.getenv('V5_DASHBOARD_BASH') or shutil.which('bash') or '/bin/bash'
+        bash_bin = str(os.getenv('V5_DASHBOARD_BASH') or shutil.which('bash') or '/bin/bash').strip()
+        if not bash_bin or '\0' in bash_bin:
+            return jsonify({'ok': False, 'error': 'invalid bash executable'}), 400
         timeout_sec = int(os.getenv('V5_DASHBOARD_BUNDLE_GENERATE_TIMEOUT_SEC', '900') or '900')
         started = time.time()
-        proc = subprocess.run(
+        proc = subprocess.run(  # noqa: S603 - bash executable is validated and script path is fixed inside the workspace.
             [bash_bin, str(script), str(WORKSPACE)],
             cwd=str(WORKSPACE),
             text=True,

@@ -49,7 +49,7 @@ def _get_unit_load_state(unit: str) -> str:
     if systemctl is None:
         return ""
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603 - systemctl path is resolved by shutil.which and arguments are fixed.
             [systemctl, "--user", "show", unit, "--property=LoadState"],
             capture_output=True,
             text=True,
@@ -254,7 +254,7 @@ class HealthChecker:
 
         for timer_name, max_delay_min in timers:
             try:
-                result = subprocess.run(
+                result = subprocess.run(  # noqa: S603 - systemctl path is resolved by shutil.which and arguments are fixed.
                     [
                         systemctl,
                         "--user",

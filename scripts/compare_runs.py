@@ -301,7 +301,11 @@ def main() -> None:
             "--end_ts",
             str(v5_end),
         ]
-        subprocess.check_call(cmd)
+        subprocess.run(  # noqa: S603 - command is built from sys.executable and fixed repo script arguments.
+            cmd,
+            check=True,
+            timeout=600,
+        )
         v4_summary_path = str(v4_out_dir / "summary.json")
 
     if not v4_summary_path:

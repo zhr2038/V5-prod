@@ -40,7 +40,7 @@ def _report_path_from_config(config_path: Path) -> Path:
 
 
 def _run_script(script_name: str, config_path: Path, *, cwd: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    return subprocess.run(  # noqa: S603 - command is built from sys.executable and fixed repo script path.
         [sys.executable, str(PROJECT_ROOT / "scripts" / script_name), str(config_path)],
         cwd=str(cwd),
         capture_output=True,
