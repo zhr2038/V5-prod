@@ -28,6 +28,7 @@ logs/*.log
 logs/*.txt
 
 # Runtime data
+backups/*.tar.gz
 reports/*.csv
 reports/*.sqlite
 reports/*.db
