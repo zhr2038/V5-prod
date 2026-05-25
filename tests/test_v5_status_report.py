@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import scripts.v5_status_report as status_report
@@ -121,6 +122,8 @@ def test_resolve_report_output_path_uses_suffixed_runtime_name(tmp_path: Path) -
 
 
 def test_generate_report_includes_negative_expectancy_counts(monkeypatch) -> None:
+    fixed_now = datetime(2026, 5, 25, 4, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(status_report, "_utc_now", lambda: fixed_now)
     monkeypatch.setattr(status_report, "load_config", lambda: {"budget": {"live_equity_cap_usdt": 20}})
     monkeypatch.setattr(
         status_report,
@@ -165,6 +168,7 @@ def test_generate_report_includes_negative_expectancy_counts(monkeypatch) -> Non
 
     report = status_report.generate_report()
 
+    assert "time: 2026-05-25 04:00:00" in report
     assert "- risk_off_suppressed_count: 1" in report
     assert "- target_zero_after_regime_count: 2" in report
     assert "- target_zero_after_dd_throttle_count: 3" in report
@@ -178,6 +182,14 @@ def test_generate_report_includes_negative_expectancy_counts(monkeypatch) -> Non
     assert "- risk_guard_level: DEFENSE" in report
     assert "- risk_guard_source: guard" in report
     assert "- risk_guard_last_update: 2026-04-17T11:55:00" in report
+
+
+def test_timestamp_helpers_use_utc(monkeypatch) -> None:
+    fixed_now = datetime(2026, 5, 25, 4, 30, tzinfo=timezone.utc)
+    monkeypatch.setattr(status_report, "_utc_now", lambda: fixed_now)
+
+    assert status_report._format_ts_ms(1_779_667_200_000) == "2026-05-25T00:00Z"
+    assert status_report.build_next_run_hint() == "2026-05-25 05:00"
 
 
 def test_get_current_risk_guard_prefers_newer_guard_state_over_eval(tmp_path: Path) -> None:

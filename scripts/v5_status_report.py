@@ -11,7 +11,7 @@ import sqlite3
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -36,6 +36,16 @@ ORDERS_DB = REPORTS_DIR / "orders.sqlite"
 LIVE_UNITS = (
     ("v5-prod.user.service", "v5-prod.user.timer"),
 )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_utc_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def resolve_config_path() -> Path:
@@ -109,7 +119,7 @@ def _coerce_timestamp_epoch(value: Any) -> float | None:
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
     try:
-        return datetime.fromisoformat(text).timestamp()
+        return _as_utc_aware(datetime.fromisoformat(text)).timestamp()
     except ValueError:
         return None
 
@@ -187,7 +197,7 @@ def get_latest_run_data(cfg: Optional[Dict[str, Any]] = None) -> Optional[Dict[s
 
     def _candidate_sort_epoch(run_dir: Path) -> float:
         try:
-            return datetime.strptime(run_dir.name, "%Y%m%d_%H").timestamp()
+            return datetime.strptime(run_dir.name, "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp()
         except Exception:
             audit_path = run_dir / "decision_audit.json"
             try:
@@ -209,7 +219,7 @@ def get_latest_run_data(cfg: Optional[Dict[str, Any]] = None) -> Optional[Dict[s
 
         run_id = str(payload.get("run_id") or run_dir.name) if isinstance(payload, dict) else run_dir.name
         try:
-            return datetime.strptime(run_id, "%Y%m%d_%H").timestamp()
+            return datetime.strptime(run_id, "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp()
         except Exception:
             try:
                 return audit_path.stat().st_mtime
@@ -311,7 +321,7 @@ def check_borrow_status(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 
 
 def _format_ts_ms(ts_ms: int) -> str:
-    return datetime.fromtimestamp(int(ts_ms) / 1000).isoformat(timespec="minutes")
+    return datetime.fromtimestamp(int(ts_ms) / 1000, timezone.utc).isoformat(timespec="minutes").replace("+00:00", "Z")
 
 
 def _get_latest_fill_ts_ms(path: Path) -> Optional[int]:
@@ -373,7 +383,7 @@ def get_last_filled_trade_ts(cfg: Optional[Dict[str, Any]] = None) -> Optional[s
 
 
 def build_next_run_hint() -> str:
-    next_run = datetime.now().replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    next_run = _utc_now().replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
     return next_run.strftime("%Y-%m-%d %H:%M")
 
 
@@ -413,7 +423,7 @@ def generate_report() -> str:
     return "\n".join(
         [
             "V5 Status Report",
-            f"time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"time: {_utc_now().strftime('%Y-%m-%d %H:%M:%S')}",
             f"workspace: {WORKSPACE}",
             f"config: {CONFIG_PATH.name}",
             "",
@@ -460,7 +470,7 @@ def main() -> int:
     reports_dir.mkdir(parents=True, exist_ok=True)
     report = generate_report()
     print(report)
-    output = _resolve_report_output_path(paths, datetime.now().strftime('%Y%m%d_%H%M'))
+    output = _resolve_report_output_path(paths, _utc_now().strftime('%Y%m%d_%H%M'))
     output.write_text(report, encoding="utf-8")
     return 0
 
