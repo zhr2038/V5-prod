@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -55,3 +57,24 @@ def test_dust_cleaner_default_paths_fail_fast_when_runtime_config_is_missing(mon
     monkeypatch.setattr(dust_cleaner, "PROJECT_ROOT", tmp_path)
     with pytest.raises(FileNotFoundError, match="runtime config not found"):
         dust_cleaner.DustCleaner(reports_dir=None)
+
+
+def test_dust_cleaner_reports_use_utc_timestamps(monkeypatch, tmp_path: Path) -> None:
+    import scripts.dust_cleaner as dust_cleaner
+
+    fixed_now = datetime(2026, 5, 25, 4, 0, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(dust_cleaner, "_utc_now", lambda: fixed_now)
+
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "shadow_orders.sqlite").write_text("", encoding="utf-8")
+
+    cleaner = DustCleaner(reports_dir=reports_dir)
+    cleaner.update_reconcile_config()
+    report = cleaner.generate_report()
+
+    config = json.loads(cleaner.dust_config_path.read_text(encoding="utf-8"))
+    report_file = reports_dir / "shadow_dust_cleanup_20260525_040001.json"
+    assert config["updated_at"] == "2026-05-25T04:00:01Z"
+    assert report["timestamp"] == "2026-05-25T04:00:01Z"
+    assert json.loads(report_file.read_text(encoding="utf-8"))["timestamp"] == "2026-05-25T04:00:01Z"

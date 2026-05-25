@@ -13,7 +13,7 @@ import json
 import sqlite3
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +39,14 @@ DUST_CRITERIA = {
 }
 
 DUST_SYMBOLS = {"PROMPT", "SPACE", "KITE", "WLFI", "MERL", "J", "PEPE", "XAUT"}
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_iso() -> str:
+    return _utc_now().isoformat().replace("+00:00", "Z")
 
 
 @dataclass
@@ -126,7 +134,7 @@ class DustCleaner:
         self.dust_list: list[dict[str, Any]] = []
 
     def log(self, msg: str) -> None:
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+        print(f"[{_utc_now().strftime('%H:%M:%S')}] {msg}")
 
     def get_positions(self) -> list[dict[str, Any]]:
         if not self.positions_db.exists():
@@ -207,7 +215,7 @@ class DustCleaner:
                 tags = {
                     "dust": True,
                     "dust_reason": reason,
-                    "dust_marked_at": datetime.now().isoformat(),
+                    "dust_marked_at": _utc_now_iso(),
                 }
                 cursor.execute(
                     "UPDATE positions SET tags_json = ? WHERE symbol = ?",
@@ -232,18 +240,18 @@ class DustCleaner:
             "excluded_from_equity": True,
             "excluded_from_rebalance": True,
             "excluded_from_borrow_check": True,
-            "updated_at": datetime.now().isoformat(),
+            "updated_at": _utc_now_iso(),
         }
         self.dust_config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
         self.log(f"Dust config saved: {self.dust_config_path}")
         return self.dust_config_path
 
     def generate_report(self) -> dict[str, Any]:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = _utc_now().strftime('%Y%m%d_%H%M%S')
         report_file = _derive_cleanup_report_path(self.orders_db, timestamp)
         report_file.parent.mkdir(parents=True, exist_ok=True)
         report = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": _utc_now_iso(),
             "dust_criteria": DUST_CRITERIA,
             "dust_symbols": sorted(DUST_SYMBOLS),
             "marked_positions": self.dust_list,
