@@ -179,6 +179,7 @@ def _extract_git_archive(blob: bytes, destination: Path) -> None:
             target = (destination / member.name).resolve()
             if member.isdir():
                 target.mkdir(parents=True, exist_ok=True)
+                target.chmod(member.mode & 0o777)
                 continue
             source = archive.extractfile(member)
             if source is None:
@@ -186,6 +187,7 @@ def _extract_git_archive(blob: bytes, destination: Path) -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
             with source, target.open("wb") as handle:
                 shutil.copyfileobj(source, handle)
+            target.chmod(member.mode & 0o777)
 
 
 def _git_existing_items(root: Path, rev: str, items: Iterable[str]) -> tuple[str, ...]:

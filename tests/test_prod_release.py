@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import shutil
 import stat
 import subprocess
@@ -64,6 +65,23 @@ def test_extract_git_archive_rejects_path_traversal_member(tmp_path: Path) -> No
     with pytest.raises(RuntimeError, match="unsafe archive member"):
         _extract_git_archive(payload.getvalue(), tmp_path)
     assert not (tmp_path.parent / "escape.txt").exists()
+
+
+def test_extract_git_archive_preserves_executable_mode(tmp_path: Path) -> None:
+    payload = io.BytesIO()
+    with tarfile.open(fileobj=payload, mode="w:") as archive:
+        data = b"#!/bin/sh\necho ok\n"
+        info = tarfile.TarInfo("run.sh")
+        info.mode = 0o755
+        info.size = len(data)
+        archive.addfile(info, io.BytesIO(data))
+
+    _extract_git_archive(payload.getvalue(), tmp_path)
+
+    out = tmp_path / "run.sh"
+    assert out.read_bytes() == b"#!/bin/sh\necho ok\n"
+    if os.name != "nt":
+        assert out.stat().st_mode & stat.S_IXUSR
 
 
 def test_render_unit_text_rewrites_known_roots() -> None:
