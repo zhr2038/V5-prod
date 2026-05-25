@@ -7,7 +7,20 @@ import subprocess
 import tarfile
 from pathlib import Path
 
-from src.reporting.v5_bundle_exporter import GIT_COMMAND_TIMEOUT_SEC, _git_command, export_v5_bundle
+from src.reporting.v5_bundle_exporter import (
+    GIT_COMMAND_TIMEOUT_SEC,
+    _git_command,
+    _normalized_symbol,
+    export_v5_bundle,
+)
+
+
+def test_bundle_export_normalized_symbol_handles_runtime_variants() -> None:
+    assert _normalized_symbol("BNB/USDT") == "BNB-USDT"
+    assert _normalized_symbol("BNB-USDT") == "BNB-USDT"
+    assert _normalized_symbol("BNBUSDT") == "BNB-USDT"
+    assert _normalized_symbol("OKX:BNB-USDT") == "BNB-USDT"
+    assert _normalized_symbol("okx:bnb_usdt") == "BNB-USDT"
 
 
 def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:

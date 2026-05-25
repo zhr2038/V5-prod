@@ -15,6 +15,20 @@ TRADE_HEADER = (
 )
 
 
+@pytest.mark.parametrize(
+    ("symbol", "expected"),
+    [
+        ("BNB/USDT", "BNB-USDT"),
+        ("BNB-USDT", "BNB-USDT"),
+        ("BNBUSDT", "BNB-USDT"),
+        ("OKX:BNB-USDT", "BNB-USDT"),
+        ("okx:bnb_usdt", "BNB-USDT"),
+    ],
+)
+def test_trade_log_normalize_symbol_handles_runtime_variants(symbol: str, expected: str) -> None:
+    assert trade_log.normalize_symbol(symbol) == expected
+
+
 def _write_equity(run_dir, ts="2026-05-12T00:00:00Z", equity=100.0):
     (run_dir / "equity.jsonl").write_text(
         "\n".join(

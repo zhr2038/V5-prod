@@ -50,16 +50,22 @@ TRADE_COLUMNS = [
 
 # Preserve deterministic column order while avoiding duplicates from legacy aliases.
 TRADE_COLUMNS = list(dict.fromkeys(TRADE_COLUMNS))
+QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "BTC", "ETH", "OKB")
 
 
 def normalize_symbol(symbol: str) -> str:
-    text = str(symbol or "").strip().upper()
-    if "/" in text:
-        return text.replace("/", "-")
+    text = str(symbol or "").strip().upper().replace("_", "-")
+    if not text:
+        return ""
+    if ":" in text:
+        text = text.rsplit(":", 1)[-1].strip()
+    text = text.replace("/", "-")
     if "-" in text:
-        return text
-    if text.endswith("USDT") and len(text) > len("USDT"):
-        return f"{text[:-4]}-USDT"
+        parts = [part for part in text.split("-") if part]
+        return "-".join(parts) if parts else text
+    for quote in QUOTE_SUFFIXES:
+        if text.endswith(quote) and len(text) > len(quote):
+            return f"{text[:-len(quote)]}-{quote}"
     return text
 
 

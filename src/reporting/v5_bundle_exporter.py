@@ -52,6 +52,7 @@ from src.reporting.quant_lab_audit import (
 
 
 GIT_COMMAND_TIMEOUT_SEC = 10
+QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "BTC", "ETH", "OKB")
 
 
 SECRET_MARKERS = (
@@ -453,13 +454,18 @@ def _to_int(value: Any) -> int:
 
 
 def _normalized_symbol(symbol: Any) -> str:
-    text = str(symbol or "").strip().upper()
-    if "/" in text:
-        return text.replace("/", "-")
+    text = str(symbol or "").strip().upper().replace("_", "-")
+    if not text:
+        return "null"
+    if ":" in text:
+        text = text.rsplit(":", 1)[-1].strip()
+    text = text.replace("/", "-")
     if "-" in text:
-        return text
-    if text.endswith("USDT") and len(text) > 4:
-        return f"{text[:-4]}-USDT"
+        parts = [part for part in text.split("-") if part]
+        return "-".join(parts) if parts else text
+    for quote in QUOTE_SUFFIXES:
+        if text.endswith(quote) and len(text) > len(quote):
+            return f"{text[:-len(quote)]}-{quote}"
     return text or "null"
 
 
