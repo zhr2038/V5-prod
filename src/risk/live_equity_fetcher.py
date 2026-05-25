@@ -60,7 +60,7 @@ def get_live_equity_from_okx(*, env_path: str | None = None, project_root: Path 
                     ticker = exchange.fetch_ticker(f"{coin}/USDT")
                     price = float(ticker.get('last', 0))
                     total_equity += float(amount) * price
-                except:
+                except Exception:
                     pass  # 忽略价格获取失败的币种
         
         return total_equity

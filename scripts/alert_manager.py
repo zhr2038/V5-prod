@@ -68,7 +68,7 @@ class AlertManager:
             try:
                 with open(self.alert_state_file) as f:
                     return json.load(f)
-            except:
+            except Exception:
                 pass
         return {'last_alerts': {}}
     

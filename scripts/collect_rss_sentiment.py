@@ -71,7 +71,7 @@ def strip_tags(html):
     try:
         s.feed(html)
         return s.get_data()
-    except:
+    except Exception:
         return html
 
 

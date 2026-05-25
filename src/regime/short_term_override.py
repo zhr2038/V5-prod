@@ -70,7 +70,7 @@ def check_short_term_opportunity(
             if latest_file is not None:
                 data = json.loads(latest_file.read_text())
                 funding_sentiment = float(data.get('f6_sentiment', 0.0))
-        except:
+        except Exception:
             funding_sentiment = 0.0
     
     signals = []
@@ -167,7 +167,7 @@ def apply_short_term_override(
         if latest_file is not None:
             data = json.loads(latest_file.read_text())
             funding_sentiment = float(data.get('f6_sentiment', 0.0))
-    except:
+    except Exception:
         pass
     
     # 检查覆盖条件

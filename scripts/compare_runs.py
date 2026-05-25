@@ -63,7 +63,7 @@ def _ts_to_epoch_sec(v: Any) -> Optional[int]:
                 except ValueError:
                     dt = None
             if dt is None:
-                raise ValueError(f"Unrecognized timestamp: {v}")
+                raise ValueError(f"Unrecognized timestamp: {v}") from None
 
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)

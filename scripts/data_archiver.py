@@ -65,7 +65,7 @@ class DataArchiver:
             date_match = re.search(r'(?<!\d)(\d{8})(?!\d)', raw_name)
             if date_match:
                 return datetime.strptime(date_match.group(1), '%Y%m%d')
-        except:
+        except Exception:
             return None
         return None
     

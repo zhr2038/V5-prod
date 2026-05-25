@@ -184,7 +184,7 @@ class GPTSentimentFactor:
                 with open(cache_file, 'r') as f:
                     cached = json.load(f)
                     return cached
-            except:
+            except Exception:
                 pass
         
         # 获取文本（这里用模拟数据，实际接入Twitter/Reddit API）

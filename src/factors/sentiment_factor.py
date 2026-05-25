@@ -104,7 +104,7 @@ class SentimentFactor:
                             'f6_fear_greed_index': self._sentiment_to_fear_greed(cached['sentiment']),
                             'f6_sentiment_source': 'cache'
                         }
-            except:
+            except Exception:
                 pass
         
         # 2. 获取文本数据
@@ -136,7 +136,7 @@ class SentimentFactor:
                     'texts_count': len(texts),
                     'timestamp': datetime.now().isoformat()
                 }, f)
-        except:
+        except Exception:
             pass
         
         return {
@@ -216,7 +216,7 @@ class SentimentFactor:
                     sentiment = 0.0
                 
                 scores.append(sentiment)
-            except:
+            except Exception:
                 continue
         
         if scores:
@@ -238,7 +238,7 @@ class SentimentFactor:
                 blob = TextBlob(text)
                 # TextBlob输出: polarity (-1 ~ +1)
                 scores.append(blob.sentiment.polarity)
-            except:
+            except Exception:
                 continue
         
         if scores:

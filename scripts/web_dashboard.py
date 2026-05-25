@@ -5332,7 +5332,7 @@ def api_cost_calibration():
                                     slippage_list.append(float(slippage))
                                 if fee is not None and not isinstance(fee, str):
                                     fee_list.append(float(fee))
-                            except:
+                            except Exception:
                                 continue
                     
                     if slippage_list or fee_list:
@@ -6027,7 +6027,7 @@ def api_decision_chain():
                             m = re.search(r'DD multiplier:\s*([\d.]+)', note)
                             if m:
                                 risk_state['dd_multiplier'] = float(m.group(1))
-                        except:
+                        except Exception:
                             pass
                     if 'drawdown' in note.lower():
                         try:
@@ -6035,7 +6035,7 @@ def api_decision_chain():
                             m = re.search(r'drawdown:\s*([\d.]+)%', note, re.IGNORECASE)
                             if m:
                                 risk_state['drawdown_pct'] = float(m.group(1))
-                        except:
+                        except Exception:
                             pass
 
                 # 3. 执行层结果

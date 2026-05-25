@@ -44,7 +44,7 @@ class TaskLock:
                     # 锁已超时，强制删除
                     self.lock_file.unlink()
                     print(f"⚠️  发现超时锁（{age:.0f}秒），已强制释放")
-            except:
+            except Exception:
                 pass
         
         try:
@@ -73,7 +73,7 @@ class TaskLock:
                 if self._locked:
                     fcntl.flock(self.fd.fileno(), fcntl.LOCK_UN)
                 self.fd.close()
-            except:
+            except Exception:
                 pass
             finally:
                 self.fd = None
@@ -81,7 +81,7 @@ class TaskLock:
         try:
             if self._locked and self.lock_file.exists():
                 self.lock_file.unlink()
-        except:
+        except Exception:
             pass
         finally:
             self._locked = False
@@ -131,7 +131,7 @@ def list_active_locks():
                 'since': timestamp,
                 'age_seconds': int(age)
             })
-        except:
+        except Exception:
             pass
     
     return locks

@@ -1289,7 +1289,7 @@ class LiveExecutionEngine:
                                     liab_quote = float(d.get("liab") or 0.0)
                                     break
                     except Exception as e:
-                        raise SafetyReject(f"NO_BORROW_BUY_BLOCK: quote balance query failed: {e}")
+                        raise SafetyReject(f"NO_BORROW_BUY_BLOCK: quote balance query failed: {e}") from e
 
                     liab_eps = float(_coalesce(getattr(self.cfg, "borrow_liab_eps", None), 1e-6))
                     if liab_quote > liab_eps:

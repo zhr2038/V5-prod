@@ -93,7 +93,7 @@ class RiskAutoRecovery:
                 with open(self.config_file) as f:
                     saved = json.load(f)
                     default_config.update(saved)
-            except:
+            except Exception:
                 pass
         
         return default_config
@@ -139,7 +139,7 @@ class RiskAutoRecovery:
                         state['level'] = current_level
                         state['since'] = since
                         return state
-            except:
+            except Exception:
                 pass
         now_iso = datetime.now().isoformat()
         return {'current_level': 'NEUTRAL', 'level': 'NEUTRAL', 'since': now_iso, 'last_update': now_iso}
@@ -204,9 +204,9 @@ class RiskAutoRecovery:
                                         'peak': data.get('peak', 0),
                                         'drawdown': drawdown if drawdown is not None else 0
                                     })
-                            except:
+                            except Exception:
                                 continue
-                except:
+                except Exception:
                     continue
             
             points.sort(key=lambda item: item['ts'])
@@ -216,7 +216,7 @@ class RiskAutoRecovery:
                 if key not in dedup:
                     dedup[key] = point
             return list(dedup.values())
-        except:
+        except Exception:
             return []
     
     def calculate_avg_drawdown(self, hours=6):
@@ -269,7 +269,7 @@ class RiskAutoRecovery:
             if since is None:
                 raise ValueError("missing since")
             return (datetime.now(timezone.utc) - since).total_seconds() / 3600  # 小时
-        except:
+        except Exception:
             return 999  # 如果解析失败，假设已停留很久
     
     def evaluate_recovery(self):
