@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -489,12 +490,18 @@ def add_issue(severity, code, message, evidence=None):
     return issue
 
 
+def _command_text(cmd):
+    if isinstance(cmd, (list, tuple)):
+        return " ".join(shlex.quote(str(part)) for part in cmd)
+    return str(cmd)
+
+
 def run_readonly(cmd):
-    commands.append(cmd)
+    commands.append(_command_text(cmd))
     try:
         proc = subprocess.run(
-            cmd,
-            shell=True,
+            [str(part) for part in cmd],
+            shell=False,
             cwd=str(ROOT) if ROOT.exists() else None,
             text=True,
             stdout=subprocess.PIPE,
@@ -11139,10 +11146,10 @@ def first_jsonl_nested_value(path, names):
 
 
 def build_provenance_meta():
-    _, inside_out, _ = run_readonly("git rev-parse --is-inside-work-tree 2>/dev/null || echo false")
+    _, inside_out, _ = run_readonly(["git", "rev-parse", "--is-inside-work-tree"])
     is_git = inside_out.splitlines()[0].strip().lower() == "true" if inside_out else False
-    _, branch_out, _ = run_readonly("git rev-parse --abbrev-ref HEAD 2>/dev/null || echo not_git")
-    _, commit_out, _ = run_readonly("git rev-parse HEAD 2>/dev/null || echo not_git")
+    _, branch_out, _ = run_readonly(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    _, commit_out, _ = run_readonly(["git", "rev-parse", "HEAD"])
     branch = branch_out.splitlines()[0].strip() if branch_out else "not_git"
     commit = commit_out.splitlines()[0].strip() if commit_out else "not_git"
     if not is_git or branch in ("", "not_git") or commit in ("", "not_git"):
@@ -11151,9 +11158,9 @@ def build_provenance_meta():
         commit = "not_git"
 
     if is_git:
-        _, dirty_out, _ = run_readonly("git status --short 2>/dev/null || true")
+        _, dirty_out, _ = run_readonly(["git", "status", "--short"])
         git_dirty = bool((dirty_out or "").strip())
-        _, remote_out, _ = run_readonly("git remote get-url origin 2>/dev/null || true")
+        _, remote_out, _ = run_readonly(["git", "remote", "get-url", "origin"])
         provenance_status = "git_dirty_degraded" if git_dirty else "git_clean"
         code_provenance = "degraded" if git_dirty else "ok"
         remote_hash = hash_text(remote_out.splitlines()[0].strip() if remote_out else "")
