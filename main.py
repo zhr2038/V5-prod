@@ -2214,6 +2214,7 @@ def _run_live_preflight_or_raise(
         runtime_order_store_path = str(
             getattr(cfg.execution, "order_store_path", "reports/orders.sqlite") or "reports/orders.sqlite"
         )
+        reconcile_status_path = str(getattr(cfg.execution, "reconcile_status_path", "") or "")
         pf = LivePreflight(
             cfg.execution,
             okx=client,
@@ -2230,9 +2231,8 @@ def _run_live_preflight_or_raise(
             ),
             reconcile_status_path=str(
                 derive_runtime_named_json_path(runtime_order_store_path, "reconcile_status")
-                if str(getattr(cfg.execution, "reconcile_status_path", "") or "").strip()
-                in {"", "reports/reconcile_status.json"}
-                else getattr(cfg.execution, "reconcile_status_path")
+                if reconcile_status_path.strip() in {"", "reports/reconcile_status.json"}
+                else reconcile_status_path
             ),
         )
         res = pf.run(

@@ -187,6 +187,10 @@ def _dashboard_renderer_mode() -> str:
     return "template"
 
 
+def _dashboard_bind_host() -> str:
+    return str(os.getenv("V5_WEB_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+
+
 SYSTEMCTL_BIN = shutil.which('systemctl')
 TIMER_TS_RE = re.compile(r'(\w{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})')
 
@@ -7356,14 +7360,14 @@ def api_health():
 
 
 if __name__ == '__main__':
+    host = _dashboard_bind_host()
+    port = int(os.getenv("V5_WEB_PORT", "5000") or 5000)
+    threads = int(os.getenv("V5_WEB_THREADS", "8") or 8)
     print("="*60)
     print("V5 Web Dashboard 启动中...")
     print("="*60)
-    print("访问地址: http://0.0.0.0:5000")
+    print(f"访问地址: http://{host}:{port}")
     print("="*60)
-    host = "0.0.0.0"
-    port = int(os.getenv("V5_WEB_PORT", "5000") or 5000)
-    threads = int(os.getenv("V5_WEB_THREADS", "8") or 8)
     try:
         from waitress import serve
 

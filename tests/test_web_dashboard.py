@@ -67,6 +67,20 @@ def test_load_config_uses_runtime_helper_dynamically(monkeypatch, tmp_path):
     assert payload["alpha"]["long_top_pct"] == 0.42
 
 
+def test_dashboard_bind_host_defaults_to_loopback(monkeypatch):
+    module = load_web_dashboard_module()
+    monkeypatch.delenv("V5_WEB_HOST", raising=False)
+
+    assert module._dashboard_bind_host() == "127.0.0.1"
+
+
+def test_dashboard_bind_host_can_be_overridden(monkeypatch):
+    module = load_web_dashboard_module()
+    monkeypatch.setenv("V5_WEB_HOST", "127.0.0.2")
+
+    assert module._dashboard_bind_host() == "127.0.0.2"
+
+
 def test_load_config_surfaces_invalid_config(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     cfg_path = tmp_path / "configs" / "runtime.yaml"

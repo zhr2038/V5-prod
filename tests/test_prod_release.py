@@ -53,6 +53,19 @@ def test_extract_git_archive_rejects_symlink_member(tmp_path: Path) -> None:
         _extract_git_archive(payload.getvalue(), tmp_path)
 
 
+def test_extract_git_archive_rejects_path_traversal_member(tmp_path: Path) -> None:
+    payload = io.BytesIO()
+    with tarfile.open(fileobj=payload, mode="w:") as archive:
+        data = b"escape"
+        info = tarfile.TarInfo("../escape.txt")
+        info.size = len(data)
+        archive.addfile(info, io.BytesIO(data))
+
+    with pytest.raises(RuntimeError, match="unsafe archive member"):
+        _extract_git_archive(payload.getvalue(), tmp_path)
+    assert not (tmp_path.parent / "escape.txt").exists()
+
+
 def test_render_unit_text_rewrites_known_roots() -> None:
     source = (
         "WorkingDirectory=/home/admin/clawd/v5-trading-bot\n"

@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import ClassVar, Dict, List, Tuple
 
 from src.utils.time import utc_now_iso
 
@@ -51,7 +51,7 @@ class AutoRiskGuard:
     """
     
     # 档位定义
-    LEVELS = {
+    LEVELS: ClassVar[dict[str, RiskLevel]] = {
         'ATTACK': RiskLevel(
             name='ATTACK',
             pos_mult_sideways=0.85,

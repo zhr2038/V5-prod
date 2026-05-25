@@ -1711,7 +1711,7 @@ class QuantLabConfig(BaseModel):
     enabled: bool = False
     mode: str = "shadow"
     base_url: str = "http://qyun2.hrhome.top:8027"
-    api_token_env: Optional[str] = "QUANT_LAB_API_TOKEN"
+    api_token_env: Optional[str] = "QUANT_LAB_API_TOKEN"  # noqa: S105 - environment variable name, not a token value
     api_env_path: Optional[str] = None
     api_env_require_secure_permissions: bool = True
     allow_api_env_symlink: bool = False

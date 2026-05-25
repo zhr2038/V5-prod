@@ -69,7 +69,7 @@ def build_sweep_candidates(
     keys = list(grid.keys())
     value_lists = [resolve_parameter_values(grid[key]) for key in keys]
     combos = [
-        {key: value for key, value in zip(keys, combo)}
+        {key: value for key, value in zip(keys, combo, strict=True)}
         for combo in itertools.product(*value_lists)
     ]
     if max_candidates is None or max_candidates >= len(combos):

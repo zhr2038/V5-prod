@@ -374,7 +374,7 @@ class QuantLabClient:
         if self.mode in STRICT_GATE_MODES:
             raise QuantLabValidationError(message)
         self.api_token = None
-        self.token_auth_disabled_reason = "public_http_token_stripped"
+        self.token_auth_disabled_reason = "public_http_token_stripped"  # noqa: S105 - status reason, not a secret
         warnings.warn(message, RuntimeWarning, stacklevel=2)
 
     def _headers(self) -> Dict[str, str]:

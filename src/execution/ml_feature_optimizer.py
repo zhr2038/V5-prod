@@ -7,7 +7,7 @@ columns while retaining a small, stable set of numeric predictors.
 
 from __future__ import annotations
 
-from typing import List
+from typing import ClassVar, List
 
 import numpy as np
 import pandas as pd
@@ -22,7 +22,7 @@ except Exception:
 
 
 class FeatureEngineeringOptimizer:
-    NON_FEATURE_COLUMNS = {
+    NON_FEATURE_COLUMNS: ClassVar[set[str]] = {
         "timestamp",
         "symbol",
         "regime",
@@ -30,13 +30,13 @@ class FeatureEngineeringOptimizer:
         "target",
     }
 
-    LOW_INFO_FEATURES = {
+    LOW_INFO_FEATURES: ClassVar[set[str]] = {
         "returns_1h",
         "returns_6h",
         "volatility_6h",
     }
 
-    STABLE_FEATURE_ORDER = [
+    STABLE_FEATURE_ORDER: ClassVar[list[str]] = [
         "returns_24h",
         "momentum_5d",
         "momentum_20d",

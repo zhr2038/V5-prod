@@ -173,10 +173,19 @@ def _extract_git_archive(blob: bytes, destination: Path) -> None:
                 raise RuntimeError(f"unsafe archive member: {member.name}")
             if member.issym() or member.islnk():
                 raise RuntimeError(f"unsupported archive link member: {member.name}")
-        try:
-            archive.extractall(destination, filter="data")
-        except TypeError:
-            archive.extractall(destination, members=members)
+            if not (member.isdir() or member.isfile()):
+                raise RuntimeError(f"unsupported archive member type: {member.name}")
+        for member in members:
+            target = (destination / member.name).resolve()
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            source = archive.extractfile(member)
+            if source is None:
+                raise RuntimeError(f"archive member has no file payload: {member.name}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with source, target.open("wb") as handle:
+                shutil.copyfileobj(source, handle)
 
 
 def _git_existing_items(root: Path, rev: str, items: Iterable[str]) -> tuple[str, ...]:
