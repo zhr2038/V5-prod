@@ -46,3 +46,28 @@ def test_resolve_active_config_path_fails_fast_when_config_is_missing(monkeypatc
 
     with pytest.raises(FileNotFoundError, match="runtime config not found"):
         sync_positions._resolve_active_config_path()
+
+
+def test_fetch_okx_ticker_last_uses_params(monkeypatch) -> None:
+    captured = {}
+
+    class _Response:
+        status_code = 200
+
+        def json(self):
+            return {"code": "0", "data": [{"last": "123.45"}]}
+
+    def fake_get(url, *, params=None, timeout=0, **kwargs):
+        captured["url"] = url
+        captured["params"] = params
+        captured["timeout"] = timeout
+        return _Response()
+
+    monkeypatch.setattr(sync_positions.requests, "get", fake_get)
+
+    assert sync_positions._fetch_okx_ticker_last("ETH-USDT") == 123.45
+    assert captured == {
+        "url": "https://www.okx.com/api/v5/market/ticker",
+        "params": {"instId": "ETH-USDT"},
+        "timeout": 5,
+    }

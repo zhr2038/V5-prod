@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import requests
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +33,20 @@ from configs.loader import load_config
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
 from src.execution.fill_store import derive_position_store_path, derive_runtime_named_json_path
 from src.execution.okx_private_client import OKXPrivateClient
+
+
+def _fetch_okx_ticker_last(inst_id: str) -> float | None:
+    response = requests.get(
+        "https://www.okx.com/api/v5/market/ticker",
+        params={"instId": str(inst_id)},
+        timeout=5,
+    )
+    if getattr(response, "status_code", 200) != 200:
+        return None
+    data = response.json()
+    if data.get("code") != "0" or not data.get("data"):
+        return None
+    return float(data["data"][0]["last"])
 
 
 def _ensure_positions_table(conn: sqlite3.Connection) -> None:
@@ -129,24 +144,17 @@ def sync_positions(*, config_path: str | None = None, env_path: str = ".env") ->
         print(f"Found {len(positions)} non-USDT positions")
 
         print("\nFetching mark prices...")
-        import requests
-
         total_position_value = 0.0
         position_details = []
         for pos in positions:
             ccy = pos["ccy"]
             symbol = f"{ccy}/USDT"
             inst_id = symbol.replace("/", "-")
-            url = f"https://www.okx.com/api/v5/market/ticker?instId={inst_id}"
 
             try:
-                response = requests.get(url, timeout=5)
-                if response.status_code != 200:
+                price = _fetch_okx_ticker_last(inst_id)
+                if price is None:
                     continue
-                data = response.json()
-                if data.get("code") != "0" or not data.get("data"):
-                    continue
-                price = float(data["data"][0]["last"])
                 value = pos["eq"] * price
                 total_position_value += value
                 position_details.append(

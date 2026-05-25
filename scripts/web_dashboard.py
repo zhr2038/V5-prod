@@ -2152,7 +2152,11 @@ def _load_okx_public_ticker_last_price(symbol: str) -> float:
             if cached and cached[0] > now:
                 return float(cached[1] or 0.0)
 
-    response = requests.get(f"https://www.okx.com/api/v5/market/ticker?instId={symbol_key}-USDT", timeout=5)
+    response = requests.get(
+        'https://www.okx.com/api/v5/market/ticker',
+        params={'instId': f'{symbol_key}-USDT'},
+        timeout=5,
+    )
     payload = response.json()
     if payload.get('code') == '0' and payload.get('data'):
         price = float(payload['data'][0].get('last') or 0)

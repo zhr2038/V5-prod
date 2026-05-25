@@ -8513,6 +8513,32 @@ def test_api_positions_reuses_recent_public_ticker_cache(monkeypatch, tmp_path):
     assert second["positions"][0]["last_price"] == 234.56
 
 
+def test_okx_public_ticker_uses_params(monkeypatch):
+    module = load_web_dashboard_module()
+    module._OKX_PUBLIC_TICKER_CACHE.clear()
+    monkeypatch.setenv("V5_DASHBOARD_PUBLIC_TICKER_CACHE_TTL_SECONDS", "0")
+    captured = {}
+
+    class _Response:
+        def json(self):
+            return {"code": "0", "data": [{"last": "234.56"}]}
+
+    def fake_get(url, *, params=None, timeout=0, **kwargs):
+        captured["url"] = url
+        captured["params"] = params
+        captured["timeout"] = timeout
+        return _Response()
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+
+    assert module._load_okx_public_ticker_last_price("ETH") == 234.56
+    assert captured == {
+        "url": "https://www.okx.com/api/v5/market/ticker",
+        "params": {"instId": "ETH-USDT"},
+        "timeout": 5,
+    }
+
+
 def test_api_account_converts_json_fee_maps_to_signed_usdt(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
