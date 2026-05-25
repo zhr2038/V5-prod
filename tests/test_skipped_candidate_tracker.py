@@ -1444,3 +1444,17 @@ def test_load_cache_ohlcv_prefers_logically_newer_file_for_duplicate_timestamp(t
         int(datetime.fromisoformat("2026-01-01T02:00:00+00:00").timestamp() * 1000),
     ]
     assert [row["close"] for row in series] == [100.0, 999.0, 103.0]
+
+
+def test_cache_file_epoch_uses_utc_for_filename_tokens(tmp_path: Path) -> None:
+    from src.reporting.skipped_candidate_tracker import _cache_file_epoch
+
+    hourly = tmp_path / "BTC_USDT_1H_20260101_03.csv"
+    daily = tmp_path / "BTC_USDT_1H_2026-01-02.csv"
+
+    assert _cache_file_epoch(hourly, prefix="BTC_USDT_1H_") == datetime.fromisoformat(
+        "2026-01-01T03:00:00+00:00"
+    ).timestamp()
+    assert _cache_file_epoch(daily, prefix="BTC_USDT_1H_") == datetime.fromisoformat(
+        "2026-01-02T00:00:00+00:00"
+    ).timestamp()
