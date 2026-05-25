@@ -11,7 +11,11 @@ from configs.schema import ExecutionConfig
 from scripts.trade_auditor_v3 import TradeAuditorV3
 from src.execution.fill_reconciler import FillReconciler
 from src.execution.fill_store import FillRow, FillStore
-from src.execution.legacy_order_polling import split_whitelist_breach_records
+from src.execution.legacy_order_polling import (
+    LegacyOrderPollPolicy,
+    legacy_order_poll_skip_reason,
+    split_whitelist_breach_records,
+)
 from src.execution.live_execution_engine import LiveExecutionEngine
 from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
@@ -153,6 +157,49 @@ def test_non_whitelist_legacy_unknown_order_not_polled() -> None:
         assert repaired is not None
         assert repaired.state == "REJECTED"
         assert repaired.last_error_code == "EXPIRED"
+
+
+def test_legacy_whitelist_normalizes_symbol_variants() -> None:
+    current, legacy = split_whitelist_breach_records(
+        [
+            {
+                "inst_id": "BNBUSDT",
+                "side": "buy",
+                "qty": 1.0,
+                "notional": 10.0,
+                "created_ts": 1_000_100,
+            },
+            {
+                "inst_id": "OKX:BNB-USDT",
+                "side": "buy",
+                "qty": 1.0,
+                "notional": 10.0,
+                "created_ts": 1_000_100,
+            },
+        ],
+        whitelist_symbols=["BNB/USDT"],
+        release_start_ts=1_000_000,
+    )
+
+    assert current == []
+    assert legacy == []
+
+
+def test_legacy_order_poll_skip_reason_does_not_skip_whitelist_symbol_variants() -> None:
+    policy = LegacyOrderPollPolicy(
+        allow_legacy_order_backfill=False,
+        legacy_order_poll_max_age_hours=1,
+        skip_non_whitelist_legacy_orders=True,
+        whitelist_symbols={"BNB/USDT"},
+    )
+
+    reason = legacy_order_poll_skip_reason(
+        {"inst_id": "OKX:BNBUSDT", "created_ts": 1_000_000_000_000},
+        policy=policy,
+        now_ms=1_000_000_000_000 + 4_000_000,
+    )
+
+    assert reason == "legacy_order_max_age"
 
 
 def test_trade_auditor_v3_recent_orders_use_created_ts_not_updated_ts(tmp_path: Path) -> None:

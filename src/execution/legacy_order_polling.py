@@ -10,14 +10,22 @@ from configs.runtime_config import load_runtime_config
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TERMINAL_ORDER_STATES = {"FILLED", "CANCELED", "CANCELLED", "REJECTED", "MMP_CANCELED"}
+QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "BTC", "ETH", "OKB")
 
 
 def _normalize_symbol(symbol: str | None) -> str:
-    raw = str(symbol or "").strip().upper().replace("-", "/")
-    if raw.endswith("/USDT"):
-        return raw
-    if raw.endswith("-USDT"):
-        return raw.replace("-", "/")
+    raw = str(symbol or "").strip().upper().replace("_", "-")
+    if not raw:
+        return ""
+    if ":" in raw:
+        raw = raw.rsplit(":", 1)[-1].strip()
+    raw = raw.replace("-", "/")
+    if "/" in raw:
+        parts = [part for part in raw.split("/") if part]
+        return "/".join(parts) if parts else raw
+    for quote in QUOTE_SUFFIXES:
+        if raw.endswith(quote) and len(raw) > len(quote):
+            return f"{raw[:-len(quote)]}/{quote}"
     return raw
 
 

@@ -20,6 +20,7 @@ from src.execution.live_execution_engine import (
     _record_rank_exit_fill,
     _record_take_profit_fill,
     submit_gate_for_live,
+    symbol_to_inst_id,
 )
 from src.execution.order_store import OrderStore
 from src.execution.position_store import Position, PositionStore
@@ -80,6 +81,20 @@ class FakeOKX:
     def get_fills(self, *, inst_type="SPOT", inst_id=None, ord_id=None, after=None, before=None, begin=None, end=None, limit=100):
         rows = list(self.fills_by_ord_id.get(str(ord_id), []))
         return SimpleNamespace(data={"code": "0", "data": rows})
+
+
+@pytest.mark.parametrize(
+    ("symbol", "expected"),
+    [
+        ("BTC/USDT", "BTC-USDT"),
+        ("BTC-USDT", "BTC-USDT"),
+        ("BTCUSDT", "BTC-USDT"),
+        ("OKX:BTC-USDT", "BTC-USDT"),
+        ("okx:btc_usdt", "BTC-USDT"),
+    ],
+)
+def test_symbol_to_inst_id_normalizes_symbol_variants(symbol: str, expected: str) -> None:
+    assert symbol_to_inst_id(symbol) == expected
 
 
 class ImmediateFillOKX(FakeOKX):

@@ -35,6 +35,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # Treat sub-threshold notional as dust (local-state hygiene, not exchange accounting).
 DUST_NOTIONAL_USDT = 0.5
+QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "BTC", "ETH", "OKB")
 
 
 def symbol_to_inst_id(symbol: str) -> str:
@@ -42,7 +43,18 @@ def symbol_to_inst_id(symbol: str) -> str:
     
     V5 internal symbols are like "BTC/USDT"; OKX instId is "BTC-USDT".
     """
-    return str(symbol).replace("/", "-")
+    raw = str(symbol or "").strip().upper().replace("_", "-").replace("/", "-")
+    if not raw:
+        return ""
+    if ":" in raw:
+        raw = raw.rsplit(":", 1)[-1].strip()
+    if "-" in raw:
+        parts = [part for part in raw.split("-") if part]
+        return "-".join(parts) if parts else raw
+    for quote in QUOTE_SUFFIXES:
+        if raw.endswith(quote) and len(raw) > len(quote):
+            return f"{raw[:-len(quote)]}-{quote}"
+    return raw
 
 
 def _resolve_path(path: str | Path) -> Path:
