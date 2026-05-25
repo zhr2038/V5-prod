@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 
 from configs.schema import RegimeConfig
 from src.core.models import MarketSeries
@@ -22,6 +23,21 @@ def test_load_market_sentiment_prefers_filename_timestamp_over_mtime(tmp_path) -
     engine.sentiment_cache_dir = cache_dir
 
     assert engine._load_market_sentiment() == 0.35
+
+
+def test_latest_sentiment_cache_file_uses_utc_filename_timestamp(tmp_path) -> None:
+    cache_dir = tmp_path / "data" / "sentiment_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / "funding_BTC-USDT_20260419_23.json"
+    cache_file.write_text('{"f6_sentiment": 0.35}', encoding="utf-8")
+
+    engine = RegimeEngine(RegimeConfig())
+    engine.sentiment_cache_dir = cache_dir
+    selected = engine._latest_sentiment_cache_file("funding_BTC-USDT_*.json")
+
+    assert selected == cache_file
+    expected = datetime(2026, 4, 19, 23, tzinfo=timezone.utc).timestamp()
+    assert RegimeEngine._sentiment_cache_sort_epoch(cache_file) == expected
 
 
 def test_detect_normalizes_unsorted_market_series_before_ma_atr() -> None:
