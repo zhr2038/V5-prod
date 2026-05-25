@@ -6,7 +6,7 @@ import json
 import re
 import sqlite3
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -78,13 +78,17 @@ class HMMRegimeDetector:
         return {0: 'TrendingUp', 1: 'Sideways', 2: 'TrendingDown'}
 
     @staticmethod
+    def _utc_now() -> datetime:
+        return datetime.now(timezone.utc)
+
+    @staticmethod
     def _cache_file_epoch(path: Path, *, prefix: str) -> float:
         suffix = path.stem[len(prefix):] if path.stem.startswith(prefix) else path.stem
 
         hourly_match = re.search(r"(20\d{6}_\d{2})$", suffix)
         if hourly_match:
             try:
-                return datetime.strptime(hourly_match.group(1), "%Y%m%d_%H").timestamp()
+                return datetime.strptime(hourly_match.group(1), "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp()
             except Exception:
                 pass
 
@@ -93,7 +97,7 @@ class HMMRegimeDetector:
             token = date_tokens[-1]
             try:
                 fmt = "%Y-%m-%d" if "-" in token else "%Y%m%d"
-                return datetime.strptime(token, fmt).timestamp()
+                return datetime.strptime(token, fmt).replace(tzinfo=timezone.utc).timestamp()
             except Exception:
                 pass
 
@@ -150,7 +154,7 @@ class HMMRegimeDetector:
     ) -> Optional[np.ndarray]:
         conn = sqlite3.connect(str(db_path))
         cursor = conn.cursor()
-        start_ts = int((datetime.now() - timedelta(days=lookback_days)).timestamp())
+        start_ts = int((self._utc_now() - timedelta(days=lookback_days)).timestamp())
         cursor.execute(
             '''
             SELECT ts, f1_mom_5d, f2_mom_20d, f3_vol_adj_ret_20d
@@ -210,7 +214,7 @@ class HMMRegimeDetector:
             return
         labels = self._infer_state_labels()
         payload = {
-            'trained_at': datetime.now().isoformat(),
+            'trained_at': self._utc_now().isoformat(),
             'model_class': type(self.model).__name__,
             'model_payload_type': 'dict',
             'model_sha256': str(model_sha256 or ''),
@@ -313,7 +317,7 @@ class HMMRegimeDetector:
     def detect_regime(self, features_list: list) -> dict:
         features_arr = np.asarray(features_list, dtype=float)
         result = self.predict(features_arr)
-        result['timestamp'] = datetime.now().isoformat()
+        result['timestamp'] = self._utc_now().isoformat()
         result['features'] = {
             'mom_5d': float(features_arr[-1][0]),
             'mom_20d': float(features_arr[-1][1]),

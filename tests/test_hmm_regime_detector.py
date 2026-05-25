@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 import numpy as np
 import pytest
@@ -40,6 +41,18 @@ def test_hmm_regime_detector_cache_prefers_logically_newer_file_for_duplicate_ti
     assert closes.tolist()[-1] == 151.0
 
 
+def test_hmm_cache_file_epoch_uses_utc_for_filename_tokens(tmp_path) -> None:
+    hourly = tmp_path / "BTC_USDT_1H_20260101_03.csv"
+    daily = tmp_path / "BTC_USDT_1H_2026-01-02.csv"
+
+    assert HMMRegimeDetector._cache_file_epoch(hourly, prefix="BTC_USDT_1H_") == datetime.fromisoformat(
+        "2026-01-01T03:00:00+00:00"
+    ).timestamp()
+    assert HMMRegimeDetector._cache_file_epoch(daily, prefix="BTC_USDT_1H_") == datetime.fromisoformat(
+        "2026-01-02T00:00:00+00:00"
+    ).timestamp()
+
+
 def _trained_hmm_payload() -> SimpleGaussianHMM:
     model = SimpleGaussianHMM(n_components=2)
     model.startprob_ = np.asarray([0.6, 0.4])
@@ -49,6 +62,25 @@ def _trained_hmm_payload() -> SimpleGaussianHMM:
     model.n_features = 2
     model.converged = True
     return model
+
+
+def test_hmm_model_info_trained_at_is_timezone_aware(tmp_path) -> None:
+    detector = HMMRegimeDetector(n_components=2, model_path=tmp_path / "hmm_regime.pkl")
+    detector.model = _trained_hmm_payload()
+
+    detector._write_model_info(100, model_sha256="abc")
+
+    info = json.loads((tmp_path / "hmm_regime_info.json").read_text(encoding="utf-8"))
+    assert datetime.fromisoformat(info["trained_at"]).tzinfo is not None
+
+
+def test_hmm_detect_regime_timestamp_is_timezone_aware(tmp_path, monkeypatch) -> None:
+    detector = HMMRegimeDetector(n_components=2, model_path=tmp_path / "hmm_regime.pkl")
+    monkeypatch.setattr(detector, "predict", lambda features: {"state": "Sideways"})
+
+    result = detector.detect_regime([[0.1, 0.2, 0.3, 55.0]])
+
+    assert datetime.fromisoformat(result["timestamp"]).tzinfo is not None
 
 
 def test_hmm_pickle_load_verifies_sha256_from_info(tmp_path) -> None:
