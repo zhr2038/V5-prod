@@ -587,34 +587,34 @@ class ReflectionAgentV2:
             start_time = datetime.now() - timedelta(days=days)
             start_timestamp = int(start_time.timestamp() * 1000)
             
-            query = f"""
+            query = """
                 SELECT 
                     inst_id, side, state, notional_usdt, fee,
                     acc_fill_sz, avg_px,
                     created_ts, updated_ts,
-                    {self._order_event_ts_expr()} AS event_ts
+                    COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts
                 FROM orders 
                 WHERE state = 'FILLED'
-                AND {self._order_event_ts_expr()} >= {start_timestamp}
+                AND COALESCE(NULLIF(updated_ts, 0), created_ts) >= ?
                 AND notional_usdt < 1000
                 ORDER BY event_ts DESC
             """
-            
+
             try:
-                df = pd.read_sql_query(query, conn)
+                df = pd.read_sql_query(query, conn, params=(start_timestamp,))
             except Exception:
-                legacy_query = f"""
+                legacy_query = """
                     SELECT 
                         inst_id, side, state, notional_usdt, fee,
                         NULL AS acc_fill_sz, NULL AS avg_px,
                         created_ts, updated_ts, created_ts AS event_ts
                     FROM orders 
                     WHERE state = 'FILLED'
-                    AND created_ts >= {start_timestamp}
+                    AND created_ts >= ?
                     AND notional_usdt < 1000
                     ORDER BY created_ts DESC
                 """
-                df = pd.read_sql_query(legacy_query, conn)
+                df = pd.read_sql_query(legacy_query, conn, params=(start_timestamp,))
             conn.close()
             
             if not df.empty:

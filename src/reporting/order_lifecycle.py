@@ -304,30 +304,37 @@ def _fills_for_order(
 ) -> list[dict[str, Any]]:
     if not fill_path.exists() or not inst_id or (not cl_ord_id and not ord_id):
         return []
-    where = ["inst_id=?"]
-    params: list[Any] = [inst_id]
     if cl_ord_id and ord_id:
-        where.append("(cl_ord_id=? OR ord_id=?)")
-        params.extend([cl_ord_id, ord_id])
-    elif cl_ord_id:
-        where.append("cl_ord_id=?")
-        params.append(cl_ord_id)
-    else:
-        where.append("ord_id=?")
-        params.append(ord_id)
-    with sqlite3.connect(str(fill_path)) as con:
-        con.row_factory = sqlite3.Row
-        cur = con.cursor()
-        cur.execute(
-            f"""
+        sql = """
             SELECT inst_id, trade_id, ts_ms, ord_id, cl_ord_id, side, fill_px,
                    fill_sz, fill_notional, fee, fee_ccy
             FROM fills
-            WHERE {' AND '.join(where)}
+            WHERE inst_id=? AND (cl_ord_id=? OR ord_id=?)
             ORDER BY ts_ms ASC, trade_id ASC
-            """,
-            tuple(params),
-        )
+        """
+        params: list[Any] = [inst_id, cl_ord_id, ord_id]
+    elif cl_ord_id:
+        sql = """
+            SELECT inst_id, trade_id, ts_ms, ord_id, cl_ord_id, side, fill_px,
+                   fill_sz, fill_notional, fee, fee_ccy
+            FROM fills
+            WHERE inst_id=? AND cl_ord_id=?
+            ORDER BY ts_ms ASC, trade_id ASC
+        """
+        params = [inst_id, cl_ord_id]
+    else:
+        sql = """
+            SELECT inst_id, trade_id, ts_ms, ord_id, cl_ord_id, side, fill_px,
+                   fill_sz, fill_notional, fee, fee_ccy
+            FROM fills
+            WHERE inst_id=? AND ord_id=?
+            ORDER BY ts_ms ASC, trade_id ASC
+        """
+        params = [inst_id, ord_id]
+    with sqlite3.connect(str(fill_path)) as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.execute(sql, tuple(params))
         return [dict(row) for row in cur.fetchall()]
 
 

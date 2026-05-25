@@ -199,22 +199,20 @@ def _append_api_metrics(builder: PrometheusTextBuilder, telemetry_db: Path) -> N
             },
         )
 
-    bucket_expr = ", ".join(
-        [
-            (
-                f"SUM(CASE WHEN duration_ms <= {bucket * 1000.0:.6f} "
-                f"THEN 1 ELSE 0 END) AS bucket_{index}"
-            )
-            for index, bucket in enumerate(LATENCY_BUCKETS_SECONDS)
-        ]
-    )
     latency_rows = _query_rows(
         telemetry_db,
-        f"""
+        """
         SELECT
           method,
           endpoint,
-          {bucket_expr},
+          SUM(CASE WHEN duration_ms <= 50.000000 THEN 1 ELSE 0 END) AS bucket_0,
+          SUM(CASE WHEN duration_ms <= 100.000000 THEN 1 ELSE 0 END) AS bucket_1,
+          SUM(CASE WHEN duration_ms <= 250.000000 THEN 1 ELSE 0 END) AS bucket_2,
+          SUM(CASE WHEN duration_ms <= 500.000000 THEN 1 ELSE 0 END) AS bucket_3,
+          SUM(CASE WHEN duration_ms <= 1000.000000 THEN 1 ELSE 0 END) AS bucket_4,
+          SUM(CASE WHEN duration_ms <= 2500.000000 THEN 1 ELSE 0 END) AS bucket_5,
+          SUM(CASE WHEN duration_ms <= 5000.000000 THEN 1 ELSE 0 END) AS bucket_6,
+          SUM(CASE WHEN duration_ms <= 10000.000000 THEN 1 ELSE 0 END) AS bucket_7,
           COUNT(*) AS total_count,
           COALESCE(SUM(duration_ms), 0.0) AS total_duration_ms
         FROM api_request_log

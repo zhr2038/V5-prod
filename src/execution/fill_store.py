@@ -376,30 +376,37 @@ class FillStore:
         if not inst_id_u or (not clid and not oid):
             return []
 
-        where = ["inst_id=?"]
-        params: List[Any] = [inst_id_u]
         if clid and oid:
-            where.append("(cl_ord_id=? OR ord_id=?)")
-            params.extend([clid, oid])
+            sql = """
+                SELECT inst_id, trade_id, ts_ms, ord_id, cl_ord_id, side, exec_type,
+                       fill_px, fill_sz, fee, fee_ccy, raw_json
+                FROM fills
+                WHERE inst_id=? AND (cl_ord_id=? OR ord_id=?)
+                ORDER BY ts_ms ASC
+            """
+            params: List[Any] = [inst_id_u, clid, oid]
         elif clid:
-            where.append("cl_ord_id=?")
-            params.append(clid)
+            sql = """
+                SELECT inst_id, trade_id, ts_ms, ord_id, cl_ord_id, side, exec_type,
+                       fill_px, fill_sz, fee, fee_ccy, raw_json
+                FROM fills
+                WHERE inst_id=? AND cl_ord_id=?
+                ORDER BY ts_ms ASC
+            """
+            params = [inst_id_u, clid]
         else:
-            where.append("ord_id=?")
-            params.append(oid)
+            sql = """
+                SELECT inst_id, trade_id, ts_ms, ord_id, cl_ord_id, side, exec_type,
+                       fill_px, fill_sz, fee, fee_ccy, raw_json
+                FROM fills
+                WHERE inst_id=? AND ord_id=?
+                ORDER BY ts_ms ASC
+            """
+            params = [inst_id_u, oid]
 
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
-        cur.execute(
-            f"""
-            SELECT inst_id, trade_id, ts_ms, ord_id, cl_ord_id, side, exec_type,
-                   fill_px, fill_sz, fee, fee_ccy, raw_json
-            FROM fills
-            WHERE {' AND '.join(where)}
-            ORDER BY ts_ms ASC
-            """,
-            tuple(params),
-        )
+        cur.execute(sql, tuple(params))
         rows = cur.fetchall()
         con.close()
 

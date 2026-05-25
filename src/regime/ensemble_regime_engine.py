@@ -193,13 +193,28 @@ class EnsembleRegimeEngine:
     def _recent_column_values(self, column: str, limit: int) -> List:
         if not self.monitor_enabled or limit <= 0:
             return []
+        if column == 'hmm_sideways_prob':
+            sql = """
+                SELECT hmm_sideways_prob
+                FROM regime_history
+                WHERE hmm_sideways_prob IS NOT NULL
+                ORDER BY ts_ms DESC
+                LIMIT ?
+            """
+        elif column == 'final_state':
+            sql = """
+                SELECT final_state
+                FROM regime_history
+                WHERE final_state IS NOT NULL
+                ORDER BY ts_ms DESC
+                LIMIT ?
+            """
+        else:
+            return []
         try:
             conn = sqlite3.connect(str(self.regime_history_db))
             cur = conn.cursor()
-            cur.execute(
-                f"SELECT {column} FROM regime_history WHERE {column} IS NOT NULL ORDER BY ts_ms DESC LIMIT ?",
-                (int(limit),),
-            )
+            cur.execute(sql, (int(limit),))
             rows = [r[0] for r in cur.fetchall()]
             conn.close()
             return rows

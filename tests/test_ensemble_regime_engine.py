@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import time
 
 from configs.schema import RegimeConfig
@@ -40,3 +41,13 @@ def test_latest_fresh_file_uses_filename_timestamp_for_freshness(tmp_path) -> No
     latest = engine._latest_fresh_file("funding_COMPOSITE_*.json", max_age_minutes=180)
 
     assert latest is None
+
+
+def test_recent_column_values_rejects_unknown_column(tmp_path) -> None:
+    cfg = RegimeConfig(regime_history_db_path=str(tmp_path / "regime_history.db"))
+    engine = EnsembleRegimeEngine(cfg)
+
+    assert engine._recent_column_values("final_state; DROP TABLE regime_history", 5) == []
+
+    with sqlite3.connect(str(engine.regime_history_db)) as con:
+        assert con.execute("SELECT name FROM sqlite_master WHERE name='regime_history'").fetchone() is not None

@@ -633,20 +633,32 @@ class NegativeExpectancyCooldown:
             col_rows = conn.execute("PRAGMA table_info(orders)").fetchall()
             cols = {str(r["name"]) for r in col_rows}
             if "updated_ts" in cols and "created_ts" in cols:
-                event_ts_expr = "COALESCE(NULLIF(updated_ts, 0), created_ts)"
+                sql = """
+                    SELECT inst_id, side, state, acc_fill_sz, avg_px, fee,
+                           COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts
+                    FROM orders
+                    WHERE state='FILLED'
+                      AND acc_fill_sz IS NOT NULL AND avg_px IS NOT NULL
+                    ORDER BY inst_id, COALESCE(NULLIF(updated_ts, 0), created_ts) ASC
+                """
             elif "created_ts" in cols:
-                event_ts_expr = "created_ts"
+                sql = """
+                    SELECT inst_id, side, state, acc_fill_sz, avg_px, fee, created_ts AS event_ts
+                    FROM orders
+                    WHERE state='FILLED'
+                      AND acc_fill_sz IS NOT NULL AND avg_px IS NOT NULL
+                    ORDER BY inst_id, created_ts ASC
+                """
             elif "updated_ts" in cols:
-                event_ts_expr = "updated_ts"
+                sql = """
+                    SELECT inst_id, side, state, acc_fill_sz, avg_px, fee, updated_ts AS event_ts
+                    FROM orders
+                    WHERE state='FILLED'
+                      AND acc_fill_sz IS NOT NULL AND avg_px IS NOT NULL
+                    ORDER BY inst_id, updated_ts ASC
+                """
             else:
                 return {}
-            sql = (
-                f"SELECT inst_id, side, state, acc_fill_sz, avg_px, fee, {event_ts_expr} AS event_ts "
-                "FROM orders "
-                "WHERE state='FILLED' "
-                "AND acc_fill_sz IS NOT NULL AND avg_px IS NOT NULL "
-                f"ORDER BY inst_id, {event_ts_expr} ASC"
-            )
             rows = conn.execute(sql).fetchall()
         except Exception:
             return {}
