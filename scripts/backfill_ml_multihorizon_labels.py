@@ -7,7 +7,7 @@ import re
 import sqlite3
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -18,11 +18,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_config_path, resolve_runtime_path
+from configs.runtime_config import (
+    load_runtime_config,
+    resolve_runtime_config_path,
+    resolve_runtime_path,
+)
 from src.data.okx_ccxt_provider import OKXCCXTProvider
 from src.execution.fill_store import derive_runtime_reports_dir
 from src.execution.ml_data_collector import MLDataCollector
-
 
 HORIZONS = (6, 12, 24)
 ONE_HOUR_MS = 3600 * 1000
@@ -60,7 +63,7 @@ def _cache_file_epoch(path: Path, *, prefix: str) -> float:
     hourly_match = re.search(r"(20\d{6}_\d{2})$", suffix)
     if hourly_match:
         try:
-            return datetime.strptime(hourly_match.group(1), "%Y%m%d_%H").timestamp()
+            return datetime.strptime(hourly_match.group(1), "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp()
         except Exception:
             pass
 
@@ -69,7 +72,7 @@ def _cache_file_epoch(path: Path, *, prefix: str) -> float:
         token = date_tokens[-1]
         try:
             fmt = "%Y-%m-%d" if "-" in token else "%Y%m%d"
-            return datetime.strptime(token, fmt).timestamp()
+            return datetime.strptime(token, fmt).replace(tzinfo=timezone.utc).timestamp()
         except Exception:
             pass
 

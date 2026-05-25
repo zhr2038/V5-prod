@@ -12,7 +12,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -27,8 +27,17 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.loader import load_config
-from configs.runtime_config import load_runtime_config, resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
+from configs.runtime_config import (
+    load_runtime_config,
+    resolve_runtime_config_path,
+    resolve_runtime_env_path,
+    resolve_runtime_path,
+)
 from src.execution.fill_store import derive_runtime_named_json_path
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _build_exchange() -> Any:
@@ -141,7 +150,7 @@ def emergency_close_all(
         print("=" * 60)
 
         report = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": _utc_now_iso(),
             "sold": sold,
             "skipped_dust": skipped,
             "errors": errors,

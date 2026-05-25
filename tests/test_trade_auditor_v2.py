@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -82,7 +83,7 @@ def test_load_active_config_fails_fast_when_runtime_config_is_missing(monkeypatc
         raise AssertionError("expected FileNotFoundError")
 
 
-def test_generate_report_includes_negative_expectancy_counts(tmp_path: Path) -> None:
+def test_generate_report_includes_negative_expectancy_counts(monkeypatch, tmp_path: Path) -> None:
     runs_dir = tmp_path / "reports" / "runs" / "20260417_01"
     runs_dir.mkdir(parents=True, exist_ok=True)
     (runs_dir / "decision_audit.json").write_text(
@@ -98,6 +99,11 @@ def test_generate_report_includes_negative_expectancy_counts(tmp_path: Path) -> 
             }
         ),
         encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        trade_auditor_v2,
+        "_utc_now",
+        lambda: datetime(2026, 5, 25, 4, 0, 1, tzinfo=timezone.utc),
     )
 
     auditor = trade_auditor_v2.SmartTradeAuditor(workspace=tmp_path)
@@ -115,6 +121,7 @@ def test_generate_report_includes_negative_expectancy_counts(tmp_path: Path) -> 
     assert report["summary"]["negative_expectancy_cooldown_count"] == 3
     assert report["summary"]["negative_expectancy_open_block_count"] == 4
     assert report["summary"]["negative_expectancy_fast_fail_open_block_count"] == 5
+    assert report["timestamp"] == "2026-05-25T04:00:01Z"
 
 
 def test_load_latest_decision_audit_prefers_audit_file_mtime(tmp_path: Path) -> None:

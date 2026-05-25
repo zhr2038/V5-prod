@@ -9,10 +9,9 @@ import json
 import sqlite3
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -20,6 +19,14 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_path
 from src.execution.fill_store import derive_runtime_named_json_path
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_iso() -> str:
+    return _utc_now().isoformat().replace("+00:00", "Z")
 
 
 @dataclass(frozen=True)
@@ -149,7 +156,7 @@ class SmartTradeAuditor:
         self.insights: list[dict[str, Any]] = []
 
     def log(self, msg: str, level: str = "INFO") -> None:
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ts = _utc_now().strftime("%Y-%m-%d %H:%M:%S")
         line = f"[{ts}] [{level}] {msg}"
         print(line)
         self.paths.log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -162,7 +169,7 @@ class SmartTradeAuditor:
 
         conn = sqlite3.connect(str(self.paths.orders_db))
         try:
-            now = datetime.now()
+            now = _utc_now()
             end_ts = int(now.timestamp() * 1000)
             start_ts = int((now - timedelta(minutes=minutes)).timestamp() * 1000)
             try:
@@ -236,7 +243,7 @@ class SmartTradeAuditor:
                 ]
                 def _candidate_sort_epoch(run_dir: Path) -> float:
                     try:
-                        return datetime.strptime(run_dir.name, "%Y%m%d_%H").timestamp()
+                        return datetime.strptime(run_dir.name, "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp()
                     except Exception:
                         audit_path = run_dir / "decision_audit.json"
                         try:
@@ -366,7 +373,7 @@ class SmartTradeAuditor:
         audit_data = self._load_latest_decision_audit()
         counts = audit_data.get("counts", {}) if isinstance(audit_data, dict) else {}
         return {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": _utc_now_iso(),
             "market_regime": regime,
             "summary": {
                 "buy_filled": len(analysis["buy_filled"]),

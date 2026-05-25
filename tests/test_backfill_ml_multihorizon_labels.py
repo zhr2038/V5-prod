@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -98,3 +99,17 @@ def test_load_pending_rows_binds_symbol_filter(tmp_path: Path) -> None:
 
         rows = multihorizon._load_pending_rows(conn, as_of_ms=as_of_ms, symbol="BTC/USDT")
         assert rows["id"].tolist() == [1]
+
+
+def test_cache_file_epoch_parses_file_dates_as_utc(tmp_path: Path) -> None:
+    hourly = tmp_path / "BTC_USDT_1H_20260525_04.csv"
+    daily = tmp_path / "BTC_USDT_1H_20260525.csv"
+    hourly.write_text("timestamp,close\n", encoding="utf-8")
+    daily.write_text("timestamp,close\n", encoding="utf-8")
+
+    assert multihorizon._cache_file_epoch(hourly, prefix="BTC_USDT_1H_") == datetime(
+        2026, 5, 25, 4, tzinfo=timezone.utc
+    ).timestamp()
+    assert multihorizon._cache_file_epoch(daily, prefix="BTC_USDT_1H_") == datetime(
+        2026, 5, 25, tzinfo=timezone.utc
+    ).timestamp()

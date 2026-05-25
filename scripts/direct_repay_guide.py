@@ -4,11 +4,14 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 @dataclass(frozen=True)
@@ -36,7 +39,7 @@ def build_guide() -> dict:
     estimated_cost_usdt = pepe_needed * 0.0000045
     estimated_cost_cny = estimated_cost_usdt * 7.2
     return {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": _utc_now_iso(),
         "pepe_borrow": pepe_borrow,
         "pepe_needed": pepe_needed,
         "estimated_cost_usdt": estimated_cost_usdt,

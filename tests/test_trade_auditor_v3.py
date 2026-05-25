@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -159,7 +160,7 @@ def test_load_active_config_fails_fast_when_runtime_config_is_missing(monkeypatc
         raise AssertionError("expected FileNotFoundError")
 
 
-def test_trade_auditor_v3_report_includes_negative_expectancy_counts(tmp_path: Path) -> None:
+def test_trade_auditor_v3_report_includes_negative_expectancy_counts(monkeypatch, tmp_path: Path) -> None:
     run_dir = tmp_path / "reports" / "runs" / "20260417_01"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "decision_audit.json").write_text(
@@ -176,6 +177,11 @@ def test_trade_auditor_v3_report_includes_negative_expectancy_counts(tmp_path: P
         ),
         encoding="utf-8",
     )
+    monkeypatch.setattr(
+        auditor_mod,
+        "_utc_now",
+        lambda: datetime(2026, 5, 25, 4, 0, 1, tzinfo=timezone.utc),
+    )
 
     auditor = auditor_mod.TradeAuditorV3(workspace=tmp_path)
     report = auditor.generate_report(
@@ -186,6 +192,7 @@ def test_trade_auditor_v3_report_includes_negative_expectancy_counts(tmp_path: P
         }
     )
 
+    assert "时间: 2026-05-25 04:00" in report
     assert "Negative expectancy: penalty=2 cooldown=3 open_block=4 fast_fail_open_block=5" in report
 
 

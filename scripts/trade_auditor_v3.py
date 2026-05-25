@@ -15,12 +15,11 @@ import sqlite3
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import requests
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -32,6 +31,10 @@ from configs.runtime_config import (
     resolve_runtime_env_path,
     resolve_runtime_path,
 )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 @dataclass(frozen=True)
@@ -153,7 +156,7 @@ class TradeAuditorV3:
                 ]
                 def _candidate_sort_epoch(run_dir: Path) -> float:
                     try:
-                        return datetime.strptime(run_dir.name, "%Y%m%d_%H").timestamp()
+                        return datetime.strptime(run_dir.name, "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp()
                     except Exception:
                         audit_path = run_dir / "decision_audit.json"
                         try:
@@ -218,7 +221,7 @@ class TradeAuditorV3:
 
         conn = sqlite3.connect(str(self.paths.orders_db))
         try:
-            start_ts = int((datetime.now() - timedelta(hours=hours)).timestamp() * 1000)
+            start_ts = int((_utc_now() - timedelta(hours=hours)).timestamp() * 1000)
             try:
                 rows = conn.execute(
                     """
@@ -293,7 +296,7 @@ class TradeAuditorV3:
         lines = [
             "交易审计报告",
             "",
-            f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            f"时间: {_utc_now().strftime('%Y-%m-%d %H:%M')}",
             "",
         ]
 

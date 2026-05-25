@@ -9,10 +9,9 @@ import json
 import sqlite3
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -20,6 +19,14 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_path
 from src.execution.fill_store import derive_runtime_named_json_path
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_iso() -> str:
+    return _utc_now().isoformat().replace("+00:00", "Z")
 
 
 @dataclass(frozen=True)
@@ -145,7 +152,7 @@ def _normalize_kill_switch(data: Any) -> dict[str, Any]:
 
 
 def log(msg: str, paths: AuditorPaths = DEFAULT_PATHS) -> None:
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts = _utc_now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
     print(line)
     paths.log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -280,7 +287,7 @@ def run_audit(paths: AuditorPaths = DEFAULT_PATHS) -> dict[str, Any] | None:
             log(f"  - {item['symbol']} {item['side']} ({item['intent']}): {item['error']}", paths=paths)
 
     report = {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": _utc_now_iso(),
         "issue_count": len(all_issues),
         "issues": all_issues,
         "rejected_orders": analysis["rejected"],

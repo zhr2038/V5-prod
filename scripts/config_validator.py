@@ -12,9 +12,10 @@ V5 配置验证工具
 import os
 import shutil
 import sys
-import yaml
+from datetime import datetime, timezone
 from pathlib import Path
-from datetime import datetime
+
+import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -27,6 +28,10 @@ CURRENT_PRODUCTION_TIMERS = (
     'v5-reconcile.timer',
     'v5-trade-monitor.timer',
 )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def resolve_workspace() -> Path:
@@ -287,7 +292,7 @@ class ConfigValidator:
         print("=" * 60)
         print("🔍 V5 配置验证")
         print("=" * 60)
-        print(f"验证时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"验证时间: {_utc_now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"工作目录: {WORKSPACE}")
         print(f"配置文件: {config_name}")
         print()
