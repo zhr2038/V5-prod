@@ -1456,7 +1456,7 @@ class AlphaEngine:
             c = list(s.close)
             v = list(s.volume)
             h = list(s.high) if hasattr(s, "high") else list(s.close)
-            l = list(s.low) if hasattr(s, "low") else list(s.close)
+            lows = list(s.low) if hasattr(s, "low") else list(s.close)
             if len(c) < 25:
                 continue
 
@@ -1492,7 +1492,7 @@ class AlphaEngine:
 
             # Alpha158 overlay
             if ov_enabled:
-                qf = compute_alpha158_style_factors(c, h, l, v)
+                qf = compute_alpha158_style_factors(c, h, lows, v)
                 for k in ov_names:
                     ov_vals[k][sym] = float(qf.get(k, 0.0))
 

@@ -32,9 +32,9 @@ def _atr_pct(series: MarketSeries, n: int = 14) -> float:
     if len(series.close) < n + 1:
         return 0.0
     h = np.array(series.high[-n:], dtype=float)
-    l = np.array(series.low[-n:], dtype=float)
+    lows = np.array(series.low[-n:], dtype=float)
     c_prev = np.array(series.close[-n - 1 : -1], dtype=float)
-    tr = np.maximum(h - l, np.maximum(np.abs(h - c_prev), np.abs(l - c_prev)))
+    tr = np.maximum(h - lows, np.maximum(np.abs(h - c_prev), np.abs(lows - c_prev)))
     atr = float(np.mean(tr))
     last = float(series.close[-1])
     return atr / last if last else 0.0

@@ -118,7 +118,7 @@ def compute_alpha158_style_factors(
     """Compute selected Alpha158-style factors from OHLCV arrays."""
     c = _safe_series(close)
     h = _safe_series(high if high else close)
-    l = _safe_series(low if low else close)
+    lows = _safe_series(low if low else close)
     v = _safe_series(volume)
 
     corr_w = max(3, int(corr_window))
@@ -142,7 +142,7 @@ def compute_alpha158_style_factors(
 
     # IMAX/IMIN/IMXD
     imax = h.rolling(aroon_w).apply(_age_since_max_roll, raw=True).iloc[-1]
-    imin = l.rolling(aroon_w).apply(_age_since_min_roll, raw=True).iloc[-1]
+    imin = lows.rolling(aroon_w).apply(_age_since_min_roll, raw=True).iloc[-1]
     imxd = float(imax - imin) if np.isfinite(imax) and np.isfinite(imin) else 0.0
 
     def _safe(vx: float, default: float = 0.0) -> float:

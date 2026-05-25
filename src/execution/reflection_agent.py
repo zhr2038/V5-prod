@@ -707,7 +707,7 @@ class ReflectionAgentV2:
         if attr['top_gainers']:
             print("  盈利: " + ", ".join([f"{g['symbol']}(+${g['pnl']})" for g in attr['top_gainers']]))
         if attr['top_losers']:
-            print("  亏损: " + ", ".join([f"{l['symbol']}(${l['pnl']})" for l in attr['top_losers']]))
+            print("  亏损: " + ", ".join([f"{loser['symbol']}(${loser['pnl']})" for loser in attr['top_losers']]))
         
         print("\n" + "="*70)
 
