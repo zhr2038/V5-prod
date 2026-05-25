@@ -5,6 +5,7 @@ import os
 import re
 import tarfile
 from contextlib import redirect_stdout
+
 import pytest
 
 import scripts.backup_manager as backup_manager

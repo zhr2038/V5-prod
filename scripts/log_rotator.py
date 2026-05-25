@@ -12,8 +12,8 @@ import gzip
 import shutil
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from datetime import datetime
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,6 +40,10 @@ ARCHIVE_DAYS = 30       # 压缩保留的天数
 MAX_LOG_SIZE_MB = 100   # 单个日志文件最大大小
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class LogRotator:
     """日志轮转器"""
     
@@ -48,7 +52,7 @@ class LogRotator:
         self.stats = {'rotated': 0, 'compressed': 0, 'deleted': 0, 'space_saved_mb': 0}
     
     def log(self, msg):
-        line = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
+        line = f"[{_utc_now().strftime('%H:%M:%S')}] {msg}"
         try:
             print(line)
         except UnicodeEncodeError:
@@ -60,8 +64,8 @@ class LogRotator:
     
     def get_file_age_days(self, path):
         """获取文件年龄（天）"""
-        mtime = datetime.fromtimestamp(path.stat().st_mtime)
-        return (datetime.now() - mtime).total_seconds() / 86400
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+        return (_utc_now() - mtime).total_seconds() / 86400
     
     def rotate_large_logs(self):
         """轮转过大的日志文件"""
@@ -72,7 +76,7 @@ class LogRotator:
                 self.log(f"🔄 轮转大文件: {log_file.name} ({size_mb:.1f}MB)")
                 
                 # 重命名为带日期后缀
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                timestamp = _utc_now().strftime('%Y%m%d_%H%M%S')
                 new_name = f"{log_file.stem}.{timestamp}.log"
                 new_path = log_file.parent / new_name
                 
@@ -137,7 +141,7 @@ class LogRotator:
                 self.log(f"🗑️  清理应用日志: {app_log.name}")
                 
                 # 压缩后删除
-                archive_path = self.paths.archive_dir / f"{app_log.name}.{datetime.now().strftime('%Y%m%d')}.gz"
+                archive_path = self.paths.archive_dir / f"{app_log.name}.{_utc_now().strftime('%Y%m%d')}.gz"
                 with open(app_log, 'rb') as f_in:
                     with gzip.open(archive_path, 'wb') as f_out:
                         shutil.copyfileobj(f_in, f_out)

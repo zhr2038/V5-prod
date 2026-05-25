@@ -13,13 +13,13 @@ V5 数据自动归档脚本
 - 超过90天：删除（释放空间）
 """
 
+import json
 import os
 import re
 import shutil
 import tarfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from datetime import datetime, timedelta
-import json
 
 # 自动检测项目根目录
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -34,6 +34,10 @@ KEEP_DAYS = 30      # 保持原样的天数
 ARCHIVE_DAYS = 90   # 压缩保留的天数（总计）
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class DataArchiver:
     """数据归档器"""
     
@@ -46,7 +50,7 @@ class DataArchiver:
         }
     
     def log(self, msg):
-        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        ts = _utc_now().strftime('%Y-%m-%d %H:%M:%S')
         print(f"[{ts}] {msg}")
     
     def parse_run_date(self, run_name):
@@ -60,11 +64,11 @@ class DataArchiver:
 
             match = re.search(r'(?<!\d)(\d{8}_\d{2})(?!\d)', raw_name)
             if match:
-                return datetime.strptime(match.group(1), '%Y%m%d_%H')
+                return datetime.strptime(match.group(1), '%Y%m%d_%H').replace(tzinfo=timezone.utc)
 
             date_match = re.search(r'(?<!\d)(\d{8})(?!\d)', raw_name)
             if date_match:
-                return datetime.strptime(date_match.group(1), '%Y%m%d')
+                return datetime.strptime(date_match.group(1), '%Y%m%d').replace(tzinfo=timezone.utc)
         except Exception:
             return None
         return None
@@ -134,7 +138,7 @@ class DataArchiver:
         # 确保归档目录存在
         ARCHIVE_DIR.mkdir(exist_ok=True)
         
-        now = datetime.now()
+        now = _utc_now()
         
         # 处理runs目录
         if RUNS_DIR.exists():
@@ -208,7 +212,7 @@ class DataArchiver:
             stats_file = REPORTS_DIR / 'archive_stats.json'
             with open(stats_file, 'w') as f:
                 json.dump({
-                    'last_run': datetime.now().isoformat(),
+                    'last_run': _utc_now().isoformat().replace("+00:00", "Z"),
                     'stats': self.stats
                 }, f, indent=2)
         

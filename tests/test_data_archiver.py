@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import scripts.data_archiver as data_archiver
 
@@ -8,14 +8,14 @@ import scripts.data_archiver as data_archiver
 class _FixedDateTime(datetime):
     @classmethod
     def now(cls, tz=None):
-        return cls(2026, 4, 21, 23, 30, 0)
+        return cls(2026, 4, 21, 23, 30, 0, tzinfo=tz)
 
 
 def test_parse_run_date_handles_archive_suffix() -> None:
     archiver = data_archiver.DataArchiver()
 
-    assert archiver.parse_run_date("20260322_23.tar") == datetime(2026, 3, 22, 23, 0, 0)
-    assert archiver.parse_run_date("20260322_23.tar.gz") == datetime(2026, 3, 22, 23, 0, 0)
+    assert archiver.parse_run_date("20260322_23.tar") == datetime(2026, 3, 22, 23, 0, 0, tzinfo=timezone.utc)
+    assert archiver.parse_run_date("20260322_23.tar.gz") == datetime(2026, 3, 22, 23, 0, 0, tzinfo=timezone.utc)
 
 
 def test_run_archives_runs_older_than_keep_days_by_exact_timedelta(monkeypatch, tmp_path) -> None:

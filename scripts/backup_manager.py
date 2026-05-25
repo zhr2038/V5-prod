@@ -5,11 +5,11 @@ V5 automated backup helper.
 
 from __future__ import annotations
 
+import sys
 import tarfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-import sys
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -50,6 +50,14 @@ STATIC_BACKUP_ITEMS = [
 KEEP_BACKUPS = 7
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_stamp() -> str:
+    return _utc_now().strftime("%Y%m%d_%H%M%S")
+
+
 def _backup_sort_epoch(path: Path) -> float:
     name = path.name
     if name.endswith(".tar.gz"):
@@ -61,7 +69,7 @@ def _backup_sort_epoch(path: Path) -> float:
     if stem.startswith(prefix):
         suffix = stem[len(prefix):]
         try:
-            return datetime.strptime(suffix, "%Y%m%d_%H%M%S").timestamp()
+            return datetime.strptime(suffix, "%Y%m%d_%H%M%S").replace(tzinfo=timezone.utc).timestamp()
         except Exception:
             pass
 
@@ -69,7 +77,7 @@ def _backup_sort_epoch(path: Path) -> float:
     if len(parts) >= 2:
         candidate = "_".join(parts[-2:])
         try:
-            return datetime.strptime(candidate, "%Y%m%d_%H%M%S").timestamp()
+            return datetime.strptime(candidate, "%Y%m%d_%H%M%S").replace(tzinfo=timezone.utc).timestamp()
         except Exception:
             pass
 
@@ -210,12 +218,12 @@ class BackupManager:
             yield path, arcname
 
     def log(self, msg):
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+        print(f"[{_utc_now().strftime('%H:%M:%S')}] {msg}")
 
     def create_backup(self, name=None):
         self.paths.backup_dir.mkdir(parents=True, exist_ok=True)
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = _utc_now_stamp()
         backup_name = name or f"v5_backup_{timestamp}"
         backup_path = self.paths.backup_dir / f"{backup_name}.tar.gz"
 
@@ -271,7 +279,7 @@ class BackupManager:
         print("-" * 60)
         for i, backup in enumerate(backups, 1):
             size_mb = backup.stat().st_size / (1024 * 1024)
-            mtime = datetime.fromtimestamp(_backup_sort_epoch(backup))
+            mtime = datetime.fromtimestamp(_backup_sort_epoch(backup), timezone.utc)
             print(f"{i}. {backup.name}")
             print(f"   size: {size_mb:.1f} MB  time: {mtime.strftime('%Y-%m-%d %H:%M')}")
         print("-" * 60)
@@ -284,7 +292,7 @@ class BackupManager:
 
         self.log(f"restoring backup: {backup_name}")
 
-        restore_dir = self.paths.workspace / f"restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        restore_dir = self.paths.workspace / f"restore_{_utc_now_stamp()}"
         restore_dir.mkdir(parents=True, exist_ok=True)
 
         with tarfile.open(backup_path, "r:gz") as tar:
