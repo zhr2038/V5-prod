@@ -16,10 +16,11 @@ def test_top_processes_uses_parameterized_ps_call(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(run_pressure_probe.subprocess, "run", fake_run)
+    monkeypatch.setattr(run_pressure_probe.shutil, "which", lambda name: f"/usr/bin/{name}")
 
     top = run_pressure_probe._top_processes(limit=2)
 
-    assert captured["cmd"] == ["ps", "-eo", "pid,comm,%cpu,%mem", "--sort=-%cpu"]
+    assert captured["cmd"] == ["/usr/bin/ps", "-eo", "pid,comm,%cpu,%mem", "--sort=-%cpu"]
     assert captured["kwargs"]["check"] is False
     assert captured["kwargs"]["capture_output"] is True
     assert captured["kwargs"]["text"] is True

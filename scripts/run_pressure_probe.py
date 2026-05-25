@@ -5,6 +5,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import time
 from typing import Any
@@ -38,8 +39,11 @@ def _loadavg() -> tuple[float, float, float]:
 
 
 def _top_processes(limit: int = 8) -> list[str]:
+    ps_bin = shutil.which("ps")
+    if ps_bin is None:
+        return []
     result = subprocess.run(
-        ["ps", "-eo", "pid,comm,%cpu,%mem", "--sort=-%cpu"],
+        [ps_bin, "-eo", "pid,comm,%cpu,%mem", "--sort=-%cpu"],
         capture_output=True,
         text=True,
         timeout=5,

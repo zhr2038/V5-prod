@@ -1898,9 +1898,12 @@ def _git_info(root: Path) -> Dict[str, Any]:
 
 
 def _git_command(root: Path, args: list[str]) -> str:
+    git_bin = shutil.which("git")
+    if git_bin is None:
+        return ""
     try:
         result = subprocess.run(
-            ["git", *args],
+            [git_bin, *args],
             cwd=root,
             check=False,
             capture_output=True,

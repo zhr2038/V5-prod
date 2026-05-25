@@ -187,9 +187,12 @@ def run_command(cmd: Sequence[str], timeout: int = 30) -> str:
 
 
 def _get_unit_load_state(unit: str) -> str:
+    systemctl = shutil.which("systemctl")
+    if systemctl is None:
+        return ""
     try:
         result = subprocess.run(
-            ["systemctl", "--user", "show", unit, "--property=LoadState"],
+            [systemctl, "--user", "show", unit, "--property=LoadState"],
             capture_output=True,
             text=True,
             timeout=5,

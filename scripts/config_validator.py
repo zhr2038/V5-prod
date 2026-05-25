@@ -10,6 +10,7 @@ V5 配置验证工具
 """
 
 import os
+import shutil
 import sys
 import yaml
 from pathlib import Path
@@ -199,10 +200,15 @@ class ConfigValidator:
         self.log("\n⏰ 检查定时任务...")
         
         import subprocess
-        
+
         try:
+            systemctl = shutil.which('systemctl')
+            if systemctl is None:
+                self.warnings.append("systemctl not available in current environment")
+                self.log("systemctl not available in current environment", 'WARN')
+                return
             result = subprocess.run(
-                ['systemctl', '--user', 'list-timers', '--all', '--no-pager'],
+                [systemctl, '--user', 'list-timers', '--all', '--no-pager'],
                 capture_output=True,
                 text=True,
                 timeout=10,

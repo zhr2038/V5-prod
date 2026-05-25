@@ -6,6 +6,7 @@ Generate a concise production status report for the V5 workspace.
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -235,8 +236,11 @@ def get_latest_run_data(cfg: Optional[Dict[str, Any]] = None) -> Optional[Dict[s
 
 
 def _unit_is_active(unit: str) -> bool:
+    systemctl = shutil.which("systemctl")
+    if systemctl is None:
+        return False
     result = subprocess.run(
-        ["systemctl", "--user", "is-active", unit],
+        [systemctl, "--user", "is-active", unit],
         capture_output=True,
         text=True,
         timeout=5,
@@ -245,8 +249,11 @@ def _unit_is_active(unit: str) -> bool:
 
 
 def _get_unit_load_state(unit: str) -> str:
+    systemctl = shutil.which("systemctl")
+    if systemctl is None:
+        return ""
     result = subprocess.run(
-        ["systemctl", "--user", "show", unit, "--property=LoadState"],
+        [systemctl, "--user", "show", unit, "--property=LoadState"],
         capture_output=True,
         text=True,
         timeout=5,

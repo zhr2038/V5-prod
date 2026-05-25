@@ -45,6 +45,13 @@ def bash_path(path):
     return raw.replace("\\", "/")
 
 
+def require_executable(name):
+    resolved = shutil.which(name)
+    if resolved is None:
+        raise RuntimeError(f"required executable not found: {name}")
+    return resolved
+
+
 def fixture_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -747,9 +754,10 @@ def fixture_provenance_root(root):
 def fixture_git_provenance_root(root):
     fixture_provenance_root(root)
     root_posix = bash_path(root)
+    bash_bin = require_executable("bash")
     subprocess.run(
         [
-            "bash",
+            bash_bin,
             "-lc",
             "set -euo pipefail; "
             f"cd {shlex.quote(root_posix)}; "
@@ -768,7 +776,7 @@ def fixture_git_provenance_root(root):
         stderr=subprocess.PIPE,
     )
     return subprocess.check_output(
-        ["bash", "-lc", f"cd {shlex.quote(root_posix)} && git rev-parse HEAD"],
+        [bash_bin, "-lc", f"cd {shlex.quote(root_posix)} && git rev-parse HEAD"],
         text=True,
     ).strip()
 
@@ -3156,8 +3164,9 @@ def fixture_entry_quality_advisory_root(root):
 def run_bundle(root):
     script_path = bash_path(SCRIPT)
     root_path = bash_path(root)
+    bash_bin = require_executable("bash")
     proc = subprocess.run(
-        ["bash", script_path, root_path],
+        [bash_bin, script_path, root_path],
         env=os.environ.copy(),
         text=True,
         stdout=subprocess.PIPE,
@@ -3169,7 +3178,8 @@ def run_bundle(root):
         if line.startswith("BUNDLE_PATH="):
             raw_bundle_path = line.split("=", 1)[1]
             if os.name == "nt" and raw_bundle_path.startswith("/"):
-                converted = subprocess.check_output(["wsl.exe", "wslpath", "-w", raw_bundle_path], text=True).strip()
+                wsl_bin = require_executable("wsl.exe")
+                converted = subprocess.check_output([wsl_bin, "wslpath", "-w", raw_bundle_path], text=True).strip()
                 bundle_path = pathlib.Path(converted)
             else:
                 bundle_path = pathlib.Path(raw_bundle_path)

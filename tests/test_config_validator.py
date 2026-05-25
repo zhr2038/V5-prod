@@ -67,11 +67,12 @@ def test_check_timers_uses_current_production_timer_names(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(config_validator.sys.modules["subprocess"], "run", _fake_run)
+    monkeypatch.setattr(config_validator.shutil, "which", lambda name: f"/usr/bin/{name}")
 
     validator = config_validator.ConfigValidator()
     validator.check_timers()
 
-    assert captured["cmd"] == ["systemctl", "--user", "list-timers", "--all", "--no-pager"]
+    assert captured["cmd"] == ["/usr/bin/systemctl", "--user", "list-timers", "--all", "--no-pager"]
     assert captured["timeout"] == 10
     assert captured["check"] is False
     assert validator.warnings == []
@@ -132,10 +133,10 @@ def test_check_timers_warns_when_systemctl_call_fails(monkeypatch) -> None:
         raise TimeoutError('systemctl timed out')
 
     monkeypatch.setattr(config_validator.sys.modules["subprocess"], "run", _fake_run)
+    monkeypatch.setattr(config_validator.shutil, "which", lambda name: f"/usr/bin/{name}")
 
     validator = config_validator.ConfigValidator()
     validator.check_timers()
 
     assert validator.checks_passed == 0
     assert validator.warnings == ["定时任务检查失败: systemctl timed out"]
-

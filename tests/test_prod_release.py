@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import shutil
 import stat
 import subprocess
 import tarfile
@@ -29,6 +30,13 @@ from deploy.sync_prod_release import (
     _user_bus_wrapped_command,
     _validate_units,
 )
+
+
+def _require_executable(name: str) -> str:
+    resolved = shutil.which(name)
+    if resolved is None:
+        pytest.skip(f"required executable not found: {name}")
+    return resolved
 
 
 
@@ -146,21 +154,22 @@ def test_iter_production_files_includes_models_directory_contents(tmp_path: Path
 
 
 def test_production_snapshot_uses_head_not_dirty_worktree(tmp_path: Path) -> None:
+    git_bin = _require_executable("git")
     (tmp_path / "main.py").write_text("print('head')\n", encoding="utf-8")
     (tmp_path / "deploy").mkdir()
     (tmp_path / "deploy" / "install_systemd.sh").write_text("#!/bin/sh\necho head\n", encoding="utf-8")
     (tmp_path / "scripts").mkdir()
 
-    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "codex@example.com"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Codex"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run([git_bin, "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run([git_bin, "config", "user.email", "codex@example.com"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run([git_bin, "config", "user.name", "Codex"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(
-        ["git", "add", "main.py", "deploy/install_systemd.sh"],
+        [git_bin, "add", "main.py", "deploy/install_systemd.sh"],
         cwd=tmp_path,
         check=True,
         capture_output=True,
     )
-    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run([git_bin, "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
 
     (tmp_path / "deploy" / "install_systemd.sh").write_text("#!/bin/sh\necho dirty\n", encoding="utf-8")
     (tmp_path / "scripts" / "untracked.py").write_text("print('dirty')\n", encoding="utf-8")
