@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -47,6 +48,13 @@ PRODUCTION_SYNC_EXCLUDES = (
 )
 
 GIT_COMMAND_TIMEOUT = 30
+
+
+def _git_bin() -> str:
+    git = shutil.which("git")
+    if not git:
+        raise RuntimeError("git executable not found on PATH")
+    return git
 
 PRODUCTION_USER_UNIT_MAPPINGS = (
     ("v5-prod.user.service", "v5-prod.user.service"),
@@ -175,7 +183,7 @@ def _git_existing_items(root: Path, rev: str, items: Iterable[str]) -> tuple[str
     existing: list[str] = []
     for item in items:
         proc = subprocess.run(
-            ["git", "-C", str(root), "ls-tree", "--name-only", rev, "--", item],
+            [_git_bin(), "-C", str(root), "ls-tree", "--name-only", rev, "--", item],
             capture_output=True,
             timeout=GIT_COMMAND_TIMEOUT,
             check=False,
@@ -204,7 +212,7 @@ def production_snapshot(
             return
 
         archive_cmd = [
-            "git",
+            _git_bin(),
             "-C",
             str(root),
             "archive",

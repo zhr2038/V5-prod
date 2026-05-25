@@ -11,6 +11,7 @@ import json
 import time
 import logging
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -31,6 +32,10 @@ LIVE_RUN_ID_RE = re.compile(r'^\d{8}_\d{2}$')
 
 # Add project path
 sys.path.insert(0, str(PROJECT_ROOT))
+
+
+def _systemctl_bin() -> str:
+    return shutil.which('systemctl') or 'systemctl'
 
 # Import event-driven components
 try:
@@ -684,13 +689,16 @@ def load_current_state(cfg=None, config_path: Path = None):
 
 def get_live_execution_service_state(service_unit: str) -> str:
     """Return systemd user unit activity state for the live service."""
-    st = subprocess.run(
-        ['systemctl', '--user', 'is-active', service_unit],
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-    )
+    try:
+        st = subprocess.run(
+            [_systemctl_bin(), '--user', 'is-active', service_unit],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except FileNotFoundError:
+        return 'unavailable'
     return (st.stdout or '').strip().lower()
 
 
@@ -714,7 +722,7 @@ def trigger_live_execution_service(service_unit: str):
                 'skipped_already_running': True,
             }
 
-        cmd = ['systemctl', '--user', 'start', service_unit]
+        cmd = [_systemctl_bin(), '--user', 'start', service_unit]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=45, check=False)
         ok = proc.returncode == 0
         return {
