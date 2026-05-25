@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -40,6 +40,18 @@ from src.risk.auto_risk_guard import get_auto_risk_guard
 REPORTS_DIR = PROJECT_ROOT / "reports"
 RUNS_DIR = REPORTS_DIR / "runs"
 AUTO_RISK_EVAL_PATH = REPORTS_DIR / "auto_risk_eval.json"
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_iso_now() -> str:
+    return _utc_now().isoformat()
+
+
+def _run_id_epoch(run_id: str) -> float:
+    return datetime.strptime(str(run_id), "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp()
 
 
 class AutoRiskEvalPaths:
@@ -115,7 +127,7 @@ def _sanitize_peak_equity(live_equity: float, peak_equity: float, initial_capita
 
 def load_recent_runs(hours: int = 24, *, runtime_paths: Optional[AutoRiskEvalPaths] = None) -> List[Dict]:
     runs: List[Dict] = []
-    cutoff = datetime.now() - timedelta(hours=hours)
+    cutoff = _utc_now() - timedelta(hours=hours)
     runs_dir = (runtime_paths or _resolve_runtime_paths()).runs_dir
 
     if not runs_dir.exists():
@@ -124,7 +136,7 @@ def load_recent_runs(hours: int = 24, *, runtime_paths: Optional[AutoRiskEvalPat
     def _candidate_sort_epoch(run_dir: Path) -> float:
         try:
             # Use the end of the run hour as a lightweight upper bound for cutoff filtering.
-            return datetime.strptime(run_dir.name, "%Y%m%d_%H").timestamp() + 3600.0
+            return _run_id_epoch(run_dir.name) + 3600.0
         except Exception:
             audit_file = run_dir / "decision_audit.json"
             try:
@@ -145,7 +157,7 @@ def load_recent_runs(hours: int = 24, *, runtime_paths: Optional[AutoRiskEvalPat
 
         run_id = str(payload.get("run_id") or run_dir.name) if isinstance(payload, dict) else run_dir.name
         try:
-            return datetime.strptime(run_id, "%Y%m%d_%H").timestamp()
+            return _run_id_epoch(run_id)
         except Exception:
             try:
                 return audit_file.stat().st_mtime
@@ -160,7 +172,7 @@ def load_recent_runs(hours: int = 24, *, runtime_paths: Optional[AutoRiskEvalPat
         audit_file = run_dir / "decision_audit.json"
         if not audit_file.exists():
             continue
-        if datetime.fromtimestamp(_candidate_sort_epoch(run_dir)) < cutoff:
+        if datetime.fromtimestamp(_candidate_sort_epoch(run_dir), timezone.utc) < cutoff:
             continue
 
         try:
@@ -169,7 +181,7 @@ def load_recent_runs(hours: int = 24, *, runtime_paths: Optional[AutoRiskEvalPat
         except Exception:
             continue
         sort_epoch = _sort_epoch(run_dir, data)
-        sort_dt = datetime.fromtimestamp(sort_epoch)
+        sort_dt = datetime.fromtimestamp(sort_epoch, timezone.utc)
         if sort_dt < cutoff:
             continue
         data["_run_id"] = run_dir.name
@@ -303,7 +315,7 @@ def _write_eval_snapshot(guard, metrics: Dict, reason: str, *, runtime_paths: Au
     eval_path = (runtime_paths or _resolve_runtime_paths()).auto_risk_eval_path
     eval_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "ts": datetime.now().isoformat(),
+        "ts": _utc_iso_now(),
         "current_level": guard.current_level,
         "config": guard.get_current_config(),
         "metrics": metrics,

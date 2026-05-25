@@ -126,7 +126,7 @@ def test_load_recent_runs_uses_decision_audit_mtime_not_run_dir_mtime(tmp_path: 
     fresh_audit.write_text(json.dumps({"counts": {"selected": 1}}), encoding="utf-8")
     stale_audit.write_text(json.dumps({"counts": {"selected": 2}}), encoding="utf-8")
 
-    now = auto_risk_eval.datetime.now().timestamp()
+    now = auto_risk_eval._utc_now().timestamp()
     fresh_audit_ts = now - 1800
     stale_audit_ts = now - 13 * 3600
     fresh_dir_ts = now - 1800
@@ -153,7 +153,7 @@ def test_load_recent_runs_prefers_run_id_epoch_when_file_mtime_is_misleading(tmp
     )
     runtime.runs_dir.mkdir(parents=True, exist_ok=True)
 
-    now = auto_risk_eval.datetime.now()
+    now = auto_risk_eval._utc_now()
     older_run_name = (now - auto_risk_eval.timedelta(hours=1)).strftime("%Y%m%d_%H")
     newer_run_name = now.strftime("%Y%m%d_%H")
     older_run = runtime.runs_dir / older_run_name
@@ -166,7 +166,7 @@ def test_load_recent_runs_prefers_run_id_epoch_when_file_mtime_is_misleading(tmp
     older_audit.write_text(json.dumps({"counts": {"selected": 1}, "run_id": older_run_name}), encoding="utf-8")
     newer_audit.write_text(json.dumps({"counts": {"selected": 2}, "run_id": newer_run_name}), encoding="utf-8")
 
-    now_ts = auto_risk_eval.datetime.now().timestamp()
+    now_ts = auto_risk_eval._utc_now().timestamp()
     os.utime(older_audit, (now_ts - 100, now_ts - 100))
     os.utime(newer_audit, (now_ts - 13 * 3600, now_ts - 13 * 3600))
 
@@ -187,7 +187,7 @@ def test_load_recent_runs_limits_audit_file_reads_before_parsing(tmp_path: Path,
     )
     runtime.runs_dir.mkdir(parents=True, exist_ok=True)
 
-    now = auto_risk_eval.datetime.now()
+    now = auto_risk_eval._utc_now()
     for offset in range(20):
         run_name = (now - auto_risk_eval.timedelta(hours=19 - offset)).strftime("%Y%m%d_%H")
         run_dir = runtime.runs_dir / run_name
