@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
+import pytest
 
 from src.regime.hmm_regime_detector import HMMRegimeDetector
+from src.regime.hmm_model import SimpleGaussianHMM
 
 
 def test_hmm_regime_detector_cache_prefers_logically_newer_file_for_duplicate_timestamp(tmp_path, monkeypatch) -> None:
@@ -34,3 +38,43 @@ def test_hmm_regime_detector_cache_prefers_logically_newer_file_for_duplicate_ti
     assert closes is not None
     assert closes.tolist()[25] == 999.0
     assert closes.tolist()[-1] == 151.0
+
+
+def _trained_hmm_payload() -> SimpleGaussianHMM:
+    model = SimpleGaussianHMM(n_components=2)
+    model.startprob_ = np.asarray([0.6, 0.4])
+    model.transmat_ = np.asarray([[0.8, 0.2], [0.3, 0.7]])
+    model.means_ = np.asarray([[0.1, 0.2], [-0.1, 0.3]])
+    model.covs_ = np.asarray([[0.01, 0.02], [0.03, 0.04]])
+    model.n_features = 2
+    model.converged = True
+    return model
+
+
+def test_hmm_pickle_load_verifies_sha256_from_info(tmp_path) -> None:
+    model_path = tmp_path / "hmm_regime.pkl"
+    sha256 = _trained_hmm_payload().save(model_path)
+    (tmp_path / "hmm_regime_info.json").write_text(
+        json.dumps({"model_sha256": sha256}),
+        encoding="utf-8",
+    )
+
+    loaded = SimpleGaussianHMM(n_components=2).load(model_path)
+    assert loaded.converged is True
+    assert loaded.n_features == 2
+
+    with model_path.open("ab") as handle:
+        handle.write(b"tamper")
+
+    with pytest.raises(RuntimeError, match="sha256 mismatch"):
+        SimpleGaussianHMM(n_components=2).load(model_path)
+
+
+def test_hmm_pickle_load_rejects_info_without_sha256(tmp_path, monkeypatch) -> None:
+    model_path = tmp_path / "hmm_regime.pkl"
+    _trained_hmm_payload().save(model_path)
+    (tmp_path / "hmm_regime_info.json").write_text("{}", encoding="utf-8")
+    monkeypatch.delenv("V5_ALLOW_LEGACY_HMM_PICKLE_LOAD", raising=False)
+
+    with pytest.raises(RuntimeError, match="sha256 missing"):
+        SimpleGaussianHMM(n_components=2).load(model_path)

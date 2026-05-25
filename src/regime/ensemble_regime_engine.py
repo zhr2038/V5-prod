@@ -101,9 +101,11 @@ class EnsembleRegimeEngine:
 
                 if model_path.exists():
                     import pickle
+                    from src.regime.hmm_model import verified_hmm_pickle_artifact_path
 
-                    with open(model_path, 'rb') as f:
-                        model = pickle.load(f)
+                    artifact_path = verified_hmm_pickle_artifact_path(model_path, require_hash=True)
+                    with artifact_path.open('rb') as f:
+                        model = pickle.load(f)  # noqa: S301 - sha256-verified local HMM artifact
 
                     model_class = type(model).__name__
                     if expected_model_class:

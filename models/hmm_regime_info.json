@@ -2,6 +2,7 @@
   "trained_at": "2026-03-09T14:19:10.022770",
   "model_class": "SimpleGaussianHMM",
   "model_payload_type": "dict",
+  "model_sha256": "0687d64f1a77ac1e7de9e24566c1f5c6573e2253e9bae6bfec3c68a23adced2b",
   "n_components": 3,
   "n_samples": 2778,
   "n_features": 4,

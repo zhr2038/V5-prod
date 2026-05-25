@@ -7,11 +7,74 @@ V5 HMM (隐马尔可夫模型) 市场状态检测器
 参考: 使用高斯HMM识别隐藏的 market regime
 """
 
-import numpy as np
+import hashlib
+import json
+import os
 import pickle
 from pathlib import Path
 from typing import Tuple
 from dataclasses import dataclass
+
+import numpy as np
+
+
+LEGACY_HMM_PICKLE_ENV = "V5_ALLOW_LEGACY_HMM_PICKLE_LOAD"
+
+
+def sha256_file(path: Path) -> str:
+    """Return the sha256 digest for a local model artifact."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def hmm_model_info_path(model_path: Path) -> Path:
+    return model_path.with_name(f"{model_path.stem}_info.json")
+
+
+def _legacy_hmm_pickle_allowed() -> bool:
+    return str(os.getenv(LEGACY_HMM_PICKLE_ENV, "")).strip().upper() in {"1", "TRUE", "YES", "Y"}
+
+
+def _expected_sha256_from_info(info_path: Path) -> str | None:
+    if not info_path.is_file():
+        return None
+    try:
+        info = json.loads(info_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError(f"HMM model info is unreadable: {info_path}") from exc
+    value = info.get("model_sha256") or info.get("sha256") or info.get("artifact_sha256")
+    return str(value).strip() if value else None
+
+
+def verified_hmm_pickle_artifact_path(
+    path: Path,
+    *,
+    expected_sha256: str | None = None,
+    require_hash: bool = False,
+) -> Path:
+    raw_path = Path(path)
+    resolved = raw_path.expanduser().resolve(strict=True)
+    if resolved.suffix.lower() != ".pkl":
+        raise RuntimeError(f"Refusing to load HMM pickle with unexpected suffix: {resolved}")
+    if raw_path.is_symlink() or resolved.is_symlink():
+        raise RuntimeError(f"Refusing to load symlinked HMM pickle: {resolved}")
+
+    info_path = hmm_model_info_path(resolved)
+    expected = expected_sha256 or _expected_sha256_from_info(info_path)
+    info_requires_hash = info_path.is_file() or require_hash
+    if expected:
+        actual = sha256_file(resolved)
+        if actual.lower() != expected.lower():
+            raise RuntimeError(f"HMM pickle sha256 mismatch: {resolved}")
+    elif info_requires_hash and not _legacy_hmm_pickle_allowed():
+        raise RuntimeError(
+            f"HMM pickle sha256 missing for {resolved}; "
+            f"set {LEGACY_HMM_PICKLE_ENV}=YES only for trusted legacy production artifacts"
+        )
+    return resolved
 
 
 @dataclass
@@ -198,9 +261,9 @@ class SimpleGaussianHMM:
         _, scale = self._forward(X)
         return np.log(scale[scale > 0]).sum()
     
-    def save(self, path: Path):
+    def save(self, path: Path) -> str:
         """保存模型"""
-        with open(path, 'wb') as f:
+        with Path(path).open('wb') as f:
             pickle.dump({
                 'n_components': self.n_components,
                 'startprob_': self.startprob_,
@@ -210,11 +273,17 @@ class SimpleGaussianHMM:
                 'n_features': self.n_features,
                 'converged': self.converged
             }, f)
-    
-    def load(self, path: Path):
+        return sha256_file(Path(path))
+
+    def load(self, path: Path, *, expected_sha256: str | None = None, require_hash: bool = False):
         """加载模型"""
-        with open(path, 'rb') as f:
-            data = pickle.load(f)
+        artifact_path = verified_hmm_pickle_artifact_path(
+            Path(path),
+            expected_sha256=expected_sha256,
+            require_hash=require_hash,
+        )
+        with artifact_path.open('rb') as f:
+            data = pickle.load(f)  # noqa: S301 - verified local HMM artifact
             self.n_components = data['n_components']
             self.startprob_ = data['startprob_']
             self.transmat_ = data['transmat_']

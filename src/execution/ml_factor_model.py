@@ -9,9 +9,12 @@ This module keeps the public API stable while fixing a few structural issues:
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import pickle
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List
 
 import numpy as np
@@ -45,6 +48,40 @@ try:
 except (ImportError, OSError):
     XGBOOST_AVAILABLE = False
     xgb = None
+
+
+LEGACY_PICKLE_MODEL_ENV = "V5_ALLOW_LEGACY_PICKLE_MODEL_LOAD"
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _legacy_pickle_model_allowed() -> bool:
+    return str(os.getenv(LEGACY_PICKLE_MODEL_ENV, "")).strip().upper() in {"1", "TRUE", "YES", "Y"}
+
+
+def _verified_pickle_artifact_path(path: str | Path, expected_sha256: str | None) -> Path:
+    raw_path = Path(path)
+    resolved = raw_path.expanduser().resolve(strict=True)
+    if resolved.suffix.lower() != ".pkl":
+        raise RuntimeError(f"Refusing to load pickle model with unexpected suffix: {resolved}")
+    if raw_path.is_symlink() or resolved.is_symlink():
+        raise RuntimeError(f"Refusing to load symlinked pickle model: {resolved}")
+    if expected_sha256:
+        actual = _sha256_file(resolved)
+        if actual.lower() != str(expected_sha256).strip().lower():
+            raise RuntimeError(f"Pickle model sha256 mismatch: {resolved}")
+    elif not _legacy_pickle_model_allowed():
+        raise RuntimeError(
+            f"Pickle model sha256 missing for {resolved}; "
+            f"set {LEGACY_PICKLE_MODEL_ENV}=YES only for trusted legacy research artifacts"
+        )
+    return resolved
 
 
 def _safe_corr(a, b) -> float:
@@ -522,8 +559,10 @@ class MLFactorModel:
                 "model": self.model,
                 "scaler": self.scaler,
             }
-            with open(f"{path}.pkl", "wb") as f:
+            artifact_path = Path(f"{path}.pkl")
+            with artifact_path.open("wb") as f:
                 pickle.dump(artifact, f)
+            model_data["pickle_artifact_sha256"] = _sha256_file(artifact_path)
 
         with open(f"{path}_config.json", "w", encoding="utf-8") as f:
             json.dump(model_data, f, indent=2)
@@ -557,8 +596,12 @@ class MLFactorModel:
             self.scaler = None
             self.training_device = str(model_data.get("training_device") or self.config.compute_device or "cpu")
         elif self.config.model_type in {"ridge", "hist_gbm"}:
-            with open(f"{path}.pkl", "rb") as f:
-                artifact = pickle.load(f)
+            artifact_path = _verified_pickle_artifact_path(
+                f"{path}.pkl",
+                model_data.get("pickle_artifact_sha256") or model_data.get("artifact_sha256"),
+            )
+            with artifact_path.open("rb") as f:
+                artifact = pickle.load(f)  # noqa: S301 - sha256-verified local research artifact
             self.model = artifact.get("model")
             self.scaler = artifact.get("scaler")
             if self.model is None:

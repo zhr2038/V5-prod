@@ -14,7 +14,7 @@ import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
-from src.regime.hmm_model import SimpleGaussianHMM
+from src.regime.hmm_model import SimpleGaussianHMM, hmm_model_info_path
 
 
 class HMMRegimeDetector:
@@ -24,7 +24,7 @@ class HMMRegimeDetector:
         self.n_components = n_components
         self.model = SimpleGaussianHMM(n_components=n_components)
         self.model_path = model_path or (PROJECT_ROOT / 'models' / 'hmm_regime.pkl')
-        self.info_path = self.model_path.parent / 'hmm_regime_info.json'
+        self.info_path = hmm_model_info_path(self.model_path)
         self.state_names = self._load_state_labels()
 
     @staticmethod
@@ -205,7 +205,7 @@ class HMMRegimeDetector:
             labels[idx] = 'Sideways'
         return labels
 
-    def _write_model_info(self, n_samples: int) -> None:
+    def _write_model_info(self, n_samples: int, *, model_sha256: str | None = None) -> None:
         if self.model.means_ is None:
             return
         labels = self._infer_state_labels()
@@ -213,6 +213,7 @@ class HMMRegimeDetector:
             'trained_at': datetime.now().isoformat(),
             'model_class': type(self.model).__name__,
             'model_payload_type': 'dict',
+            'model_sha256': str(model_sha256 or ''),
             'n_components': int(self.n_components),
             'n_samples': int(n_samples),
             'n_features': int(self.model.n_features or 0),
@@ -261,8 +262,8 @@ class HMMRegimeDetector:
         self.state_names = self._infer_state_labels()
 
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
-        self.model.save(self.model_path)
-        self._write_model_info(len(X))
+        model_sha256 = self.model.save(self.model_path)
+        self._write_model_info(len(X), model_sha256=model_sha256)
 
         print(f'[HMM] training done, converged={self.model.converged}')
         print(f'[HMM] transition matrix:\n{self.model.transmat_}')
