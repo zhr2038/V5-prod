@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.execution import ml_data_collector as collector_mod
@@ -102,6 +103,22 @@ def test_ml_data_collector_cache_ohlcv_prefers_logically_newer_file_for_duplicat
         collector_mod.MLDataCollector._parse_cache_timestamp_ms(pd.Series(["2026-01-01 02:00:00"])).iloc[0],
     ]
     assert list(ohlcv["close"]) == [100.0, 999.0, 103.0]
+
+
+def test_ml_data_collector_cache_file_epoch_uses_utc_for_filename_tokens(tmp_path: Path) -> None:
+    hourly = tmp_path / "BTC_USDT_1H_20260408_02.csv"
+    daily = tmp_path / "BTC_USDT_1H_20260408.csv"
+    hourly.write_text("timestamp,open,high,low,close,volume\n", encoding="utf-8")
+    daily.write_text("timestamp,open,high,low,close,volume\n", encoding="utf-8")
+
+    assert collector_mod.MLDataCollector._cache_file_epoch(
+        hourly,
+        prefix="BTC_USDT_1H_",
+    ) == datetime(2026, 4, 8, 2, tzinfo=timezone.utc).timestamp()
+    assert collector_mod.MLDataCollector._cache_file_epoch(
+        daily,
+        prefix="BTC_USDT_1H_",
+    ) == datetime(2026, 4, 8, tzinfo=timezone.utc).timestamp()
 
 
 def test_align_export_cycles_keeps_latest_duplicate_row_for_same_hour_and_symbol() -> None:

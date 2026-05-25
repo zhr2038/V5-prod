@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
-from datetime import datetime
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -525,7 +525,11 @@ class MLDataCollector:
         hourly_match = re.search(r"(20\d{6}_\d{2})$", suffix)
         if hourly_match:
             try:
-                return datetime.strptime(hourly_match.group(1), "%Y%m%d_%H").timestamp()
+                return (
+                    datetime.strptime(hourly_match.group(1), "%Y%m%d_%H")
+                    .replace(tzinfo=timezone.utc)
+                    .timestamp()
+                )
             except Exception:
                 pass
 
@@ -534,7 +538,11 @@ class MLDataCollector:
             token = date_tokens[-1]
             try:
                 fmt = "%Y-%m-%d" if "-" in token else "%Y%m%d"
-                return datetime.strptime(token, fmt).timestamp()
+                return (
+                    datetime.strptime(token, fmt)
+                    .replace(tzinfo=timezone.utc)
+                    .timestamp()
+                )
             except Exception:
                 pass
 
