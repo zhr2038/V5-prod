@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, asdict, fields
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
+
+from src.utils.time import utc_now_iso
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -98,7 +99,7 @@ class HighestPriceTracker:
             symbol=symbol,
             highest_px=new_high,
             entry_px=float(entry_px),
-            updated_at=datetime.now().isoformat(),
+            updated_at=utc_now_iso(),
             source=source
         )
         self._save()

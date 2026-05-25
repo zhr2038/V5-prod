@@ -165,6 +165,16 @@ def test_highest_price_tracker_ignores_legacy_extra_fields(tmp_path) -> None:
     assert tracker.get_highest_px("BTC/USDT") == pytest.approx(105.0)
 
 
+def test_highest_price_tracker_writes_utc_updated_at(tmp_path) -> None:
+    state_path = tmp_path / "highest_px_state.json"
+    tracker = HighestPriceTracker(state_path=str(state_path))
+
+    tracker.update("BTC/USDT", 105.0, 100.0)
+
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    assert payload["BTC/USDT"]["updated_at"].endswith("Z")
+
+
 def test_live_execution_internal_value_error_is_not_marked_safety(monkeypatch, tmp_path) -> None:
     okx = FakeOKX()
     store = OrderStore(path=str(tmp_path / "orders.sqlite"))
