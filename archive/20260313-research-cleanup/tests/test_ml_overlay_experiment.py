@@ -1,8 +1,11 @@
 from configs.schema import AppConfig
-from src.research.ml_overlay_experiment import (
-    DEFAULT_RESEARCH_SYMBOLS,
-    build_experiment_configs,
-)
+
+from _archive_imports import load_archive_module
+
+
+ml_overlay_experiment = load_archive_module("src/research/ml_overlay_experiment.py")
+DEFAULT_RESEARCH_SYMBOLS = ml_overlay_experiment.DEFAULT_RESEARCH_SYMBOLS
+build_experiment_configs = ml_overlay_experiment.build_experiment_configs
 
 
 def test_build_experiment_configs_isolated_and_model_specific(tmp_path):

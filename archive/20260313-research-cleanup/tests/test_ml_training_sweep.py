@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from src.research.ml_training_sweep import (
-    apply_dict_overrides,
-    build_sweep_candidates,
-    is_gpu_task,
-    score_training_result,
-    select_best_gate_passed_candidate,
-)
+from _archive_imports import load_archive_module
+
+
+ml_training_sweep = load_archive_module("src/research/ml_training_sweep.py")
+apply_dict_overrides = ml_training_sweep.apply_dict_overrides
+build_sweep_candidates = ml_training_sweep.build_sweep_candidates
+is_gpu_task = ml_training_sweep.is_gpu_task
+score_training_result = ml_training_sweep.score_training_result
+select_best_gate_passed_candidate = ml_training_sweep.select_best_gate_passed_candidate
 
 
 def test_build_sweep_candidates_random_cap_is_deterministic() -> None:

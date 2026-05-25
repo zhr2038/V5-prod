@@ -1,9 +1,12 @@
 from configs.schema import AppConfig
-from src.research.trend_quality_experiment import (
-    DEFAULT_RESEARCH_SYMBOLS,
-    build_experiment_configs,
-    seed_sandbox_read_only_artifacts,
-)
+
+from _archive_imports import load_archive_module
+
+
+trend_quality_experiment = load_archive_module("src/research/trend_quality_experiment.py")
+DEFAULT_RESEARCH_SYMBOLS = trend_quality_experiment.DEFAULT_RESEARCH_SYMBOLS
+build_experiment_configs = trend_quality_experiment.build_experiment_configs
+seed_sandbox_read_only_artifacts = trend_quality_experiment.seed_sandbox_read_only_artifacts
 
 
 def test_build_experiment_configs_isolated_and_safe(tmp_path):
