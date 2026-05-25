@@ -27,6 +27,18 @@ def load_web_dashboard_module():
     return module
 
 
+def _utc_epoch_from_text(value: str, fmt: str) -> float:
+    return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc).timestamp()
+
+
+def _utc_iso_from_epoch(epoch: float) -> str:
+    return datetime.fromtimestamp(float(epoch), timezone.utc).astimezone(timezone(timedelta(hours=8))).replace(tzinfo=None).isoformat()
+
+
+def _utc_text_from_epoch(epoch: float, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
+    return datetime.fromtimestamp(float(epoch), timezone.utc).astimezone(timezone(timedelta(hours=8))).strftime(fmt)
+
+
 def test_resolve_config_path_uses_runtime_helper(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     monkeypatch.setattr(module, "WORKSPACE", tmp_path)
@@ -1797,7 +1809,7 @@ def test_api_scores_exposes_display_score_rank_and_raw_strength(monkeypatch, tmp
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["regime"] == "SIDEWAYS"
-    assert payload["last_update"] == datetime.strptime("20260311_01", "%Y%m%d_%H").isoformat()
+    assert payload["last_update"] == _utc_iso_from_epoch(_utc_epoch_from_text("20260311_01", "%Y%m%d_%H"))
     first = payload["scores"][0]
     assert first["symbol"] == "FLOW/USDT"
     assert first["rank"] == 1
@@ -1940,7 +1952,7 @@ def test_api_scores_falls_back_to_alpha_snapshot_when_runs_empty(monkeypatch, tm
     payload = response.get_json()
     assert payload["current_run"] == "alpha_snapshot"
     assert payload["regime"] == "Trending"
-    assert payload["last_update"] == datetime.fromtimestamp(1_710_100_000).isoformat()
+    assert payload["last_update"] == _utc_iso_from_epoch(1_710_100_000)
     assert [item["symbol"] for item in payload["scores"][:2]] == ["SOL/USDT", "BTC/USDT"]
 
 
@@ -1987,7 +1999,7 @@ def test_api_scores_prefers_alpha_snapshot_runtime_ts_over_file_mtime(monkeypatc
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["current_run"] == "alpha_snapshot"
-    assert payload["last_update"] == datetime.fromtimestamp(module._coerce_timestamp_epoch("2026-03-10T12:05:00Z")).isoformat()
+    assert payload["last_update"] == _utc_iso_from_epoch(module._coerce_timestamp_epoch("2026-03-10T12:05:00Z"))
 
 
 def test_api_scores_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
@@ -2590,7 +2602,7 @@ def test_api_decision_audit_falls_back_to_previous_run_strategy_signals(monkeypa
     assert payload["strategy_run_id"] == "20260313_14"
     assert payload["strategy_signals"][0]["strategy"] == "TrendFollowing"
     assert payload["fused_source_is_fallback"] is True
-    assert payload["timestamp"] == datetime.strptime("20260313_15", "%Y%m%d_%H").timestamp()
+    assert payload["timestamp"] == _utc_epoch_from_text("20260313_15", "%Y%m%d_%H")
 
 
 def test_api_decision_audit_timestamp_stays_on_latest_run_when_strategy_file_mtime_is_newer(monkeypatch, tmp_path):
@@ -2640,7 +2652,7 @@ def test_api_decision_audit_timestamp_stays_on_latest_run_when_strategy_file_mti
     payload = response.get_json()
     assert payload["strategy_signal_source"] == "strategy_file"
     assert payload["strategy_run_id"] == "20260313_15"
-    assert payload["timestamp"] == datetime.strptime("20260313_15", "%Y%m%d_%H").timestamp()
+    assert payload["timestamp"] == _utc_epoch_from_text("20260313_15", "%Y%m%d_%H")
 
 
 def test_api_decision_audit_tolerates_non_numeric_selected_order_notional(monkeypatch, tmp_path):
@@ -3757,7 +3769,7 @@ def test_api_decision_audit_timestamp_prefers_sorted_epoch_over_file_mtime(monke
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["run_id"] == "20260408_02"
-    assert payload["timestamp"] == datetime.strptime("20260408_02", "%Y%m%d_%H").timestamp()
+    assert payload["timestamp"] == _utc_epoch_from_text("20260408_02", "%Y%m%d_%H")
 
 
 def test_shadow_ml_overlay_api_reads_shadow_workspace(monkeypatch, tmp_path):
@@ -3910,7 +3922,7 @@ def test_signal_health_prefers_latest_file_by_filename_timestamp_not_mtime(monke
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     older_name = f"rss_MARKET_{(now - timedelta(hours=1)).strftime('%Y%m%d_%H')}.json"
     newer_name = f"rss_MARKET_{now.strftime('%Y%m%d_%H')}.json"
     older = cache_dir / older_name
@@ -3927,7 +3939,7 @@ def test_signal_health_prefers_latest_file_by_filename_timestamp_not_mtime(monke
     assert latest is not None
     assert latest.name == newer_name
     assert health["status"] == "fresh"
-    assert health["last_mtime"] == datetime.fromtimestamp(module._signal_file_epoch(newer)).strftime('%Y-%m-%d %H:%M:%S')
+    assert health["last_mtime"] == _utc_text_from_epoch(module._signal_file_epoch(newer))
 
 
 def test_shadow_ml_overlay_timestamp_prefers_sort_epoch_over_file_mtime(monkeypatch, tmp_path):
@@ -6081,7 +6093,7 @@ def test_load_equity_points_limits_recent_equity_file_reads_before_parsing(tmp_p
         telemetry_db=reports_dir / "api_telemetry.sqlite",
     )
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     recent_hours = {19, 18, 17, 16}
     for hour in range(20):
         day_offset = 0 if hour in recent_hours else 10
@@ -6917,7 +6929,7 @@ def test_api_market_state_uses_active_runtime_reports_dir(monkeypatch, tmp_path)
     payload = response.get_json()
     assert payload["state"] == "TRENDING"
     assert payload["history_24h"][0]["final"]["state"] == "TRENDING"
-    assert payload["last_update"] == datetime.fromtimestamp(1_710_100_000).strftime("%Y-%m-%d %H:%M:%S")
+    assert payload["last_update"] == _utc_text_from_epoch(1_710_100_000)
 
 
 def test_market_state_error_response_hides_internal_paths(monkeypatch):
@@ -7269,7 +7281,7 @@ def test_market_state_snapshot_limits_recent_decision_audit_scan(monkeypatch, tm
     assert snapshot["state"] == "TRENDING"
     assert snapshot["position_multiplier"] == 1.2
     assert snapshot["final_score"] == pytest.approx(0.19)
-    assert snapshot["ts"] == datetime.strptime("20260312_19", "%Y%m%d_%H").timestamp()
+    assert snapshot["ts"] == _utc_epoch_from_text("20260312_19", "%Y%m%d_%H")
     assert reads["decision_audit"] <= 4
 
 
@@ -7387,7 +7399,7 @@ def test_decision_chain_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
     assert payload["rounds"][0]["execution_result"]["negative_expectancy_cooldown"] == 1
     assert payload["rounds"][0]["execution_result"]["negative_expectancy_open_block"] == 2
     assert payload["rounds"][0]["execution_result"]["negative_expectancy_fast_fail_open_block"] == 3
-    assert payload["last_update"] == datetime.fromtimestamp(1_710_000_600).strftime("%Y-%m-%d %H:%M:%S")
+    assert payload["last_update"] == _utc_text_from_epoch(1_710_000_600)
 
 
 def test_decision_chain_prefers_sorted_epoch_over_run_dir_mtime(monkeypatch, tmp_path):
@@ -7449,7 +7461,7 @@ def test_decision_chain_scan_limit_prefers_sorted_epoch_over_file_mtime(monkeypa
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["rounds"][0]["run_id"] == "20260408_02"
-    assert payload["last_update"] == datetime.strptime("20260408_02", "%Y%m%d_%H").strftime("%Y-%m-%d %H:%M:%S")
+    assert payload["last_update"] == _utc_text_from_epoch(_utc_epoch_from_text("20260408_02", "%Y%m%d_%H"))
 
 
 def test_decision_chain_uses_preloaded_audit_entries_without_reopening_files(monkeypatch, tmp_path):
@@ -7703,7 +7715,7 @@ def test_api_shadow_test_uses_active_runtime_paths(monkeypatch, tmp_path):
     assert payload["proposed_params"]["deadband_sideways"] == 0.06
     assert payload["matrix"][0]["name"] == "A(当前)"
     assert payload["matrix"][0]["params"]["deadband_sideways"] == payload["current_params"]["deadband_sideways"]
-    assert payload["last_update"] == datetime.fromtimestamp(module._run_id_epoch("20260408_01")).strftime("%Y-%m-%d %H:%M:%S")
+    assert payload["last_update"] == _utc_text_from_epoch(module._run_id_epoch("20260408_01"))
 
 
 def test_api_shadow_test_prefers_sorted_epoch_over_file_mtime_when_limited_to_50_runs(monkeypatch, tmp_path):
@@ -7765,7 +7777,7 @@ def test_api_shadow_test_prefers_sorted_epoch_over_file_mtime_when_limited_to_50
     payload = response.get_json()
     assert payload["window_rounds"] == 50
     assert payload["comparison"]["current"]["avg_selected_per_round"] > 20
-    assert payload["last_update"] == datetime.fromtimestamp(module._run_id_epoch("20260409_00")).strftime("%Y-%m-%d %H:%M:%S")
+    assert payload["last_update"] == _utc_text_from_epoch(module._run_id_epoch("20260409_00"))
 
 
 def test_api_shadow_test_uses_preloaded_audit_entries_without_reopening_files(monkeypatch, tmp_path):

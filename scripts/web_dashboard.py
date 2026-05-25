@@ -10,9 +10,10 @@ V5 Web Dashboard - 交易可视化界面
 - 系统状态
 """
 
-import os
+import copy
 import json
 import math
+import os
 import re
 import shutil
 import sqlite3
@@ -21,7 +22,6 @@ import sys
 import threading
 import time
 import traceback
-import copy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -34,19 +34,28 @@ _BOOTSTRAP_WORKSPACE_STR = str(_BOOTSTRAP_WORKSPACE)
 if _BOOTSTRAP_WORKSPACE_STR not in sys.path:
     sys.path.insert(0, _BOOTSTRAP_WORKSPACE_STR)
 
-from flask import Flask, g, has_app_context, has_request_context, render_template, jsonify, request, send_from_directory
 import pandas as pd
 import requests
+from flask import (
+    Flask,
+    g,
+    has_app_context,
+    has_request_context,
+    jsonify,
+    render_template,
+    request,
+    send_from_directory,
+)
+
 from configs.loader import load_config as load_app_config
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
-
 from src.core.models import MarketSeries
 from src.data.okx_ccxt_provider import OKXCCXTProvider
 from src.execution.fill_store import (
     derive_fill_store_path,
     derive_position_store_path,
-    derive_runtime_auto_risk_guard_path,
     derive_runtime_auto_risk_eval_path,
+    derive_runtime_auto_risk_guard_path,
     derive_runtime_cost_events_dir,
     derive_runtime_named_artifact_path,
     derive_runtime_reports_dir,
@@ -100,6 +109,46 @@ WEB_DIR = WORKSPACE / 'web'
 REPORTS_DIR = WORKSPACE / 'reports'
 CACHE_DIR = WORKSPACE / 'data' / 'cache'
 CHINA_TZ = timezone(timedelta(hours=8))
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _local_tzinfo():
+    return _utc_now().astimezone().tzinfo or timezone.utc
+
+
+def _parse_utc_datetime(value: str, fmt: str) -> datetime:
+    return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
+
+
+def _epoch_from_utc_text(value: str, fmt: str) -> float:
+    return _parse_utc_datetime(value, fmt).timestamp()
+
+
+def _utc_from_epoch(epoch: float) -> datetime:
+    return datetime.fromtimestamp(float(epoch), timezone.utc)
+
+
+def _format_utc_epoch(epoch: float, fmt: str = '%Y-%m-%d %H:%M:%S') -> str:
+    return _utc_from_epoch(epoch).strftime(fmt)
+
+
+def _display_from_epoch(epoch: float) -> datetime:
+    return _utc_from_epoch(epoch).astimezone(CHINA_TZ)
+
+
+def _format_display_epoch(epoch: float, fmt: str = '%Y-%m-%d %H:%M:%S') -> str:
+    return _display_from_epoch(epoch).strftime(fmt)
+
+
+def _iso_display_epoch(epoch: float) -> str:
+    return _display_from_epoch(epoch).replace(tzinfo=None).isoformat()
+
+
+def _display_now(fmt: str = '%Y-%m-%d %H:%M:%S') -> str:
+    return _utc_now().astimezone(CHINA_TZ).strftime(fmt)
 
 
 def _resolve_workspace_env_path() -> Path:
@@ -685,7 +734,7 @@ def _sorted_run_dirs_by_artifact_mtime(runs_dir: Path, artifact_name: str, limit
     run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / artifact_name).exists()]
     def _sort_epoch(run_dir: Path) -> float:
         try:
-            return datetime.strptime(run_dir.name, "%Y%m%d_%H").timestamp()
+            return _epoch_from_utc_text(run_dir.name, "%Y%m%d_%H")
         except Exception:
             return (run_dir / artifact_name).stat().st_mtime
 
@@ -1263,7 +1312,7 @@ def _reflection_report_sort_epoch(path: Path) -> float:
         stamp = match.group(1)
         for fmt in ("%Y%m%d_%H%M%S", "%Y%m%d_%H%M"):
             try:
-                return datetime.strptime(stamp, fmt).timestamp()
+                return _epoch_from_utc_text(stamp, fmt)
             except Exception:
                 continue
     return path.stat().st_mtime
@@ -1277,7 +1326,7 @@ def _run_id_epoch(run_id: str) -> Optional[float]:
     date_part, hour_part, minute_part, second_part = match.groups()
     timestamp = f"{date_part}{hour_part}{minute_part or '00'}{second_part or '00'}"
     try:
-        return datetime.strptime(timestamp, '%Y%m%d%H%M%S').timestamp()
+        return _epoch_from_utc_text(timestamp, '%Y%m%d%H%M%S')
     except ValueError:
         return None
 
@@ -1431,15 +1480,18 @@ def _parse_timer_datetime(value: str) -> Optional[datetime]:
     match = TIMER_TS_RE.search(value)
     if match:
         try:
-            return datetime.strptime(match.group(1), '%a %Y-%m-%d %H:%M:%S')
+            return datetime.strptime(match.group(1), '%a %Y-%m-%d %H:%M:%S').replace(tzinfo=_local_tzinfo())
         except ValueError:
             pass
 
     cleaned = re.sub(r'\s+[A-Z]{2,5}$', '', value)
     try:
-        return datetime.fromisoformat(cleaned)
+        parsed = datetime.fromisoformat(cleaned)
     except ValueError:
         return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=_local_tzinfo())
+    return parsed
 
 
 def _parse_time_left_seconds(value: Optional[str]) -> int:
@@ -1531,7 +1583,7 @@ def _get_timer_runtime(timer_name: str) -> Dict[str, Any]:
         trigger_dt = _parse_timer_datetime(props.get('Trigger', ''))
         if trigger_dt:
             runtime['next_run'] = trigger_dt.strftime('%Y-%m-%d %H:%M:%S')
-            runtime['countdown_seconds'] = max(0, int((trigger_dt - datetime.now()).total_seconds()))
+            runtime['countdown_seconds'] = max(0, int((trigger_dt - _utc_now()).total_seconds()))
     except Exception as exc:
         if not runtime.get('error'):
             runtime['error'] = str(exc)
@@ -1550,7 +1602,7 @@ def _get_timer_runtime(timer_name: str) -> Dict[str, Any]:
                 next_run_dt = _parse_timer_datetime(matches[0].group(1))
                 if next_run_dt:
                     runtime['next_run'] = next_run_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    runtime['countdown_seconds'] = max(0, int((next_run_dt - datetime.now()).total_seconds()))
+                    runtime['countdown_seconds'] = max(0, int((next_run_dt - _utc_now()).total_seconds()))
 
             if len(matches) >= 2:
                 left_str = line[matches[0].end():matches[1].start()].strip()
@@ -2122,7 +2174,9 @@ def _load_okx_account_balance(key: str, sec: str, pp: str) -> Dict[str, Any]:
                 payload = cached[1]
                 return payload if isinstance(payload, dict) else {}
 
-    import hmac, hashlib, base64
+    import base64
+    import hashlib
+    import hmac
 
     ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
     path = '/api/v5/account/balance'
@@ -2782,7 +2836,7 @@ def _history_entry_sort_epoch(entry: Dict[str, Any]) -> float:
         run_id = str(entry.get("run_id") or "")
         if run_id:
             try:
-                return datetime.strptime(run_id, "%Y%m%d_%H").timestamp()
+                return _epoch_from_utc_text(run_id, "%Y%m%d_%H")
             except Exception:
                 pass
     return 0.0
@@ -2792,7 +2846,7 @@ def _ic_diagnostic_sort_epoch(path: Path) -> float:
     match = re.search(r"(?<!\d)(20\d{6})(?!\d)", path.stem)
     if match:
         try:
-            return datetime.strptime(match.group(1), "%Y%m%d").timestamp()
+            return _epoch_from_utc_text(match.group(1), "%Y%m%d")
         except Exception:
             pass
     return path.stat().st_mtime
@@ -2851,6 +2905,7 @@ def _load_live_okx_balance_snapshot() -> Dict[str, Any]:
         import hashlib
         import hmac
         import time
+
         from dotenv import load_dotenv
 
         envp = _resolve_workspace_env_path()
@@ -3429,7 +3484,7 @@ def api_account():
             'total_sell': round(float(total_sell), 2),
             'total_fees': round(float(total_fees), 4),
             'realized_pnl': round(float(realized_pnl), 2),
-            'last_update': datetime.fromtimestamp(latest_update_epoch).strftime('%Y-%m-%d %H:%M:%S') if latest_update_epoch is not None else ''
+            'last_update': _format_display_epoch(latest_update_epoch) if latest_update_epoch is not None else ''
         })
     except Exception as e:
         return _json_internal_error_response(
@@ -3463,7 +3518,9 @@ def api_trades():
 
         # 0) 优先OKX实时成交
         try:
-            import hmac, hashlib, base64
+            import base64
+            import hashlib
+            import hmac
 
             key, sec, pp = _load_workspace_exchange_creds()
             if _dashboard_live_account_enabled() and key and sec and pp:
@@ -4037,7 +4094,7 @@ def api_scores():
             'current_run': current_run_id,
             'previous_run': previous_run_id,
             'scores': scores_with_trend,
-            'last_update': datetime.fromtimestamp(current_run_epoch).isoformat() if current_run_epoch is not None else ''
+            'last_update': _iso_display_epoch(current_run_epoch) if current_run_epoch is not None else ''
         })
     except Exception as e:
         return _json_internal_error_response(
@@ -4097,7 +4154,7 @@ def api_sentiment():
                     'summary': data.get('f6_sentiment_summary', ''),
                     'source': data.get('f6_sentiment_source', 'cache'),
                     'cache_file': latest.name,
-                    'cache_mtime': datetime.fromtimestamp(logical_epoch).strftime('%Y-%m-%d %H:%M:%S')
+                    'cache_mtime': _format_utc_epoch(logical_epoch)
                 }
             except Exception:
                 results[symbol] = {'error': 'cache_error'}
@@ -4125,7 +4182,7 @@ def api_sentiment():
                 'mood_color': mood_color
             },
             'by_symbol': results,
-            'last_update': datetime.fromtimestamp(latest_update_epoch).strftime('%Y-%m-%d %H:%M:%S') if latest_update_epoch is not None else ''
+            'last_update': _format_utc_epoch(latest_update_epoch) if latest_update_epoch is not None else ''
         })
     except Exception as e:
         return _json_internal_error_response(
@@ -4161,7 +4218,7 @@ def api_status():
             'dry_run': dry_run,
             'kill_switch': _dashboard_kill_switch_enabled(runtime_paths.kill_switch_path),
             'equity_cap': config.get('budget', {}).get('live_equity_cap_usdt', 0),
-            'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'last_check': _display_now(),
         })
     except Exception as e:
         return _json_internal_error_response(
@@ -4191,7 +4248,7 @@ def calculate_market_indicators():
         def _sort_epoch(path: Path) -> float:
             suffix = path.stem.removeprefix('BTC_USDT_1H_')
             try:
-                return datetime.strptime(suffix, "%Y%m%d_%H").timestamp()
+                return _epoch_from_utc_text(suffix, "%Y%m%d_%H")
             except Exception:
                 return path.stat().st_mtime
 
@@ -4261,7 +4318,7 @@ def _load_market_vote_history(reports_dir: Path, hours: int = 24, max_points: in
     if not db_path.exists():
         return []
 
-    cutoff_ms = int((datetime.now() - timedelta(hours=hours)).timestamp() * 1000)
+    cutoff_ms = int((_utc_now() - timedelta(hours=hours)).timestamp() * 1000)
     try:
         conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
@@ -4292,7 +4349,7 @@ def _load_market_vote_history(reports_dir: Path, hours: int = 24, max_points: in
             continue
         points.append({
             'ts_ms': ts_ms,
-            'label': datetime.fromtimestamp(ts_ms / 1000).strftime('%m-%d %H:%M'),
+            'label': _format_display_epoch(ts_ms / 1000, '%m-%d %H:%M'),
             'final': {
                 'state': str(row['final_state'] or 'SIDEWAYS'),
                 'confidence': float(row['confidence'] or 0.0),
@@ -4326,7 +4383,7 @@ def _ohlcv_cache_file_epoch(path: Path) -> float:
     hourly_match = re.search(r"(20\d{6}_\d{2})$", suffix)
     if hourly_match:
         try:
-            return datetime.strptime(hourly_match.group(1), "%Y%m%d_%H").timestamp()
+            return _epoch_from_utc_text(hourly_match.group(1), "%Y%m%d_%H")
         except Exception:
             pass
 
@@ -4335,7 +4392,7 @@ def _ohlcv_cache_file_epoch(path: Path) -> float:
         token = date_tokens[-1]
         try:
             fmt = "%Y-%m-%d" if "-" in token else "%Y%m%d"
-            return datetime.strptime(token, fmt).timestamp()
+            return _epoch_from_utc_text(token, fmt)
         except Exception:
             pass
 
@@ -4346,7 +4403,7 @@ def _signal_file_epoch(path: Path) -> float:
     parts = path.stem.split('_')
     if len(parts) >= 2:
         try:
-            return datetime.strptime('_'.join(parts[-2:]), "%Y%m%d_%H").timestamp()
+            return _epoch_from_utc_text('_'.join(parts[-2:]), "%Y%m%d_%H")
         except Exception:
             pass
     return path.stat().st_mtime
@@ -4382,14 +4439,14 @@ def _signal_health(cache_dir: Path, patterns: List[str], max_age_minutes: int, e
         }
 
     signal_epoch = _signal_file_epoch(latest)
-    age_minutes = max(0.0, (datetime.now().timestamp() - signal_epoch) / 60.0)
+    age_minutes = max(0.0, (_utc_now().timestamp() - signal_epoch) / 60.0)
     is_fresh = age_minutes <= max(int(max_age_minutes), 1)
     return {
         'status': 'fresh' if is_fresh else 'stale',
         'is_fresh': bool(is_fresh),
         'error': None if is_fresh else error_name,
         'last_file': latest.name,
-        'last_mtime': datetime.fromtimestamp(signal_epoch).strftime('%Y-%m-%d %H:%M:%S'),
+        'last_mtime': _format_display_epoch(signal_epoch),
         'age_minutes': round(age_minutes, 1),
         'max_age_minutes': int(max_age_minutes),
     }
@@ -4762,9 +4819,9 @@ def api_market_state():
             'signal_health': signal_health,
             'history_24h': history_24h,
             'last_update': (
-                datetime.fromtimestamp(snapshot_ts_epoch).strftime('%Y-%m-%d %H:%M:%S')
+                _format_display_epoch(snapshot_ts_epoch)
                 if snapshot_ts_epoch is not None
-                else datetime.fromtimestamp(latest_history_ts_ms / 1000.0).strftime('%Y-%m-%d %H:%M:%S') if latest_history_ts_ms else ''
+                else _format_display_epoch(latest_history_ts_ms / 1000.0) if latest_history_ts_ms else ''
             ),
         })
     except Exception as exc:
@@ -5162,7 +5219,7 @@ def api_timer():
             'countdown_seconds': int(runtime.get('countdown_seconds') or 0),
             'interval_minutes': int(runtime.get('interval_minutes') or 60),
             'error': runtime.get('error'),
-            'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'last_check': _display_now(),
         })
     except Exception as e:
         return _json_internal_error_response(
@@ -5202,7 +5259,7 @@ def api_timers():
 
         return jsonify({
             'timers': timers,
-            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'last_update': _display_now(),
         })
     except Exception as e:
         return _json_internal_error_response(
@@ -5399,7 +5456,7 @@ def api_cost_calibration():
         if calibration_data:
             latest_day = calibration_data[-1].get('date')
             if isinstance(latest_day, str) and re.fullmatch(r'\d{8}', latest_day):
-                latest_update = datetime.strptime(latest_day, '%Y%m%d').strftime('%Y-%m-%d 00:00:00')
+                latest_update = _parse_utc_datetime(latest_day, '%Y%m%d').strftime('%Y-%m-%d 00:00:00')
         
         # 获取事件文件数
         event_count = len(dated_event_files)
@@ -5531,7 +5588,7 @@ def api_ic_diagnostics():
                 'regimes': regimes,
                 'source_file': latest_ic.name,
                 'fallback_reason': 'fresh_format',
-                'last_update': datetime.fromtimestamp(_ic_diagnostic_sort_epoch(latest_ic)).strftime('%Y-%m-%d %H:%M:%S')
+                'last_update': _format_utc_epoch(_ic_diagnostic_sort_epoch(latest_ic))
             })
         
         # 解析IC数据 - 旧版结构在overall_tradable.ic下
@@ -5619,7 +5676,7 @@ def api_ic_diagnostics():
             'regimes': regimes,
             'source_file': latest_ic.name,
             'fallback_reason': fallback_reason,
-            'last_update': datetime.fromtimestamp(_ic_diagnostic_sort_epoch(latest_ic)).strftime('%Y-%m-%d %H:%M:%S')
+            'last_update': _format_utc_epoch(_ic_diagnostic_sort_epoch(latest_ic))
         })
     except Exception as exc:
         return _json_internal_error_response(
@@ -5771,11 +5828,11 @@ def _api_ml_training_v2():
 
     latest_model = _latest_model_file(model_base_path)
     latest_model_mtime = _latest_model_file_mtime(model_base_path)
-    model_time = datetime.fromtimestamp(latest_model_mtime) if latest_model_mtime is not None else None
+    model_time = _display_from_epoch(latest_model_mtime) if latest_model_mtime is not None else None
 
     def _display_update_value(value: Any) -> Optional[str]:
         if isinstance(value, (int, float)):
-            return datetime.fromtimestamp(float(value)).strftime('%Y-%m-%d %H:%M:%S')
+            return _format_display_epoch(float(value))
         text = str(value or '').strip()
         if not text:
             return None
@@ -5952,7 +6009,7 @@ def api_reflection_reports():
 
         latest_update = ''
         if report_files:
-            latest_update = datetime.fromtimestamp(_reflection_report_sort_epoch(report_files[0])).strftime('%Y-%m-%d %H:%M:%S')
+            latest_update = _format_utc_epoch(_reflection_report_sort_epoch(report_files[0]))
 
         return jsonify({
             'reports': reports,
@@ -6142,7 +6199,7 @@ def api_decision_chain():
 
         return jsonify({
             'rounds': rounds,
-            'last_update': datetime.fromtimestamp(latest_update_epoch).strftime('%Y-%m-%d %H:%M:%S') if latest_update_epoch > 0 else ''
+            'last_update': _format_display_epoch(latest_update_epoch) if latest_update_epoch > 0 else ''
         })
     except Exception as exc:
         return _json_internal_error_response(exc, rounds=[], last_update='')
@@ -6264,7 +6321,7 @@ def api_shadow_test():
                 gate_epoch = _coerce_timestamp_epoch((ab_gate or {}).get('ts')) if isinstance(ab_gate, dict) else None
                 if gate_epoch is None:
                     gate_epoch = gate_path.stat().st_mtime
-                ab_gate_age_sec = max(0, int(datetime.now().timestamp() - gate_epoch))
+                ab_gate_age_sec = max(0, int(_utc_now().timestamp() - gate_epoch))
                 ab_gate_status = 'stale' if ab_gate_age_sec > 1800 else 'fresh'
         except Exception:
             ab_gate = None
@@ -6327,7 +6384,7 @@ def api_shadow_test():
             'ab_gate': ab_gate,
             'ab_gate_status': ab_gate_status,
             'ab_gate_age_sec': ab_gate_age_sec,
-            'last_update': datetime.fromtimestamp(latest_update_epoch).strftime('%Y-%m-%d %H:%M:%S') if latest_update_epoch > 0 else ''
+            'last_update': _format_display_epoch(latest_update_epoch) if latest_update_epoch > 0 else ''
         }
         
         return jsonify(ab_report)
@@ -6355,7 +6412,7 @@ def api_smart_alerts():
         return jsonify({
             'alerts': alerts,
             'count': len(alerts),
-            'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'last_check': _utc_now().strftime('%Y-%m-%d %H:%M:%S'),
             'status': 'alert' if alerts else 'normal'
         })
     except Exception as exc:
@@ -6854,7 +6911,7 @@ def api_decision_audit():
                         fill_rows = cur.fetchall()
                         fill_rows_have_updated_ts = False
 
-                now_ms = int(datetime.now().timestamp() * 1000)
+                now_ms = int(_utc_now().timestamp() * 1000)
                 latest_fill_ts = 0
                 order_event_ts_by_ord_id: Dict[str, int] = {}
                 order_event_ts_by_cl_ord_id: Dict[str, int] = {}
@@ -7278,7 +7335,7 @@ def api_health():
                 overall_status = 'critical'
             elif warning_count > 0:
                 overall_status = 'warning'
-        checked_at = datetime.now()
+        checked_at = _utc_now()
         return jsonify({
             'status': overall_status,
             'checks': checks,
