@@ -5,7 +5,7 @@ import json
 import sqlite3
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +15,18 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.runtime_config import load_runtime_config, resolve_runtime_path
-from src.execution.fill_store import derive_runtime_named_artifact_path, derive_runtime_reports_dir
+from src.execution.fill_store import (
+    derive_runtime_named_artifact_path,
+    derive_runtime_reports_dir,
+)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_iso() -> str:
+    return _utc_now().isoformat().replace("+00:00", "Z")
 
 
 @dataclass(frozen=True)
@@ -65,7 +76,7 @@ class BacktestLiveConsistencyChecker:
         }
 
     def log(self, msg):
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+        print(f"[{_utc_now().strftime('%H:%M:%S')}] {msg}")
 
     @staticmethod
     def _split_inst_id_base_quote(inst_id: str) -> tuple[str, str]:
@@ -132,7 +143,7 @@ class BacktestLiveConsistencyChecker:
 
         conn = sqlite3.connect(str(orders_db))
         cursor = conn.cursor()
-        cutoff = int((datetime.now() - timedelta(days=days)).timestamp() * 1000)
+        cutoff = int((_utc_now() - timedelta(days=days)).timestamp() * 1000)
 
         try:
             try:
@@ -167,7 +178,7 @@ class BacktestLiveConsistencyChecker:
 
         conn = sqlite3.connect(str(orders_db))
         cursor = conn.cursor()
-        cutoff = int((datetime.now() - timedelta(days=days)).timestamp() * 1000)
+        cutoff = int((_utc_now() - timedelta(days=days)).timestamp() * 1000)
 
         try:
             try:
@@ -209,7 +220,7 @@ class BacktestLiveConsistencyChecker:
                         "order_sz": row[4],
                         "fill_sz": row[5],
                         "fee_usdt": self._fee_cost_usdt_from_order_fee(row[0], row[3], row[6]),
-                        "ts": datetime.fromtimestamp((row[8] or 0) / 1000),
+                        "ts": datetime.fromtimestamp((row[8] or 0) / 1000, timezone.utc),
                     }
                 )
             return trades
@@ -245,7 +256,7 @@ class BacktestLiveConsistencyChecker:
             if stem.startswith(prefix):
                 suffix = stem[len(prefix):]
                 try:
-                    return datetime.strptime(suffix, "%Y%m%d").timestamp()
+                    return datetime.strptime(suffix, "%Y%m%d").replace(tzinfo=timezone.utc).timestamp()
                 except Exception:
                     pass
             return path.stat().st_mtime
@@ -332,14 +343,14 @@ class BacktestLiveConsistencyChecker:
 
         report_file = derive_runtime_named_artifact_path(
             self.paths.orders_db,
-            f"consistency_check_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            f"consistency_check_{_utc_now().strftime('%Y%m%d_%H%M%S')}",
             ".json",
         ).resolve()
         report_file.parent.mkdir(parents=True, exist_ok=True)
         with open(report_file, "w", encoding="utf-8") as f:
             json.dump(
                 {
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": _utc_now_iso(),
                     "results": self.results,
                 },
                 f,

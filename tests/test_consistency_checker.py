@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -102,7 +103,11 @@ def test_load_backtest_config_prefers_latest_day_over_file_mtime(tmp_path: Path)
     assert payload["avg_cost_bps"] == 7.25
 
 
-def test_generate_report_uses_prefixed_runtime_filename(tmp_path: Path) -> None:
+def test_generate_report_uses_prefixed_runtime_filename(monkeypatch, tmp_path: Path) -> None:
+    import scripts.consistency_checker as consistency_checker
+
+    fixed_now = datetime(2026, 5, 25, 4, 0, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(consistency_checker, "_utc_now", lambda: fixed_now)
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
@@ -117,6 +122,8 @@ def test_generate_report_uses_prefixed_runtime_filename(tmp_path: Path) -> None:
 
     files = list(reports_dir.glob("shadow_consistency_check_*.json"))
     assert len(files) == 1
+    assert files[0].name == "shadow_consistency_check_20260525_040001.json"
+    assert json.loads(files[0].read_text(encoding="utf-8"))["timestamp"] == "2026-05-25T04:00:01Z"
 
 
 def test_generate_report_uses_suffixed_runtime_filename(tmp_path: Path) -> None:
