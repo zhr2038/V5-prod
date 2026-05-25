@@ -7337,7 +7337,7 @@ class V5Pipeline:
                 try:
                     from src.data.okx_instruments import OKXSpotInstrumentsCache
 
-                    spec = OKXSpotInstrumentsCache().get_spec(symbol_to_inst_id(sym))
+                    spec = OKXSpotInstrumentsCache().get_spec(str(sym).replace("/", "-"))
                     if spec is not None:
                         min_sz = float(spec.min_sz or 0.0)
                         # Estimate min notional requirement from base minSz.

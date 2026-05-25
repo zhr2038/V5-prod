@@ -5,7 +5,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import yaml
@@ -21,6 +21,10 @@ from src.research.processors import (
     summarize_numeric_series,
 )
 from src.research.recorder import ResearchRecorder
+
+if TYPE_CHECKING:
+    from src.execution.ml_factor_model import MLFactorConfig, MLFactorModel
+    from src.execution.ml_time_series_cv import GroupedTimeSeriesSplit
 
 
 def load_task_config(path: str | Path) -> dict[str, Any]:

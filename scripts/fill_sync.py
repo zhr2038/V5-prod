@@ -5,12 +5,17 @@ import logging
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+if TYPE_CHECKING:
+    from src.execution.fill_store import FillStore
+    from src.execution.okx_private_client import OKXPrivateClient
 
 log = logging.getLogger("fill_sync")
 

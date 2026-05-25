@@ -6450,6 +6450,8 @@ def api_decision_audit():
 
         latest_run_dir = audit_entries[0]['run_dir']
         latest_audit_file = latest_run_dir / 'decision_audit.json'
+        runs_dir = runtime_paths.runs_dir
+        run_dirs = [entry['run_dir'] for entry in audit_entries if isinstance(entry.get('run_dir'), Path)]
 
         with open(latest_audit_file, 'r') as f:
             audit_data = json.load(f)

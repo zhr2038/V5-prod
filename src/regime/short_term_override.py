@@ -15,8 +15,11 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import TYPE_CHECKING, List, Dict, Optional
 from dataclasses import dataclass
+
+if TYPE_CHECKING:
+    from src.regime.regime_engine import RegimeResult
 
 
 @dataclass
