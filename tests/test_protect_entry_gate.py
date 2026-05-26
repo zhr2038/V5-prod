@@ -336,6 +336,47 @@ def test_target_execution_explain_passed_symbol_is_not_marked_blocked(tmp_path: 
     assert row["high_score_block_category"] is None
 
 
+def test_target_execution_explain_prior_guard_skips_protect_entry_gate(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    pipe = _build_pipe(cfg, tmp_path, _strategy_payload())
+
+    rows = pipe._build_target_execution_explain(
+        targets_post_risk={"BNB/USDT": 1.0},
+        top_scores=[{"symbol": "BNB/USDT", "final_score": 0.59, "rank": 1}],
+        strategy_signal_lookup={
+            "Alpha6Factor": {
+                "BNB/USDT": {
+                    "symbol": "BNB/USDT",
+                    "side": "buy",
+                    "score": 0.60,
+                    "metadata": {
+                        "raw_factors": {
+                            "f4_volume_expansion": 0.50,
+                            "f5_rsi_trend_confirm": 0.20,
+                        }
+                    },
+                }
+            }
+        },
+        router_decisions=[
+            {
+                "symbol": "BNB/USDT",
+                "action": "skip",
+                "reason": "protect_alt_short_cycle_negative_expectancy",
+            }
+        ],
+        current_auto_risk_level="PROTECT",
+        regime_state="TRENDING",
+    )
+
+    row = rows[0]
+    assert row["router_reason"] == "protect_alt_short_cycle_negative_expectancy"
+    assert row["f5_rsi_trend_confirm"] < row["protect_entry_min_f5_rsi_trend_confirm"]
+    assert row["passed_protect_entry_gate"] is False
+    assert row["protect_entry_gate_evaluation_status"] == "skipped_due_to_prior_guard"
+    assert row["prior_guard_reason"] == "protect_alt_short_cycle_negative_expectancy"
+
+
 def test_protect_gate_falls_back_to_auto_risk_guard_when_eval_snapshot_missing(tmp_path: Path) -> None:
     cfg = _base_cfg(tmp_path)
     _write_auto_risk_guard_level(cfg.execution.order_store_path, "PROTECT")

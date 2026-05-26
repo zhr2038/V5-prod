@@ -1432,6 +1432,31 @@ class V5Pipeline:
             return "risk_off"
         return "other"
 
+    @staticmethod
+    def _target_execution_protect_entry_gate_status(reason: str) -> Tuple[bool, str, Optional[str]]:
+        norm_reason = str(reason or "").strip()
+        if not norm_reason:
+            return True, "passed", None
+        if norm_reason.startswith("protect_entry_"):
+            return False, "failed", None
+        prior_guard_reasons = {
+            "protect_alt_short_cycle_negative_expectancy",
+            "negative_expectancy_cooldown",
+            "negative_expectancy_open_block",
+            "negative_expectancy_fast_fail_open_block",
+            "protect_negative_expectancy_short_cycle_block",
+            "protect_negative_expectancy_short_cycle_guard",
+            "same_symbol_reentry_cooldown",
+            "cost_aware_edge",
+        }
+        if (
+            norm_reason in prior_guard_reasons
+            or norm_reason.startswith("negative_expectancy_")
+            or norm_reason.startswith("cost_aware_")
+        ):
+            return False, "skipped_due_to_prior_guard", norm_reason
+        return True, "passed", None
+
     def _build_target_execution_explain(
         self,
         *,
@@ -1496,6 +1521,11 @@ class V5Pipeline:
                 and float(final_score) >= 0.80
                 and router_action == "skip"
             )
+            (
+                passed_protect_entry_gate,
+                protect_entry_gate_evaluation_status,
+                prior_guard_reason,
+            ) = self._target_execution_protect_entry_gate_status(blocked_reason)
             row = {
                 "symbol": sym,
                 "target_w": _float_or_none(target_w),
@@ -1513,7 +1543,9 @@ class V5Pipeline:
                 "protect_entry_alpha6_min_score": protect_entry_alpha6_min_score,
                 "protect_entry_min_f4_volume_expansion": protect_entry_min_f4_volume_expansion,
                 "protect_entry_min_f5_rsi_trend_confirm": protect_entry_min_f5_rsi_trend_confirm,
-                "passed_protect_entry_gate": not str(blocked_reason).startswith("protect_entry_"),
+                "passed_protect_entry_gate": passed_protect_entry_gate,
+                "protect_entry_gate_evaluation_status": protect_entry_gate_evaluation_status,
+                "prior_guard_reason": prior_guard_reason,
                 "blocked_reason": blocked_reason,
                 "router_action": router_action or None,
                 "router_reason": router_reason or None,

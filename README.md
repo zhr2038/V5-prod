@@ -182,6 +182,8 @@ skipped_candidate_labels.jsonl
 candidate_snapshot.csv
 ```
 
+`target_execution_explain` 中的 `passed_protect_entry_gate` 只表示 PROTECT entry gate 本身完成评估后的结果。若订单在更早的 hard guard 被拦截，例如 `protect_alt_short_cycle_negative_expectancy`、`negative_expectancy_cooldown`、`same_symbol_reentry_cooldown` 或 `cost_aware_edge`，会写入 `protect_entry_gate_evaluation_status=skipped_due_to_prior_guard` 和 `prior_guard_reason`，不得解读为“已通过 PROTECT gate 后被拦”。
+
 ---
 
 ## Probe 小仓试探机制
