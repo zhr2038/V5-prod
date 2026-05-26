@@ -3155,13 +3155,14 @@ def fixture_entry_quality_advisory_root(root):
         + "\n",
     )
     write_text(
-        root / "reports/risk_on_multi_buy_shadow.csv",
+        root / "reports/quant_lab/latest/reports/risk_on_multi_buy_shadow.csv",
         "\n".join(
             [
-                "strategy_candidate,top_k,current_regime,selected_symbols,would_buy_symbol",
-                'v5.risk_on_multi_buy_top1_shadow,1,ALT_IMPULSE,"[""BNB-USDT""]",BNB-USDT',
-                'v5.risk_on_multi_buy_top2_shadow,2,ALT_IMPULSE,"[""BNB-USDT"",""SOL-USDT""]",BNB-USDT',
-                'v5.risk_on_multi_buy_top3_shadow,3,ALT_IMPULSE,"[""BNB-USDT"",""SOL-USDT"",""ETH-USDT""]",BNB-USDT',
+                "run_id,ts_utc,top_k,current_regime,selected_symbols,would_buy_symbol",
+                'r_old,2026-05-24T00:00:00Z,2,ALT_IMPULSE,"[""ETH-USDT"",""SOL-USDT""]",ETH-USDT',
+                'r_latest,2026-05-26T00:00:00Z,1,ALT_IMPULSE,"[""BNB-USDT""]",BNB-USDT',
+                'r_latest,2026-05-26T00:00:00Z,2,ALT_IMPULSE,"[""BNB-USDT"",""SOL-USDT""]",BNB-USDT',
+                'r_latest,2026-05-26T00:00:00Z,3,ALT_IMPULSE,"[""BNB-USDT"",""SOL-USDT"",""ETH-USDT""]",BNB-USDT',
             ]
         )
         + "\n",

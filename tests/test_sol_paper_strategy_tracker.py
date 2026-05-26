@@ -1687,15 +1687,28 @@ def test_risk_on_multi_buy_prefers_detail_file_selected_symbols(tmp_path: Path) 
             }
         ],
     )
-    with (reports_dir / "risk_on_multi_buy_shadow.csv").open("w", encoding="utf-8", newline="") as fh:
+    detail_path = reports_dir / "quant_lab" / "latest" / "reports" / "risk_on_multi_buy_shadow.csv"
+    detail_path.parent.mkdir(parents=True, exist_ok=True)
+    with detail_path.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(
             fh,
-            fieldnames=["strategy_candidate", "top_k", "current_regime", "selected_symbols", "would_buy_symbol"],
+            fieldnames=["run_id", "ts_utc", "top_k", "current_regime", "selected_symbols", "would_buy_symbol"],
         )
         writer.writeheader()
         writer.writerow(
             {
-                "strategy_candidate": "v5.risk_on_multi_buy_top2_shadow",
+                "run_id": "r_old",
+                "ts_utc": "2026-05-25T00:00:00Z",
+                "top_k": "2",
+                "current_regime": "ALT_IMPULSE",
+                "selected_symbols": '["ETH-USDT","SOL-USDT"]',
+                "would_buy_symbol": "ETH-USDT",
+            }
+        )
+        writer.writerow(
+            {
+                "run_id": "r_risk_on_detail",
+                "ts_utc": "2026-05-26T00:00:00Z",
                 "top_k": "2",
                 "current_regime": "ALT_IMPULSE",
                 "selected_symbols": '["BNB-USDT","SOL-USDT"]',

@@ -860,6 +860,14 @@ def copy_entry_quality_report(filename, dest_rel, file_kind):
     return False
 
 
+def copy_optional_quant_lab_report(filename, dest_rel, file_kind):
+    error_count = len(collection_errors)
+    if copy_entry_quality_report(filename, dest_rel, file_kind):
+        return True
+    del collection_errors[error_count:]
+    return False
+
+
 def parse_run_time(run_name):
     for fmt in ("%Y%m%d_%H", "%Y%m%dT%H%M%SZ", "%Y%m%d_%H%M%S"):
         try:
@@ -950,10 +958,15 @@ def copy_current_reports():
         ("reports/quant_lab_latest/strategy_opportunity_advisory.csv", "raw/reports/quant_lab_latest/strategy_opportunity_advisory.csv"),
         ("reports/quant_lab/latest/reports/strategy_opportunity_advisory.csv", "raw/reports/quant_lab/latest/reports/strategy_opportunity_advisory.csv"),
         ("reports/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
+        ("reports/quant_lab/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
+        ("reports/quant_lab_latest/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
+        ("reports/quant_lab/latest/reports/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
         ("reports/summaries/strategy_opportunity_advisory_reader.csv", "summaries/strategy_opportunity_advisory_reader.csv"),
     ):
         if (ROOT / src_rel).is_file():
             copy_sanitized(src_rel, dest_rel)
+    if not (OUT / "raw" / "reports" / "risk_on_multi_buy_shadow.csv").is_file():
+        copy_optional_quant_lab_report("risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv", "csv")
     for filename, dest_rel, file_kind in ENTRY_QUALITY_REPORT_FILES:
         if not copy_entry_quality_report(filename, dest_rel, file_kind):
             collection_errors.append({
@@ -9241,6 +9254,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             flatten_value(row.get("strategy_id")),
             flatten_value(row.get("advisory_strategy_id")),
             flatten_value(row.get("experiment_name")),
+            flatten_value(row.get("candidate")),
+            flatten_value(row.get("candidate_name")),
+            flatten_value(row.get("source_strategy_candidate")),
+            flatten_value(row.get("strategy")),
+            flatten_value(row.get("strategy_name")),
         ]
         normalized = [value.strip().lower() for value in values if value and value != not_obs]
         for value in normalized:
@@ -9757,6 +9775,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if explicit is not None and explicit > 0:
             return explicit
         match = re.search(r"risk_on_multi_buy_top(\d+)", flatten_value(strategy_key).lower())
+        if not match:
+            for name in (
+                "strategy_candidate",
+                "strategy_id",
+                "experiment_name",
+                "candidate",
+                "candidate_name",
+                "source_strategy_candidate",
+                "strategy",
+                "strategy_name",
+            ):
+                match = re.search(r"risk_on_multi_buy_top(\d+)", flatten_value(row.get(name)).lower())
+                if match:
+                    break
         return int(match.group(1)) if match else None
 
     def risk_on_actual_bought_symbols():
@@ -9808,6 +9840,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             OUT / "raw" / "reports" / "risk_on_multi_buy_shadow.csv",
             ROOT / "raw" / "reports" / "risk_on_multi_buy_shadow.csv",
             ROOT / "reports" / "risk_on_multi_buy_shadow.csv",
+            ROOT / "reports" / "quant_lab" / "risk_on_multi_buy_shadow.csv",
+            ROOT / "reports" / "quant_lab_latest" / "risk_on_multi_buy_shadow.csv",
+            ROOT / "reports" / "quant_lab" / "latest" / "reports" / "risk_on_multi_buy_shadow.csv",
         ]
         rows = []
         seen_paths = set()
@@ -9822,18 +9857,79 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 rows.append(payload)
         return rows
 
+    def risk_on_row_dt(row):
+        values = [
+            parse_dt_utc(row.get(name))
+            for name in ("ts_utc", "timestamp", "sampled_at", "generated_at", "as_of_ts", "run_ts")
+        ]
+        values = [value for value in values if value is not None]
+        return max(values) if values else None
+
+    def merge_risk_on_detail_rows(rows):
+        candidates = list(rows)
+        if not candidates:
+            return {}
+        merged = dict(candidates[-1])
+        selected = []
+        would_buy = []
+        for row in candidates:
+            selected.extend(risk_on_symbols_from_row(
+                row,
+                (
+                    "selected_symbols",
+                    "selected_symbol_list",
+                    "top_symbols",
+                    "top_n_symbols",
+                    "symbols",
+                    "would_buy_symbols",
+                    "would_buy_symbol",
+                    "symbol",
+                ),
+            ))
+            would_buy.extend(risk_on_symbols_from_row(
+                row,
+                (
+                    "would_buy_symbols",
+                    "would_buy_symbol",
+                    "would_enter_symbols",
+                    "would_open_symbols",
+                    "paper_buy_symbols",
+                    "selected_symbols",
+                    "symbol",
+                ),
+            ))
+        if selected:
+            merged["selected_symbols"] = risk_on_symbols_csv_value(selected)
+        if would_buy:
+            merged["would_buy_symbols"] = risk_on_symbols_csv_value(would_buy)
+        return merged
+
     def risk_on_detail_for(advisory_row, detail_rows, top_k):
         strategy_key = risk_on_multi_buy_strategy_key(advisory_row)
         if strategy_key:
-            for row in detail_rows:
-                if risk_on_multi_buy_strategy_key(row) == strategy_key:
-                    return row
-        if top_k is not None:
-            for row in detail_rows:
-                detail_top_k = risk_on_top_k(row, risk_on_multi_buy_strategy_key(row))
-                if detail_top_k == top_k:
-                    return row
-        return None
+            candidates = [row for row in detail_rows if risk_on_multi_buy_strategy_key(row) == strategy_key]
+        else:
+            candidates = []
+        if not candidates and top_k is not None:
+            candidates = [
+                row for row in detail_rows
+                if risk_on_top_k(row, risk_on_multi_buy_strategy_key(row)) == top_k
+            ]
+        if not candidates:
+            return None
+        advisory_run_id = flatten_value(advisory_value(advisory_row, "run_id", default="")).strip()
+        if advisory_run_id:
+            same_run = [row for row in candidates if flatten_value(row.get("run_id")).strip() == advisory_run_id]
+            if same_run:
+                candidates = same_run
+        latest_dt = max([risk_on_row_dt(row) for row in candidates if risk_on_row_dt(row) is not None], default=None)
+        if latest_dt is not None:
+            candidates = [row for row in candidates if risk_on_row_dt(row) == latest_dt]
+        else:
+            latest_run_id = max((flatten_value(row.get("run_id")).strip() for row in candidates), default="")
+            if latest_run_id:
+                candidates = [row for row in candidates if flatten_value(row.get("run_id")).strip() == latest_run_id]
+        return merge_risk_on_detail_rows(candidates)
 
     def risk_on_symbols_csv_value(symbols):
         return json.dumps(symbols, ensure_ascii=False) if symbols else not_obs

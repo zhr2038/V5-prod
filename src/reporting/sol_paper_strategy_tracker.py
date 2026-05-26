@@ -2154,8 +2154,15 @@ def _actual_bought_symbols_for_run(run_path: Path, candidate_rows: Iterable[Mapp
 def _risk_on_multi_buy_strategy_key(row: Mapping[str, Any]) -> str:
     keys = {
         str(row.get("strategy_candidate") or "").strip().lower(),
+        str(row.get("advisory_strategy_candidate") or "").strip().lower(),
         str(row.get("strategy_id") or "").strip().lower(),
+        str(row.get("advisory_strategy_id") or "").strip().lower(),
         str(row.get("experiment_name") or "").strip().lower(),
+        str(row.get("candidate") or "").strip().lower(),
+        str(row.get("candidate_name") or "").strip().lower(),
+        str(row.get("source_strategy_candidate") or "").strip().lower(),
+        str(row.get("strategy") or "").strip().lower(),
+        str(row.get("strategy_name") or "").strip().lower(),
     }
     for key in keys:
         if key in RISK_ON_MULTI_BUY_SHADOW_CANDIDATES:
@@ -2171,7 +2178,18 @@ def _risk_on_multi_buy_top_k(row: Mapping[str, Any]) -> Optional[int]:
     explicit = _normalize_float(row.get("top_k") or row.get("k"))
     if explicit is not None and explicit > 0:
         return int(explicit)
-    for key in ("strategy_candidate", "strategy_id", "experiment_name"):
+    for key in (
+        "strategy_candidate",
+        "advisory_strategy_candidate",
+        "strategy_id",
+        "advisory_strategy_id",
+        "experiment_name",
+        "candidate",
+        "candidate_name",
+        "source_strategy_candidate",
+        "strategy",
+        "strategy_name",
+    ):
         text = str(row.get(key) or "").strip().lower()
         marker = "risk_on_multi_buy_top"
         if marker not in text:
@@ -2192,6 +2210,9 @@ def _risk_on_multi_buy_detail_paths(*, run_path: Path, reports_dir: Path) -> lis
     raw_rel = Path("raw") / "reports" / "risk_on_multi_buy_shadow.csv"
     candidates = [
         reports_dir / "risk_on_multi_buy_shadow.csv",
+        reports_dir / "quant_lab" / "risk_on_multi_buy_shadow.csv",
+        reports_dir / "quant_lab_latest" / "risk_on_multi_buy_shadow.csv",
+        reports_dir / "quant_lab" / "latest" / "reports" / "risk_on_multi_buy_shadow.csv",
         reports_dir.parent / "reports" / "risk_on_multi_buy_shadow.csv",
         reports_dir.parent / raw_rel,
         run_path / "risk_on_multi_buy_shadow.csv",
@@ -2221,15 +2242,81 @@ def _risk_on_multi_buy_detail_for(
     rows = list(detail_rows)
     strategy_key = _risk_on_multi_buy_strategy_key(advisory_row)
     if strategy_key:
-        for row in rows:
-            if _risk_on_multi_buy_strategy_key(row) == strategy_key:
-                return row
-    if top_k is not None:
-        for row in rows:
-            detail_top_k = _risk_on_multi_buy_top_k(row)
-            if detail_top_k == top_k:
-                return row
-    return None
+        candidates = [row for row in rows if _risk_on_multi_buy_strategy_key(row) == strategy_key]
+    else:
+        candidates = []
+    if not candidates and top_k is not None:
+        candidates = [row for row in rows if _risk_on_multi_buy_top_k(row) == top_k]
+    if not candidates:
+        return None
+
+    advisory_run_id = str(advisory_row.get("run_id") or "").strip()
+    if advisory_run_id:
+        same_run = [row for row in candidates if str(row.get("run_id") or "").strip() == advisory_run_id]
+        if same_run:
+            candidates = same_run
+
+    latest_ts_ms = max((_risk_on_multi_buy_row_ts_ms(row) or -1) for row in candidates)
+    if latest_ts_ms >= 0:
+        candidates = [row for row in candidates if (_risk_on_multi_buy_row_ts_ms(row) or -1) == latest_ts_ms]
+    else:
+        latest_run_id = max((str(row.get("run_id") or "") for row in candidates), default="")
+        if latest_run_id:
+            candidates = [row for row in candidates if str(row.get("run_id") or "") == latest_run_id]
+    return _merge_risk_on_multi_buy_detail_rows(candidates)
+
+
+def _risk_on_multi_buy_row_ts_ms(row: Mapping[str, Any]) -> Optional[int]:
+    values = [
+        _advisory_time_ms(row.get(name))
+        for name in ("ts_utc", "timestamp", "sampled_at", "generated_at", "as_of_ts", "run_ts")
+    ]
+    values = [value for value in values if value is not None]
+    return max(values) if values else None
+
+
+def _merge_risk_on_multi_buy_detail_rows(rows: Iterable[Mapping[str, Any]]) -> Mapping[str, Any]:
+    candidates = list(rows)
+    if not candidates:
+        return {}
+    merged = dict(candidates[-1])
+    selected: list[str] = []
+    would_buy: list[str] = []
+    for row in candidates:
+        selected.extend(
+            _risk_on_symbol_list_from_row(
+                row,
+                (
+                    "selected_symbols",
+                    "selected_symbol_list",
+                    "top_symbols",
+                    "top_n_symbols",
+                    "symbols",
+                    "would_buy_symbols",
+                    "would_buy_symbol",
+                    "symbol",
+                ),
+            )
+        )
+        would_buy.extend(
+            _risk_on_symbol_list_from_row(
+                row,
+                (
+                    "would_buy_symbols",
+                    "would_buy_symbol",
+                    "would_enter_symbols",
+                    "would_open_symbols",
+                    "paper_buy_symbols",
+                    "selected_symbols",
+                    "symbol",
+                ),
+            )
+        )
+    if selected:
+        merged["selected_symbols"] = _risk_on_symbols_csv_value(selected)
+    if would_buy:
+        merged["would_buy_symbols"] = _risk_on_symbols_csv_value(would_buy)
+    return merged
 
 
 def _risk_on_multi_buy_shadow_rows(
