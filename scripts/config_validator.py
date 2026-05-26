@@ -79,6 +79,23 @@ def resolve_env_path() -> Path:
     return Path(resolve_runtime_env_path(project_root=WORKSPACE)).resolve()
 
 
+def resolve_config_path(config_name: str | os.PathLike[str]) -> Path:
+    """Resolve CLI config arguments without duplicating the configs/ prefix.
+
+    Bare names keep the historical behavior of resolving under CONFIG_DIR.
+    Paths such as configs/live_prod.yaml are workspace-relative, and absolute
+    paths are used as provided.
+    """
+
+    value = str(config_name or "live_prod.yaml").strip() or "live_prod.yaml"
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    if path.parent == Path("."):
+        return (CONFIG_DIR / path).resolve()
+    return (WORKSPACE / path).resolve()
+
+
 def _resolve_workspace_relative_path(raw_path, default: str) -> Path:
     value = str(raw_path or default).strip()
     path = Path(value)
@@ -156,8 +173,8 @@ class ConfigValidator:
     def check_yaml_config(self, config_name):
         """检查YAML配置文件"""
         self.log(f"\n📋 检查配置: {config_name}")
-        
-        config_path = CONFIG_DIR / config_name
+
+        config_path = resolve_config_path(config_name)
         if not config_path.exists():
             self.errors.append(f"配置文件不存在: {config_path}")
             self.log("配置文件不存在", 'FAIL')

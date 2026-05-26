@@ -120,6 +120,31 @@ def test_check_yaml_config_reads_utf8_config(monkeypatch, tmp_path) -> None:
     assert validator.warnings == []
 
 
+def test_check_yaml_config_accepts_workspace_relative_config_path(monkeypatch, tmp_path) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / "live_prod.yaml").write_text("execution: {}\nexchange: {}\n", encoding="utf-8")
+    monkeypatch.setattr(config_validator, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(config_validator, "CONFIG_DIR", configs_dir)
+
+    validator = config_validator.ConfigValidator()
+    config = validator.check_yaml_config("configs/live_prod.yaml")
+
+    assert config == {"execution": {}, "exchange": {}}
+    assert validator.errors == []
+
+
+def test_resolve_config_path_keeps_bare_names_under_config_dir(monkeypatch, tmp_path) -> None:
+    configs_dir = tmp_path / "configs"
+    monkeypatch.setattr(config_validator, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(config_validator, "CONFIG_DIR", configs_dir)
+
+    assert config_validator.resolve_config_path("live_prod.yaml") == (configs_dir / "live_prod.yaml").resolve()
+    assert config_validator.resolve_config_path("configs/live_prod.yaml") == (
+        tmp_path / "configs" / "live_prod.yaml"
+    ).resolve()
+
+
 def test_check_database_uses_runtime_db_paths_from_active_config(monkeypatch, tmp_path) -> None:
     workspace = tmp_path
     configs_dir = workspace / "configs"
