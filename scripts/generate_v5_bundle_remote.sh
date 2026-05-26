@@ -7161,6 +7161,109 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if post_min_hold_atr_better_12_rows
         else None
     )
+
+    SWING_ATR_SOFT_EXIT_MIN_SAMPLE_COUNT = 3
+    SWING_ATR_SOFT_EXIT_MIN_OBSERVABLE_12H_COUNT = 3
+    SWING_ATR_SOFT_EXIT_MIN_BETTER_12H_RATE = 0.60
+    SWING_ATR_SOFT_EXIT_MIN_IMPROVEMENT_BPS = 50.0
+
+    def swing_atr_soft_exit_readiness_reasons(
+        sample_count,
+        observable_12h_count,
+        better_to_hold_12h_rate,
+        improvement_bps,
+    ):
+        reasons = []
+        if sample_count < SWING_ATR_SOFT_EXIT_MIN_SAMPLE_COUNT:
+            reasons.append("sample_count_lt_3")
+        if observable_12h_count < SWING_ATR_SOFT_EXIT_MIN_OBSERVABLE_12H_COUNT:
+            reasons.append("observable_12h_count_lt_3")
+        if better_to_hold_12h_rate is None or better_to_hold_12h_rate < SWING_ATR_SOFT_EXIT_MIN_BETTER_12H_RATE:
+            reasons.append("better_to_hold_12h_rate_lt_0_60")
+        if improvement_bps is None or improvement_bps < SWING_ATR_SOFT_EXIT_MIN_IMPROVEMENT_BPS:
+            reasons.append("improvement_bps_lt_50")
+        return reasons
+
+    def build_swing_atr_soft_exit_readiness_by_symbol(rows):
+        out = []
+        for row in rows:
+            sample_count = as_int(row.get("sample_count"))
+            observable_12h_count = as_int(row.get("observable_12h_count"))
+            better_rate = as_float(row.get("better_to_hold_12h_rate"))
+            avg_realized = as_float(row.get("avg_realized_net_bps"))
+            avg_delayed_12h = as_float(row.get("avg_net_bps_if_held_12h_after_exit"))
+            improvement = (
+                avg_delayed_12h - avg_realized
+                if avg_delayed_12h is not None and avg_realized is not None
+                else None
+            )
+            blocking_reasons = swing_atr_soft_exit_readiness_reasons(
+                sample_count,
+                observable_12h_count,
+                better_rate,
+                improvement,
+            )
+            out.append({
+                "symbol": row.get("symbol", not_obs),
+                "ready_for_live_guard": str(not blocking_reasons).lower(),
+                "blocking_reasons": ";".join(blocking_reasons),
+                "sample_count": sample_count,
+                "observable_12h_count": observable_12h_count,
+                "better_to_hold_12h_rate": fmt_num(better_rate, 6),
+                "avg_realized_net_bps": fmt_num(avg_realized, 6),
+                "avg_delayed_12h_net_bps": fmt_num(avg_delayed_12h, 6),
+                "improvement_bps": fmt_num(improvement, 6),
+            })
+        return out
+
+    swing_atr_soft_exit_readiness_by_symbol = build_swing_atr_soft_exit_readiness_by_symbol(
+        post_min_hold_atr_exit_outcomes_by_symbol
+    )
+    swing_atr_soft_exit_ready_symbols = [
+        row for row in swing_atr_soft_exit_readiness_by_symbol
+        if row.get("ready_for_live_guard") == "true"
+    ]
+    swing_atr_soft_exit_avg_realized = swing_avg_numeric_field(
+        post_min_hold_atr_exit_rows,
+        "realized_net_bps",
+    )
+    swing_atr_soft_exit_avg_delayed_12h = swing_avg_numeric_field(
+        post_min_hold_atr_exit_rows,
+        "net_bps_if_held_12h_after_exit",
+    )
+    swing_atr_soft_exit_improvement_bps = (
+        swing_atr_soft_exit_avg_delayed_12h - swing_atr_soft_exit_avg_realized
+        if swing_atr_soft_exit_avg_delayed_12h is not None and swing_atr_soft_exit_avg_realized is not None
+        else None
+    )
+    swing_atr_soft_exit_readiness_blocking_reasons = swing_atr_soft_exit_readiness_reasons(
+        len(post_min_hold_atr_exit_rows),
+        len(post_min_hold_atr_better_12_rows),
+        post_min_hold_atr_better_12_rate,
+        swing_atr_soft_exit_improvement_bps,
+    )
+    if not swing_atr_soft_exit_readiness_blocking_reasons and not swing_atr_soft_exit_ready_symbols:
+        swing_atr_soft_exit_readiness_blocking_reasons.append("no_symbol_ready_for_live_guard")
+    swing_atr_soft_exit_readiness = {
+        "schema_version": "v5.swing_atr_soft_exit_readiness.v1",
+        "ready_for_live_guard": not bool(swing_atr_soft_exit_readiness_blocking_reasons),
+        "blocking_reasons": list(swing_atr_soft_exit_readiness_blocking_reasons),
+        "sample_count": len(post_min_hold_atr_exit_rows),
+        "observable_12h_count": len(post_min_hold_atr_better_12_rows),
+        "better_to_hold_12h_rate": post_min_hold_atr_better_12_rate if post_min_hold_atr_better_12_rate is not None else not_obs,
+        "avg_realized_net_bps": swing_atr_soft_exit_avg_realized if swing_atr_soft_exit_avg_realized is not None else not_obs,
+        "avg_delayed_12h_net_bps": swing_atr_soft_exit_avg_delayed_12h if swing_atr_soft_exit_avg_delayed_12h is not None else not_obs,
+        "improvement_bps": swing_atr_soft_exit_improvement_bps if swing_atr_soft_exit_improvement_bps is not None else not_obs,
+        "ready_symbols": [row.get("symbol", not_obs) for row in swing_atr_soft_exit_ready_symbols],
+        "thresholds": {
+            "min_sample_count": SWING_ATR_SOFT_EXIT_MIN_SAMPLE_COUNT,
+            "min_observable_12h_count": SWING_ATR_SOFT_EXIT_MIN_OBSERVABLE_12H_COUNT,
+            "min_better_to_hold_12h_rate": SWING_ATR_SOFT_EXIT_MIN_BETTER_12H_RATE,
+            "min_improvement_bps": SWING_ATR_SOFT_EXIT_MIN_IMPROVEMENT_BPS,
+        },
+        "by_symbol": swing_atr_soft_exit_readiness_by_symbol,
+    }
+
     if (
         len(post_min_hold_atr_exit_rows) >= 3
         and len(post_min_hold_atr_better_12_rows) >= 3
@@ -8760,6 +8863,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         post_min_hold_atr_exit_outcomes_by_symbol,
         ["symbol", "sample_count", "avg_realized_net_bps", "avg_net_bps_if_held_6h_after_exit", "avg_net_bps_if_held_12h_after_exit", "avg_net_bps_if_held_24h_after_exit", "observable_6h_count", "better_to_hold_6h_count", "better_to_hold_6h_rate", "observable_12h_count", "better_to_hold_12h_count", "better_to_hold_12h_rate", "observable_24h_count", "better_to_hold_24h_count", "better_to_hold_24h_rate", "diagnosis_mix"],
     )
+    write_text(
+        "summaries/swing_atr_soft_exit_readiness.json",
+        json.dumps(swing_atr_soft_exit_readiness, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    )
+    write_csv(
+        "summaries/swing_atr_soft_exit_readiness_by_symbol.csv",
+        swing_atr_soft_exit_readiness_by_symbol,
+        ["symbol", "ready_for_live_guard", "blocking_reasons", "sample_count", "observable_12h_count", "better_to_hold_12h_rate", "avg_realized_net_bps", "avg_delayed_12h_net_bps", "improvement_bps"],
+    )
     write_csv(
         "summaries/swing_atr_soft_exit_shadow.csv",
         swing_atr_soft_exit_shadow_rows,
@@ -10345,6 +10457,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "post_min_hold_atr_better_to_hold_12h_count": post_min_hold_atr_better_12_count,
         "post_min_hold_atr_observable_12h_count": len(post_min_hold_atr_better_12_rows),
         "post_min_hold_atr_medium_issue": bool(post_min_hold_atr_medium_issue_present),
+        "swing_atr_soft_exit_ready_for_live_guard": swing_atr_soft_exit_readiness.get("ready_for_live_guard", False),
+        "swing_atr_soft_exit_readiness_blocking_reasons": swing_atr_soft_exit_readiness.get("blocking_reasons", []),
+        "swing_atr_soft_exit_readiness_improvement_bps": swing_atr_soft_exit_readiness.get("improvement_bps", not_obs),
         "swing_atr_soft_exit_shadow_rows": len(swing_atr_soft_exit_shadow_rows),
         "swing_atr_soft_exit_shadow_would_delay_count": sum(
             1 for row in swing_atr_soft_exit_shadow_rows
@@ -11073,6 +11188,19 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- medium issue present: {'yes' if post_min_hold_atr_medium_issue_present else 'no'}",
         "- output: summaries/post_min_hold_atr_exit_audit.csv and summaries/post_min_hold_atr_exit_outcomes_by_symbol.csv",
         "",
+        "## Swing ATR soft-exit readiness",
+        f"- ready_for_live_guard: {str(swing_atr_soft_exit_readiness.get('ready_for_live_guard', False)).lower()}",
+        f"- blocking_reasons: {json.dumps(swing_atr_soft_exit_readiness.get('blocking_reasons', []), ensure_ascii=False)}",
+        f"- sample_count: {swing_atr_soft_exit_readiness.get('sample_count', 0)}",
+        f"- observable_12h_count: {swing_atr_soft_exit_readiness.get('observable_12h_count', 0)}",
+        f"- better_to_hold_12h_rate: {fmt_num(swing_atr_soft_exit_readiness.get('better_to_hold_12h_rate'), 6)}",
+        f"- avg_realized_net_bps: {fmt_num(swing_atr_soft_exit_readiness.get('avg_realized_net_bps'), 6)}",
+        f"- avg_delayed_12h_net_bps: {fmt_num(swing_atr_soft_exit_readiness.get('avg_delayed_12h_net_bps'), 6)}",
+        f"- improvement_bps: {fmt_num(swing_atr_soft_exit_readiness.get('improvement_bps'), 6)}",
+        f"- ready_symbols: {json.dumps(swing_atr_soft_exit_readiness.get('ready_symbols', []), ensure_ascii=False)}",
+        "- interpretation: do not enable the real soft-exit guard until readiness is true and symbol-level evidence is sufficient.",
+        "- output: summaries/swing_atr_soft_exit_readiness.json and summaries/swing_atr_soft_exit_readiness_by_symbol.csv",
+        "",
         "## BNB profit-lock / ATR trailing shadow",
         f"- sample_count: {bnb_profit_lock_shadow_sample_count}",
         f"- sample_count_gate_met_for_exit_change_review: {str(bnb_profit_lock_shadow_sample_gate_met).lower()}",
@@ -11521,6 +11649,8 @@ sanity = {
     "contains summaries/probe_lifecycle_audit.csv": (OUT / "summaries/probe_lifecycle_audit.csv").is_file(),
     "contains summaries/open_probe_watch.csv": (OUT / "summaries/open_probe_watch.csv").is_file(),
     "contains summaries/post_min_hold_atr_exit_audit.csv": (OUT / "summaries/post_min_hold_atr_exit_audit.csv").is_file(),
+    "contains summaries/swing_atr_soft_exit_readiness.json": (OUT / "summaries/swing_atr_soft_exit_readiness.json").is_file(),
+    "contains summaries/swing_atr_soft_exit_readiness_by_symbol.csv": (OUT / "summaries/swing_atr_soft_exit_readiness_by_symbol.csv").is_file(),
     "contains summaries/swing_atr_soft_exit_shadow.csv": (OUT / "summaries/swing_atr_soft_exit_shadow.csv").is_file(),
     "contains summaries/bnb_risk_summary.json": (OUT / "summaries/bnb_risk_summary.json").is_file(),
     "contains summaries/quant_lab_compliance.csv": (OUT / "summaries/quant_lab_compliance.csv").is_file(),
@@ -11561,6 +11691,8 @@ failure_check_names = [
     "contains summaries/probe_lifecycle_audit.csv",
     "contains summaries/open_probe_watch.csv",
     "contains summaries/post_min_hold_atr_exit_audit.csv",
+    "contains summaries/swing_atr_soft_exit_readiness.json",
+    "contains summaries/swing_atr_soft_exit_readiness_by_symbol.csv",
     "contains summaries/swing_atr_soft_exit_shadow.csv",
     "contains summaries/bnb_risk_summary.json",
     "contains summaries/quant_lab_compliance.csv",

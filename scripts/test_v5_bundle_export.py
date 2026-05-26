@@ -3923,6 +3923,8 @@ def main():
             with tarfile.open(bundle, "r:gz") as tf:
                 rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/post_min_hold_atr_exit_audit.csv")).read().decode().splitlines()))
                 by_symbol = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/post_min_hold_atr_exit_outcomes_by_symbol.csv")).read().decode().splitlines()))
+                readiness = json.loads(tf.extractfile(extract_member(tf, "summaries/swing_atr_soft_exit_readiness.json")).read().decode())
+                readiness_by_symbol = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/swing_atr_soft_exit_readiness_by_symbol.csv")).read().decode().splitlines()))
                 shadow = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/swing_atr_soft_exit_shadow.csv")).read().decode().splitlines()))
                 bnb_profit = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_profit_lock_shadow.csv")).read().decode().splitlines()))
                 bnb_risk = json.loads(tf.extractfile(extract_member(tf, "summaries/bnb_risk_summary.json")).read().decode())
@@ -3971,6 +3973,18 @@ def main():
             by_symbol_map = {row["symbol"]: row for row in by_symbol}
             assert by_symbol_map["BNB/USDT"]["sample_count"] == "1", by_symbol
             assert by_symbol_map["BNB/USDT"]["better_to_hold_12h_rate"] == "1", by_symbol
+            assert readiness["ready_for_live_guard"] is False, readiness
+            assert readiness["sample_count"] == 4, readiness
+            assert readiness["observable_12h_count"] == 4, readiness
+            assert readiness["better_to_hold_12h_rate"] == 1.0, readiness
+            assert readiness["improvement_bps"] > 300, readiness
+            assert "no_symbol_ready_for_live_guard" in readiness["blocking_reasons"], readiness
+            readiness_by_symbol_map = {row["symbol"]: row for row in readiness_by_symbol}
+            assert readiness_by_symbol_map["BNB/USDT"]["ready_for_live_guard"] == "false", readiness_by_symbol
+            assert readiness_by_symbol_map["BNB/USDT"]["sample_count"] == "1", readiness_by_symbol
+            assert "sample_count_lt_3" in readiness_by_symbol_map["BNB/USDT"]["blocking_reasons"], readiness_by_symbol
+            assert "observable_12h_count_lt_3" in readiness_by_symbol_map["BNB/USDT"]["blocking_reasons"], readiness_by_symbol
+            assert readiness_by_symbol_map["BNB/USDT"]["improvement_bps"] == "300", readiness_by_symbol
             medium_issues = [
                 item for item in issues["issues"]
                 if item.get("severity") == "medium" and item.get("code") == "post_min_hold_atr_exit_may_be_premature"
@@ -3980,6 +3994,8 @@ def main():
             assert window["post_min_hold_atr_exit_count"] == 4, window
             assert window["post_min_hold_atr_better_to_hold_12h_rate"] == 1.0, window
             assert window["post_min_hold_atr_medium_issue"] is True, window
+            assert window["swing_atr_soft_exit_ready_for_live_guard"] is False, window
+            assert "no_symbol_ready_for_live_guard" in window["swing_atr_soft_exit_readiness_blocking_reasons"], window
             assert window["swing_atr_soft_exit_shadow_rows"] == 4, window
             assert window["swing_atr_soft_exit_shadow_would_delay_count"] == 2, window
             assert window["bnb_profit_lock_shadow_rows"] == 1, window
@@ -4003,6 +4019,9 @@ def main():
             assert "## Post-min-hold ATR exit audit" in readme, readme
             assert "just-after-min-hold ATR exits: 4" in readme, readme
             assert "better_to_hold_12h_rate: 1 (4/4)" in readme, readme
+            assert "## Swing ATR soft-exit readiness" in readme, readme
+            assert "ready_for_live_guard: false" in readme, readme
+            assert "no_symbol_ready_for_live_guard" in readme, readme
             assert "## BNB profit-lock / ATR trailing shadow" in readme, readme
             assert "sample_count_gate_met_for_exit_change_review: false" in readme, readme
             assert "latest best_shadow_exit_policy: delayed_exit_24h" in readme, readme
