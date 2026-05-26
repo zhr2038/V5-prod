@@ -102,6 +102,14 @@ def _safe_extract_backup(archive: tarfile.TarFile, destination: Path) -> None:
             archive.extract(member, path=destination)
 
 
+def _resolve_backup_archive_path(backup_dir: Path, backup_name: str) -> Path:
+    backup_root = backup_dir.resolve()
+    backup_path = (backup_root / str(backup_name or "")).resolve()
+    if backup_path != backup_root and backup_root in backup_path.parents:
+        return backup_path
+    raise RuntimeError(f"unsafe backup path: {backup_name}")
+
+
 class BackupManager:
     """Create and retain workspace backups."""
 
@@ -285,7 +293,7 @@ class BackupManager:
         print("-" * 60)
 
     def restore_backup(self, backup_name):
-        backup_path = self.paths.backup_dir / backup_name
+        backup_path = _resolve_backup_archive_path(self.paths.backup_dir, str(backup_name or ""))
         if not backup_path.exists():
             self.log(f"backup missing: {backup_name}")
             return False

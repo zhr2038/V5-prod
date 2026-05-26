@@ -211,6 +211,23 @@ def test_backup_manager_restore_rejects_path_traversal(tmp_path) -> None:
     assert not (tmp_path / "escape.txt").exists()
 
 
+def test_backup_manager_restore_rejects_archive_path_outside_backup_dir(tmp_path) -> None:
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = tmp_path / "external.tar.gz"
+
+    with tarfile.open(archive_path, "w:gz") as archive:
+        payload = b"external"
+        info = tarfile.TarInfo(name="reports/orders.sqlite")
+        info.size = len(payload)
+        archive.addfile(info, io.BytesIO(payload))
+
+    manager = backup_manager.BackupManager(workspace=tmp_path)
+
+    with pytest.raises(RuntimeError, match="unsafe backup path"):
+        manager.restore_backup("../external.tar.gz")
+
+
 def test_backup_manager_restore_rejects_link_members(tmp_path) -> None:
     backup_dir = tmp_path / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
