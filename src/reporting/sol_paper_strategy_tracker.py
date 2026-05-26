@@ -395,6 +395,7 @@ RISK_ON_MULTI_BUY_SHADOW_FIELDS = [
     "would_buy_symbols",
     "actual_bought_symbols",
     "missed_symbols",
+    "source_detail_available",
     "response_action",
     "live_order_effect",
 ]
@@ -2082,8 +2083,21 @@ def _symbol_list_from_row(row: Mapping[str, Any], names: Iterable[str]) -> list[
     return []
 
 
+def _risk_on_symbol_list_from_row(row: Mapping[str, Any], names: Iterable[str]) -> list[str]:
+    for name in names:
+        symbols = [symbol for symbol in _symbol_list(row.get(name)) if symbol != "MULTI"]
+        if symbols:
+            return symbols
+    return []
+
+
 def _json_symbol_list(symbols: Iterable[str]) -> str:
     return json.dumps(list(dict.fromkeys(symbols)), ensure_ascii=False)
+
+
+def _risk_on_symbols_csv_value(symbols: Iterable[str]) -> str:
+    values = list(dict.fromkeys(symbols))
+    return _json_symbol_list(values) if values else "not_observable"
 
 
 def _actual_bought_symbols_for_run(run_path: Path, candidate_rows: Iterable[Mapping[str, Any]]) -> list[str]:
@@ -2110,13 +2124,20 @@ def _actual_bought_symbols_for_run(run_path: Path, candidate_rows: Iterable[Mapp
     return sorted(bought)
 
 
-def _risk_on_multi_buy_advisory(row: Mapping[str, Any]) -> bool:
+def _risk_on_multi_buy_strategy_key(row: Mapping[str, Any]) -> str:
     keys = {
         str(row.get("strategy_candidate") or "").strip().lower(),
         str(row.get("strategy_id") or "").strip().lower(),
         str(row.get("experiment_name") or "").strip().lower(),
     }
-    return any(key in RISK_ON_MULTI_BUY_SHADOW_CANDIDATES for key in keys if key)
+    for key in keys:
+        if key in RISK_ON_MULTI_BUY_SHADOW_CANDIDATES:
+            return key
+    return ""
+
+
+def _risk_on_multi_buy_advisory(row: Mapping[str, Any]) -> bool:
+    return bool(_risk_on_multi_buy_strategy_key(row))
 
 
 def _risk_on_multi_buy_top_k(row: Mapping[str, Any]) -> Optional[int]:
@@ -2140,9 +2161,54 @@ def _risk_on_multi_buy_top_k(row: Mapping[str, Any]) -> Optional[int]:
     return None
 
 
+def _risk_on_multi_buy_detail_paths(*, run_path: Path, reports_dir: Path) -> list[Path]:
+    raw_rel = Path("raw") / "reports" / "risk_on_multi_buy_shadow.csv"
+    candidates = [
+        reports_dir / "risk_on_multi_buy_shadow.csv",
+        reports_dir.parent / "reports" / "risk_on_multi_buy_shadow.csv",
+        reports_dir.parent / raw_rel,
+        run_path / "risk_on_multi_buy_shadow.csv",
+    ]
+    return list(dict.fromkeys(path.resolve() for path in candidates))
+
+
+def _read_risk_on_multi_buy_detail_rows(*, run_path: Path, reports_dir: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen_paths: set[Path] = set()
+    for path in _risk_on_multi_buy_detail_paths(run_path=run_path, reports_dir=reports_dir):
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        if not path.is_file():
+            continue
+        rows.extend(_read_raw_csv_path(path, target_filename="risk_on_multi_buy_shadow.csv"))
+    return rows
+
+
+def _risk_on_multi_buy_detail_for(
+    advisory_row: Mapping[str, Any],
+    detail_rows: Iterable[Mapping[str, Any]],
+    *,
+    top_k: Optional[int],
+) -> Optional[Mapping[str, Any]]:
+    rows = list(detail_rows)
+    strategy_key = _risk_on_multi_buy_strategy_key(advisory_row)
+    if strategy_key:
+        for row in rows:
+            if _risk_on_multi_buy_strategy_key(row) == strategy_key:
+                return row
+    if top_k is not None:
+        for row in rows:
+            detail_top_k = _risk_on_multi_buy_top_k(row)
+            if detail_top_k == top_k:
+                return row
+    return None
+
+
 def _risk_on_multi_buy_shadow_rows(
     advisory_rows: Iterable[Mapping[str, Any]],
     *,
+    detail_rows: Iterable[Mapping[str, Any]] = (),
     run_id: str,
     asof_ts_ms: int,
     audit: DecisionAudit,
@@ -2156,15 +2222,39 @@ def _risk_on_multi_buy_shadow_rows(
     for row in advisory_rows:
         if not _risk_on_multi_buy_advisory(row):
             continue
-        selected = _symbol_list_from_row(
-            row,
-            ("selected_symbols", "would_buy_symbols", "symbol"),
-        )
-        would_buy = _symbol_list_from_row(
-            row,
-            ("would_buy_symbols", "selected_symbols", "symbol"),
-        )
         top_k = _risk_on_multi_buy_top_k(row)
+        detail_row = _risk_on_multi_buy_detail_for(row, detail_rows, top_k=top_k)
+        source_row = detail_row or row
+        source_detail_available = detail_row is not None
+        selected = _risk_on_symbol_list_from_row(
+            source_row,
+            (
+                "selected_symbols",
+                "selected_symbol_list",
+                "top_symbols",
+                "top_n_symbols",
+                "symbols",
+                "would_buy_symbols",
+                "would_buy_symbol",
+                "symbol",
+            ),
+        )
+        would_buy = _risk_on_symbol_list_from_row(
+            source_row,
+            (
+                "would_buy_symbols",
+                "would_buy_symbol",
+                "would_enter_symbols",
+                "would_open_symbols",
+                "paper_buy_symbols",
+                "selected_symbols",
+                "symbol",
+            ),
+        )
+        if not selected and would_buy:
+            selected = list(would_buy)
+        if not would_buy and selected:
+            would_buy = list(selected)
         if top_k is not None and top_k > 0:
             selected = selected[:top_k]
             would_buy = would_buy[:top_k]
@@ -2178,10 +2268,11 @@ def _risk_on_multi_buy_shadow_rows(
                 "ts_utc": ts_utc,
                 "current_regime": current_regime,
                 "top_k": top_k,
-                "selected_symbols": _json_symbol_list(selected),
-                "would_buy_symbols": _json_symbol_list(would_buy),
+                "selected_symbols": _risk_on_symbols_csv_value(selected),
+                "would_buy_symbols": _risk_on_symbols_csv_value(would_buy),
                 "actual_bought_symbols": _json_symbol_list(actual_bought),
                 "missed_symbols": _json_symbol_list(missed),
+                "source_detail_available": bool(source_detail_available),
                 "response_action": "shadow_tracking",
                 "live_order_effect": "read_only_no_live_order",
             }
@@ -3324,6 +3415,7 @@ def update_sol_paper_strategy_tracker(
     )
     risk_on_multi_buy_rows = _risk_on_multi_buy_shadow_rows(
         advisory_rows,
+        detail_rows=_read_risk_on_multi_buy_detail_rows(run_path=run_path, reports_dir=reports_dir),
         run_id=str(getattr(audit, "run_id", "") or ""),
         asof_ts_ms=asof_ts_ms,
         audit=audit,

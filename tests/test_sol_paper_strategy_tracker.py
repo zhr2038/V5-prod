@@ -1651,17 +1651,107 @@ def test_risk_on_multi_buy_shadow_is_read_only(tmp_path: Path) -> None:
     assert json.loads(top1["selected_symbols"]) == ["ETH/USDT"]
     assert json.loads(top1["would_buy_symbols"]) == ["ETH/USDT"]
     assert json.loads(top1["missed_symbols"]) == ["ETH/USDT"]
+    assert top1["source_detail_available"] == "False"
     assert top2["current_regime"] == "ALT_IMPULSE"
     assert top2["top_k"] == "2"
     assert json.loads(top2["selected_symbols"]) == ["ETH/USDT", "SOL/USDT"]
     assert json.loads(top2["would_buy_symbols"]) == ["ETH/USDT", "SOL/USDT"]
     assert json.loads(top2["actual_bought_symbols"]) == ["SOL/USDT"]
     assert json.loads(top2["missed_symbols"]) == ["ETH/USDT"]
+    assert top2["source_detail_available"] == "False"
     assert top3["top_k"] == "3"
     assert json.loads(top3["would_buy_symbols"]) == ["ETH/USDT", "SOL/USDT", "BNB/USDT"]
     assert json.loads(top3["missed_symbols"]) == ["ETH/USDT", "BNB/USDT"]
     assert all(row["response_action"] == "shadow_tracking" for row in rows)
     assert all(row["live_order_effect"] == "read_only_no_live_order" for row in rows)
+
+
+def test_risk_on_multi_buy_prefers_detail_file_selected_symbols(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    reports_dir = tmp_path / "reports"
+    run_dir = reports_dir / "runs" / "r_risk_on_detail"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        reports_dir,
+        [
+            {
+                "strategy_candidate": "v5.risk_on_multi_buy_top2_shadow",
+                "decision": "KEEP_SHADOW",
+                "recommended_mode": "shadow",
+                "current_regime": "ALT_IMPULSE",
+                "symbol": "MULTI",
+                **_fresh_meta(start_s),
+            }
+        ],
+    )
+    with (reports_dir / "risk_on_multi_buy_shadow.csv").open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(
+            fh,
+            fieldnames=["strategy_candidate", "top_k", "current_regime", "selected_symbols", "would_buy_symbol"],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "strategy_candidate": "v5.risk_on_multi_buy_top2_shadow",
+                "top_k": "2",
+                "current_regime": "ALT_IMPULSE",
+                "selected_symbols": '["BNB-USDT","SOL-USDT"]',
+                "would_buy_symbol": "BNB-USDT",
+            }
+        )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_risk_on_detail", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["risk_on_multi_buy_shadow_rows"] == 1
+    rows = _read_csv(reports_dir / "summaries" / "risk_on_multi_buy_shadow.csv")
+    row = rows[0]
+    assert json.loads(row["selected_symbols"]) == ["BNB/USDT", "SOL/USDT"]
+    assert json.loads(row["would_buy_symbols"]) == ["BNB/USDT"]
+    assert row["source_detail_available"] == "True"
+
+
+def test_risk_on_multi_buy_advisory_multi_symbol_is_not_observable_without_detail(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    reports_dir = tmp_path / "reports"
+    run_dir = reports_dir / "runs" / "r_risk_on_multi_only"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        reports_dir,
+        [
+            {
+                "strategy_candidate": "v5.risk_on_multi_buy_top2_shadow",
+                "decision": "KEEP_SHADOW",
+                "recommended_mode": "shadow",
+                "current_regime": "ALT_IMPULSE",
+                "symbol": "MULTI",
+                **_fresh_meta(start_s),
+            }
+        ],
+    )
+
+    update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_risk_on_multi_only", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    rows = _read_csv(reports_dir / "summaries" / "risk_on_multi_buy_shadow.csv")
+    row = rows[0]
+    assert row["selected_symbols"] == "not_observable"
+    assert row["would_buy_symbols"] == "not_observable"
+    assert row["source_detail_available"] == "False"
 
 
 def test_strategy_advisory_uses_fresh_local_without_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -3141,6 +3141,18 @@ def fixture_entry_quality_advisory_root(root):
         + "\n",
     )
     write_text(
+        root / "reports/risk_on_multi_buy_shadow.csv",
+        "\n".join(
+            [
+                "strategy_candidate,top_k,current_regime,selected_symbols,would_buy_symbol",
+                'v5.risk_on_multi_buy_top1_shadow,1,ALT_IMPULSE,"[""BNB-USDT""]",BNB-USDT',
+                'v5.risk_on_multi_buy_top2_shadow,2,ALT_IMPULSE,"[""BNB-USDT"",""SOL-USDT""]",BNB-USDT',
+                'v5.risk_on_multi_buy_top3_shadow,3,ALT_IMPULSE,"[""BNB-USDT"",""SOL-USDT"",""ETH-USDT""]",BNB-USDT',
+            ]
+        )
+        + "\n",
+    )
+    write_text(
         root / "reports/summaries/expanded_universe_advisory_reader.csv",
         "run_id,ts_utc,universe_type,symbol,response_action,live_order_effect\n"
         "r_expanded,2026-05-20T00:00:00Z,expanded_paper,TRX/USDT,paper_tracking,read_only_no_live_order\n",
@@ -4739,6 +4751,7 @@ def main():
                 alpha_factory = tf.extractfile(extract_member(tf, "summaries/alpha_factory_advisory_reader.csv")).read().decode()
                 alpha_factory_family = tf.extractfile(extract_member(tf, "summaries/alpha_factory_family_summary.csv")).read().decode()
                 risk_on_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/risk_on_multi_buy_shadow.csv")).read().decode().splitlines()))
+                raw_risk_on = tf.extractfile(extract_member(tf, "raw/reports/risk_on_multi_buy_shadow.csv")).read().decode()
                 raw_missed_low = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/missed_low_audit.csv")).read().decode()
                 raw_missed_by_symbol = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/missed_low_by_symbol.csv")).read().decode()
                 raw_late_sensitivity = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/late_entry_chase_threshold_sensitivity.csv")).read().decode()
@@ -4789,12 +4802,17 @@ def main():
             assert "v5.expanded_relative_strength_top1_shadow" in alpha_factory, alpha_factory
             assert "read_only_no_live_order" in alpha_factory, alpha_factory
             assert "expanded" in alpha_factory_family, alpha_factory_family
+            assert "BNB-USDT" in raw_risk_on and "SOL-USDT" in raw_risk_on, raw_risk_on
             assert len(risk_on_rows) == 3, risk_on_rows
             by_top_k = {row["top_k"]: row for row in risk_on_rows}
             assert by_top_k["1"]["current_regime"] == "ALT_IMPULSE", risk_on_rows
-            assert json.loads(by_top_k["1"]["would_buy_symbols"]) == ["ETH/USDT"], by_top_k["1"]
-            assert json.loads(by_top_k["2"]["would_buy_symbols"]) == ["ETH/USDT", "SOL/USDT"], by_top_k["2"]
-            assert json.loads(by_top_k["3"]["would_buy_symbols"]) == ["ETH/USDT", "SOL/USDT", "BNB/USDT"], by_top_k["3"]
+            assert json.loads(by_top_k["1"]["selected_symbols"]) == ["BNB/USDT"], by_top_k["1"]
+            assert json.loads(by_top_k["2"]["selected_symbols"]) == ["BNB/USDT", "SOL/USDT"], by_top_k["2"]
+            assert json.loads(by_top_k["3"]["selected_symbols"]) == ["BNB/USDT", "SOL/USDT", "ETH/USDT"], by_top_k["3"]
+            assert json.loads(by_top_k["1"]["would_buy_symbols"]) == ["BNB/USDT"], by_top_k["1"]
+            assert json.loads(by_top_k["2"]["would_buy_symbols"]) == ["BNB/USDT"], by_top_k["2"]
+            assert json.loads(by_top_k["3"]["would_buy_symbols"]) == ["BNB/USDT"], by_top_k["3"]
+            assert all(row["source_detail_available"] == "true" for row in risk_on_rows), risk_on_rows
             assert all(row["response_action"] == "shadow_tracking" for row in risk_on_rows), risk_on_rows
             assert all(row["live_order_effect"] == "read_only_no_live_order" for row in risk_on_rows), risk_on_rows
             assert raw_pullback["rows"][0]["ready_for_paper"] is True, raw_pullback
@@ -4805,6 +4823,9 @@ def main():
             assert "would_enter_count: 1" in readme, readme
             assert "late_entry_chase_guard_enabled: false" in readme, readme
             assert "live_order_effect: read_only_no_hard_block" in readme, readme
+            assert "## Risk-on multi-buy shadow" in readme, readme
+            assert "BNB/USDT" in readme and "SOL/USDT" in readme, readme
+            assert "source_detail_available: true" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

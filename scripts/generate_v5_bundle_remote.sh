@@ -177,6 +177,7 @@ RISK_ON_MULTI_BUY_SHADOW_FIELDS = (
     "would_buy_symbols",
     "actual_bought_symbols",
     "missed_symbols",
+    "source_detail_available",
     "response_action",
     "live_order_effect",
 )
@@ -945,6 +946,7 @@ def copy_current_reports():
         ("reports/quant_lab/strategy_opportunity_advisory.csv", "raw/reports/quant_lab/strategy_opportunity_advisory.csv"),
         ("reports/quant_lab_latest/strategy_opportunity_advisory.csv", "raw/reports/quant_lab_latest/strategy_opportunity_advisory.csv"),
         ("reports/quant_lab/latest/reports/strategy_opportunity_advisory.csv", "raw/reports/quant_lab/latest/reports/strategy_opportunity_advisory.csv"),
+        ("reports/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
         ("reports/summaries/strategy_opportunity_advisory_reader.csv", "summaries/strategy_opportunity_advisory_reader.csv"),
     ):
         if (ROOT / src_rel).is_file():
@@ -3945,6 +3947,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         seen = set()
         for item in raw:
             symbol = normalize_multi_symbol_text(item)
+            if symbol == "MULTI":
+                continue
             if not symbol or symbol in seen:
                 continue
             seen.add(symbol)
@@ -9556,22 +9560,82 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             return api_rows
         return [row for row in strategy_advisory_rows_for_modules if risk_on_multi_buy_strategy_key(row)]
 
+    def risk_on_detail_rows():
+        detail_paths = [
+            OUT / "raw" / "reports" / "risk_on_multi_buy_shadow.csv",
+            ROOT / "raw" / "reports" / "risk_on_multi_buy_shadow.csv",
+            ROOT / "reports" / "risk_on_multi_buy_shadow.csv",
+        ]
+        rows = []
+        seen_paths = set()
+        for path in detail_paths:
+            key = path.as_posix()
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            for row in load_csv_dicts(path):
+                payload = dict(row)
+                payload.setdefault("source_path", key)
+                rows.append(payload)
+        return rows
+
+    def risk_on_detail_for(advisory_row, detail_rows, top_k):
+        strategy_key = risk_on_multi_buy_strategy_key(advisory_row)
+        if strategy_key:
+            for row in detail_rows:
+                if risk_on_multi_buy_strategy_key(row) == strategy_key:
+                    return row
+        if top_k is not None:
+            for row in detail_rows:
+                detail_top_k = risk_on_top_k(row, risk_on_multi_buy_strategy_key(row))
+                if detail_top_k == top_k:
+                    return row
+        return None
+
+    def risk_on_symbols_csv_value(symbols):
+        return json.dumps(symbols, ensure_ascii=False) if symbols else not_obs
+
     existing_risk_on_rows = load_csv_dicts(OUT / "summaries" / "risk_on_multi_buy_shadow.csv")
-    if not existing_risk_on_rows:
+    risk_on_source_rows = risk_on_source_advisory_rows()
+    risk_on_detail_source_rows = risk_on_detail_rows()
+    risk_on_rows = []
+    if risk_on_source_rows:
         actual_bought_symbols = risk_on_actual_bought_symbols()
-        risk_on_rows = []
         default_run_id = copied_runs[-1] if copied_runs else f"bundle_{STAMP}"
-        for advisory_row in risk_on_source_advisory_rows():
+        for advisory_row in risk_on_source_rows:
             strategy_key = risk_on_multi_buy_strategy_key(advisory_row)
             top_k = risk_on_top_k(advisory_row, strategy_key)
+            detail_row = risk_on_detail_for(advisory_row, risk_on_detail_source_rows, top_k)
+            source_row = detail_row or advisory_row
             selected_symbols = risk_on_symbols_from_row(
-                advisory_row,
-                ("selected_symbols", "selected_symbol_list", "top_symbols", "top_n_symbols", "would_buy_symbols", "symbol"),
+                source_row,
+                (
+                    "selected_symbols",
+                    "selected_symbol_list",
+                    "top_symbols",
+                    "top_n_symbols",
+                    "symbols",
+                    "would_buy_symbols",
+                    "would_buy_symbol",
+                    "symbol",
+                ),
             )
             would_buy_symbols = risk_on_symbols_from_row(
-                advisory_row,
-                ("would_buy_symbols", "would_enter_symbols", "would_open_symbols", "paper_buy_symbols", "selected_symbols", "symbol"),
+                source_row,
+                (
+                    "would_buy_symbols",
+                    "would_buy_symbol",
+                    "would_enter_symbols",
+                    "would_open_symbols",
+                    "paper_buy_symbols",
+                    "selected_symbols",
+                    "symbol",
+                ),
             )
+            if not selected_symbols and would_buy_symbols:
+                selected_symbols = list(would_buy_symbols)
+            if not would_buy_symbols and selected_symbols:
+                would_buy_symbols = list(selected_symbols)
             if top_k is not None and top_k > 0:
                 selected_symbols = selected_symbols[:top_k]
                 would_buy_symbols = would_buy_symbols[:top_k]
@@ -9581,14 +9645,38 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "ts_utc": flatten_value(advisory_value(advisory_row, "ts_utc", "generated_at", "as_of_ts", default=NOW.strftime("%Y-%m-%dT%H:%M:%SZ"))),
                 "current_regime": flatten_value(advisory_value(advisory_row, "current_regime", "regime_state", "market_regime", "risk_regime", default=not_obs)),
                 "top_k": top_k if top_k is not None else not_obs,
-                "selected_symbols": json.dumps(selected_symbols, ensure_ascii=False),
-                "would_buy_symbols": json.dumps(would_buy_symbols, ensure_ascii=False),
+                "selected_symbols": risk_on_symbols_csv_value(selected_symbols),
+                "would_buy_symbols": risk_on_symbols_csv_value(would_buy_symbols),
                 "actual_bought_symbols": json.dumps(actual_bought_symbols, ensure_ascii=False),
                 "missed_symbols": json.dumps(missed_symbols, ensure_ascii=False),
+                "source_detail_available": str(detail_row is not None).lower(),
                 "response_action": "shadow_tracking",
                 "live_order_effect": "read_only_no_live_order",
             })
+    else:
+        risk_on_rows = existing_risk_on_rows
+        for row in risk_on_rows:
+            row.setdefault("source_detail_available", "false")
+            selected_symbols = risk_on_symbol_list(row.get("selected_symbols"))
+            if not selected_symbols and flatten_value(row.get("selected_symbols")) != not_obs:
+                row["selected_symbols"] = not_obs
+            would_buy_symbols = risk_on_symbol_list(row.get("would_buy_symbols"))
+            if not would_buy_symbols and flatten_value(row.get("would_buy_symbols")) != not_obs:
+                row["would_buy_symbols"] = not_obs
+    if risk_on_rows:
         write_csv("summaries/risk_on_multi_buy_shadow.csv", risk_on_rows, RISK_ON_MULTI_BUY_SHADOW_FIELDS)
+
+    risk_on_latest_selected_symbols = not_obs
+    risk_on_source_detail_available = False
+    if risk_on_rows:
+        latest_ts = max(flatten_value(row.get("ts_utc")) for row in risk_on_rows)
+        latest_rows = [row for row in risk_on_rows if flatten_value(row.get("ts_utc")) == latest_ts]
+        latest_payload = {
+            flatten_value(row.get("top_k")) or str(index + 1): flatten_value(row.get("selected_symbols")) or not_obs
+            for index, row in enumerate(latest_rows)
+        }
+        risk_on_latest_selected_symbols = json.dumps(latest_payload, ensure_ascii=False, sort_keys=True)
+        risk_on_source_detail_available = any(truthy_text(row.get("source_detail_available")) for row in latest_rows)
 
     high_count = sum(1 for item in issues if item.get("severity") == "high")
     medium_count = sum(1 for item in issues if item.get("severity") == "medium")
@@ -10085,6 +10173,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "pullback_reversal_ready_for_live_probe": pullback_reversal_ready_for_live_probe,
         "late_entry_chase_guard_enabled": bool(late_entry_chase_guard_enabled),
         "pullback_reversal_live_enabled": bool(pullback_reversal_live_enabled),
+        "risk_on_multi_buy_shadow_rows": len(risk_on_rows),
+        "risk_on_multi_buy_latest_selected_symbols": risk_on_latest_selected_symbols,
+        "risk_on_multi_buy_source_detail_available": bool(risk_on_source_detail_available),
         "telemetry_contract_version": QUANT_LAB_CONTRACT_VERSION,
         "telemetry_schema_version": QUANT_LAB_SCHEMA_VERSION,
         "rank_exit_sell_count": len(rank_exit_consistency_rows),
@@ -10765,6 +10856,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- pullback_reversal_live_enabled: {str(window_summary.get('pullback_reversal_live_enabled', False)).lower()}",
         "- live_order_effect: read_only_no_hard_block",
         "- output: summaries/entry_quality_advisory_reader.csv and raw/reports/entry_quality/*",
+        "",
+        "## Risk-on multi-buy shadow",
+        f"- rows: {window_summary.get('risk_on_multi_buy_shadow_rows', not_obs)}",
+        f"- latest selected_symbols: {window_summary.get('risk_on_multi_buy_latest_selected_symbols', not_obs)}",
+        f"- source_detail_available: {str(window_summary.get('risk_on_multi_buy_source_detail_available', False)).lower()}",
+        "- live_order_effect: read_only_no_live_order",
+        "- output: summaries/risk_on_multi_buy_shadow.csv",
         "",
         "## Probe 生命周期检查",
         f"- 今天是否有 market_impulse_probe / btc_leadership_probe: market_impulse_probe={bool(market_probe_seen or probe_counts['market_impulse_probe_candidate_count'] or probe_counts['market_impulse_probe_open_count'])}, btc_leadership_probe={bool(btc_seen_in_decision_audit or probe_counts['btc_leadership_probe_candidate_count'] or probe_counts['btc_leadership_probe_open_count'] or probe_counts['btc_leadership_probe_blocked_count'])}",
