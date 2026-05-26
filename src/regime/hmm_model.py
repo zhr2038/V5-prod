@@ -275,8 +275,8 @@ class SimpleGaussianHMM:
             }, f)
         return sha256_file(Path(path))
 
-    def load(self, path: Path, *, expected_sha256: str | None = None, require_hash: bool = False):
-        """加载模型"""
+    def load(self, path: Path, *, expected_sha256: str | None = None, require_hash: bool = True):
+        """加载模型，默认要求 sha256 校验以避免未验证 pickle 进入运行时。"""
         artifact_path = verified_hmm_pickle_artifact_path(
             Path(path),
             expected_sha256=expected_sha256,

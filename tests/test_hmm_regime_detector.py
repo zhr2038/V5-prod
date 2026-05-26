@@ -110,3 +110,22 @@ def test_hmm_pickle_load_rejects_info_without_sha256(tmp_path, monkeypatch) -> N
 
     with pytest.raises(RuntimeError, match="sha256 missing"):
         SimpleGaussianHMM(n_components=2).load(model_path)
+
+
+def test_hmm_pickle_load_rejects_missing_info_by_default(tmp_path, monkeypatch) -> None:
+    model_path = tmp_path / "hmm_regime.pkl"
+    _trained_hmm_payload().save(model_path)
+    monkeypatch.delenv("V5_ALLOW_LEGACY_HMM_PICKLE_LOAD", raising=False)
+
+    with pytest.raises(RuntimeError, match="sha256 missing"):
+        SimpleGaussianHMM(n_components=2).load(model_path)
+
+
+def test_hmm_pickle_load_legacy_env_allows_missing_info(tmp_path, monkeypatch) -> None:
+    model_path = tmp_path / "hmm_regime.pkl"
+    _trained_hmm_payload().save(model_path)
+    monkeypatch.setenv("V5_ALLOW_LEGACY_HMM_PICKLE_LOAD", "YES")
+
+    loaded = SimpleGaussianHMM(n_components=2).load(model_path)
+
+    assert loaded.converged is True
