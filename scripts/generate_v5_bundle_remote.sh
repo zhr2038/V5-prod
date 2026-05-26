@@ -7255,6 +7255,127 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 )
             swing_atr_soft_exit_shadow_rows.append(shadow_row)
 
+    BNB_PROFIT_LOCK_SYMBOL = "BNB/USDT"
+    BNB_PROFIT_LOCK_THRESHOLDS = (30, 50)
+    BNB_PROFIT_LOCK_DELAY_HOURS = (6, 12, 24)
+
+    def cache_max_close_between(symbol, start_dt, end_dt):
+        if start_dt is None or end_dt is None:
+            return None
+        start_ms = int(start_dt.timestamp() * 1000.0)
+        end_ms = int(end_dt.timestamp() * 1000.0)
+        if end_ms < start_ms:
+            return None
+        values = [
+            close
+            for ts_ms, close in load_cache_candles(symbol)
+            if start_ms <= int(ts_ms) <= end_ms
+        ]
+        return max(values) if values else None
+
+    def bnb_profit_lock_max_unrealized_bps(row, entry_dt, exit_dt):
+        direct_bps = max_numeric(
+            first_nested_value_from_row(row, ("max_unrealized_bps",)),
+            first_nested_value_from_row(row, ("max_unrealized_net_bps",)),
+            first_nested_value_from_row(row, ("highest_unrealized_net_bps",)),
+            first_nested_value_from_row(row, ("highest_net_bps",)),
+            first_nested_value_from_row(row, ("mfe_bps",)),
+            first_nested_value_from_row(row, ("max_favorable_excursion_bps",)),
+        )
+        if direct_bps is not None:
+            return direct_bps
+        entry_px = as_float(row.get("entry_px"))
+        if entry_px is None or entry_px <= 0:
+            return None
+        highest_px = max_numeric(
+            first_nested_value_from_row(row, ("highest_px_before_exit",)),
+            first_nested_value_from_row(row, ("highest_px",)),
+            first_nested_value_from_row(row, ("highest_price",)),
+            first_nested_value_from_row(row, ("max_px",)),
+            first_nested_value_from_row(row, ("max_price",)),
+            first_nested_value_from_row(row, ("high_px",)),
+            cache_max_close_between(row.get("symbol"), entry_dt, exit_dt),
+            row.get("entry_px"),
+            row.get("exit_px"),
+        )
+        if highest_px is None or highest_px <= 0:
+            return None
+        return ((highest_px / entry_px) - 1.0) * 10000.0 - swing_rt_cost_bps
+
+    def profit_lock_shadow_exit_value(max_unrealized_bps, threshold_bps):
+        max_value = as_float(max_unrealized_bps)
+        if max_value is None:
+            return not_obs
+        if max_value >= float(threshold_bps):
+            return fmt_num(float(threshold_bps), 6)
+        return "not_triggered"
+
+    def best_bnb_shadow_exit_policy(row):
+        candidates = [("actual_exit", row.get("actual_exit_net_bps"))]
+        for threshold in BNB_PROFIT_LOCK_THRESHOLDS:
+            candidates.append((f"profit_lock_{threshold}bps_exit", row.get(f"profit_lock_{threshold}bps_exit")))
+        for horizon in BNB_PROFIT_LOCK_DELAY_HOURS:
+            candidates.append((f"delayed_exit_{horizon}h", row.get(f"delayed_exit_{horizon}h")))
+        numeric_candidates = [
+            (name, as_float(value))
+            for name, value in candidates
+            if as_float(value) is not None
+        ]
+        if not numeric_candidates:
+            return not_obs
+        best_name, _best_value = max(numeric_candidates, key=lambda item: item[1])
+        return best_name
+
+    def bnb_profit_lock_diagnosis(row):
+        best_policy = row.get("best_shadow_exit_policy")
+        if best_policy == not_obs:
+            return "bnb_profit_lock_shadow_not_observable"
+        if best_policy == "actual_exit":
+            return "actual_atr_exit_best_or_tied"
+        if best_policy.startswith("profit_lock_"):
+            return "profit_lock_would_have_helped"
+        if best_policy.startswith("delayed_exit_"):
+            return "atr_trailing_delay_would_have_helped"
+        return "bnb_profit_lock_shadow_observed"
+
+    bnb_profit_lock_shadow_rows = []
+    for row in closed_roundtrip_rows:
+        if normalize_symbol_text(row.get("symbol")) != BNB_PROFIT_LOCK_SYMBOL:
+            continue
+        if not row_has_truthy_key(row, "swing_hold_position"):
+            continue
+        entry_dt = parse_dt_utc(row.get("entry_ts"))
+        exit_dt = parse_dt_utc(row.get("exit_ts"))
+        actual_exit_net_bps = first_observed(row.get("net_bps"), row.get("realized_net_bps"), not_obs)
+        max_unrealized_bps = bnb_profit_lock_max_unrealized_bps(row, entry_dt, exit_dt)
+        shadow_row = {
+            "symbol": row.get("symbol", BNB_PROFIT_LOCK_SYMBOL),
+            "entry_ts": row.get("entry_ts", not_obs),
+            "exit_ts": row.get("exit_ts", not_obs),
+            "entry_px": row.get("entry_px", not_obs),
+            "exit_px": row.get("exit_px", not_obs),
+            "exit_reason": row.get("exit_reason", not_obs),
+            "max_unrealized_bps": fmt_num(max_unrealized_bps, 6),
+            "actual_exit_net_bps": flatten_value(actual_exit_net_bps),
+        }
+        for threshold in BNB_PROFIT_LOCK_THRESHOLDS:
+            shadow_row[f"profit_lock_{threshold}bps_exit"] = profit_lock_shadow_exit_value(
+                max_unrealized_bps,
+                threshold,
+            )
+        for horizon in BNB_PROFIT_LOCK_DELAY_HOURS:
+            _delayed_px, delayed_net = price_and_net_if_held_after_exit(
+                row.get("symbol"),
+                row.get("entry_px"),
+                exit_dt,
+                horizon,
+                swing_rt_cost_bps,
+            )
+            shadow_row[f"delayed_exit_{horizon}h"] = delayed_net
+        shadow_row["best_shadow_exit_policy"] = best_bnb_shadow_exit_policy(shadow_row)
+        shadow_row["diagnosis"] = bnb_profit_lock_diagnosis(shadow_row)
+        bnb_profit_lock_shadow_rows.append(shadow_row)
+
     SOL_SWING_SYMBOL = "SOL/USDT"
 
     def is_sol_symbol(value):
@@ -8645,6 +8766,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         ["symbol", "exit_ts", "exit_px", "net_bps_at_exit", "f5_rsi_trend_confirm", "would_delay_exit_if_enabled", "hard_exit_reason", "net_bps_if_delayed_3h", "net_bps_if_delayed_6h", "net_bps_if_delayed_12h", "better_to_delay_3h", "better_to_delay_6h", "better_to_delay_12h"],
     )
     write_csv(
+        "summaries/bnb_profit_lock_shadow.csv",
+        bnb_profit_lock_shadow_rows,
+        ["symbol", "entry_ts", "exit_ts", "entry_px", "exit_px", "exit_reason", "max_unrealized_bps", "profit_lock_30bps_exit", "profit_lock_50bps_exit", "delayed_exit_6h", "delayed_exit_12h", "delayed_exit_24h", "actual_exit_net_bps", "best_shadow_exit_policy", "diagnosis"],
+    )
+    write_csv(
         "summaries/factor_contribution_audit.csv",
         factor_contribution_rows,
         ["ts_utc", "run_id", "symbol", "final_score", "alpha6_score", "raw_factors", "z_factors", "effective_factor_weights", "contribution_f1_mom_5d", "contribution_f2_mom_20d", "contribution_f3_vol_adj_ret", "contribution_f4_volume_expansion", "contribution_f5_rsi_trend_confirm", "dominant_factor", "dominant_factor_contribution_pct", "router_action", "router_reason", *[f"forward_{int(h)}h_net_bps" for h in label_horizons]],
@@ -9790,6 +9916,21 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         item.get("code") == "post_min_hold_atr_exit_may_be_premature"
         for item in issues
     )
+    bnb_profit_lock_shadow_sample_count = len(bnb_profit_lock_shadow_rows)
+    bnb_profit_lock_shadow_sample_gate_met = bnb_profit_lock_shadow_sample_count >= 10
+    bnb_profit_lock_shadow_best_policy_mix = dict(sorted(Counter(
+        row.get("best_shadow_exit_policy") or not_obs
+        for row in bnb_profit_lock_shadow_rows
+    ).items()))
+    bnb_profit_lock_shadow_latest = (
+        sorted(
+            bnb_profit_lock_shadow_rows,
+            key=lambda row: parse_dt_utc(row.get("exit_ts")) or dt.datetime.min.replace(tzinfo=dt.timezone.utc),
+            reverse=True,
+        )[0]
+        if bnb_profit_lock_shadow_rows
+        else {}
+    )
     high_score_block_category_counts = dict(sorted(Counter(row.get("high_score_block_category") or not_obs for row in high_score_blocked_rows).items()))
     high_score_recent_24h_rows = [
         row for row in high_score_blocked_rows
@@ -10209,6 +10350,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             1 for row in swing_atr_soft_exit_shadow_rows
             if row.get("would_delay_exit_if_enabled") == "true"
         ),
+        "bnb_profit_lock_shadow_rows": bnb_profit_lock_shadow_sample_count,
+        "bnb_profit_lock_shadow_sample_gate_met": bnb_profit_lock_shadow_sample_gate_met,
+        "bnb_profit_lock_shadow_best_policy_mix": bnb_profit_lock_shadow_best_policy_mix,
+        "bnb_profit_lock_shadow_latest_best_policy": bnb_profit_lock_shadow_latest.get("best_shadow_exit_policy", not_obs),
         "high_score_blocked_target_count": len(high_score_blocked_rows),
         "high_score_blocked_labelable_target_count": len(high_score_labelable_rows),
         "high_score_blocked_non_entry_management_count": len(high_score_non_entry_management_rows),
@@ -10927,6 +11072,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- by_symbol: {post_min_hold_atr_by_symbol_text}",
         f"- medium issue present: {'yes' if post_min_hold_atr_medium_issue_present else 'no'}",
         "- output: summaries/post_min_hold_atr_exit_audit.csv and summaries/post_min_hold_atr_exit_outcomes_by_symbol.csv",
+        "",
+        "## BNB profit-lock / ATR trailing shadow",
+        f"- sample_count: {bnb_profit_lock_shadow_sample_count}",
+        f"- sample_count_gate_met_for_exit_change_review: {str(bnb_profit_lock_shadow_sample_gate_met).lower()}",
+        f"- latest actual_exit_net_bps: {bnb_profit_lock_shadow_latest.get('actual_exit_net_bps', not_obs)}",
+        f"- latest max_unrealized_bps: {bnb_profit_lock_shadow_latest.get('max_unrealized_bps', not_obs)}",
+        f"- latest delayed_exit_6h/12h/24h: {bnb_profit_lock_shadow_latest.get('delayed_exit_6h', not_obs)} / {bnb_profit_lock_shadow_latest.get('delayed_exit_12h', not_obs)} / {bnb_profit_lock_shadow_latest.get('delayed_exit_24h', not_obs)}",
+        f"- latest best_shadow_exit_policy: {bnb_profit_lock_shadow_latest.get('best_shadow_exit_policy', not_obs)}",
+        f"- best_policy_mix: {json.dumps(bnb_profit_lock_shadow_best_policy_mix, ensure_ascii=False, sort_keys=True)}",
+        "- interpretation: this is diagnostic only; do not modify live ATR/profit-lock exit until sample_count >= 10 and follow-up review confirms improvement.",
+        "- output: summaries/bnb_profit_lock_shadow.csv",
         "",
         "## PROTECT SOL exception shadow",
         f"- experiment_name: {flatten_value(find_config_value(effective_data, 'protect_sol_exception_experiment_name') or 'protect_sol_exception_v1')}",

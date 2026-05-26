@@ -2075,6 +2075,7 @@ def fixture_post_min_hold_atr_exit_root(root):
     entry_prices = {"BNB/USDT": 100.0, "ETH/USDT": 200.0, "SOL/USDT": 50.0, "BTC/USDT": 300.0}
     exit_prices = {"BNB/USDT": 99.0, "ETH/USDT": 198.0, "SOL/USDT": 49.5, "BTC/USDT": 293.0}
     f5_values = {"BNB/USDT": 0.58, "ETH/USDT": 0.55, "SOL/USDT": -0.4, "BTC/USDT": 0.2}
+    in_hold_high_prices = {"BNB/USDT": 100.8, "ETH/USDT": 202.0, "SOL/USDT": 50.2, "BTC/USDT": 301.0}
     future_prices = {
         "BNB/USDT": (100.5, 101.0, 102.0, 103.0),
         "ETH/USDT": (201.0, 202.0, 204.0, 206.0),
@@ -2116,6 +2117,7 @@ def fixture_post_min_hold_atr_exit_root(root):
             root,
             symbol,
             [
+                (entry_ts + 12 * 3600, in_hold_high_prices[symbol]),
                 (exit_ts + 3 * 3600, future_prices[symbol][0]),
                 (exit_ts + 6 * 3600, future_prices[symbol][1]),
                 (exit_ts + 12 * 3600, future_prices[symbol][2]),
@@ -3922,6 +3924,7 @@ def main():
                 rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/post_min_hold_atr_exit_audit.csv")).read().decode().splitlines()))
                 by_symbol = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/post_min_hold_atr_exit_outcomes_by_symbol.csv")).read().decode().splitlines()))
                 shadow = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/swing_atr_soft_exit_shadow.csv")).read().decode().splitlines()))
+                bnb_profit = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_profit_lock_shadow.csv")).read().decode().splitlines()))
                 bnb_risk = json.loads(tf.extractfile(extract_member(tf, "summaries/bnb_risk_summary.json")).read().decode())
                 issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
@@ -3953,6 +3956,18 @@ def main():
             assert shadow_map["SOL/USDT"]["hard_exit_reason"] == "f5_momentum_breakdown", shadow
             assert shadow_map["BTC/USDT"]["would_delay_exit_if_enabled"] == "false", shadow
             assert shadow_map["BTC/USDT"]["hard_exit_reason"] == "net_bps_hard_exit", shadow
+            assert len(bnb_profit) == 1, bnb_profit
+            bnb_profit_row = bnb_profit[0]
+            assert bnb_profit_row["symbol"] == "BNB/USDT", bnb_profit_row
+            assert bnb_profit_row["max_unrealized_bps"] == "80", bnb_profit_row
+            assert bnb_profit_row["profit_lock_30bps_exit"] == "30", bnb_profit_row
+            assert bnb_profit_row["profit_lock_50bps_exit"] == "50", bnb_profit_row
+            assert bnb_profit_row["delayed_exit_6h"] == "100", bnb_profit_row
+            assert bnb_profit_row["delayed_exit_12h"] == "200", bnb_profit_row
+            assert bnb_profit_row["delayed_exit_24h"] == "300", bnb_profit_row
+            assert bnb_profit_row["actual_exit_net_bps"] == "-100", bnb_profit_row
+            assert bnb_profit_row["best_shadow_exit_policy"] == "delayed_exit_24h", bnb_profit_row
+            assert bnb_profit_row["diagnosis"] == "atr_trailing_delay_would_have_helped", bnb_profit_row
             by_symbol_map = {row["symbol"]: row for row in by_symbol}
             assert by_symbol_map["BNB/USDT"]["sample_count"] == "1", by_symbol
             assert by_symbol_map["BNB/USDT"]["better_to_hold_12h_rate"] == "1", by_symbol
@@ -3967,6 +3982,9 @@ def main():
             assert window["post_min_hold_atr_medium_issue"] is True, window
             assert window["swing_atr_soft_exit_shadow_rows"] == 4, window
             assert window["swing_atr_soft_exit_shadow_would_delay_count"] == 2, window
+            assert window["bnb_profit_lock_shadow_rows"] == 1, window
+            assert window["bnb_profit_lock_shadow_sample_gate_met"] is False, window
+            assert window["bnb_profit_lock_shadow_latest_best_policy"] == "delayed_exit_24h", window
             assert bnb_risk["closed_cycles"] == 3.0, bnb_risk
             assert bnb_risk["net_expectancy_bps"] == -123.56, bnb_risk
             assert bnb_risk["fast_fail_net_expectancy_bps"] == -118.4, bnb_risk
@@ -3985,6 +4003,9 @@ def main():
             assert "## Post-min-hold ATR exit audit" in readme, readme
             assert "just-after-min-hold ATR exits: 4" in readme, readme
             assert "better_to_hold_12h_rate: 1 (4/4)" in readme, readme
+            assert "## BNB profit-lock / ATR trailing shadow" in readme, readme
+            assert "sample_count_gate_met_for_exit_change_review: false" in readme, readme
+            assert "latest best_shadow_exit_policy: delayed_exit_24h" in readme, readme
             assert "## BNB risk summary" in readme, readme
             assert "recommendation: keep_blocked" in readme, readme
             assert "do not add BNB to protect_recovery multi-position" in readme, readme
