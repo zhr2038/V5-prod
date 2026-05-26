@@ -9496,6 +9496,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         seen = set()
         for item in raw:
             symbol = normalize_multi_symbol_text(item)
+            if symbol == "MULTI":
+                continue
             if not symbol or symbol in seen:
                 continue
             seen.add(symbol)
