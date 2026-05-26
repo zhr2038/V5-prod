@@ -29,6 +29,13 @@ logger = logging.getLogger('event_driven_wrapper')
 PROJECT_ROOT = Path(__file__).resolve().parent
 REPORTS_DIR = PROJECT_ROOT / 'reports'
 LIVE_RUN_ID_RE = re.compile(r'^\d{8}_\d{2}$')
+ALLOWED_LIVE_SERVICE_UNITS = frozenset(
+    {
+        'v5-prod.user.service',
+        'v5-live-small.user.service',
+        'v5-live-100u.user.service',
+    }
+)
 
 # Add project path
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -173,13 +180,21 @@ def resolve_live_service_unit(ev_cfg: dict) -> str:
     """Resolve live service unit for event-driven trigger."""
     explicit = str((ev_cfg or {}).get('live_service_unit', '') or '').strip()
     if explicit:
-        return explicit
+        return validate_live_service_unit(explicit)
 
     env_unit = os.getenv('V5_LIVE_SERVICE', '').strip()
     if env_unit:
-        return env_unit
+        return validate_live_service_unit(env_unit)
 
     return 'v5-prod.user.service'
+
+
+def validate_live_service_unit(service_unit: str) -> str:
+    """Validate the systemd unit that event-driven mode is allowed to start."""
+    unit = str(service_unit or '').strip()
+    if unit in ALLOWED_LIVE_SERVICE_UNITS:
+        return unit
+    raise ValueError(f"unsupported live service unit: {service_unit}")
 
 
 def _parse_live_run_id(run_id: str) -> Optional[datetime]:
@@ -701,6 +716,7 @@ def load_current_state(cfg=None, config_path: Path = None):
 
 def get_live_execution_service_state(service_unit: str) -> str:
     """Return systemd user unit activity state for the live service."""
+    service_unit = validate_live_service_unit(service_unit)
     try:
         st = subprocess.run(
             [_systemctl_bin(), '--user', 'is-active', service_unit],

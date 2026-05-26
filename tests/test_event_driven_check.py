@@ -5,6 +5,8 @@ import logging
 import os
 from types import SimpleNamespace
 
+import pytest
+
 import event_driven_check as edc
 from event_driven_check import (
     _build_effective_event_log_values,
@@ -550,6 +552,36 @@ def test_trigger_live_execution_service_rejects_already_running_unit(monkeypatch
     assert result["skipped_already_running"] is True
     assert "already active" in result["stderr"]
     assert calls == [["systemctl", "--user", "is-active", "v5-prod.user.service"]]
+
+
+def test_resolve_live_service_unit_rejects_non_v5_live_unit(monkeypatch) -> None:
+    monkeypatch.delenv("V5_LIVE_SERVICE", raising=False)
+
+    with pytest.raises(ValueError, match="unsupported live service unit"):
+        edc.resolve_live_service_unit({"live_service_unit": "ssh.service"})
+
+
+def test_resolve_live_service_unit_rejects_env_non_v5_live_unit(monkeypatch) -> None:
+    monkeypatch.setenv("V5_LIVE_SERVICE", "ssh.service")
+
+    with pytest.raises(ValueError, match="unsupported live service unit"):
+        edc.resolve_live_service_unit({})
+
+
+def test_trigger_live_execution_service_rejects_non_whitelisted_unit(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        raise AssertionError("invalid service unit should not call systemctl")
+
+    monkeypatch.setattr(edc.subprocess, "run", fake_run)
+
+    result = edc.trigger_live_execution_service("ssh.service")
+
+    assert result["ok"] is False
+    assert "unsupported live service unit" in result["stderr"]
+    assert calls == []
 
 
 def test_clear_event_actions_removes_unaccepted_action_file(tmp_path) -> None:
