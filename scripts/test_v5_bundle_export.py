@@ -2138,6 +2138,85 @@ def fixture_post_min_hold_atr_exit_root(root):
     return run_id
 
 
+def fixture_bnb_profit_lock_review_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    window_end = int(now.timestamp())
+    run_id = now.strftime("%Y%m%d_%H")
+
+    write_text(
+        root / "configs/live_prod.yaml",
+        "execution:\n"
+        "  swing_hold_enabled: true\n"
+        "  swing_min_hold_hours: 24\n"
+        "  fee_bps: 0\n"
+        "  slippage_bps: 0\n",
+    )
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    run_dir = root / "reports/runs/prod" / run_id
+    trade_lines = ["ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,exit_reason,raw_meta"]
+    candles = []
+    raw_meta = '{"swing_hold_position": true, "swing_min_hold_hours": 24}'.replace('"', '""')
+    for idx in range(10):
+        entry_ts = window_end - (10 - idx) * 72 * 3600
+        exit_ts = entry_ts + int(24.1 * 3600)
+        entry_px = 100.0
+        exit_px = 99.0
+        trade_lines.append(f"{iso(entry_ts)},{run_id},BNB/USDT,OPEN_LONG,buy,1,{entry_px},{entry_px},0,,\"{raw_meta}\"")
+        trade_lines.append(f"{iso(exit_ts)},{run_id},BNB/USDT,CLOSE_LONG,sell,1,{exit_px},{exit_px},0,atr_trailing,")
+        candles.extend(
+            [
+                (entry_ts + 12 * 3600, 100.8),
+                (exit_ts + 6 * 3600, 101.0),
+                (exit_ts + 12 * 3600, 102.0),
+                (exit_ts + 24 * 3600, 103.0),
+            ]
+        )
+
+    write_json(run_dir / "decision_audit.json", {
+        "now_ts": window_end + 15,
+        "window_end_ts": window_end,
+        "current_level": "PROTECT",
+        "regime": "Trending",
+        "router_decisions": [
+            {
+                "symbol": "BNB/USDT",
+                "action": "create",
+                "intent": "OPEN_LONG",
+                "side": "buy",
+                "reason": "normal_entry",
+                "entry_reason": "normal_entry",
+                "swing_hold_position": True,
+                "swing_min_hold_hours": 24,
+            },
+            {
+                "symbol": "BNB/USDT",
+                "action": "create",
+                "intent": "CLOSE_LONG",
+                "side": "sell",
+                "reason": "atr_trailing",
+                "source_reason": "atr_trailing",
+                "exit_priority": "soft",
+                "min_hold_hours": 24,
+            },
+        ],
+    })
+    write_text(run_dir / "trades.csv", "\n".join(trade_lines) + "\n")
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id})
+    write_ohlcv_cache(root, "BNB/USDT", candles)
+    return run_id
+
+
 def fixture_swing_post_fix_early_exit_root(root):
     now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
     window_end = int(now.timestamp())
@@ -3960,6 +4039,7 @@ def main():
             assert bnb["f5_at_entry"] == "0.58", bnb
             assert bnb["dominant_factor"] == "f3_vol_adj_ret", bnb
             assert bnb["dominant_factor_contribution_pct"] == "0.7", bnb
+            assert bnb["sample_count"] == "4", bnb
             assert bnb["diagnosis"] == "post_min_hold_atr_exit_better_to_hold", bnb
             shadow_map = {row["symbol"]: row for row in shadow}
             assert len(shadow) == 4, shadow
@@ -3974,7 +4054,10 @@ def main():
             assert len(bnb_profit) == 1, bnb_profit
             bnb_profit_row = bnb_profit[0]
             assert bnb_profit_row["symbol"] == "BNB/USDT", bnb_profit_row
+            assert bnb_profit_row["atr_trailing_exit"] == "true", bnb_profit_row
             assert bnb_profit_row["max_unrealized_bps"] == "80", bnb_profit_row
+            assert bnb_profit_row["profit_lock_30bps"] == "30", bnb_profit_row
+            assert bnb_profit_row["profit_lock_50bps"] == "50", bnb_profit_row
             assert bnb_profit_row["profit_lock_30bps_exit"] == "30", bnb_profit_row
             assert bnb_profit_row["profit_lock_50bps_exit"] == "50", bnb_profit_row
             assert bnb_profit_row["delayed_exit_6h"] == "100", bnb_profit_row
@@ -3982,6 +4065,10 @@ def main():
             assert bnb_profit_row["delayed_exit_24h"] == "300", bnb_profit_row
             assert bnb_profit_row["actual_exit_net_bps"] == "-100", bnb_profit_row
             assert bnb_profit_row["best_shadow_exit_policy"] == "delayed_exit_24h", bnb_profit_row
+            assert bnb_profit_row["best_shadow_improvement_bps"] == "400", bnb_profit_row
+            assert bnb_profit_row["sample_count"] == "1", bnb_profit_row
+            assert bnb_profit_row["recommendation"] == "collect_more_samples", bnb_profit_row
+            assert bnb_profit_row["review_reason"] == "sample_count_lt_10", bnb_profit_row
             assert bnb_profit_row["diagnosis"] == "atr_trailing_delay_would_have_helped", bnb_profit_row
             by_symbol_map = {row["symbol"]: row for row in by_symbol}
             assert by_symbol_map["BNB/USDT"]["sample_count"] == "1", by_symbol
@@ -4013,6 +4100,10 @@ def main():
             assert window["swing_atr_soft_exit_shadow_would_delay_count"] == 2, window
             assert window["bnb_profit_lock_shadow_rows"] == 1, window
             assert window["bnb_profit_lock_shadow_sample_gate_met"] is False, window
+            assert window["bnb_profit_lock_shadow_recommendation"] == "collect_more_samples", window
+            assert window["bnb_profit_lock_shadow_review_reason"] == "sample_count_lt_10", window
+            assert window["bnb_profit_lock_shadow_help_rate"] == 1.0, window
+            assert window["bnb_profit_lock_shadow_avg_best_improvement_bps"] == 400.0, window
             assert window["bnb_profit_lock_shadow_latest_best_policy"] == "delayed_exit_24h", window
             assert bnb_risk["closed_cycles"] == 3.0, bnb_risk
             assert bnb_risk["net_expectancy_bps"] == -123.56, bnb_risk
@@ -4037,10 +4128,42 @@ def main():
             assert "no_symbol_ready_for_live_guard" in readme, readme
             assert "## BNB profit-lock / ATR trailing shadow" in readme, readme
             assert "sample_count_gate_met_for_exit_change_review: false" in readme, readme
+            assert "recommendation: collect_more_samples" in readme, readme
+            assert "review_reason: sample_count_lt_10" in readme, readme
+            assert "latest atr_trailing_exit: true" in readme, readme
+            assert "latest profit_lock_30bps/50bps: 30 / 50" in readme, readme
             assert "latest best_shadow_exit_policy: delayed_exit_24h" in readme, readme
             assert "## BNB risk summary" in readme, readme
             assert "recommendation: keep_blocked" in readme, readme
             assert "do not add BNB to protect_recovery multi-position" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-bnb-profit-lock-review-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_bnb_profit_lock_review_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                bnb_profit = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_profit_lock_shadow.csv")).read().decode().splitlines()))
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert len(bnb_profit) == 10, bnb_profit
+            assert {row["sample_count"] for row in bnb_profit} == {"10"}, bnb_profit
+            assert {row["recommendation"] for row in bnb_profit} == {"REVIEW_EXIT_POLICY"}, bnb_profit
+            assert {row["review_reason"] for row in bnb_profit} == {"sample_gate_met_shadow_exit_outperforms_actual"}, bnb_profit
+            assert all(row["atr_trailing_exit"] == "true" for row in bnb_profit), bnb_profit
+            assert all(row["best_shadow_improvement_bps"] == "400" for row in bnb_profit), bnb_profit
+            assert window["bnb_profit_lock_shadow_rows"] == 10, window
+            assert window["bnb_profit_lock_shadow_sample_gate_met"] is True, window
+            assert window["bnb_profit_lock_shadow_recommendation"] == "REVIEW_EXIT_POLICY", window
+            assert window["bnb_profit_lock_shadow_review_reason"] == "sample_gate_met_shadow_exit_outperforms_actual", window
+            assert window["bnb_profit_lock_shadow_help_rate"] == 1.0, window
+            assert window["bnb_profit_lock_shadow_avg_best_improvement_bps"] == 400.0, window
+            assert "recommendation: REVIEW_EXIT_POLICY" in readme, readme
+            assert "interpretation: this is diagnostic only" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
