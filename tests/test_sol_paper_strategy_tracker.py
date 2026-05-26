@@ -14,6 +14,7 @@ from configs.schema import AppConfig
 from src.core.models import MarketSeries
 from src.reporting.decision_audit import DecisionAudit
 from src.reporting.sol_paper_strategy_tracker import (
+    _assess_advisory_rows,
     _daily_rows,
     _readiness_for_rows,
     update_sol_paper_strategy_tracker,
@@ -1922,6 +1923,73 @@ def test_strategy_advisory_stale_local_api_fail_is_paper_only(monkeypatch: pytes
     health = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_source_health.csv")
     assert health[0]["selected_source"] == "stale_local"
     assert "age_exceeds_max" in health[0]["stale_reason"]
+
+
+def test_strategy_advisory_source_health_explains_expires_rule_without_inconsistency(
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg()
+    cfg.diagnostics.quant_lab_strategy_opportunity_advisory_api_enabled = False
+    cfg.diagnostics.quant_lab_strategy_opportunity_advisory_max_age_minutes = 90
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_expired_before_max_age"
+    _write_single_sol_candidate(run_dir, run_id="r_expired_before_max_age", overrides={})
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "strategy_id": "SOL_F4_VOLUME_EXPANSION_PAPER_V1",
+                "symbol": "SOL/USDT",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "generated_at": str(start_s),
+                "as_of_ts": str(start_s),
+                "expires_at": str(start_s + 600),
+                "contract_version": CONTRACT_VERSION,
+            }
+        ],
+    )
+
+    update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_expired_before_max_age", start_s + 1200),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s + 1200, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    health = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_source_health.csv")
+    row = health[0]
+    assert row["advisory_age_sec"] == "1200.0"
+    assert row["advisory_max_age_sec"] == "5400.0"
+    assert row["advisory_expires_at"]
+    assert row["stale_reason"] == "expired"
+    assert row["freshness_inconsistency_warning"] == ""
+
+
+def test_strategy_advisory_invalid_expires_before_generated_is_not_marked_expired() -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+
+    meta = _assess_advisory_rows(
+        [
+            {
+                "strategy_candidate": "v5.entry_quality_missed_low_audit",
+                "generated_at": str(start_s),
+                "as_of_ts": str(start_s),
+                "expires_at": str(start_s - 60),
+                "contract_version": CONTRACT_VERSION,
+            }
+        ],
+        diagnostics=cfg.diagnostics,
+        now_ms=(start_s + 300) * 1000,
+        source="local",
+    )
+
+    assert meta["advisory_fresh"] is False
+    assert "expired" not in str(meta["stale_reason"])
+    assert "invalid_expires_at_before_reference" in str(meta["stale_reason"])
+    assert meta["advisory_expires_at"] == ""
 
 
 def test_strategy_advisory_source_health_warns_when_api_selected_older_than_local(

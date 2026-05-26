@@ -190,6 +190,9 @@ STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = (
     "latest_local_generated_at",
     "latest_api_generated_at",
     "selected_latest_generated_at",
+    "advisory_age_sec",
+    "advisory_max_age_sec",
+    "advisory_expires_at",
     "advisory_source_lag_sec",
     "selected_source",
     "api_fallback_attempted",
@@ -10257,7 +10260,48 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     else:
         ml_live_overlay_status = "not_observable"
 
+    def enrich_strategy_advisory_source_health(row):
+        if not isinstance(row, dict):
+            return {}
+        payload = dict(row)
+        max_age_sec = (config_number("quant_lab_strategy_opportunity_advisory_max_age_minutes") or 90.0) * 60.0
+        if not payload.get("advisory_max_age_sec"):
+            payload["advisory_max_age_sec"] = fmt_num(max_age_sec, 3)
+        if not payload.get("advisory_age_sec"):
+            for advisory_row in strategy_advisory_rows_for_modules:
+                age = as_float(advisory_value(advisory_row, "advisory_age_sec", default=""))
+                if age is not None:
+                    payload["advisory_age_sec"] = fmt_num(age, 3)
+                    break
+        if not payload.get("advisory_expires_at"):
+            expires_values = []
+            for advisory_row in strategy_advisory_rows_for_modules:
+                expires_dt = parse_dt_utc(advisory_value(advisory_row, "expires_at", default=""))
+                if expires_dt is None:
+                    continue
+                row_refs = [
+                    parse_dt_utc(advisory_value(advisory_row, "as_of_ts", default="")),
+                    parse_dt_utc(advisory_value(advisory_row, "generated_at", default="")),
+                ]
+                row_refs = [value for value in row_refs if value is not None]
+                row_ref = max(row_refs) if row_refs else None
+                if row_ref is not None and expires_dt < row_ref:
+                    continue
+                expires_values.append(expires_dt)
+            if expires_values:
+                payload["advisory_expires_at"] = min(expires_values).isoformat().replace("+00:00", "Z")
+        if str(payload.get("stale_reason") or "").strip() and str(payload.get("freshness_inconsistency_warning") or "").strip():
+            payload["freshness_inconsistency_warning"] = ""
+        return payload
+
     advisory_source_health_rows = load_csv_dicts(OUT / "summaries" / "strategy_opportunity_advisory_source_health.csv")
+    if advisory_source_health_rows:
+        advisory_source_health_rows[-1] = enrich_strategy_advisory_source_health(advisory_source_health_rows[-1])
+        write_csv(
+            "summaries/strategy_opportunity_advisory_source_health.csv",
+            advisory_source_health_rows,
+            STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS,
+        )
     advisory_source_health = advisory_source_health_rows[-1] if advisory_source_health_rows else {}
 
     data_quality_warnings = []
@@ -10417,6 +10461,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "strategy_advisory_local_row_count": advisory_source_health.get("local_row_count", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_api_row_count": advisory_source_health.get("api_row_count", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_selected_row_count": advisory_source_health.get("selected_row_count", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_age_sec": advisory_source_health.get("advisory_age_sec", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_max_age_sec": advisory_source_health.get("advisory_max_age_sec", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_expires_at": advisory_source_health.get("advisory_expires_at", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_stale_reason": advisory_source_health.get("stale_reason", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_source_lag_sec": advisory_source_health.get("advisory_source_lag_sec", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "entry_quality_strategy_advisory_count": len(entry_quality_strategy_rows),
         "entry_quality_would_block_if_enabled_count": entry_quality_would_block_count,
@@ -11100,9 +11148,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- latest_local_generated_at: {advisory_source_health.get('latest_local_generated_at', not_obs)}",
         f"- latest_api_generated_at: {advisory_source_health.get('latest_api_generated_at', not_obs)}",
         f"- selected_latest_generated_at: {advisory_source_health.get('selected_latest_generated_at', not_obs)}",
+        f"- advisory_age_sec: {advisory_source_health.get('advisory_age_sec', not_obs)}",
+        f"- advisory_max_age_sec: {advisory_source_health.get('advisory_max_age_sec', not_obs)}",
+        f"- advisory_expires_at: {advisory_source_health.get('advisory_expires_at', not_obs)}",
         f"- advisory_source_lag_sec: {advisory_source_health.get('advisory_source_lag_sec', not_obs)}",
         f"- stale_reason: {advisory_source_health.get('stale_reason', not_obs)}",
         f"- warning: {first_observed(advisory_source_health.get('warning'), advisory_source_health.get('freshness_inconsistency_warning'), not_obs)}",
+        "- freshness_rule: advisory is fresh only when age <= advisory_max_age_sec, expires_at is not past, and contract matches. If age is below max age but stale_reason=expired, the shorter expires_at rule is the reason.",
         "",
         "## Entry quality advisory",
         f"- missed_low late_chase_loss_count: {window_summary.get('missed_low_late_chase_loss_count', not_obs)}",

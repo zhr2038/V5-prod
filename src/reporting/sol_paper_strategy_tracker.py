@@ -273,6 +273,9 @@ STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = [
     "latest_local_generated_at",
     "latest_api_generated_at",
     "selected_latest_generated_at",
+    "advisory_age_sec",
+    "advisory_max_age_sec",
+    "advisory_expires_at",
     "advisory_source_lag_sec",
     "selected_source",
     "api_fallback_attempted",
@@ -1065,8 +1068,17 @@ def _assess_advisory_rows(
     references = [_advisory_row_reference_ms(row) for row in rows]
     references = [value for value in references if value is not None]
     reference_ms = max(references) if references else None
-    expires_values = [_advisory_time_ms(row.get("expires_at")) for row in rows]
-    expires_values = [value for value in expires_values if value is not None]
+    expires_values = []
+    invalid_expires_before_reference = False
+    for row in rows:
+        expires_ms = _advisory_time_ms(row.get("expires_at"))
+        if expires_ms is None:
+            continue
+        row_reference_ms = _advisory_row_reference_ms(row)
+        if row_reference_ms is not None and expires_ms < row_reference_ms:
+            invalid_expires_before_reference = True
+            continue
+        expires_values.append(expires_ms)
     min_expires_ms = min(expires_values) if expires_values else None
     age_sec = None
     if reference_ms is not None and now_ms > 0:
@@ -1084,7 +1096,14 @@ def _assess_advisory_rows(
         contract_match = bool(contracts)
     else:
         contract_match = bool(contracts) and contracts == {expected_contract}
-    fresh = bool(rows and has_time_context and age_ok and expires_ok and contract_match)
+    fresh = bool(
+        rows
+        and has_time_context
+        and age_ok
+        and expires_ok
+        and contract_match
+        and not invalid_expires_before_reference
+    )
     stale_reasons: list[str] = []
     if not rows:
         stale_reasons.append("no_rows")
@@ -1094,6 +1113,8 @@ def _assess_advisory_rows(
         stale_reasons.append("age_exceeds_max")
     if rows and not expires_ok:
         stale_reasons.append("expired")
+    if rows and invalid_expires_before_reference:
+        stale_reasons.append("invalid_expires_at_before_reference")
     if rows and not contract_match:
         stale_reasons.append("contract_mismatch")
     advisory_source = source
@@ -1103,6 +1124,8 @@ def _assess_advisory_rows(
         "advisory_source": advisory_source,
         "advisory_fresh": fresh,
         "advisory_age_sec": round(age_sec, 3) if age_sec is not None else None,
+        "advisory_max_age_sec": float(max_age_minutes) * 60.0,
+        "advisory_expires_at": _iso_from_ms(min_expires_ms) if min_expires_ms is not None else "",
         "advisory_contract_match": contract_match,
         "stale_advisory_used": advisory_source == "stale_local",
         "api_fallback_attempted": bool(api_fallback_attempted),
@@ -1152,6 +1175,7 @@ def _advisory_source_health_row(
         and max_age_sec > 0
         and age_sec < max_age_sec
         and contract_match is True
+        and not str(selected_meta.get("stale_reason") or "").strip()
     ):
         freshness_inconsistency_warning = "freshness_inconsistency_warning"
     return {
@@ -1163,6 +1187,9 @@ def _advisory_source_health_row(
         "latest_local_generated_at": _iso_from_ms(local_latest_ms) if local_latest_ms is not None else "",
         "latest_api_generated_at": _iso_from_ms(api_latest_ms) if api_latest_ms is not None else "",
         "selected_latest_generated_at": _iso_from_ms(selected_latest_ms) if selected_latest_ms is not None else "",
+        "advisory_age_sec": selected_meta.get("advisory_age_sec") if selected_meta.get("advisory_age_sec") is not None else "",
+        "advisory_max_age_sec": selected_meta.get("advisory_max_age_sec") or selected_meta.get("max_age_sec") or "",
+        "advisory_expires_at": selected_meta.get("advisory_expires_at") or "",
         "advisory_source_lag_sec": round(lag_sec, 3) if lag_sec is not None else "",
         "selected_source": selected_meta.get("advisory_source") or "missing",
         "api_fallback_attempted": bool(

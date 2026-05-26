@@ -3021,6 +3021,8 @@ def fixture_entry_quality_advisory_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
     run_id = now.strftime("%Y%m%d_%H")
+    advisory_generated_at = (now - dt.timedelta(seconds=2274)).isoformat().replace("+00:00", "Z")
+    advisory_expires_at = (now - dt.timedelta(seconds=60)).isoformat().replace("+00:00", "Z")
     write_text(
         root / "configs/live_prod.yaml",
         "\n".join(
@@ -3122,10 +3124,20 @@ def fixture_entry_quality_advisory_root(root):
         root / "reports/summaries/strategy_opportunity_advisory_reader.csv",
         "\n".join(
             [
-                "source_path,advisory_source,advisory_fresh,stale_advisory_used,api_fallback_attempted,api_fallback_success,strategy_candidate,symbol,decision,recommended_mode,would_block_if_enabled,would_enter,no_sample_reason,max_live_notional_usdt,response_action,live_block_reasons",
-                "api:/v1/strategy-opportunity-advisory,api,True,False,True,True,v5.entry_quality_missed_low_audit,BTC/USDT,KEEP_RESEARCH,research,,False,research_only,0,research_display_only,",
-                "api:/v1/strategy-opportunity-advisory,api,True,False,True,True,v5.late_entry_chase_guard_shadow,BTC/USDT,KEEP_SHADOW,shadow,True,False,late_chase_loss_shadow,0,shadow_tracking,",
-                "api:/v1/strategy-opportunity-advisory,api,True,False,True,True,v5.pullback_reversal_shadow_sol,SOL/USDT,PAPER_READY,paper,False,True,,25,paper_tracking,cost_source_not_actual_or_mixed",
+                "source_path,advisory_source,advisory_fresh,advisory_age_sec,stale_advisory_used,api_fallback_attempted,api_fallback_success,generated_at,expires_at,strategy_candidate,symbol,decision,recommended_mode,would_block_if_enabled,would_enter,no_sample_reason,max_live_notional_usdt,response_action,live_block_reasons",
+                f"api:/v1/strategy-opportunity-advisory,api,False,2274,True,True,True,{advisory_generated_at},{advisory_expires_at},v5.entry_quality_missed_low_audit,BTC/USDT,KEEP_RESEARCH,research,,False,research_only,0,research_display_only,",
+                f"api:/v1/strategy-opportunity-advisory,api,False,2274,True,True,True,{advisory_generated_at},{advisory_expires_at},v5.late_entry_chase_guard_shadow,BTC/USDT,KEEP_SHADOW,shadow,True,False,late_chase_loss_shadow,0,shadow_tracking,",
+                f"api:/v1/strategy-opportunity-advisory,api,False,2274,True,True,True,{advisory_generated_at},{advisory_expires_at},v5.pullback_reversal_shadow_sol,SOL/USDT,PAPER_READY,paper,False,True,,25,paper_tracking,cost_source_not_actual_or_mixed",
+            ]
+        )
+        + "\n",
+    )
+    write_text(
+        root / "reports/summaries/strategy_opportunity_advisory_source_health.csv",
+        "\n".join(
+            [
+                "run_id,ts_utc,local_row_count,api_row_count,selected_row_count,latest_local_generated_at,latest_api_generated_at,selected_latest_generated_at,advisory_source_lag_sec,selected_source,api_fallback_attempted,api_fallback_success,stale_reason,warning,freshness_inconsistency_warning",
+                f"{run_id},{now.isoformat().replace('+00:00', 'Z')},0,3,3,,{advisory_generated_at},{advisory_generated_at},,api,True,True,expired,,freshness_inconsistency_warning",
             ]
         )
         + "\n",
@@ -4786,6 +4798,7 @@ def main():
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+                source_health = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/strategy_opportunity_advisory_source_health.csv")).read().decode().splitlines()))
                 expanded_advisory = tf.extractfile(extract_member(tf, "summaries/expanded_universe_advisory_reader.csv")).read().decode()
                 expanded_runs = tf.extractfile(extract_member(tf, "summaries/expanded_universe_paper_runs.csv")).read().decode()
                 alpha_factory = tf.extractfile(extract_member(tf, "summaries/alpha_factory_advisory_reader.csv")).read().decode()
@@ -4829,6 +4842,17 @@ def main():
             assert window["late_entry_chase_ready_for_live_guard"] == "false", window
             assert window["pullback_reversal_ready_for_paper"] == "true", window
             assert window["pullback_reversal_ready_for_live_probe"] == "false", window
+            assert len(source_health) == 1, source_health
+            health_row = source_health[0]
+            assert float(health_row["advisory_age_sec"]) == 2274.0, health_row
+            assert float(health_row["advisory_max_age_sec"]) == 5400.0, health_row
+            assert health_row["advisory_expires_at"].endswith("Z"), health_row
+            assert health_row["stale_reason"] == "expired", health_row
+            assert health_row["freshness_inconsistency_warning"] == "", health_row
+            assert float(window["strategy_advisory_age_sec"]) == 2274.0, window
+            assert float(window["strategy_advisory_max_age_sec"]) == 5400.0, window
+            assert window["strategy_advisory_expires_at"] == health_row["advisory_expires_at"], window
+            assert window["strategy_advisory_stale_reason"] == "expired", window
             unavailable = [
                 item for item in issues["issues"]
                 if item.get("code") == "quant_lab_entry_quality_unavailable"
@@ -4863,6 +4887,11 @@ def main():
             assert "would_enter_count: 1" in readme, readme
             assert "late_entry_chase_guard_enabled: false" in readme, readme
             assert "live_order_effect: read_only_no_hard_block" in readme, readme
+            assert "## Strategy advisory source health" in readme, readme
+            assert "advisory_age_sec: 2274" in readme, readme
+            assert "advisory_max_age_sec: 5400" in readme, readme
+            assert f"advisory_expires_at: {health_row['advisory_expires_at']}" in readme, readme
+            assert "freshness_rule:" in readme, readme
             assert "## Risk-on multi-buy shadow" in readme, readme
             assert "BNB/USDT" in readme and "SOL/USDT" in readme, readme
             assert "source_detail_available: true" in readme, readme
