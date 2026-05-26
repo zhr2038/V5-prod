@@ -169,11 +169,14 @@ def parse_rss_feed(url: str, max_items: int = 5) -> list:
     return articles
 
 
-def collect_rss_sentiment(*, env_path: str = ".env", project_root: Path | None = None):
+def collect_rss_sentiment(*, env_path: str = ".env", project_root: Path | None = None) -> bool:
     """收集RSS情报并进行情绪分析"""
     root = (project_root or PROJECT_ROOT).resolve()
     resolved_env_path = resolve_runtime_env_path(env_path, project_root=root)
-    
+    if SAFE_XML_ET is None:
+        print("[RSS] 缺少 defusedxml，无法安全解析 RSS XML；请运行 pip install -r requirements.txt")
+        return False
+
     # RSS源配置
     rss_sources = [source for source in RSS_SOURCES if source.get('enabled', True)]
     
@@ -198,7 +201,7 @@ def collect_rss_sentiment(*, env_path: str = ".env", project_root: Path | None =
     
     if not all_articles:
         print("[RSS] 没有获取到任何文章")
-        return
+        return False
     
     print(f"[RSS] 总共获取 {len(all_articles)} 篇文章，开始情绪分析...")
     
@@ -269,18 +272,21 @@ def collect_rss_sentiment(*, env_path: str = ".env", project_root: Path | None =
                 json.dump(cache_data, f, indent=2)
         
         print(f"[RSS] 情绪数据已保存到 {cache_file}")
-        
+        return True
+
     except Exception as e:
         print(f"[RSS] DeepSeek分析失败: {e}")
         import traceback
         traceback.print_exc()
+        return False
 
 
 def main(argv: list[str] | None = None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", default=".env")
     args = parser.parse_args(argv)
-    collect_rss_sentiment(env_path=args.env)
+    if not collect_rss_sentiment(env_path=args.env):
+        raise SystemExit(1)
 
 
 if __name__ == '__main__':

@@ -3956,6 +3956,39 @@ def test_signal_health_prefers_latest_file_by_filename_timestamp_not_mtime(monke
     assert health["last_mtime"] == _utc_text_from_epoch(module._signal_file_epoch(newer))
 
 
+def test_market_state_filters_unconfigured_regime_stuck_trending_alert(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "_load_market_state_snapshot", lambda _: {
+        "state": "TRENDING",
+        "position_multiplier": 1.2,
+        "method": "regime_history",
+        "votes": {"hmm": {"state": "TRENDING", "confidence": 0.7}},
+        "alerts": ["regime_stuck_trending"],
+        "monitor": {},
+    })
+    monkeypatch.setattr(module, "_load_latest_regime_history_snapshot", lambda _: {"votes": {}})
+    monkeypatch.setattr(module, "_load_market_vote_history", lambda *args, **kwargs: [])
+    monkeypatch.setattr(module, "load_config", lambda: {
+        "regime": {
+            "hmm_weight": 0.35,
+            "funding_weight": 0.4,
+            "rss_weight": 0.25,
+            "regime_final_state_stuck_warn_states": ["SIDEWAYS", "RISK_OFF"],
+        }
+    })
+    monkeypatch.setattr(module, "_signal_health", lambda *args, **kwargs: {"status": "fresh", "is_fresh": True, "error": None})
+    monkeypatch.setattr(module, "_build_live_funding_vote", lambda *args, **kwargs: {})
+    monkeypatch.setattr(module, "_build_live_rss_vote", lambda *args, **kwargs: {})
+    monkeypatch.setattr(module, "calculate_market_indicators", lambda: {"price": 0.0})
+
+    response = client.get("/api/market_state")
+
+    assert response.status_code == 200
+    assert "regime_stuck_trending" not in response.get_json()["alerts"]
+
+
 def test_shadow_ml_overlay_timestamp_prefers_sort_epoch_over_file_mtime(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

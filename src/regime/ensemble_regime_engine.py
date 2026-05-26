@@ -76,6 +76,14 @@ class EnsembleRegimeEngine:
         self.monitor_sideways_consecutive_warn = int(
             getattr(cfg, 'regime_sideways_consecutive_warn', 10)
         )
+        raw_stuck_states = getattr(cfg, 'regime_final_state_stuck_warn_states', ['SIDEWAYS', 'RISK_OFF'])
+        if isinstance(raw_stuck_states, str):
+            raw_stuck_states = [item.strip() for item in raw_stuck_states.split(',')]
+        self.monitor_final_state_stuck_warn_states = {
+            str(item or '').strip().upper()
+            for item in (raw_stuck_states or [])
+            if str(item or '').strip()
+        }
         self.monitor_keep_rows = int(getattr(cfg, 'regime_monitor_keep_rows', 5000))
 
         self.startup_alerts: List[str] = []
@@ -233,6 +241,9 @@ class EnsembleRegimeEngine:
         return all(v >= th for v in vals)
 
     def _is_final_state_stuck(self, current_final_state: str) -> Optional[str]:
+        normalized_state = str(current_final_state or '').strip().upper()
+        if normalized_state not in self.monitor_final_state_stuck_warn_states:
+            return None
         n = max(3, int(self.monitor_sideways_consecutive_warn))
         prev = self._recent_column_values('final_state', n - 1)
         if len(prev) < n - 1:

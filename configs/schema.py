@@ -482,6 +482,7 @@ class RegimeConfig(BaseModel):
     regime_history_db_path: str = Field(default="reports/regime_history.db")
     regime_sideways_prob_warn_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
     regime_sideways_consecutive_warn: int = Field(default=10, ge=2, le=200)
+    regime_final_state_stuck_warn_states: List[str] = Field(default_factory=lambda: ["SIDEWAYS", "RISK_OFF"])
     regime_monitor_keep_rows: int = Field(default=5000, ge=100, le=500000)
 
     @model_validator(mode='after')

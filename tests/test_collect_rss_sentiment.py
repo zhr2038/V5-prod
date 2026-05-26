@@ -25,6 +25,7 @@ def test_collect_rss_sentiment_passes_runtime_env_to_deepseek(monkeypatch, tmp_p
             }
         ],
     )
+    monkeypatch.setattr(rss_mod, "SAFE_XML_ET", object())
 
     class _FakeFactor:
         def __init__(self, **kwargs):
@@ -41,7 +42,7 @@ def test_collect_rss_sentiment_passes_runtime_env_to_deepseek(monkeypatch, tmp_p
 
     monkeypatch.setattr(rss_mod, "DeepSeekSentimentFactor", _FakeFactor)
 
-    rss_mod.collect_rss_sentiment(env_path=".env.runtime", project_root=tmp_path)
+    assert rss_mod.collect_rss_sentiment(env_path=".env.runtime", project_root=tmp_path) is True
 
     assert captured["env_path"] == str((tmp_path / ".env.runtime").resolve())
     assert captured["project_root"] == tmp_path
@@ -84,8 +85,9 @@ def test_collect_rss_sentiment_skips_disabled_sources(monkeypatch, tmp_path):
 
     monkeypatch.setattr(rss_mod, "parse_rss_feed", _fake_parse_rss_feed)
     monkeypatch.setattr(rss_mod, "DeepSeekSentimentFactor", _FakeFactor)
+    monkeypatch.setattr(rss_mod, "SAFE_XML_ET", object())
 
-    rss_mod.collect_rss_sentiment(env_path=".env.runtime", project_root=tmp_path)
+    assert rss_mod.collect_rss_sentiment(env_path=".env.runtime", project_root=tmp_path) is True
 
     assert requested_urls
     assert all("theblock.co" not in url for url in requested_urls)
@@ -97,11 +99,29 @@ def test_collect_rss_sentiment_main_passes_env(monkeypatch):
     def _fake_collect_rss_sentiment(*, env_path=".env", project_root=None):
         captured["env_path"] = env_path
         captured["project_root"] = project_root
+        return True
 
     monkeypatch.setattr(rss_mod, "collect_rss_sentiment", _fake_collect_rss_sentiment)
     rss_mod.main(["--env", ".env.runtime"])
 
     assert captured == {"env_path": ".env.runtime", "project_root": None}
+
+
+def test_collect_rss_sentiment_missing_safe_parser_fails(monkeypatch, tmp_path):
+    monkeypatch.setattr(rss_mod, "SAFE_XML_ET", None)
+
+    assert rss_mod.collect_rss_sentiment(project_root=tmp_path) is False
+
+
+def test_collect_rss_sentiment_main_exits_nonzero_on_failure(monkeypatch):
+    monkeypatch.setattr(rss_mod, "collect_rss_sentiment", lambda **kwargs: False)
+
+    try:
+        rss_mod.main(["--env", ".env.runtime"])
+    except SystemExit as exc:
+        assert exc.code == 1
+    else:
+        raise AssertionError("main should exit nonzero when RSS collection fails")
 
 
 def test_parse_rss_feed_uses_safe_xml_parser(monkeypatch):

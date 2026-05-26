@@ -61,3 +61,34 @@ def test_recent_column_values_rejects_unknown_column(tmp_path) -> None:
 
     with sqlite3.connect(str(engine.regime_history_db)) as con:
         assert con.execute("SELECT name FROM sqlite_master WHERE name='regime_history'").fetchone() is not None
+
+
+def test_final_state_stuck_monitor_ignores_trending_by_default(tmp_path) -> None:
+    cfg = RegimeConfig(
+        regime_history_db_path=str(tmp_path / "regime_history.db"),
+        regime_sideways_consecutive_warn=3,
+    )
+    engine = EnsembleRegimeEngine(cfg)
+    with sqlite3.connect(str(engine.regime_history_db)) as con:
+        con.executemany(
+            "INSERT INTO regime_history (ts_ms, final_state) VALUES (?, ?)",
+            [(1, "TRENDING"), (2, "TRENDING")],
+        )
+
+    assert engine._is_final_state_stuck("TRENDING") is None
+
+
+def test_final_state_stuck_monitor_keeps_configured_risk_off(tmp_path) -> None:
+    cfg = RegimeConfig(
+        regime_history_db_path=str(tmp_path / "regime_history.db"),
+        regime_sideways_consecutive_warn=3,
+        regime_final_state_stuck_warn_states=["RISK_OFF"],
+    )
+    engine = EnsembleRegimeEngine(cfg)
+    with sqlite3.connect(str(engine.regime_history_db)) as con:
+        con.executemany(
+            "INSERT INTO regime_history (ts_ms, final_state) VALUES (?, ?)",
+            [(1, "RISK_OFF"), (2, "RISK_OFF")],
+        )
+
+    assert engine._is_final_state_stuck("RISK_OFF") == "RISK_OFF"

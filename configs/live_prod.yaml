@@ -177,6 +177,7 @@ regime:
   regime_history_db_path: reports/regime_history.db
   regime_sideways_prob_warn_threshold: 0.80
   regime_sideways_consecutive_warn: 10
+  regime_final_state_stuck_warn_states: ["SIDEWAYS", "RISK_OFF"]
   regime_monitor_keep_rows: 5000
 
 risk:

@@ -4456,6 +4456,24 @@ def _signal_health(cache_dir: Path, patterns: List[str], max_age_minutes: int, e
     }
 
 
+def _regime_final_state_stuck_warn_states(regime_cfg: Dict[str, Any]) -> set[str]:
+    raw_states = regime_cfg.get('regime_final_state_stuck_warn_states', ['SIDEWAYS', 'RISK_OFF'])
+    if isinstance(raw_states, str):
+        raw_states = [item.strip() for item in raw_states.split(',')]
+    if not isinstance(raw_states, list):
+        raw_states = ['SIDEWAYS', 'RISK_OFF']
+    return {str(item or '').strip().upper() for item in raw_states if str(item or '').strip()}
+
+
+def _should_keep_regime_stuck_alert(alert: str, regime_cfg: Dict[str, Any]) -> bool:
+    prefix = 'regime_stuck_'
+    text = str(alert or '').strip()
+    if not text.startswith(prefix):
+        return True
+    state = text[len(prefix):].strip().upper()
+    return state in _regime_final_state_stuck_warn_states(regime_cfg)
+
+
 def _load_json_payload(path: Optional[Path]) -> Dict[str, Any]:
     if path is None or not path.exists():
         return {}
@@ -4773,6 +4791,8 @@ def api_market_state():
         merged_alerts: List[str] = []
         for item in list(alerts) + [signal_health['funding'].get('error'), signal_health['rss'].get('error')]:
             if not item or item in merged_alerts:
+                continue
+            if not _should_keep_regime_stuck_alert(str(item), regime_cfg):
                 continue
             if item == 'funding_signal_stale_or_missing' and signal_health['funding'].get('is_fresh'):
                 continue
