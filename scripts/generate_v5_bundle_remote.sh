@@ -8799,6 +8799,49 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         open_position_rows,
         ["symbol", "entry_ts", "entry_px", "qty", "current_px", "current_value_usdt", "notional_entry_usdt", "unrealized_gross_bps", "unrealized_net_bps", "unrealized_net_usdt", "entry_reason", "probe_type", "current_stop_px", "highest_px", "current_level", "regime", "is_probe", "profit_lock_active", "trailing_active"],
     )
+    def run_completion_hour(run_name):
+        parsed = parse_run_time(run_name)
+        if parsed is None:
+            audit = audit_by_run.get(run_name, {})
+            parsed = parse_dt_utc(first_observed(audit.get("now"), audit.get("now_ts"), audit.get("timestamp"), audit.get("ts_utc"), ""))
+        if parsed is None:
+            return not_obs
+        return parsed.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:00:00Z")
+
+    completion_attempts_by_hour = defaultdict(list)
+    for run_name in copied_runs:
+        completion_attempts_by_hour[run_completion_hour(run_name)].append(run_name)
+    run_completion_diagnostic_rows = []
+    for hour, runs in sorted(completion_attempts_by_hour.items()):
+        run_completion_diagnostic_rows.append({
+            "run_hour": hour,
+            "completion_attempts": len(runs),
+            "canonical_completion_count": 1 if runs else 0,
+            "duplicate_same_hour_completion_count": max(0, len(runs) - 1),
+            "affected_run_ids": ";".join(runs),
+            "diagnosis": "duplicate_same_hour_completion" if len(runs) > 1 else "unique_hour_completion",
+        })
+    duplicate_same_hour_completion_count = sum(
+        as_int(row.get("duplicate_same_hour_completion_count")) or 0
+        for row in run_completion_diagnostic_rows
+    )
+    affected_duplicate_run_hours = [
+        row["run_hour"]
+        for row in run_completion_diagnostic_rows
+        if (as_int(row.get("duplicate_same_hour_completion_count")) or 0) > 0
+    ]
+    write_csv(
+        "summaries/run_completion_diagnostics.csv",
+        run_completion_diagnostic_rows,
+        [
+            "run_hour",
+            "completion_attempts",
+            "canonical_completion_count",
+            "duplicate_same_hour_completion_count",
+            "affected_run_ids",
+            "diagnosis",
+        ],
+    )
     write_csv(
         "summaries/open_probe_watch.csv",
         open_probe_watch_rows,
@@ -10541,6 +10584,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             str(row.get("diagnosis") or "").startswith("high_issue")
             for row in summary_trade_count_mismatch_rows
         ),
+        "duplicate_same_hour_completion_count": duplicate_same_hour_completion_count,
+        "affected_duplicate_run_hours": affected_duplicate_run_hours,
+        "completion_attempts": len(copied_runs),
+        "canonical_completion_count": len(completion_attempts_by_hour),
         "trade_metrics_rows": len(trade_metrics_rows),
         "fill_metrics_rows": len(fill_metrics_rows),
         "order_lifecycle_rows": len(order_lifecycle_rows),
@@ -10763,7 +10810,6 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "missing_paths": sorted(missing_paths),
         "collection_error_count": len(collection_errors),
     }
-    write_text("summaries/window_summary.json", json.dumps(window_summary, ensure_ascii=False, indent=2) + "\n")
     enforce_readiness_snapshot = {
         "quant_lab_requested_mode": window_summary.get("quant_lab_requested_mode", not_obs),
         "quant_lab_effective_mode": window_summary.get("quant_lab_effective_mode", not_obs),
@@ -10858,6 +10904,44 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         open_pnl_text = "not_applicable_no_open_positions"
         open_net_bps_text = "not_applicable_no_open_positions"
         open_stop_protection_text = "not_applicable_no_open_positions"
+
+    def write_positions_json_summary():
+        raw_state_path = OUT / "raw" / "state" / "positions.json"
+        source_files = ["summaries/open_positions.csv"]
+        fallback_source = "summaries/open_positions.csv"
+        raw_state_present = raw_state_path.is_file()
+        if raw_state_present:
+            source_files.append("raw/state/positions.json")
+            fallback_source = "raw/state/positions.json"
+        payload = {
+            "generated_at": NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "account_state": account_status_text,
+            "open_position_count": len(open_position_rows),
+            "effective_open_position_count": effective_open_position_count,
+            "dust_only": bool(not open_position_rows and (dust_only_count or dust_residual_position_count or dust_residual_roundtrip_count)),
+            "positions": sanitize_obj(open_position_rows),
+            "source_files": source_files,
+            "fallback_source": fallback_source,
+            "schema_version": "v5.positions_summary.v1",
+        }
+        text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        write_text("reports/positions.json", text)
+        copied_sources["reports/positions.json"] = f"generated from {fallback_source}"
+        if not raw_state_present:
+            write_text("raw/state/positions.json", text)
+            copied_sources["raw/state/positions.json"] = "generated from summaries/open_positions.csv"
+        if "reports/positions.json" in missing_paths:
+            missing_paths.remove("reports/positions.json")
+        notes.append(f"positions.json summary generated from {fallback_source}")
+        return payload
+
+    positions_json_summary = write_positions_json_summary()
+    window_summary["positions_json_generated"] = True
+    window_summary["positions_json_path"] = "reports/positions.json"
+    window_summary["positions_json_fallback_source"] = positions_json_summary.get("fallback_source", not_obs)
+    window_summary["positions_json_source_files"] = positions_json_summary.get("source_files", [])
+    window_summary["missing_paths"] = sorted(missing_paths)
+    write_text("summaries/window_summary.json", json.dumps(window_summary, ensure_ascii=False, indent=2) + "\n")
 
     if open_probe_watch_rows:
         active_probe_text = f"yes / {len(open_probe_watch_rows)}"
@@ -11611,6 +11695,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "order_lifecycle_rows": len(order_lifecycle_rows),
         "order_lifecycle_trade_metric_fill_count": order_lifecycle_trade_metric_fill_count,
         "order_lifecycle_missing_high_issue": order_lifecycle_missing_high_issue,
+        "positions_json_generated": True,
+        "positions_json_path": "reports/positions.json",
+        "positions_json_fallback_source": positions_json_summary.get("fallback_source", not_obs),
+        "positions_json_source_files": positions_json_summary.get("source_files", []),
+        "duplicate_same_hour_completion_count": duplicate_same_hour_completion_count,
+        "affected_duplicate_run_hours": affected_duplicate_run_hours,
+        "completion_attempts": len(copied_runs),
+        "canonical_completion_count": len(completion_attempts_by_hour),
         "data_quality_warnings": data_quality_warnings,
     }
 
@@ -11873,7 +11965,9 @@ sanity = {
     "contains raw/recent_runs": any((OUT / "raw/recent_runs").glob("*/decision_audit.json")),
     "contains raw/reports/quant_lab_usage.jsonl": (OUT / "raw/reports/quant_lab_usage.jsonl").is_file(),
     "contains raw/reports/quant_lab_requests.jsonl": (OUT / "raw/reports/quant_lab_requests.jsonl").is_file(),
+    "contains reports/positions.json": (OUT / "reports/positions.json").is_file(),
     "contains summaries/probe_lifecycle_audit.csv": (OUT / "summaries/probe_lifecycle_audit.csv").is_file(),
+    "contains summaries/run_completion_diagnostics.csv": (OUT / "summaries/run_completion_diagnostics.csv").is_file(),
     "contains summaries/open_probe_watch.csv": (OUT / "summaries/open_probe_watch.csv").is_file(),
     "contains summaries/post_min_hold_atr_exit_audit.csv": (OUT / "summaries/post_min_hold_atr_exit_audit.csv").is_file(),
     "contains summaries/swing_atr_soft_exit_readiness.json": (OUT / "summaries/swing_atr_soft_exit_readiness.json").is_file(),
@@ -11979,6 +12073,14 @@ manifest = {
         summary_meta.get("order_lifecycle_trade_metric_fill_count", 0) or 0
     ),
     "order_lifecycle_missing_high_issue": bool(summary_meta.get("order_lifecycle_missing_high_issue", False)),
+    "positions_json_generated": bool(summary_meta.get("positions_json_generated", False)),
+    "positions_json_path": summary_meta.get("positions_json_path", "not_observable"),
+    "positions_json_fallback_source": summary_meta.get("positions_json_fallback_source", "not_observable"),
+    "positions_json_source_files": summary_meta.get("positions_json_source_files", []),
+    "duplicate_same_hour_completion_count": int(summary_meta.get("duplicate_same_hour_completion_count", 0) or 0),
+    "affected_duplicate_run_hours": summary_meta.get("affected_duplicate_run_hours", []),
+    "completion_attempts": int(summary_meta.get("completion_attempts", 0) or 0),
+    "canonical_completion_count": int(summary_meta.get("canonical_completion_count", 0) or 0),
     "data_quality_warnings": summary_meta.get("data_quality_warnings", []),
     "strategy_version": provenance_meta.get("strategy_version", "not_observable"),
     "strategy_hash": provenance_meta.get("strategy_hash", "not_observable"),

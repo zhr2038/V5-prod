@@ -4777,8 +4777,10 @@ def main():
         try:
             with tarfile.open(bundle, "r:gz") as tf:
                 open_positions = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/open_positions.csv")).read().decode().splitlines()))
+                positions = json.loads(tf.extractfile(extract_member(tf, "reports/positions.json")).read().decode())
                 issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
             assert len(open_positions) == 1, open_positions
             row = open_positions[0]
@@ -4789,6 +4791,12 @@ def main():
             assert row["profit_lock_active"] == "false", row
             assert row["trailing_active"] == "false", row
             assert window["open_position_count"] == 1, window
+            assert window["positions_json_generated"] is True, window
+            assert positions["open_position_count"] == 1, positions
+            assert positions["positions"][0]["symbol"] == "BTC/USDT", positions
+            assert positions["source_files"][0] == "summaries/open_positions.csv", positions
+            assert "reports/positions.json" not in manifest["missing_paths"], manifest
+            assert manifest["positions_json_generated"] is True, manifest
             medium_open = [
                 item for item in issues["issues"]
                 if item.get("severity") == "medium" and item.get("code") == "open_profit_without_profit_lock"
@@ -4798,6 +4806,41 @@ def main():
             assert "当前是否有持仓: yes / 1" in readme, readme
             assert "unrealized net bps: BTC/USDT=1178.8" in readme, readme
             assert "当前 stop 是否足够保护浮盈: no" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-same-hour-diagnostics-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        run_id = fixture_root(root)
+        base = dt.datetime.strptime(run_id, "%Y%m%d_%H").replace(tzinfo=dt.timezone.utc)
+        duplicate_run_id = base.strftime("%Y%m%d_%H%M%S")
+        duplicate_run_dir = root / "reports/runs/prod" / duplicate_run_id
+        write_json(
+            duplicate_run_dir / "decision_audit.json",
+            {
+                "now_ts": int(base.timestamp()) + 30,
+                "counts": {},
+                "router_decisions": [],
+            },
+        )
+        write_text(duplicate_run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+        write_json(duplicate_run_dir / "summary.json", {"run_id": duplicate_run_id, "num_trades": 0})
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                diagnostics = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/run_completion_diagnostics.csv")).read().decode().splitlines()))
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
+            duplicate_rows = [
+                row for row in diagnostics
+                if int(row["duplicate_same_hour_completion_count"]) >= 1
+            ]
+            assert duplicate_rows, diagnostics
+            assert window["duplicate_same_hour_completion_count"] >= 1, window
+            assert manifest["duplicate_same_hour_completion_count"] >= 1, manifest
+            assert manifest["completion_attempts"] > manifest["canonical_completion_count"], manifest
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
@@ -4852,12 +4895,15 @@ def main():
                 roundtrips = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/trades_roundtrips.csv")).read().decode().splitlines()))
                 dust_roundtrips = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/dust_residual_roundtrips.csv")).read().decode().splitlines()))
                 open_positions = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/open_positions.csv")).read().decode().splitlines()))
+                positions = json.loads(tf.extractfile(extract_member(tf, "reports/positions.json")).read().decode())
                 lifecycle = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/probe_lifecycle_audit.csv")).read().decode().splitlines()))
                 issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
 
             assert open_positions == [], open_positions
+            assert positions["open_position_count"] == 0, positions
+            assert positions["dust_only"] is True, positions
             assert window["effective_open_position_count"] == 0, window
             assert window["open_position_count"] == 0, window
             assert window["dust_residual_position_count"] >= 1, window
