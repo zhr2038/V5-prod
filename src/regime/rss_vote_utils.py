@@ -70,7 +70,7 @@ def build_rss_vote(payload: Dict[str, Any], weight: float) -> Dict[str, Any]:
     sentiment = float(payload.get("f6_sentiment", 0.0) or 0.0)
     source_confidence = float(payload.get("f6_sentiment_confidence", 0.7) or 0.7)
     state = rss_vote_state(sentiment)
-    summary = str(payload.get("f6_sentiment_summary", "") or "")[:100]
+    summary = str(payload.get("f6_sentiment_summary", "") or "").strip()
     return {
         "state": state,
         "confidence": rss_vote_confidence(sentiment, source_confidence),

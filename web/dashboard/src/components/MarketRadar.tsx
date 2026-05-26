@@ -17,16 +17,19 @@ function VoteCard({
   vote,
   showProbs,
   showBars,
+  showFullSummary,
 }: {
   title: string;
   vote?: import('../types').MarketVote;
   showProbs?: boolean;
   showBars?: boolean;
+  showFullSummary?: boolean;
 }) {
   if (!vote) return null;
   const state = String(vote.state || '').toUpperCase();
   const confidence = vote.confidence ?? 0;
   const probs = vote.probs || {};
+  const summary = vote.summary || vote.summary_short;
   const surfaceTone =
     state === 'TRENDING' || state === 'TRENDINGUP'
       ? 'tone-sage'
@@ -72,7 +75,15 @@ function VoteCard({
           ))}
         </div>
       )}
-      {vote.summary && <div className="text-xs text-[var(--text-soft)] line-clamp-2">{vote.summary}</div>}
+      {summary && (
+        <div
+          className={`text-xs leading-relaxed text-[var(--text-soft)] break-words ${
+            showFullSummary ? 'whitespace-normal' : 'line-clamp-2'
+          }`}
+        >
+          {summary}
+        </div>
+      )}
     </div>
   );
 }
@@ -92,7 +103,7 @@ export function MarketRadar({ marketState }: MarketRadarProps) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <VoteCard title="HMM" vote={votes.hmm} showProbs />
         <VoteCard title="资金费率" vote={votes.funding} showBars />
-        <VoteCard title="RSS" vote={votes.rss} showBars />
+        <VoteCard title="RSS" vote={votes.rss} showBars showFullSummary />
       </div>
 
       {alerts.length > 0 && (

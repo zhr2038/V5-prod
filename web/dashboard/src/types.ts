@@ -147,6 +147,7 @@ export interface MarketVote {
   weight?: number;
   probs?: Record<string, number>;
   summary?: string;
+  summary_short?: string;
   raw?: unknown;
 }
 
