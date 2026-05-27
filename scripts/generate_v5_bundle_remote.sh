@@ -7621,6 +7621,124 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         shadow_row["recommendation"] = bnb_profit_lock_shadow_recommendation
         shadow_row["review_reason"] = bnb_profit_lock_shadow_review_reason
 
+    def is_bnb_f3_dominant_swing_roundtrip(row):
+        if normalize_symbol_text(row.get("symbol")) != BNB_PROFIT_LOCK_SYMBOL:
+            return False
+        if not row_has_truthy_key(row, "swing_hold_position"):
+            return False
+        dominant_factor = flatten_value(first_nested_value_from_row(row, ("dominant_factor",))).strip()
+        if dominant_factor == "f3_vol_adj_ret":
+            return True
+        haystack = " ".join(
+            flatten_value(first_observed(row.get(field), ""))
+            for field in (
+                "strategy_candidate",
+                "source_strategy_candidate",
+                "entry_strategy_candidate",
+                "entry_reason",
+                "reason",
+                "router_reason",
+                "raw_json",
+            )
+        ).lower()
+        return "f3_vol_adj_ret" in haystack or "f3_dominant" in haystack
+
+    def bnb_f3_dominant_swing_diagnosis(row):
+        realized = as_float(row.get("realized_net_bps"))
+        if realized is None:
+            return "bnb_f3_dominant_swing_not_observable"
+        if realized < 0:
+            held_values = [
+                as_float(row.get("if_held_6h_net_bps")),
+                as_float(row.get("if_held_12h_net_bps")),
+                as_float(row.get("if_held_24h_net_bps")),
+            ]
+            if any(value is not None and value > realized for value in held_values):
+                return "bnb_f3_dominant_swing_loss_better_if_held"
+            return "bnb_f3_dominant_swing_loss"
+        return "bnb_f3_dominant_swing_profitable"
+
+    bnb_f3_dominant_swing_outcome_rows = []
+    for row in closed_roundtrip_rows:
+        if not is_bnb_f3_dominant_swing_roundtrip(row):
+            continue
+        exit_dt = parse_dt_utc(row.get("exit_ts"))
+        realized_net_bps = first_observed(row.get("net_bps"), row.get("realized_net_bps"), not_obs)
+        outcome_row = {
+            "run_id": row.get("run_id", not_obs),
+            "entry_ts": row.get("entry_ts", not_obs),
+            "exit_ts": row.get("exit_ts", not_obs),
+            "entry_px": row.get("entry_px", not_obs),
+            "exit_px": row.get("exit_px", not_obs),
+            "realized_net_bps": flatten_value(realized_net_bps),
+            "net_pnl_usdt": first_observed(row.get("net_pnl_usdt"), row.get("realized_net_pnl_usdt"), row.get("net_pnl_sum_usdt"), not_obs),
+            "dominant_factor": flatten_value(first_nested_value_from_row(row, ("dominant_factor",))),
+            "dominant_factor_contribution_pct": flatten_value(first_nested_value_from_row(row, ("dominant_factor_contribution_pct", "contribution_pct", "dominant_contribution_pct"))),
+            "f4_volume_expansion": flatten_value(first_nested_value_from_row(row, ("f4_volume_expansion", "f4"))),
+            "f5_rsi_trend_confirm": flatten_value(first_nested_value_from_row(row, ("f5_rsi_trend_confirm", "f5"))),
+            "alpha6_score": flatten_value(first_nested_value_from_row(row, ("alpha6_score", "alpha6_score_at_entry"))),
+            "final_score": flatten_value(first_nested_value_from_row(row, ("final_score", "final_score_at_entry"))),
+            "exit_reason": row.get("exit_reason", not_obs),
+        }
+        for horizon in (6, 12, 24):
+            _held_px, held_net = price_and_net_if_held_after_exit(
+                row.get("symbol"),
+                row.get("entry_px"),
+                exit_dt,
+                horizon,
+                swing_rt_cost_bps,
+            )
+            outcome_row[f"if_held_{horizon}h_net_bps"] = held_net
+        outcome_row["diagnosis"] = bnb_f3_dominant_swing_diagnosis(outcome_row)
+        bnb_f3_dominant_swing_outcome_rows.append(outcome_row)
+
+    bnb_f3_realized_values = [
+        value
+        for value in (as_float(row.get("realized_net_bps")) for row in bnb_f3_dominant_swing_outcome_rows)
+        if value is not None
+    ]
+    bnb_f3_if_held_12h_values = [
+        value
+        for value in (as_float(row.get("if_held_12h_net_bps")) for row in bnb_f3_dominant_swing_outcome_rows)
+        if value is not None
+    ]
+    bnb_f3_avg_realized_net_bps = (
+        sum(bnb_f3_realized_values) / len(bnb_f3_realized_values)
+        if bnb_f3_realized_values
+        else None
+    )
+    bnb_f3_win_rate = (
+        sum(1 for value in bnb_f3_realized_values if value > 0) / len(bnb_f3_realized_values)
+        if bnb_f3_realized_values
+        else None
+    )
+    bnb_f3_avg_if_held_12h_net_bps = (
+        sum(bnb_f3_if_held_12h_values) / len(bnb_f3_if_held_12h_values)
+        if bnb_f3_if_held_12h_values
+        else None
+    )
+    if len(bnb_f3_dominant_swing_outcome_rows) < 5:
+        bnb_f3_dominant_swing_recommendation = "collect_more_samples"
+    elif bnb_f3_avg_realized_net_bps is not None and bnb_f3_avg_realized_net_bps < -50.0:
+        bnb_f3_dominant_swing_recommendation = "consider_block_bnb_f3_dominant_swing"
+    elif bnb_f3_avg_realized_net_bps is None:
+        bnb_f3_dominant_swing_recommendation = "outcome_not_observable"
+    else:
+        bnb_f3_dominant_swing_recommendation = "keep_monitoring"
+    bnb_f3_dominant_swing_summary = {
+        "schema_version": "v5.bnb_f3_dominant_swing_summary.v1",
+        "diagnostic_only": True,
+        "sample_count": len(bnb_f3_dominant_swing_outcome_rows),
+        "avg_realized_net_bps": bnb_f3_avg_realized_net_bps if bnb_f3_avg_realized_net_bps is not None else not_obs,
+        "win_rate": bnb_f3_win_rate if bnb_f3_win_rate is not None else not_obs,
+        "avg_if_held_12h_net_bps": bnb_f3_avg_if_held_12h_net_bps if bnb_f3_avg_if_held_12h_net_bps is not None else not_obs,
+        "recommendation": bnb_f3_dominant_swing_recommendation,
+        "thresholds": {
+            "min_samples_for_restriction_review": 5,
+            "avg_realized_net_bps_review_threshold": -50,
+        },
+    }
+
     SOL_SWING_SYMBOL = "SOL/USDT"
 
     def is_sol_symbol(value):
@@ -9066,6 +9184,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "summaries/bnb_profit_lock_shadow.csv",
         bnb_profit_lock_shadow_rows,
         ["symbol", "strategy_candidate", "entry_reason", "source_entry_id", "entry_ts", "exit_ts", "entry_px", "exit_px", "exit_reason", "atr_trailing_exit", "max_unrealized_bps", "profit_lock_30bps", "profit_lock_50bps", "profit_lock_30bps_exit", "profit_lock_50bps_exit", "delayed_exit_6h", "delayed_exit_12h", "delayed_exit_24h", "actual_exit_net_bps", "best_shadow_exit_policy", "best_shadow_improvement_bps", "sample_count", "recommendation", "review_reason", "diagnosis"],
+    )
+    write_csv(
+        "summaries/bnb_f3_dominant_swing_outcomes.csv",
+        bnb_f3_dominant_swing_outcome_rows,
+        ["run_id", "entry_ts", "exit_ts", "entry_px", "exit_px", "realized_net_bps", "net_pnl_usdt", "dominant_factor", "dominant_factor_contribution_pct", "f4_volume_expansion", "f5_rsi_trend_confirm", "alpha6_score", "final_score", "exit_reason", "if_held_6h_net_bps", "if_held_12h_net_bps", "if_held_24h_net_bps", "diagnosis"],
+    )
+    write_text(
+        "summaries/bnb_f3_dominant_swing_summary.json",
+        json.dumps(bnb_f3_dominant_swing_summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
     )
     write_csv(
         "summaries/factor_contribution_audit.csv",
@@ -10830,6 +10957,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "bnb_profit_lock_shadow_avg_best_improvement_bps": bnb_profit_lock_shadow_avg_best_improvement_bps if bnb_profit_lock_shadow_avg_best_improvement_bps is not None else not_obs,
         "bnb_profit_lock_shadow_best_policy_mix": bnb_profit_lock_shadow_best_policy_mix,
         "bnb_profit_lock_shadow_latest_best_policy": bnb_profit_lock_shadow_latest.get("best_shadow_exit_policy", not_obs),
+        "bnb_f3_dominant_swing_sample_count": bnb_f3_dominant_swing_summary.get("sample_count", 0),
+        "bnb_f3_dominant_swing_avg_realized_net_bps": bnb_f3_dominant_swing_summary.get("avg_realized_net_bps", not_obs),
+        "bnb_f3_dominant_swing_win_rate": bnb_f3_dominant_swing_summary.get("win_rate", not_obs),
+        "bnb_f3_dominant_swing_avg_if_held_12h_net_bps": bnb_f3_dominant_swing_summary.get("avg_if_held_12h_net_bps", not_obs),
+        "bnb_f3_dominant_swing_recommendation": bnb_f3_dominant_swing_summary.get("recommendation", not_obs),
         "high_score_blocked_target_count": len(high_score_blocked_rows),
         "high_score_blocked_labelable_target_count": len(high_score_labelable_rows),
         "high_score_blocked_non_entry_management_count": len(high_score_non_entry_management_rows),
@@ -11621,6 +11753,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- best_policy_mix: {json.dumps(bnb_profit_lock_shadow_best_policy_mix, ensure_ascii=False, sort_keys=True)}",
         "- interpretation: this is diagnostic only; do not modify live ATR/profit-lock exit until sample_count >= 10 and follow-up review confirms improvement.",
         "- output: summaries/bnb_profit_lock_shadow.csv",
+        "",
+        "## BNB f3-dominant swing outcome audit",
+        f"- sample_count: {bnb_f3_dominant_swing_summary.get('sample_count', 0)}",
+        f"- avg_realized_net_bps: {fmt_num(bnb_f3_dominant_swing_summary.get('avg_realized_net_bps'), 6)}",
+        f"- win_rate: {fmt_num(bnb_f3_dominant_swing_summary.get('win_rate'), 6)}",
+        f"- avg_if_held_12h_net_bps: {fmt_num(bnb_f3_dominant_swing_summary.get('avg_if_held_12h_net_bps'), 6)}",
+        f"- recommendation: {bnb_f3_dominant_swing_summary.get('recommendation', not_obs)}",
+        "- interpretation: diagnostic only; do not tighten BNB f3-dominant swing eligibility until the sample gate is met.",
+        "- output: summaries/bnb_f3_dominant_swing_outcomes.csv and summaries/bnb_f3_dominant_swing_summary.json",
         "",
         "## PROTECT SOL exception shadow",
         f"- experiment_name: {flatten_value(find_config_value(effective_data, 'protect_sol_exception_experiment_name') or 'protect_sol_exception_v1')}",
