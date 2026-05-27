@@ -2269,7 +2269,7 @@ def _risk_on_multi_buy_detail_for(
 def _risk_on_multi_buy_row_ts_ms(row: Mapping[str, Any]) -> Optional[int]:
     values = [
         _advisory_time_ms(row.get(name))
-        for name in ("ts_utc", "timestamp", "sampled_at", "generated_at", "as_of_ts", "run_ts")
+        for name in ("decision_ts", "decision_time", "ts_utc", "timestamp", "sampled_at", "generated_at", "as_of_ts", "run_ts")
     ]
     values = [value for value in values if value is not None]
     return max(values) if values else None

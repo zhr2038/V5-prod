@@ -3237,7 +3237,7 @@ def fixture_entry_quality_advisory_root(root):
         root / "reports/quant_lab/latest/reports/risk_on_multi_buy_shadow.csv",
         "\n".join(
             [
-                "run_id,ts_utc,top_k,current_regime,selected_symbols,would_buy_symbol",
+                "run_id,decision_ts,top_k,current_regime,selected_symbols,would_buy_symbol",
                 'r_old,2026-05-24T00:00:00Z,2,ALT_IMPULSE,"[""ETH-USDT"",""SOL-USDT""]",ETH-USDT',
                 'r_latest,2026-05-26T00:00:00Z,1,ALT_IMPULSE,"[""BNB-USDT""]",BNB-USDT',
                 'r_latest,2026-05-26T00:00:00Z,2,ALT_IMPULSE,"[""BNB-USDT"",""SOL-USDT""]",BNB-USDT',
@@ -5086,13 +5086,18 @@ def main():
             "entry_quality_summary.md",
         ):
             members[f"reports/{filename}"] = (source_dir / filename).read_text(encoding="utf-8")
+        members["reports/risk_on_multi_buy_shadow.csv"] = (
+            source_dir / "risk_on_multi_buy_shadow.csv"
+        ).read_text(encoding="utf-8")
         shutil.rmtree(root / "reports/quant_lab/latest")
         write_zip(root / "reports/quant_lab_latest_bundle.zip", members)
         bundle = run_bundle(root)
         try:
             with tarfile.open(bundle, "r:gz") as tf:
                 reader = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/entry_quality_advisory_reader.csv")).read().decode().splitlines()))
+                risk_on_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/risk_on_multi_buy_shadow.csv")).read().decode().splitlines()))
                 raw_names = set(tf.getnames())
+                raw_risk_on = tf.extractfile(extract_member(tf, "raw/reports/risk_on_multi_buy_shadow.csv")).read().decode()
                 raw_missed_low = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/missed_low_audit.csv")).read().decode()
                 raw_missed_by_symbol = tf.extractfile(extract_member(tf, "raw/reports/entry_quality/missed_low_by_symbol.csv")).read().decode()
                 raw_late_advisory = json.loads(tf.extractfile(extract_member(tf, "raw/reports/entry_quality/late_entry_chase_threshold_advisory.json")).read().decode())
@@ -5111,6 +5116,10 @@ def main():
             assert raw_late_advisory["late_chase_loss_count"] == 1, raw_late_advisory
             assert "threshold_bps" in raw_late_sensitivity, raw_late_sensitivity
             assert "read-only fixture" in raw_summary, raw_summary
+            assert "BNB-USDT" in raw_risk_on and "SOL-USDT" in raw_risk_on, raw_risk_on
+            by_top_k = {row["top_k"]: row for row in risk_on_rows}
+            assert json.loads(by_top_k["2"]["selected_symbols"]) == ["BNB/USDT", "SOL/USDT"], by_top_k
+            assert by_top_k["2"]["source_detail_available"] == "true", by_top_k
             assert any(name.endswith("raw/reports/entry_quality/pullback_reversal_shadow_outcomes.csv") for name in raw_names), raw_names
         finally:
             bundle.unlink(missing_ok=True)

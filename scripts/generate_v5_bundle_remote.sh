@@ -734,20 +734,45 @@ def entry_quality_archive_paths():
 
 def read_entry_quality_from_archive(archive_path, filename):
     candidates = []
+    def archive_member_score(normalized):
+        normalized = normalized.replace("\\", "/").lstrip("./")
+        raw_report = f"raw/reports/{filename}"
+        report = f"reports/{filename}"
+        raw_entry_quality = f"raw/reports/entry_quality/{filename}"
+        entry_quality = f"reports/entry_quality/{filename}"
+        if normalized == raw_report:
+            return 60
+        if normalized == report:
+            return 55
+        if normalized == raw_entry_quality:
+            return 50
+        if normalized == entry_quality:
+            return 45
+        if normalized.endswith(f"/{raw_report}"):
+            return 40
+        if normalized.endswith(f"/{report}"):
+            return 35
+        if normalized.endswith(f"/{raw_entry_quality}"):
+            return 30
+        if normalized.endswith(f"/{entry_quality}"):
+            return 25
+        if normalized.endswith(f"reports/{filename}"):
+            return 20
+        if "/reports/" in normalized:
+            return 15
+        if "/entry_quality/" in normalized:
+            return 10
+        if normalized == filename or normalized.endswith(f"/{filename}"):
+            return 5
+        return -1
     try:
         if archive_path.suffix.lower() == ".zip":
             import zipfile
             with zipfile.ZipFile(archive_path) as zf:
                 for name in zf.namelist():
                     normalized = name.replace("\\", "/")
-                    if normalized.endswith(f"/{filename}") or normalized == filename:
-                        score = 0
-                        if normalized.endswith(f"reports/{filename}"):
-                            score = 3
-                        elif "/reports/" in normalized:
-                            score = 2
-                        elif "/entry_quality/" in normalized:
-                            score = 1
+                    score = archive_member_score(normalized)
+                    if score >= 0:
                         candidates.append((score, normalized))
                 if not candidates:
                     return ""
@@ -759,14 +784,8 @@ def read_entry_quality_from_archive(archive_path, filename):
                 normalized = member.name.replace("\\", "/")
                 if not member.isfile():
                     continue
-                if normalized.endswith(f"/{filename}") or normalized == filename:
-                    score = 0
-                    if normalized.endswith(f"reports/{filename}"):
-                        score = 3
-                    elif "/reports/" in normalized:
-                        score = 2
-                    elif "/entry_quality/" in normalized:
-                        score = 1
+                score = archive_member_score(normalized)
+                if score >= 0:
                     candidates.append((score, normalized, member))
             if not candidates:
                 return ""
@@ -9972,7 +9991,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     def risk_on_row_dt(row):
         values = [
             parse_dt_utc(row.get(name))
-            for name in ("ts_utc", "timestamp", "sampled_at", "generated_at", "as_of_ts", "run_ts")
+            for name in ("decision_ts", "decision_time", "ts_utc", "timestamp", "sampled_at", "generated_at", "as_of_ts", "run_ts")
         ]
         values = [value for value in values if value is not None]
         return max(values) if values else None
@@ -10091,9 +10110,32 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 selected_symbols = selected_symbols[:top_k]
                 would_buy_symbols = would_buy_symbols[:top_k]
             missed_symbols = [symbol for symbol in would_buy_symbols if symbol not in set(actual_bought_symbols)]
+            row_ts = flatten_value(advisory_value(
+                source_row,
+                "decision_ts",
+                "decision_time",
+                "ts_utc",
+                "timestamp",
+                "sampled_at",
+                "generated_at",
+                "as_of_ts",
+                default="",
+            ))
+            if not row_ts:
+                row_ts = flatten_value(advisory_value(
+                    advisory_row,
+                    "decision_ts",
+                    "decision_time",
+                    "ts_utc",
+                    "timestamp",
+                    "sampled_at",
+                    "generated_at",
+                    "as_of_ts",
+                    default=NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                ))
             risk_on_rows.append({
                 "run_id": flatten_value(advisory_value(advisory_row, "run_id", default=default_run_id)),
-                "ts_utc": flatten_value(advisory_value(advisory_row, "ts_utc", "generated_at", "as_of_ts", default=NOW.strftime("%Y-%m-%dT%H:%M:%SZ"))),
+                "ts_utc": row_ts,
                 "current_regime": flatten_value(advisory_value(advisory_row, "current_regime", "regime_state", "market_regime", "risk_regime", default=not_obs)),
                 "top_k": top_k if top_k is not None else not_obs,
                 "selected_symbols": risk_on_symbols_csv_value(selected_symbols),
