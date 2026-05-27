@@ -7500,24 +7500,60 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             return "atr_trailing_delay_would_have_helped"
         return "bnb_profit_lock_shadow_observed"
 
+    def bnb_profit_lock_entry_source(row):
+        return flatten_value(first_observed(
+            row.get("strategy_candidate"),
+            row.get("source_strategy_candidate"),
+            row.get("entry_strategy_candidate"),
+            row.get("entry_reason"),
+            row.get("reason"),
+            row.get("router_reason"),
+            not_obs,
+        ))
+
+    def is_bnb_profit_lock_shadow_roundtrip(row):
+        if normalize_symbol_text(row.get("symbol")) != BNB_PROFIT_LOCK_SYMBOL:
+            return False
+        if row_has_truthy_key(row, "swing_hold_position"):
+            return True
+        haystack = " ".join(
+            flatten_value(first_observed(row.get(field), ""))
+            for field in (
+                "strategy_candidate",
+                "source_strategy_candidate",
+                "entry_strategy_candidate",
+                "entry_reason",
+                "reason",
+                "router_reason",
+                "dominant_factor",
+                "raw_json",
+            )
+        ).lower()
+        return "f3_dominant" in haystack or "f3_vol_adj_ret" in haystack
+
     bnb_profit_lock_shadow_rows = []
     for row in closed_roundtrip_rows:
-        if normalize_symbol_text(row.get("symbol")) != BNB_PROFIT_LOCK_SYMBOL:
-            continue
-        if not row_has_truthy_key(row, "swing_hold_position"):
+        if not is_bnb_profit_lock_shadow_roundtrip(row):
             continue
         entry_dt = parse_dt_utc(row.get("entry_ts"))
         exit_dt = parse_dt_utc(row.get("exit_ts"))
         actual_exit_net_bps = first_observed(row.get("net_bps"), row.get("realized_net_bps"), not_obs)
         max_unrealized_bps = bnb_profit_lock_max_unrealized_bps(row, entry_dt, exit_dt)
+        exit_reason_text = flatten_value(row.get("exit_reason")).strip().lower()
+        source_entry_id = flatten_value(first_observed(row.get("entry_trade_id"), row.get("trade_id"), row.get("order_id"), row.get("source_entry_id"), ""))
+        if not source_entry_id or source_entry_id == not_obs:
+            source_entry_id = f"{flatten_value(row.get('run_id') or not_obs)}:{flatten_value(row.get('symbol') or BNB_PROFIT_LOCK_SYMBOL)}:{flatten_value(row.get('entry_ts') or not_obs)}"
         shadow_row = {
             "symbol": row.get("symbol", BNB_PROFIT_LOCK_SYMBOL),
+            "strategy_candidate": bnb_profit_lock_entry_source(row),
+            "entry_reason": flatten_value(first_observed(row.get("entry_reason"), row.get("reason"), not_obs)),
+            "source_entry_id": source_entry_id,
             "entry_ts": row.get("entry_ts", not_obs),
             "exit_ts": row.get("exit_ts", not_obs),
             "entry_px": row.get("entry_px", not_obs),
             "exit_px": row.get("exit_px", not_obs),
             "exit_reason": row.get("exit_reason", not_obs),
-            "atr_trailing_exit": str(flatten_value(row.get("exit_reason")).strip().lower() == "atr_trailing").lower(),
+            "atr_trailing_exit": str("atr_trailing" in exit_reason_text).lower(),
             "max_unrealized_bps": fmt_num(max_unrealized_bps, 6),
             "actual_exit_net_bps": flatten_value(actual_exit_net_bps),
         }
@@ -9029,7 +9065,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     write_csv(
         "summaries/bnb_profit_lock_shadow.csv",
         bnb_profit_lock_shadow_rows,
-        ["symbol", "entry_ts", "exit_ts", "entry_px", "exit_px", "exit_reason", "atr_trailing_exit", "max_unrealized_bps", "profit_lock_30bps", "profit_lock_50bps", "profit_lock_30bps_exit", "profit_lock_50bps_exit", "delayed_exit_6h", "delayed_exit_12h", "delayed_exit_24h", "actual_exit_net_bps", "best_shadow_exit_policy", "best_shadow_improvement_bps", "sample_count", "recommendation", "review_reason", "diagnosis"],
+        ["symbol", "strategy_candidate", "entry_reason", "source_entry_id", "entry_ts", "exit_ts", "entry_px", "exit_px", "exit_reason", "atr_trailing_exit", "max_unrealized_bps", "profit_lock_30bps", "profit_lock_50bps", "profit_lock_30bps_exit", "profit_lock_50bps_exit", "delayed_exit_6h", "delayed_exit_12h", "delayed_exit_24h", "actual_exit_net_bps", "best_shadow_exit_policy", "best_shadow_improvement_bps", "sample_count", "recommendation", "review_reason", "diagnosis"],
     )
     write_csv(
         "summaries/factor_contribution_audit.csv",

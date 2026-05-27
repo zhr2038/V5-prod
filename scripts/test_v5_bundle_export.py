@@ -2163,16 +2163,23 @@ def fixture_bnb_profit_lock_review_root(root):
     write_text(root / "logs/v5_runtime.log", "fixture log\n")
 
     run_dir = root / "reports/runs/prod" / run_id
-    trade_lines = ["ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,exit_reason,raw_meta"]
+    trade_lines = ["ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,exit_reason,entry_reason,strategy_candidate,trade_id,raw_meta"]
     candles = []
-    raw_meta = '{"swing_hold_position": true, "swing_min_hold_hours": 24}'.replace('"', '""')
     for idx in range(10):
         entry_ts = window_end - (10 - idx) * 72 * 3600
         exit_ts = entry_ts + int(24.1 * 3600)
         entry_px = 100.0
         exit_px = 99.0
-        trade_lines.append(f"{iso(entry_ts)},{run_id},BNB/USDT,OPEN_LONG,buy,1,{entry_px},{entry_px},0,,\"{raw_meta}\"")
-        trade_lines.append(f"{iso(exit_ts)},{run_id},BNB/USDT,CLOSE_LONG,sell,1,{exit_px},{exit_px},0,atr_trailing,")
+        if idx == 0:
+            raw_meta = "{}".replace('"', '""')
+            entry_reason = "f3_dominant_entry"
+            strategy_candidate = "f3_dominant_entry"
+        else:
+            raw_meta = '{"swing_hold_position": true, "swing_min_hold_hours": 24}'.replace('"', '""')
+            entry_reason = "normal_entry"
+            strategy_candidate = "normal_entry"
+        trade_lines.append(f"{iso(entry_ts)},{run_id},BNB/USDT,OPEN_LONG,buy,1,{entry_px},{entry_px},0,,{entry_reason},{strategy_candidate},entry-{idx},\"{raw_meta}\"")
+        trade_lines.append(f"{iso(exit_ts)},{run_id},BNB/USDT,CLOSE_LONG,sell,1,{exit_px},{exit_px},0,atr_trailing,,,exit-{idx},")
         candles.extend(
             [
                 (entry_ts + 12 * 3600, 100.8),
@@ -4156,6 +4163,10 @@ def main():
             assert {row["review_reason"] for row in bnb_profit} == {"sample_gate_met_shadow_exit_outperforms_actual"}, bnb_profit
             assert all(row["atr_trailing_exit"] == "true" for row in bnb_profit), bnb_profit
             assert all(row["best_shadow_improvement_bps"] == "400" for row in bnb_profit), bnb_profit
+            f3_rows = [row for row in bnb_profit if row["entry_reason"] == "f3_dominant_entry"]
+            assert len(f3_rows) == 1, bnb_profit
+            assert f3_rows[0]["strategy_candidate"] == "f3_dominant_entry", f3_rows
+            assert "BNB/USDT" in f3_rows[0]["source_entry_id"], f3_rows
             assert window["bnb_profit_lock_shadow_rows"] == 10, window
             assert window["bnb_profit_lock_shadow_sample_gate_met"] is True, window
             assert window["bnb_profit_lock_shadow_recommendation"] == "REVIEW_EXIT_POLICY", window
