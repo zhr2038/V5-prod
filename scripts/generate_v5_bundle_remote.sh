@@ -151,6 +151,8 @@ ALPHA_FACTORY_ADVISORY_FIELDS = (
     "advisory_source",
     "advisory_fresh",
     "advisory_age_sec",
+    "stale_reason",
+    "stale_response_downgraded",
     "response_action",
     "max_live_notional_usdt_ignored",
     "live_order_effect",
@@ -9597,16 +9599,23 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     def advisory_decision(row):
         return flatten_value(advisory_value(row, "decision", "advisory_decision", default="")).strip().upper()
 
+    def advisory_is_fresh(row):
+        fresh_text = flatten_value(advisory_value(row, "advisory_fresh", default="true")).strip().lower()
+        return fresh_text not in {"false", "0", "no"}
+
     def advisory_response_action(row):
+        decision = advisory_decision(row)
+        mode = advisory_mode(row)
+        fresh = advisory_is_fresh(row)
+        if decision == "KILL":
+            return "negative_advisory"
+        if mode == "paper" and not fresh:
+            return "stale_paper_display_only"
+        if mode == "shadow" and not fresh:
+            return "stale_shadow_display_only"
         existing = flatten_value(advisory_value(row, "response_action", "advisory_response_action", default=""))
         if existing:
             return existing
-        decision = advisory_decision(row)
-        mode = advisory_mode(row)
-        fresh_text = flatten_value(advisory_value(row, "advisory_fresh", default="true")).strip().lower()
-        fresh = fresh_text not in {"false", "0", "no"}
-        if decision == "KILL":
-            return "negative_advisory"
         if mode == "research":
             return "research_display_only"
         if mode == "shadow":
@@ -9642,6 +9651,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         return "entry_quality_advisory_only"
 
     strategy_advisory_rows_for_modules = list(strategy_advisory_summary_rows())
+    strategy_advisory_stale_count = sum(
+        1 for row in strategy_advisory_rows_for_modules
+        if not advisory_is_fresh(row)
+    )
+    strategy_advisory_stale_response_downgraded_count = sum(
+        1 for row in strategy_advisory_rows_for_modules
+        if advisory_response_action(row) in {"stale_paper_display_only", "stale_shadow_display_only"}
+    )
     entry_quality_strategy_rows = []
     for advisory_row in strategy_advisory_rows_for_modules:
         strategy_key = entry_quality_strategy_key(advisory_row)
@@ -10143,7 +10160,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "actual_bought_symbols": json.dumps(actual_bought_symbols, ensure_ascii=False),
                 "missed_symbols": json.dumps(missed_symbols, ensure_ascii=False),
                 "source_detail_available": str(detail_row is not None).lower(),
-                "response_action": "shadow_tracking",
+                "response_action": advisory_response_action(advisory_row),
                 "live_order_effect": "read_only_no_live_order",
             })
     else:
@@ -10720,6 +10737,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "strategy_advisory_expires_at": advisory_source_health.get("advisory_expires_at", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_stale_reason": advisory_source_health.get("stale_reason", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_source_lag_sec": advisory_source_health.get("advisory_source_lag_sec", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_stale_count": strategy_advisory_stale_count,
+        "strategy_advisory_stale_response_downgraded_count": strategy_advisory_stale_response_downgraded_count,
         "entry_quality_strategy_advisory_count": len(entry_quality_strategy_rows),
         "entry_quality_would_block_if_enabled_count": entry_quality_would_block_count,
         "entry_quality_would_enter_count": entry_quality_would_enter_count,
@@ -11446,6 +11465,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- advisory_age_sec: {advisory_source_health.get('advisory_age_sec', not_obs)}",
         f"- advisory_max_age_sec: {advisory_source_health.get('advisory_max_age_sec', not_obs)}",
         f"- advisory_expires_at: {advisory_source_health.get('advisory_expires_at', not_obs)}",
+        f"- stale_advisory_count: {window_summary.get('strategy_advisory_stale_count', not_obs)}",
+        f"- stale_response_downgraded_count: {window_summary.get('strategy_advisory_stale_response_downgraded_count', not_obs)}",
         f"- advisory_source_lag_sec: {advisory_source_health.get('advisory_source_lag_sec', not_obs)}",
         f"- stale_reason: {advisory_source_health.get('stale_reason', not_obs)}",
         f"- warning: {first_observed(advisory_source_health.get('warning'), advisory_source_health.get('freshness_inconsistency_warning'), not_obs)}",

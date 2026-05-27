@@ -1066,6 +1066,7 @@ def test_sol_paper_strategy_tracker_reads_paper_ready_advisory(tmp_path: Path) -
                 "max_paper_notional_usdt": "12",
                 "max_live_notional_usdt": "50",
                 "live_block_reasons": "no_live_slippage_coverage",
+                **_fresh_meta(start_s),
             }
         ],
     )
@@ -1129,6 +1130,7 @@ def test_sol_f4_proposal_uses_same_horizon_paper_advisory_over_kill(tmp_path: Pa
                 "recommended_mode": "none",
                 "horizon_hours": "4",
                 "live_block_reasons": "short_horizon_negative",
+                **_fresh_meta(start_s),
             },
             {
                 "strategy_candidate": "v5.f4_volume_expansion_entry",
@@ -1137,6 +1139,7 @@ def test_sol_f4_proposal_uses_same_horizon_paper_advisory_over_kill(tmp_path: Pa
                 "recommended_mode": "paper",
                 "horizon_hours": "72",
                 "max_paper_notional_usdt": "100",
+                **_fresh_meta(start_s),
             },
         ],
     )
@@ -1180,6 +1183,7 @@ def test_sol_paper_strategy_tracker_reads_advisory_from_expert_pack_tar(tmp_path
                 "recommended_mode": "paper",
                 "max_paper_notional_usdt": "11",
                 "live_block_reasons": "no_paper_days",
+                **_fresh_meta(start_s),
             }
         ],
     )
@@ -1219,6 +1223,7 @@ def test_sol_paper_strategy_tracker_reads_advisory_from_expert_pack_zip(tmp_path
                 "decision": "PAPER_READY",
                 "recommended_mode": "paper",
                 "max_paper_notional_usdt": "13",
+                **_fresh_meta(start_s),
             }
         ],
     )
@@ -1336,6 +1341,7 @@ def test_sol_paper_strategy_tracker_reads_api_advisory(monkeypatch: pytest.Monke
                             "decision": "PAPER_READY",
                             "recommended_mode": "paper",
                             "max_paper_notional_usdt": 10,
+                            **_fresh_meta(start_s),
                         }
                     ]
                 },
@@ -1575,6 +1581,8 @@ def test_alpha_factory_advisory_reader_is_read_only(tmp_path: Path) -> None:
     assert by_candidate["v5.futures_downtrend_short_proxy_shadow"]["response_action"] == "negative_advisory"
     assert by_candidate["v5.btc_strict_probe_exit_policy_review"]["response_action"] == "paper_tracking"
     assert "v5.not_alpha_factory" not in by_candidate
+    assert by_candidate["v5.expanded_relative_strength_top1_shadow"]["stale_reason"] == ""
+    assert by_candidate["v5.expanded_relative_strength_top1_shadow"]["stale_response_downgraded"] == "False"
     assert all(row["max_live_notional_usdt_ignored"] == "True" for row in reader)
     assert all(row["live_order_effect"] == "read_only_no_live_order" for row in reader)
 
@@ -1584,6 +1592,66 @@ def test_alpha_factory_advisory_reader_is_read_only(tmp_path: Path) -> None:
     assert by_family["futures"]["negative_advisory_count"] == "1"
     assert by_family["exit_policy"]["paper_tracking_count"] == "1"
     assert by_family["other"]["display_only_count"] == "1"
+
+
+def test_alpha_factory_stale_advisory_downgrades_tracking_actions(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    cfg.diagnostics.quant_lab_strategy_opportunity_advisory_api_enabled = False
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_alpha_factory_stale"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "source_module": "alpha_factory",
+                "strategy_candidate": "v5.expanded_relative_strength_top1_shadow",
+                "symbol": "TRX-USDT",
+                "decision": "KEEP_SHADOW",
+                "recommended_mode": "shadow",
+                "promotion_state": "stage2_shadow",
+                "alpha_factory_score": "0.77",
+                **_stale_meta(start_s),
+            },
+            {
+                "strategy_candidate": "v5.btc_strict_probe_exit_policy_review",
+                "symbol": "BTC-USDT",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "promotion_state": "review",
+                "alpha_factory_score": "0.63",
+                **_stale_meta(start_s),
+            },
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_alpha_factory_stale", start_s),
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["alpha_factory_advisory_rows"] == 2
+    reader = _read_csv(tmp_path / "reports" / "summaries" / "alpha_factory_advisory_reader.csv")
+    by_candidate = {row["strategy_candidate"]: row for row in reader}
+    expanded = by_candidate["v5.expanded_relative_strength_top1_shadow"]
+    exit_policy = by_candidate["v5.btc_strict_probe_exit_policy_review"]
+    assert expanded["response_action"] == "stale_shadow_display_only"
+    assert exit_policy["response_action"] == "stale_paper_display_only"
+    assert expanded["stale_response_downgraded"] == "True"
+    assert exit_policy["stale_response_downgraded"] == "True"
+    assert "age_exceeds_max" in expanded["stale_reason"]
+    assert "expired" in exit_policy["stale_reason"]
+
+    families = _read_csv(tmp_path / "reports" / "summaries" / "alpha_factory_family_summary.csv")
+    by_family = {row["family"]: row for row in families}
+    assert by_family["expanded"]["display_only_count"] == "1"
+    assert by_family["expanded"]["shadow_tracking_count"] == "0"
+    assert by_family["exit_policy"]["display_only_count"] == "1"
+    assert by_family["exit_policy"]["paper_tracking_count"] == "0"
 
 
 def test_risk_on_multi_buy_shadow_is_read_only(tmp_path: Path) -> None:
@@ -1978,6 +2046,11 @@ def test_strategy_advisory_source_health_explains_expires_rule_without_inconsist
     assert row["advisory_expires_at"]
     assert row["stale_reason"] == "expired"
     assert row["freshness_inconsistency_warning"] == ""
+    advisory = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_reader.csv")
+    assert advisory[0]["response_action"] == "stale_paper_display_only"
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    f4 = next(row for row in runs if row["strategy_id"] == "SOL_F4_VOLUME_EXPANSION_PAPER_V1")
+    assert f4["advisory_response_action"] == "stale_paper_display_only"
 
 
 def test_strategy_advisory_invalid_expires_before_generated_is_not_marked_expired() -> None:
@@ -2174,7 +2247,7 @@ def test_strategy_advisory_stale_paper_ready_keeps_paper_without_live(monkeypatc
     runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
     f4 = next(row for row in runs if row["strategy_id"] == "SOL_F4_VOLUME_EXPANSION_PAPER_V1")
     assert f4["would_enter"] == "True"
-    assert f4["advisory_response_action"] == "paper_tracking"
+    assert f4["advisory_response_action"] == "stale_paper_display_only"
     assert f4["advisory_source"] == "stale_local"
     assert f4["advisory_max_live_notional_usdt"] == "0.0"
 

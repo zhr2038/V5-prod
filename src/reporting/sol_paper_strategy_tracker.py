@@ -370,6 +370,8 @@ ALPHA_FACTORY_ADVISORY_FIELDS = [
     "advisory_source",
     "advisory_fresh",
     "advisory_age_sec",
+    "stale_reason",
+    "stale_response_downgraded",
     "response_action",
     "max_live_notional_usdt_ignored",
     "live_order_effect",
@@ -1726,6 +1728,10 @@ def _advisory_response_fields(
         response_action = "no_advisory"
     elif negative:
         response_action = "negative_advisory"
+    elif recommended_mode == "paper" and not advisory_fresh:
+        response_action = "stale_paper_display_only"
+    elif recommended_mode == "shadow" and not advisory_fresh:
+        response_action = "stale_shadow_display_only"
     elif recommended_mode == "paper":
         response_action = "paper_tracking"
     elif recommended_mode == "shadow":
@@ -1978,13 +1984,27 @@ def _is_alpha_factory_advisory(row: Mapping[str, Any]) -> bool:
 def _alpha_factory_response_action(row: Mapping[str, Any]) -> str:
     decision = str(row.get("decision") or "").strip().upper()
     mode = str(row.get("recommended_mode") or "").strip().lower().replace("-", "_")
+    fresh = _normalize_bool(row.get("advisory_fresh"))
+    fresh = True if fresh is None else bool(fresh)
     if decision == "KILL":
         return "negative_advisory"
+    if mode == "shadow" and not fresh:
+        return "stale_shadow_display_only"
+    if mode == "paper" and not fresh:
+        return "stale_paper_display_only"
     if mode == "shadow":
         return "shadow_tracking"
     if mode == "paper":
         return "paper_tracking"
     return "display_only"
+
+
+def _alpha_factory_stale_response_downgraded(row: Mapping[str, Any]) -> bool:
+    decision = str(row.get("decision") or "").strip().upper()
+    mode = str(row.get("recommended_mode") or "").strip().lower().replace("-", "_")
+    fresh = _normalize_bool(row.get("advisory_fresh"))
+    fresh = True if fresh is None else bool(fresh)
+    return bool(decision != "KILL" and mode in {"paper", "shadow"} and not fresh)
 
 
 def _alpha_factory_family(row: Mapping[str, Any]) -> str:
@@ -2027,6 +2047,8 @@ def _alpha_factory_advisory_rows(
                 "advisory_source": row.get("advisory_source"),
                 "advisory_fresh": row.get("advisory_fresh"),
                 "advisory_age_sec": row.get("advisory_age_sec"),
+                "stale_reason": row.get("stale_reason"),
+                "stale_response_downgraded": _alpha_factory_stale_response_downgraded(row),
                 "response_action": _alpha_factory_response_action(row),
                 "max_live_notional_usdt_ignored": True,
                 "live_order_effect": "read_only_no_live_order",
@@ -2058,6 +2080,11 @@ def _alpha_factory_family_summary_rows(
     out: list[dict[str, Any]] = []
     for family, rows in sorted(buckets.items()):
         actions = Counter(str(row.get("response_action") or "") for row in rows)
+        display_only_count = (
+            actions.get("display_only", 0)
+            + actions.get("stale_paper_display_only", 0)
+            + actions.get("stale_shadow_display_only", 0)
+        )
         candidates = sorted({str(row.get("strategy_candidate") or "") for row in rows if str(row.get("strategy_candidate") or "")})
         out.append(
             {
@@ -2065,7 +2092,7 @@ def _alpha_factory_family_summary_rows(
                 "ts_utc": ts_utc,
                 "family": family,
                 "row_count": len(rows),
-                "display_only_count": actions.get("display_only", 0),
+                "display_only_count": display_only_count,
                 "shadow_tracking_count": actions.get("shadow_tracking", 0),
                 "paper_tracking_count": actions.get("paper_tracking", 0),
                 "negative_advisory_count": actions.get("negative_advisory", 0),
@@ -2323,6 +2350,7 @@ def _risk_on_multi_buy_shadow_rows(
     advisory_rows: Iterable[Mapping[str, Any]],
     *,
     detail_rows: Iterable[Mapping[str, Any]] = (),
+    diagnostics: DiagnosticsConfig,
     run_id: str,
     asof_ts_ms: int,
     audit: DecisionAudit,
@@ -2337,6 +2365,8 @@ def _risk_on_multi_buy_shadow_rows(
         if not _risk_on_multi_buy_advisory(row):
             continue
         top_k = _risk_on_multi_buy_top_k(row)
+        fields = _advisory_response_fields(row, diagnostics)
+        response_action = str(fields.get("advisory_response_action") or "")
         detail_row = _risk_on_multi_buy_detail_for(row, detail_rows, top_k=top_k)
         source_row = detail_row or row
         source_detail_available = detail_row is not None
@@ -2387,7 +2417,7 @@ def _risk_on_multi_buy_shadow_rows(
                 "actual_bought_symbols": _json_symbol_list(actual_bought),
                 "missed_symbols": _json_symbol_list(missed),
                 "source_detail_available": bool(source_detail_available),
-                "response_action": "shadow_tracking",
+                "response_action": response_action or "display_only",
                 "live_order_effect": "read_only_no_live_order",
             }
         )
@@ -3530,6 +3560,7 @@ def update_sol_paper_strategy_tracker(
     risk_on_multi_buy_rows = _risk_on_multi_buy_shadow_rows(
         advisory_rows,
         detail_rows=_read_risk_on_multi_buy_detail_rows(run_path=run_path, reports_dir=reports_dir),
+        diagnostics=diagnostics,
         run_id=str(getattr(audit, "run_id", "") or ""),
         asof_ts_ms=asof_ts_ms,
         audit=audit,

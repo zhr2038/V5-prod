@@ -4998,8 +4998,9 @@ def main():
             assert by_strategy["v5.entry_quality_missed_low_audit"]["recommended_mode"] == "research", strategy_rows
             assert by_strategy["v5.entry_quality_missed_low_audit"]["status"] == "research_display_only", strategy_rows
             assert by_strategy["v5.late_entry_chase_guard_shadow"]["would_block_if_enabled"] == "True", strategy_rows
-            assert by_strategy["v5.late_entry_chase_guard_shadow"]["status"] == "shadow_tracking", strategy_rows
+            assert by_strategy["v5.late_entry_chase_guard_shadow"]["status"] == "stale_shadow_display_only", strategy_rows
             assert by_strategy["v5.pullback_reversal_shadow_sol"]["would_enter"] == "True", strategy_rows
+            assert by_strategy["v5.pullback_reversal_shadow_sol"]["status"] == "stale_paper_display_only", strategy_rows
             assert by_strategy["v5.pullback_reversal_shadow_sol"]["max_live_notional_usdt_ignored"] == "true", strategy_rows
             assert late["late_entry_chase_guard_enabled"] == "false", late
             assert pullback["pullback_reversal_live_enabled"] == "false", pullback
@@ -5061,6 +5062,8 @@ def main():
             assert "advisory_age_sec: 2274" in readme, readme
             assert "advisory_max_age_sec: 5400" in readme, readme
             assert f"advisory_expires_at: {health_row['advisory_expires_at']}" in readme, readme
+            assert "stale_advisory_count: 3" in readme, readme
+            assert "stale_response_downgraded_count: 2" in readme, readme
             assert "freshness_rule:" in readme, readme
             assert "## Risk-on multi-buy shadow" in readme, readme
             assert "BNB/USDT" in readme and "SOL/USDT" in readme, readme
