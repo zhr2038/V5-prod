@@ -2243,6 +2243,49 @@ def fixture_bnb_profit_lock_review_root(root):
     return run_id
 
 
+def fixture_bnb_atr_trailing_metadata_incomplete_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    window_end = int(now.timestamp())
+    run_id = now.strftime("%Y%m%d_%H")
+    entry_ts = window_end - 60 * 3600
+    exit_ts = entry_ts + int(24.1 * 3600)
+
+    write_text(
+        root / "configs/live_prod.yaml",
+        "execution:\n"
+        "  fee_bps: 0\n"
+        "  slippage_bps: 0\n",
+    )
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(run_dir / "decision_audit.json", {"window_end_ts": window_end, "router_decisions": []})
+    write_text(
+        run_dir / "trades.csv",
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,exit_reason,entry_reason,strategy_candidate\n"
+        f"{iso(entry_ts)},{run_id},BNB/USDT,OPEN_LONG,buy,1,100,100,0,,normal_entry,normal_entry\n"
+        f"{iso(exit_ts)},{run_id},BNB/USDT,CLOSE_LONG,sell,1,99,99,0,atr_trailing,,\n",
+    )
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id})
+    write_ohlcv_cache(root, "BNB/USDT", [
+        (entry_ts + 12 * 3600, 100.7),
+        (exit_ts + 6 * 3600, 100.5),
+        (exit_ts + 12 * 3600, 101.0),
+        (exit_ts + 24 * 3600, 102.0),
+    ])
+    return run_id
+
+
 def fixture_bnb_f3_dominant_swing_review_root(root):
     now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
     window_end = int(now.timestamp())
@@ -4123,6 +4166,7 @@ def main():
                 readiness_by_symbol = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/swing_atr_soft_exit_readiness_by_symbol.csv")).read().decode().splitlines()))
                 shadow = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/swing_atr_soft_exit_shadow.csv")).read().decode().splitlines()))
                 bnb_profit = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_profit_lock_shadow.csv")).read().decode().splitlines()))
+                bnb_profit_summary = json.loads(tf.extractfile(extract_member(tf, "summaries/bnb_profit_lock_summary.json")).read().decode())
                 bnb_f3_outcomes = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_f3_dominant_swing_outcomes.csv")).read().decode().splitlines()))
                 bnb_f3_summary = json.loads(tf.extractfile(extract_member(tf, "summaries/bnb_f3_dominant_swing_summary.json")).read().decode())
                 bnb_risk = json.loads(tf.extractfile(extract_member(tf, "summaries/bnb_risk_summary.json")).read().decode())
@@ -4161,6 +4205,9 @@ def main():
             bnb_profit_row = bnb_profit[0]
             assert bnb_profit_row["symbol"] == "BNB/USDT", bnb_profit_row
             assert bnb_profit_row["atr_trailing_exit"] == "true", bnb_profit_row
+            assert bnb_profit_row["has_swing_hold_flag"] == "true", bnb_profit_row
+            assert bnb_profit_row["has_f3_dominant_signal"] == "true", bnb_profit_row
+            assert bnb_profit_row["classification_reason"] == "bnb_f3_dominant_swing_hold", bnb_profit_row
             assert bnb_profit_row["max_unrealized_bps"] == "80", bnb_profit_row
             assert bnb_profit_row["profit_lock_30bps"] == "30", bnb_profit_row
             assert bnb_profit_row["profit_lock_50bps"] == "50", bnb_profit_row
@@ -4169,13 +4216,21 @@ def main():
             assert bnb_profit_row["delayed_exit_6h"] == "100", bnb_profit_row
             assert bnb_profit_row["delayed_exit_12h"] == "200", bnb_profit_row
             assert bnb_profit_row["delayed_exit_24h"] == "300", bnb_profit_row
+            assert bnb_profit_row["delayed_exit_6h_net_bps"] == "100", bnb_profit_row
+            assert bnb_profit_row["delayed_exit_12h_net_bps"] == "200", bnb_profit_row
+            assert bnb_profit_row["delayed_exit_24h_net_bps"] == "300", bnb_profit_row
             assert bnb_profit_row["actual_exit_net_bps"] == "-100", bnb_profit_row
             assert bnb_profit_row["best_shadow_exit_policy"] == "delayed_exit_24h", bnb_profit_row
             assert bnb_profit_row["best_shadow_improvement_bps"] == "400", bnb_profit_row
+            assert bnb_profit_row["delta_vs_actual_bps"] == "400", bnb_profit_row
             assert bnb_profit_row["sample_count"] == "1", bnb_profit_row
             assert bnb_profit_row["recommendation"] == "collect_more_samples", bnb_profit_row
             assert bnb_profit_row["review_reason"] == "sample_count_lt_10", bnb_profit_row
-            assert bnb_profit_row["diagnosis"] == "atr_trailing_delay_would_have_helped", bnb_profit_row
+            assert bnb_profit_row["diagnosis"] == "gave_back_unrealized_profit", bnb_profit_row
+            assert bnb_profit_summary["sample_count"] == 1, bnb_profit_summary
+            assert bnb_profit_summary["recommendation"] == "collect_more_samples", bnb_profit_summary
+            assert bnb_profit_summary["gave_back_unrealized_profit_count"] == 1, bnb_profit_summary
+            assert bnb_profit_summary["latest"]["delta_vs_actual_bps"] == "400", bnb_profit_summary
             assert len(bnb_f3_outcomes) == 1, bnb_f3_outcomes
             bnb_f3 = bnb_f3_outcomes[0]
             assert bnb_f3["run_id"] == run_id, bnb_f3
@@ -4282,6 +4337,8 @@ def main():
             assert "latest atr_trailing_exit: true" in readme, readme
             assert "latest profit_lock_30bps/50bps: 30 / 50" in readme, readme
             assert "latest best_shadow_exit_policy: delayed_exit_24h" in readme, readme
+            assert "latest delta_vs_actual_bps: 400" in readme, readme
+            assert "summaries/bnb_profit_lock_shadow.csv and summaries/bnb_profit_lock_summary.json" in readme, readme
             assert "## BNB f3-dominant swing outcome audit" in readme, readme
             assert "diagnostic only: true" in readme, readme
             assert "live_order_effect: none_diagnostic_only" in readme, readme
@@ -4304,6 +4361,7 @@ def main():
         try:
             with tarfile.open(bundle, "r:gz") as tf:
                 bnb_profit = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_profit_lock_shadow.csv")).read().decode().splitlines()))
+                bnb_profit_summary = json.loads(tf.extractfile(extract_member(tf, "summaries/bnb_profit_lock_summary.json")).read().decode())
                 bnb_f3_outcomes = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_f3_dominant_swing_outcomes.csv")).read().decode().splitlines()))
                 bnb_f3_summary = json.loads(tf.extractfile(extract_member(tf, "summaries/bnb_f3_dominant_swing_summary.json")).read().decode())
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
@@ -4315,6 +4373,13 @@ def main():
             assert {row["review_reason"] for row in bnb_profit} == {"sample_gate_met_shadow_exit_outperforms_actual"}, bnb_profit
             assert all(row["atr_trailing_exit"] == "true" for row in bnb_profit), bnb_profit
             assert all(row["best_shadow_improvement_bps"] == "400" for row in bnb_profit), bnb_profit
+            assert all(row["delta_vs_actual_bps"] == "400" for row in bnb_profit), bnb_profit
+            assert all(row["delayed_exit_24h_net_bps"] == "300" for row in bnb_profit), bnb_profit
+            assert bnb_profit_summary["sample_count"] == 10, bnb_profit_summary
+            assert bnb_profit_summary["recommendation"] == "REVIEW_EXIT_POLICY", bnb_profit_summary
+            assert bnb_profit_summary["review_reason"] == "sample_gate_met_shadow_exit_outperforms_actual", bnb_profit_summary
+            assert bnb_profit_summary["gave_back_unrealized_profit_count"] == 10, bnb_profit_summary
+            assert bnb_profit_summary["avg_best_shadow_improvement_bps"] == 400.0, bnb_profit_summary
             f3_rows = [row for row in bnb_profit if row["entry_reason"] == "f3_dominant_entry"]
             assert len(f3_rows) == 1, bnb_profit
             assert f3_rows[0]["strategy_candidate"] == "f3_dominant_entry", f3_rows
@@ -4351,6 +4416,37 @@ def main():
             assert "interpretation: this is diagnostic only" in readme, readme
             assert "missing_swing_flag_count: 1" in readme, readme
             assert "live_order_effect: none_diagnostic_only" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-bnb-atr-metadata-incomplete-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_bnb_atr_trailing_metadata_incomplete_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                bnb_profit = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_profit_lock_shadow.csv")).read().decode().splitlines()))
+                bnb_profit_summary = json.loads(tf.extractfile(extract_member(tf, "summaries/bnb_profit_lock_summary.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+            assert len(bnb_profit) == 1, bnb_profit
+            row = bnb_profit[0]
+            assert row["symbol"] == "BNB/USDT", row
+            assert row["has_swing_hold_flag"] == "false", row
+            assert row["has_f3_dominant_signal"] == "false", row
+            assert row["classification_reason"] == "bnb_atr_trailing_exit_metadata_incomplete", row
+            assert row["atr_trailing_exit"] == "true", row
+            assert row["actual_exit_net_bps"] == "-100", row
+            assert row["max_unrealized_bps"] == "70", row
+            assert row["delayed_exit_24h_net_bps"] == "200", row
+            assert row["best_shadow_exit_policy"] == "delayed_exit_24h", row
+            assert row["delta_vs_actual_bps"] == "300", row
+            assert row["diagnosis"] == "gave_back_unrealized_profit", row
+            assert bnb_profit_summary["sample_count"] == 1, bnb_profit_summary
+            assert bnb_profit_summary["recommendation"] == "collect_more_samples", bnb_profit_summary
+            assert bnb_profit_summary["gave_back_unrealized_profit_count"] == 1, bnb_profit_summary
+            assert window["bnb_profit_lock_shadow_rows"] == 1, window
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
