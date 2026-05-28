@@ -7590,10 +7590,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         has_f3_dominant_signal = bnb_row_has_f3_dominant_signal(row) if is_bnb else False
         exit_reason_text = flatten_value(row.get("exit_reason")).strip().lower()
         has_atr_trailing_exit = is_bnb and "atr_trailing" in exit_reason_text
-        is_profit_lock_shadow_candidate = is_bnb and (has_swing_hold_flag or has_f3_dominant_signal or has_atr_trailing_exit)
+        is_profit_lock_shadow_candidate = is_bnb and (has_swing_hold_flag or has_f3_dominant_signal)
         is_f3_dominant_entry = is_bnb and has_f3_dominant_signal
         is_f3_dominant_swing_hold = is_f3_dominant_entry and has_swing_hold_flag
         missing_swing_hold_flag = is_f3_dominant_entry and not has_swing_hold_flag
+        is_atr_trailing_metadata_incomplete = (
+            is_bnb
+            and has_atr_trailing_exit
+            and not is_profit_lock_shadow_candidate
+        )
         if not is_bnb:
             classification_reason = "not_bnb"
         elif is_f3_dominant_swing_hold:
@@ -7602,7 +7607,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             classification_reason = "bnb_f3_dominant_missing_swing_hold_flag"
         elif has_swing_hold_flag:
             classification_reason = "bnb_swing_hold_non_f3"
-        elif has_atr_trailing_exit:
+        elif is_atr_trailing_metadata_incomplete:
             classification_reason = "bnb_atr_trailing_exit_metadata_incomplete"
         else:
             classification_reason = "bnb_not_shadow_candidate"
@@ -7612,6 +7617,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "has_f3_dominant_signal": has_f3_dominant_signal,
             "has_atr_trailing_exit": has_atr_trailing_exit,
             "is_profit_lock_shadow_candidate": is_profit_lock_shadow_candidate,
+            "is_atr_trailing_metadata_incomplete": is_atr_trailing_metadata_incomplete,
             "is_f3_dominant_entry": is_f3_dominant_entry,
             "is_f3_dominant_swing_hold": is_f3_dominant_swing_hold,
             "missing_swing_hold_flag": missing_swing_hold_flag,
@@ -7634,17 +7640,23 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             f"{flatten_value(row.get('entry_ts') or not_obs)}"
         )
 
-    bnb_profit_lock_shadow_rows = []
-    for row in closed_roundtrip_rows:
-        bnb_classification = classify_bnb_swing_candidate(row)
-        if not bnb_classification.get("is_profit_lock_shadow_candidate"):
-            continue
+    def roundtrip_actual_exit_net_bps(row):
+        return first_observed(
+            row.get("actual_exit_net_bps"),
+            first_nested_value_from_row(row, ("actual_exit_net_bps",)),
+            row.get("net_bps"),
+            row.get("realized_net_bps"),
+            not_obs,
+        )
+
+    def build_bnb_profit_lock_shadow_row(row, bnb_classification):
         entry_dt = parse_dt_utc(row.get("entry_ts"))
         exit_dt = parse_dt_utc(row.get("exit_ts"))
-        actual_exit_net_bps = first_observed(row.get("actual_exit_net_bps"), row.get("net_bps"), row.get("realized_net_bps"), not_obs)
+        actual_exit_net_bps = roundtrip_actual_exit_net_bps(row)
         max_unrealized_bps = bnb_profit_lock_max_unrealized_bps(row, entry_dt, exit_dt)
         exit_reason_text = flatten_value(row.get("exit_reason")).strip().lower()
         shadow_row = {
+            "run_id": row.get("run_id", not_obs),
             "symbol": row.get("symbol", BNB_PROFIT_LOCK_SYMBOL),
             "strategy_candidate": bnb_profit_lock_entry_source(row),
             "entry_reason": flatten_value(first_observed(row.get("entry_reason"), row.get("reason"), not_obs)),
@@ -7682,9 +7694,28 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         shadow_row["best_shadow_improvement_bps"] = fmt_num(bnb_shadow_improvement_bps(shadow_row), 6)
         shadow_row["delta_vs_actual_bps"] = shadow_row["best_shadow_improvement_bps"]
         shadow_row["diagnosis"] = bnb_profit_lock_diagnosis(shadow_row)
-        bnb_profit_lock_shadow_rows.append(shadow_row)
+        return shadow_row
+
+    bnb_profit_lock_shadow_rows = []
+    bnb_atr_trailing_metadata_incomplete_rows = []
+    for row in closed_roundtrip_rows:
+        bnb_classification = classify_bnb_swing_candidate(row)
+        if not (
+            bnb_classification.get("is_profit_lock_shadow_candidate")
+            or bnb_classification.get("is_atr_trailing_metadata_incomplete")
+        ):
+            continue
+        shadow_row = build_bnb_profit_lock_shadow_row(row, bnb_classification)
+        if bnb_classification.get("is_profit_lock_shadow_candidate"):
+            bnb_profit_lock_shadow_rows.append(shadow_row)
+        else:
+            shadow_row["sample_count"] = "not_applicable_metadata_incomplete"
+            shadow_row["recommendation"] = "metadata_incomplete_not_in_review_gate"
+            shadow_row["review_reason"] = "excluded_from_profit_lock_review_gate"
+            bnb_atr_trailing_metadata_incomplete_rows.append(shadow_row)
 
     bnb_profit_lock_shadow_sample_count = len(bnb_profit_lock_shadow_rows)
+    bnb_profit_lock_metadata_incomplete_count = len(bnb_atr_trailing_metadata_incomplete_rows)
     bnb_profit_lock_improvement_values = [
         value
         for value in (bnb_shadow_improvement_bps(row) for row in bnb_profit_lock_shadow_rows)
@@ -7730,6 +7761,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "schema_version": "v5.bnb_profit_lock_shadow_summary.v1",
         "diagnostic_only": True,
         "live_order_effect": "none_diagnostic_only",
+        "sample_scope": "bnb_swing_or_f3_entries",
+        "metadata_incomplete_count": bnb_profit_lock_metadata_incomplete_count,
+        "metadata_incomplete_output_path": "summaries/bnb_atr_trailing_metadata_incomplete.csv",
+        "metadata_incomplete_excluded_from_review_gate": True,
         "sample_count": bnb_profit_lock_shadow_sample_count,
         "recommendation": bnb_profit_lock_shadow_recommendation,
         "review_reason": bnb_profit_lock_shadow_review_reason,
@@ -7776,7 +7811,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if not bnb_classification.get("is_f3_dominant_entry"):
             continue
         exit_dt = parse_dt_utc(row.get("exit_ts"))
-        realized_net_bps = first_observed(row.get("net_bps"), row.get("realized_net_bps"), not_obs)
+        realized_net_bps = roundtrip_actual_exit_net_bps(row)
         outcome_row = {
             "run_id": row.get("run_id", not_obs),
             "strategy_candidate": bnb_profit_lock_entry_source(row),
@@ -9343,7 +9378,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     write_csv(
         "summaries/bnb_profit_lock_shadow.csv",
         bnb_profit_lock_shadow_rows,
-        ["symbol", "strategy_candidate", "entry_reason", "source_entry_id", "has_swing_hold_flag", "has_f3_dominant_signal", "classification_reason", "entry_ts", "exit_ts", "entry_px", "exit_px", "exit_reason", "atr_trailing_exit", "max_unrealized_bps", "actual_exit_net_bps", "profit_lock_30bps", "profit_lock_50bps", "profit_lock_30bps_exit", "profit_lock_50bps_exit", "delayed_exit_6h", "delayed_exit_12h", "delayed_exit_24h", "delayed_exit_6h_net_bps", "delayed_exit_12h_net_bps", "delayed_exit_24h_net_bps", "best_shadow_exit_policy", "best_shadow_improvement_bps", "delta_vs_actual_bps", "sample_count", "recommendation", "review_reason", "diagnosis"],
+        ["run_id", "symbol", "strategy_candidate", "entry_reason", "source_entry_id", "has_swing_hold_flag", "has_f3_dominant_signal", "classification_reason", "entry_ts", "exit_ts", "entry_px", "exit_px", "exit_reason", "atr_trailing_exit", "max_unrealized_bps", "actual_exit_net_bps", "profit_lock_30bps", "profit_lock_50bps", "profit_lock_30bps_exit", "profit_lock_50bps_exit", "delayed_exit_6h", "delayed_exit_12h", "delayed_exit_24h", "delayed_exit_6h_net_bps", "delayed_exit_12h_net_bps", "delayed_exit_24h_net_bps", "best_shadow_exit_policy", "best_shadow_improvement_bps", "delta_vs_actual_bps", "sample_count", "recommendation", "review_reason", "diagnosis"],
+    )
+    write_csv(
+        "summaries/bnb_atr_trailing_metadata_incomplete.csv",
+        bnb_atr_trailing_metadata_incomplete_rows,
+        ["run_id", "symbol", "strategy_candidate", "entry_reason", "source_entry_id", "has_swing_hold_flag", "has_f3_dominant_signal", "classification_reason", "entry_ts", "exit_ts", "entry_px", "exit_px", "exit_reason", "atr_trailing_exit", "max_unrealized_bps", "actual_exit_net_bps", "profit_lock_30bps", "profit_lock_50bps", "profit_lock_30bps_exit", "profit_lock_50bps_exit", "delayed_exit_6h", "delayed_exit_12h", "delayed_exit_24h", "delayed_exit_6h_net_bps", "delayed_exit_12h_net_bps", "delayed_exit_24h_net_bps", "best_shadow_exit_policy", "best_shadow_improvement_bps", "delta_vs_actual_bps", "sample_count", "recommendation", "review_reason", "diagnosis"],
     )
     write_text(
         "summaries/bnb_profit_lock_summary.json",
@@ -11476,6 +11516,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             if row.get("would_delay_exit_if_enabled") == "true"
         ),
         "bnb_profit_lock_shadow_rows": bnb_profit_lock_shadow_sample_count,
+        "bnb_profit_lock_shadow_sample_scope": "bnb_swing_or_f3_entries",
+        "bnb_profit_lock_metadata_incomplete_count": bnb_profit_lock_metadata_incomplete_count,
+        "bnb_profit_lock_metadata_incomplete_output_path": "summaries/bnb_atr_trailing_metadata_incomplete.csv",
         "bnb_profit_lock_shadow_sample_gate_met": bnb_profit_lock_shadow_sample_gate_met,
         "bnb_profit_lock_shadow_recommendation": bnb_profit_lock_shadow_recommendation,
         "bnb_profit_lock_shadow_review_reason": bnb_profit_lock_shadow_review_reason,
@@ -12291,7 +12334,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "- output: summaries/swing_atr_soft_exit_readiness.json and summaries/swing_atr_soft_exit_readiness_by_symbol.csv",
         "",
         "## BNB profit-lock / ATR trailing shadow",
+        f"- diagnostic only: {str(bnb_profit_lock_summary.get('diagnostic_only', True)).lower()}",
+        f"- live_order_effect: {bnb_profit_lock_summary.get('live_order_effect', 'none_diagnostic_only')}",
+        f"- sample_scope: {bnb_profit_lock_summary.get('sample_scope', 'bnb_swing_or_f3_entries')}",
         f"- sample_count: {bnb_profit_lock_shadow_sample_count}",
+        f"- metadata_incomplete_count: {bnb_profit_lock_metadata_incomplete_count}",
+        "- metadata_incomplete_scope: ATR-trailing-only BNB rows without swing_hold_position or f3 signal are diagnosed separately and excluded from the review gate.",
+        "- metadata_incomplete_output: summaries/bnb_atr_trailing_metadata_incomplete.csv",
         f"- sample_count_gate_met_for_exit_change_review: {str(bnb_profit_lock_shadow_sample_gate_met).lower()}",
         f"- recommendation: {bnb_profit_lock_shadow_recommendation}",
         f"- review_reason: {bnb_profit_lock_shadow_review_reason}",
@@ -12305,7 +12354,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- latest best_shadow_exit_policy: {bnb_profit_lock_shadow_latest.get('best_shadow_exit_policy', not_obs)}",
         f"- latest delta_vs_actual_bps: {bnb_profit_lock_shadow_latest.get('delta_vs_actual_bps', not_obs)}",
         f"- best_policy_mix: {json.dumps(bnb_profit_lock_shadow_best_policy_mix, ensure_ascii=False, sort_keys=True)}",
-        "- interpretation: this is diagnostic only; do not modify live ATR/profit-lock exit until sample_count >= 10 and follow-up review confirms improvement.",
+        "- interpretation: this is diagnostic only; main sample_count only covers BNB swing/f3 shadow candidates, and no live order or exit behavior changes from this report.",
         "- output: summaries/bnb_profit_lock_shadow.csv and summaries/bnb_profit_lock_summary.json",
         "",
         "## BNB f3-dominant swing outcome audit",
@@ -12506,6 +12555,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "completion_attempts": len(copied_runs),
         "canonical_completion_count": len(completion_attempts_by_hour),
         "data_quality_warnings": data_quality_warnings,
+        "bnb_profit_lock_metadata_incomplete_count": bnb_profit_lock_metadata_incomplete_count,
         "bnb_f3_dominant_swing_sample_count": bnb_f3_dominant_swing_summary.get("sample_count", 0),
         "bnb_f3_dominant_swing_missing_swing_flag_count": bnb_f3_dominant_swing_summary.get("bnb_f3_missing_swing_flag_count", 0),
         "bnb_f3_dominant_swing_diagnostic_only": True,
@@ -12887,6 +12937,9 @@ manifest = {
     "completion_attempts": int(summary_meta.get("completion_attempts", 0) or 0),
     "canonical_completion_count": int(summary_meta.get("canonical_completion_count", 0) or 0),
     "data_quality_warnings": summary_meta.get("data_quality_warnings", []),
+    "bnb_profit_lock_metadata_incomplete_count": int(
+        summary_meta.get("bnb_profit_lock_metadata_incomplete_count", 0) or 0
+    ),
     "bnb_f3_dominant_swing_sample_count": int(summary_meta.get("bnb_f3_dominant_swing_sample_count", 0) or 0),
     "bnb_f3_dominant_swing_missing_swing_flag_count": int(
         summary_meta.get("bnb_f3_dominant_swing_missing_swing_flag_count", 0) or 0
