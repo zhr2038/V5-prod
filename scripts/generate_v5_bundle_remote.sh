@@ -982,6 +982,7 @@ def copy_current_reports():
         ("reports/quant_lab/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
         ("reports/quant_lab_latest/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
         ("reports/quant_lab/latest/reports/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
+        ("reports/quant_lab/latest/raw/reports/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
         ("reports/summaries/strategy_opportunity_advisory_reader.csv", "summaries/strategy_opportunity_advisory_reader.csv"),
     ):
         if (ROOT / src_rel).is_file():
@@ -10161,17 +10162,42 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     )
 
     def risk_on_symbol_list(value):
-        text = flatten_value(value)
-        if not text or text == not_obs:
+        if isinstance(value, dict):
+            out = []
+            seen = set()
+            for nested in value.values():
+                for symbol in risk_on_symbol_list(nested):
+                    if symbol and symbol not in seen:
+                        seen.add(symbol)
+                        out.append(symbol)
+            return out
+        if isinstance(value, list):
+            raw = value
+            text = ""
+        else:
+            raw = []
+            text = flatten_value(value)
+            if not text or text == not_obs:
+                return []
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    raw = parsed
+                elif isinstance(parsed, dict):
+                    return risk_on_symbol_list(parsed)
+                else:
+                    raw = [text]
+            except Exception:
+                regex_symbols = re.findall(r"\b[A-Za-z0-9]{2,20}[-/](?:USDT|USD|BTC|ETH)\b", text)
+                if regex_symbols:
+                    raw = regex_symbols
+                else:
+                    cleaned = text.strip("[]")
+                    for old, new in ((";", ","), ("|", ","), ("\n", ",")):
+                        cleaned = cleaned.replace(old, new)
+                    raw = [part.strip().strip("'\"") for part in cleaned.split(",")]
+        if not raw:
             return []
-        try:
-            parsed = json.loads(text)
-            raw = parsed if isinstance(parsed, list) else [text]
-        except Exception:
-            cleaned = text.strip("[]")
-            for old, new in ((";", ","), ("|", ","), ("\n", ",")):
-                cleaned = cleaned.replace(old, new)
-            raw = [part.strip().strip("'\"") for part in cleaned.split(",")]
         out = []
         seen = set()
         for item in raw:
@@ -10192,7 +10218,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         return []
 
     def risk_on_top_k(row, strategy_key):
-        explicit = as_int(advisory_value(row, "top_k", "k", "rank_k", default=""))
+        explicit = as_int(advisory_value(
+            row,
+            "top_k",
+            "k",
+            "rank_k",
+            "top_n",
+            "top",
+            "portfolio_k",
+            "portfolio_size",
+            "selected_count",
+            default="",
+        ))
         if explicit is not None and explicit > 0:
             return explicit
         match = re.search(r"risk_on_multi_buy_top(\d+)", flatten_value(strategy_key).lower())
@@ -10206,11 +10243,54 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "source_strategy_candidate",
                 "strategy",
                 "strategy_name",
+                "portfolio_name",
+                "portfolio_id",
             ):
                 match = re.search(r"risk_on_multi_buy_top(\d+)", flatten_value(row.get(name)).lower())
                 if match:
                     break
         return int(match.group(1)) if match else None
+
+    def risk_on_selected_field_names():
+        return (
+            "selected_symbols",
+            "selected",
+            "selected_symbol",
+            "selected_symbol_list",
+            "selected_portfolio",
+            "selected_portfolio_symbols",
+            "portfolio_symbols",
+            "portfolio",
+            "latest_portfolio",
+            "latest_portfolios",
+            "top_symbols",
+            "top_n_symbols",
+            "symbols",
+            "would_buy_symbols",
+            "would_buy",
+            "would_buy_symbol",
+            "symbol",
+            "raw_json",
+            "raw_meta",
+        )
+
+    def risk_on_would_buy_field_names():
+        return (
+            "would_buy_symbols",
+            "would_buy",
+            "would_buy_symbol",
+            "would_enter_symbols",
+            "would_open_symbols",
+            "paper_buy_symbols",
+            "selected_symbols",
+            "selected",
+            "selected_symbol",
+            "portfolio_symbols",
+            "portfolio",
+            "symbol",
+            "raw_json",
+            "raw_meta",
+        )
 
     def risk_on_actual_bought_symbols():
         bought = set()
@@ -10264,6 +10344,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             ROOT / "reports" / "quant_lab" / "risk_on_multi_buy_shadow.csv",
             ROOT / "reports" / "quant_lab_latest" / "risk_on_multi_buy_shadow.csv",
             ROOT / "reports" / "quant_lab" / "latest" / "reports" / "risk_on_multi_buy_shadow.csv",
+            ROOT / "reports" / "quant_lab" / "latest" / "raw" / "reports" / "risk_on_multi_buy_shadow.csv",
         ]
         rows = []
         seen_paths = set()
@@ -10296,28 +10377,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         for row in candidates:
             selected.extend(risk_on_symbols_from_row(
                 row,
-                (
-                    "selected_symbols",
-                    "selected_symbol_list",
-                    "top_symbols",
-                    "top_n_symbols",
-                    "symbols",
-                    "would_buy_symbols",
-                    "would_buy_symbol",
-                    "symbol",
-                ),
+                risk_on_selected_field_names(),
             ))
             would_buy.extend(risk_on_symbols_from_row(
                 row,
-                (
-                    "would_buy_symbols",
-                    "would_buy_symbol",
-                    "would_enter_symbols",
-                    "would_open_symbols",
-                    "paper_buy_symbols",
-                    "selected_symbols",
-                    "symbol",
-                ),
+                risk_on_would_buy_field_names(),
             ))
         if selected:
             merged["selected_symbols"] = risk_on_symbols_csv_value(selected)
@@ -10355,53 +10419,32 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     def risk_on_symbols_csv_value(symbols):
         return json.dumps(symbols, ensure_ascii=False) if symbols else not_obs
 
-    existing_risk_on_rows = load_csv_dicts(OUT / "summaries" / "risk_on_multi_buy_shadow.csv")
-    risk_on_source_rows = risk_on_source_advisory_rows()
-    risk_on_detail_source_rows = risk_on_detail_rows()
-    risk_on_rows = []
-    if risk_on_source_rows:
-        actual_bought_symbols = risk_on_actual_bought_symbols()
-        default_run_id = copied_runs[-1] if copied_runs else f"bundle_{STAMP}"
-        for advisory_row in risk_on_source_rows:
-            strategy_key = risk_on_multi_buy_strategy_key(advisory_row)
-            top_k = risk_on_top_k(advisory_row, strategy_key)
-            detail_row = risk_on_detail_for(advisory_row, risk_on_detail_source_rows, top_k)
-            source_row = detail_row or advisory_row
-            selected_symbols = risk_on_symbols_from_row(
-                source_row,
-                (
-                    "selected_symbols",
-                    "selected_symbol_list",
-                    "top_symbols",
-                    "top_n_symbols",
-                    "symbols",
-                    "would_buy_symbols",
-                    "would_buy_symbol",
-                    "symbol",
-                ),
-            )
-            would_buy_symbols = risk_on_symbols_from_row(
-                source_row,
-                (
-                    "would_buy_symbols",
-                    "would_buy_symbol",
-                    "would_enter_symbols",
-                    "would_open_symbols",
-                    "paper_buy_symbols",
-                    "selected_symbols",
-                    "symbol",
-                ),
-            )
-            if not selected_symbols and would_buy_symbols:
-                selected_symbols = list(would_buy_symbols)
-            if not would_buy_symbols and selected_symbols:
-                would_buy_symbols = list(selected_symbols)
-            if top_k is not None and top_k > 0:
-                selected_symbols = selected_symbols[:top_k]
-                would_buy_symbols = would_buy_symbols[:top_k]
-            missed_symbols = [symbol for symbol in would_buy_symbols if symbol not in set(actual_bought_symbols)]
+    def build_risk_on_shadow_row(advisory_row, detail_row, top_k, actual_bought_symbols, default_run_id, response_action=None):
+        source_row = detail_row or advisory_row
+        selected_symbols = risk_on_symbols_from_row(source_row, risk_on_selected_field_names())
+        would_buy_symbols = risk_on_symbols_from_row(source_row, risk_on_would_buy_field_names())
+        if not selected_symbols and would_buy_symbols:
+            selected_symbols = list(would_buy_symbols)
+        if not would_buy_symbols and selected_symbols:
+            would_buy_symbols = list(selected_symbols)
+        if top_k is not None and top_k > 0:
+            selected_symbols = selected_symbols[:top_k]
+            would_buy_symbols = would_buy_symbols[:top_k]
+        missed_symbols = [symbol for symbol in would_buy_symbols if symbol not in set(actual_bought_symbols)]
+        row_ts = flatten_value(advisory_value(
+            source_row,
+            "decision_ts",
+            "decision_time",
+            "ts_utc",
+            "timestamp",
+            "sampled_at",
+            "generated_at",
+            "as_of_ts",
+            default="",
+        ))
+        if not row_ts:
             row_ts = flatten_value(advisory_value(
-                source_row,
+                advisory_row,
                 "decision_ts",
                 "decision_time",
                 "ts_utc",
@@ -10409,33 +10452,47 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "sampled_at",
                 "generated_at",
                 "as_of_ts",
-                default="",
+                default=NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
             ))
-            if not row_ts:
-                row_ts = flatten_value(advisory_value(
-                    advisory_row,
-                    "decision_ts",
-                    "decision_time",
-                    "ts_utc",
-                    "timestamp",
-                    "sampled_at",
-                    "generated_at",
-                    "as_of_ts",
-                    default=NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                ))
-            risk_on_rows.append({
-                "run_id": flatten_value(advisory_value(advisory_row, "run_id", default=default_run_id)),
-                "ts_utc": row_ts,
-                "current_regime": flatten_value(advisory_value(advisory_row, "current_regime", "regime_state", "market_regime", "risk_regime", default=not_obs)),
-                "top_k": top_k if top_k is not None else not_obs,
-                "selected_symbols": risk_on_symbols_csv_value(selected_symbols),
-                "would_buy_symbols": risk_on_symbols_csv_value(would_buy_symbols),
-                "actual_bought_symbols": json.dumps(actual_bought_symbols, ensure_ascii=False),
-                "missed_symbols": json.dumps(missed_symbols, ensure_ascii=False),
-                "source_detail_available": str(detail_row is not None).lower(),
-                "response_action": advisory_response_action(advisory_row),
-                "live_order_effect": "read_only_no_live_order",
-            })
+        return {
+            "run_id": flatten_value(advisory_value(source_row, "run_id", default=advisory_value(advisory_row, "run_id", default=default_run_id))),
+            "ts_utc": row_ts,
+            "current_regime": flatten_value(advisory_value(source_row, "current_regime", "regime_state", "market_regime", "risk_regime", default=advisory_value(advisory_row, "current_regime", "regime_state", "market_regime", "risk_regime", default=not_obs))),
+            "top_k": top_k if top_k is not None else not_obs,
+            "selected_symbols": risk_on_symbols_csv_value(selected_symbols),
+            "would_buy_symbols": risk_on_symbols_csv_value(would_buy_symbols),
+            "actual_bought_symbols": json.dumps(actual_bought_symbols, ensure_ascii=False),
+            "missed_symbols": json.dumps(missed_symbols, ensure_ascii=False),
+            "source_detail_available": str(detail_row is not None).lower(),
+            "response_action": response_action or advisory_response_action(advisory_row),
+            "live_order_effect": "read_only_no_live_order",
+        }
+
+    existing_risk_on_rows = load_csv_dicts(OUT / "summaries" / "risk_on_multi_buy_shadow.csv")
+    risk_on_source_rows = risk_on_source_advisory_rows()
+    risk_on_detail_source_rows = risk_on_detail_rows()
+    risk_on_rows = []
+    actual_bought_symbols = risk_on_actual_bought_symbols()
+    default_run_id = copied_runs[-1] if copied_runs else f"bundle_{STAMP}"
+    if risk_on_source_rows:
+        for advisory_row in risk_on_source_rows:
+            strategy_key = risk_on_multi_buy_strategy_key(advisory_row)
+            top_k = risk_on_top_k(advisory_row, strategy_key)
+            detail_row = risk_on_detail_for(advisory_row, risk_on_detail_source_rows, top_k)
+            risk_on_rows.append(build_risk_on_shadow_row(advisory_row, detail_row, top_k, actual_bought_symbols, default_run_id))
+    elif risk_on_detail_source_rows:
+        latest_dt = max([risk_on_row_dt(row) for row in risk_on_detail_source_rows if risk_on_row_dt(row) is not None], default=None)
+        detail_candidates = risk_on_detail_source_rows
+        if latest_dt is not None:
+            detail_candidates = [row for row in detail_candidates if risk_on_row_dt(row) == latest_dt]
+        groups = defaultdict(list)
+        for detail_row in detail_candidates:
+            top_k = risk_on_top_k(detail_row, risk_on_multi_buy_strategy_key(detail_row))
+            groups[top_k if top_k is not None else not_obs].append(detail_row)
+        for group_key in sorted(groups, key=lambda value: int(value) if isinstance(value, int) else 999):
+            top_k = group_key if isinstance(group_key, int) else None
+            detail_row = merge_risk_on_detail_rows(groups[group_key])
+            risk_on_rows.append(build_risk_on_shadow_row(detail_row, detail_row, top_k, actual_bought_symbols, default_run_id, response_action="shadow_tracking"))
     else:
         risk_on_rows = existing_risk_on_rows
         for row in risk_on_rows:

@@ -3324,11 +3324,11 @@ def fixture_entry_quality_advisory_root(root):
         root / "reports/quant_lab/latest/reports/risk_on_multi_buy_shadow.csv",
         "\n".join(
             [
-                "run_id,decision_ts,top_k,current_regime,selected_symbols,would_buy_symbol",
-                'r_old,2026-05-24T00:00:00Z,2,ALT_IMPULSE,"[""ETH-USDT"",""SOL-USDT""]",ETH-USDT',
-                'r_latest,2026-05-26T00:00:00Z,1,ALT_IMPULSE,"[""BNB-USDT""]",BNB-USDT',
-                'r_latest,2026-05-26T00:00:00Z,2,ALT_IMPULSE,"[""BNB-USDT"",""SOL-USDT""]",BNB-USDT',
-                'r_latest,2026-05-26T00:00:00Z,3,ALT_IMPULSE,"[""BNB-USDT"",""SOL-USDT"",""ETH-USDT""]",BNB-USDT',
+                "run_id,decision_ts,top_k,current_regime,selected,would_buy_symbol",
+                'r_old,2026-05-24T00:00:00Z,2,ALT_IMPULSE,"selected=[""ETH-USDT"",""SOL-USDT""]",ETH-USDT',
+                'r_latest,2026-05-26T00:00:00Z,1,ALT_IMPULSE,"selected=[""BNB-USDT""]",BNB-USDT',
+                'r_latest,2026-05-26T00:00:00Z,2,ALT_IMPULSE,"selected=[""BNB-USDT"",""SOL-USDT""]",BNB-USDT',
+                'r_latest,2026-05-26T00:00:00Z,3,ALT_IMPULSE,"selected=[""BNB-USDT"",""SOL-USDT"",""ETH-USDT""]",BNB-USDT',
             ]
         )
         + "\n",
@@ -3352,6 +3352,23 @@ def fixture_entry_quality_advisory_root(root):
         root / "reports/summaries/alpha_factory_family_summary.csv",
         "run_id,ts_utc,family,row_count,display_only_count,shadow_tracking_count,paper_tracking_count,negative_advisory_count,max_live_notional_usdt_ignored,live_order_effect,strategy_candidates\n"
         "r_af,2026-05-20T00:00:00Z,expanded,1,0,1,0,0,True,read_only_no_live_order,\"[\"\"v5.expanded_relative_strength_top1_shadow\"\"]\"\n",
+    )
+    return run_id
+
+
+def fixture_risk_on_detail_only_root(root):
+    run_id = fixture_root(root)
+    detail_path = root / "reports/quant_lab/latest/raw/reports/risk_on_multi_buy_shadow.csv"
+    write_text(
+        detail_path,
+        "\n".join(
+            [
+                "run_id,decision_ts,top_k,current_regime,selected,would_buy",
+                'r_detail_old,2026-05-25T00:00:00Z,1,ALT_IMPULSE,"selected=[""ETH-USDT""]",ETH-USDT',
+                'r_detail_latest,2026-05-26T00:00:00Z,1,ALT_IMPULSE,"selected=[""BNB-USDT""]",BNB-USDT',
+            ]
+        )
+        + "\n",
     )
     return run_id
 
@@ -5332,6 +5349,31 @@ def main():
             assert "freshness_rule:" in readme, readme
             assert "## Risk-on multi-buy shadow" in readme, readme
             assert "BNB/USDT" in readme and "SOL/USDT" in readme, readme
+            assert "source_detail_available: true" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-risk-on-detail-only-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_risk_on_detail_only_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                risk_on_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/risk_on_multi_buy_shadow.csv")).read().decode().splitlines()))
+                raw_risk_on = tf.extractfile(extract_member(tf, "raw/reports/risk_on_multi_buy_shadow.csv")).read().decode()
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert "selected=[" in raw_risk_on, raw_risk_on
+            assert len(risk_on_rows) == 1, risk_on_rows
+            row = risk_on_rows[0]
+            assert row["top_k"] == "1", row
+            assert json.loads(row["selected_symbols"]) == ["BNB/USDT"], row
+            assert json.loads(row["would_buy_symbols"]) == ["BNB/USDT"], row
+            assert row["source_detail_available"] == "true", row
+            assert row["response_action"] == "shadow_tracking", row
+            assert row["live_order_effect"] == "read_only_no_live_order", row
+            assert "BNB/USDT" in readme, readme
             assert "source_detail_available: true" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
