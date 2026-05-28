@@ -420,6 +420,46 @@ def fixture_last_72h_trade_no_24h_root(root):
     })
 
 
+def fixture_strict_window_trade_scope_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    run_id = now.strftime("%Y%m%d_%H")
+    recent_open_ts = int((now - dt.timedelta(hours=2)).timestamp())
+    recent_close_ts = int((now - dt.timedelta(hours=1)).timestamp())
+    old_close_ts = int((now - dt.timedelta(hours=80)).timestamp())
+
+    write_text(root / "configs/live_prod.yaml", "btc_leadership_probe_enabled: true\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(run_dir / "decision_audit.json", {"window_end_ts": int(now.timestamp()), "router_decisions": []})
+    write_text(
+        run_dir / "trades.csv",
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n"
+        f"{iso(old_close_ts)},{run_id},BNB/USDT,CLOSE_LONG,sell,1.0,650.0,650.0,0.13\n"
+        f"{iso(recent_open_ts)},{run_id},ETH/USDT,OPEN_LONG,buy,1.0,100.0,100.0,0.1\n"
+        f"{iso(recent_close_ts)},{run_id},ETH/USDT,CLOSE_LONG,sell,1.0,102.0,102.0,0.1\n",
+    )
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {
+        "run_id": run_id,
+        "num_trades": 3,
+        "turnover_usdt": 852.0,
+        "fees_usdt_total": 0.33,
+        "slippage_usdt_total": 0.0,
+        "cost_usdt_total": 0.33,
+        "budget": {"fills_count_today": 3},
+    })
+
+
 def fixture_negative_expectancy_consistent_root(root):
     now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
     write_text(root / "configs/live_prod.yaml", "probe_time_stop_hours: 4\n")
@@ -4689,6 +4729,46 @@ def main():
             assert "closed roundtrip gross/net bps: gross=" in readme, readme
             assert "## Negative expectancy 口径一致性" in readme, readme
             assert "mismatch_suspected_count: 1" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-strict-window-trades-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_strict_window_trade_scope_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                roundtrips = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/trades_roundtrips.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert window["raw_recent_runs_trade_rows"] == 3, window
+            assert window["strict_window_trade_rows"] == 2, window
+            assert window["strict_window_roundtrip_count"] == 1, window
+            assert window["out_of_window_trade_rows"] == 1, window
+            assert window["last_72h_trade_count"] == 2, window
+            assert window["last_72h_roundtrip_count"] == 1, window
+
+            bnb_rows = [row for row in roundtrips if row["symbol"] == "BNB/USDT"]
+            eth_rows = [row for row in roundtrips if row["symbol"] == "ETH/USDT"]
+            assert len(bnb_rows) == 1 and bnb_rows[0]["roundtrip_status"] == "unmatched_close", roundtrips
+            assert bnb_rows[0]["in_strict_window"] == "false", bnb_rows
+            assert bnb_rows[0]["window_start_utc"], bnb_rows
+            assert bnb_rows[0]["window_end_utc"], bnb_rows
+            assert len(eth_rows) == 1 and eth_rows[0]["roundtrip_status"] == "closed", roundtrips
+            assert eth_rows[0]["in_strict_window"] == "true", eth_rows
+            assert not any(
+                item.get("severity") == "high"
+                and item.get("code") == "trades_exist_but_roundtrip_summary_missing"
+                for item in issues["issues"]
+            ), issues
+            assert "strict_72h_trade_rows: 2" in readme, readme
+            assert "strict_72h_roundtrip_count: 1" in readme, readme
+            assert "raw_recent_runs_trade_rows: 3" in readme, readme
+            assert "out_of_window_trade_rows: 1" in readme, readme
+            assert "raw recent_runs has out-of-window residual trades: yes" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

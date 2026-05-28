@@ -3075,7 +3075,26 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             or row.get("probe_type") == "probe"
         )
 
+    def strict_window_timestamp_for_trade_row(row):
+        return parse_dt_utc(first_observed(row.get("exit_ts"), row.get("timestamp"), row.get("entry_ts")))
+
+    def is_in_strict_trade_window(value):
+        parsed = value if isinstance(value, dt.datetime) else parse_dt_utc(value)
+        if parsed is None:
+            return False
+        return WINDOW_72H_START <= parsed.astimezone(dt.timezone.utc) <= WINDOW_72H_END
+
+    STRICT_WINDOW_START_UTC_TEXT = WINDOW_72H_START.strftime("%Y-%m-%dT%H:%M:%SZ")
+    STRICT_WINDOW_END_UTC_TEXT = WINDOW_72H_END.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def annotate_trade_summary_window(row):
+        row["in_strict_window"] = str(is_in_strict_trade_window(strict_window_timestamp_for_trade_row(row))).lower()
+        row["window_start_utc"] = STRICT_WINDOW_START_UTC_TEXT
+        row["window_end_utc"] = STRICT_WINDOW_END_UTC_TEXT
+        return row
+
     def record_trade_summary_row(row, lifecycle_diagnosis):
+        annotate_trade_summary_window(row)
         trade_rows.append(row)
         if not is_probe_trade_row(row):
             return
@@ -6111,6 +6130,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         )
 
     raw_trade_file_rows = len(raw_trade_events)
+    raw_recent_runs_trade_rows = raw_trade_file_rows
+    strict_window_trade_rows = sum(
+        1 for event in raw_trade_events
+        if is_in_strict_trade_window(event.get("ts_dt"))
+    )
+    out_of_window_trade_rows = max(0, raw_recent_runs_trade_rows - strict_window_trade_rows)
     has_trade_data = bool(trade_paths) and trade_read_errors == 0
     if not has_trade_data:
         trade_observation_status = "not_observable"
@@ -6318,6 +6343,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 open_position_rows.append(open_position)
 
     closed_roundtrip_rows = [row for row in trade_rows if row.get("roundtrip_status") == "closed"]
+    strict_window_roundtrip_rows = [
+        row for row in closed_roundtrip_rows
+        if row.get("in_strict_window") == "true"
+    ]
 
     def probe_config_number(key, default):
         value = config_number(key)
@@ -8521,14 +8550,24 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
 
     rank_exit_consistency_rows = build_rank_exit_consistency_rows()
 
-    uncovered_trade_events = sorted({event["event_id"] for event in raw_trade_events} - covered_trade_event_ids)
+    strict_window_trade_event_ids = {
+        event["event_id"] for event in raw_trade_events
+        if is_in_strict_trade_window(event.get("ts_dt"))
+    }
+    uncovered_trade_events = sorted(strict_window_trade_event_ids - covered_trade_event_ids)
     roundtrip_warning = bool(uncovered_trade_events)
     if roundtrip_warning:
         add_issue(
             "high",
             "trades_exist_but_roundtrip_summary_missing",
             "Raw trades exist but roundtrip/open trade summary rows are missing.",
-            {"raw_trade_rows": raw_trade_file_rows, "roundtrip_rows": len(trade_rows), "uncovered_trade_events": uncovered_trade_events[:20]},
+            {
+                "raw_recent_runs_trade_rows": raw_recent_runs_trade_rows,
+                "strict_window_trade_rows": strict_window_trade_rows,
+                "out_of_window_trade_rows": out_of_window_trade_rows,
+                "roundtrip_rows": len(trade_rows),
+                "uncovered_trade_events": uncovered_trade_events[:20],
+            },
         )
 
     for log_path in sorted((OUT / "raw" / "logs").glob("*")):
@@ -9028,7 +9067,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     write_csv(
         "summaries/trades_roundtrips.csv",
         trade_rows,
-        ["run_id", "source_file", "row_number", "timestamp", "symbol", "side", "qty", "price", "entry_ts", "entry_px", "exit_ts", "exit_px", "entry_reason", "exit_reason", "probe_type", "roundtrip_status", "gross_pnl_usdt", "fee_total_usdt", "net_pnl_usdt", "gross_bps", "net_bps", "hold_minutes", "hold_hours", "min_hold_hours", "exit_allowed_before_min_hold", "exit_blocked_by_min_hold", "exit_priority", "min_hold_block_reason", "early_exit_opportunity_cost_bps", "would_have_held_24h_status", "would_have_held_24h_net_bps", "remaining_value_usdt", "dust_threshold_usdt", "raw_json"],
+        ["run_id", "source_file", "row_number", "timestamp", "symbol", "side", "qty", "price", "entry_ts", "entry_px", "exit_ts", "exit_px", "entry_reason", "exit_reason", "probe_type", "roundtrip_status", "in_strict_window", "window_start_utc", "window_end_utc", "gross_pnl_usdt", "fee_total_usdt", "net_pnl_usdt", "gross_bps", "net_bps", "hold_minutes", "hold_hours", "min_hold_hours", "exit_allowed_before_min_hold", "exit_blocked_by_min_hold", "exit_priority", "min_hold_block_reason", "early_exit_opportunity_cost_bps", "would_have_held_24h_status", "would_have_held_24h_net_bps", "remaining_value_usdt", "dust_threshold_usdt", "raw_json"],
     )
     write_csv(
         "summaries/early_exit_cases.csv",
@@ -10437,14 +10476,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         1 for row in closed_roundtrip_rows
         if (trade_row_dt(row) is not None and trade_row_dt(row).timestamp() >= RECENT_24H)
     )
-    last_72h_trade_count = raw_trade_file_rows
-    last_72h_roundtrip_count = len(closed_roundtrip_rows)
+    last_72h_trade_count = strict_window_trade_rows
+    last_72h_roundtrip_count = len(strict_window_roundtrip_rows)
+    strict_window_roundtrip_count = last_72h_roundtrip_count
     gross_values = [as_float(row.get("gross_bps")) for row in lifecycle_rows]
     net_values = [as_float(row.get("net_bps")) for row in lifecycle_rows]
     gross_values = [v for v in gross_values if v is not None]
     net_values = [v for v in net_values if v is not None]
-    closed_gross_values = [as_float(row.get("gross_bps")) for row in closed_roundtrip_rows]
-    closed_net_values = [as_float(row.get("net_bps")) for row in closed_roundtrip_rows]
+    closed_gross_values = [as_float(row.get("gross_bps")) for row in strict_window_roundtrip_rows]
+    closed_net_values = [as_float(row.get("net_bps")) for row in strict_window_roundtrip_rows]
     closed_gross_values = [v for v in closed_gross_values if v is not None]
     closed_net_values = [v for v in closed_net_values if v is not None]
     probe_exit_count = sum(probe_counts[field] for field in ("probe_take_profit_count", "probe_stop_loss_count", "probe_trailing_stop_count", "probe_time_stop_count"))
@@ -10854,6 +10894,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "trade_observation_status": trade_observation_status,
         "trade_read_error_count": trade_read_errors,
         "raw_trade_rows": raw_trade_file_rows,
+        "raw_recent_runs_trade_rows": raw_recent_runs_trade_rows,
+        "strict_window_trade_rows": strict_window_trade_rows if has_trade_data else not_obs,
+        "strict_window_roundtrip_count": strict_window_roundtrip_count if has_trade_data else not_obs,
+        "out_of_window_trade_rows": out_of_window_trade_rows if has_trade_data else not_obs,
         "trade_rows": len(trade_rows),
         "ml_live_overlay_status": ml_live_overlay_status,
         "ml_factor_enabled": ml_factor_enabled,
@@ -11173,6 +11217,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             gross_net_text = "not_applicable_no_probe_trade"
             probe_lifecycle_text = "not_applicable_no_probe_trade"
             probe_exit_policy_text = "not_applicable_no_probe_trade"
+
+    raw_recent_runs_trade_text = window_summary.get("raw_recent_runs_trade_rows", not_obs)
+    strict_window_trade_text = window_summary.get("strict_window_trade_rows", not_obs)
+    strict_window_roundtrip_text = window_summary.get("strict_window_roundtrip_count", not_obs)
+    out_of_window_trade_text = window_summary.get("out_of_window_trade_rows", not_obs)
+    out_of_window_residual_text = (
+        not_obs
+        if out_of_window_trade_text == not_obs
+        else ("yes" if (as_int(out_of_window_trade_text) or 0) > 0 else "no")
+    )
 
     if open_position_rows:
         open_position_text = f"yes / {len(open_position_rows)}"
@@ -11744,6 +11798,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- latest_24h_roundtrip_count: {window_summary['latest_24h_roundtrip_count']}",
         f"- last_72h_trade_count: {window_summary['last_72h_trade_count']}",
         f"- last_72h_roundtrip_count: {window_summary['last_72h_roundtrip_count']}",
+        f"- strict_72h_trade_rows: {strict_window_trade_text}",
+        f"- strict_72h_roundtrip_count: {strict_window_roundtrip_text}",
+        f"- raw_recent_runs_trade_rows: {raw_recent_runs_trade_text}",
+        f"- out_of_window_trade_rows: {out_of_window_trade_text}",
+        f"- raw recent_runs has out-of-window residual trades: {out_of_window_residual_text}",
         f"- latest_24h 是否真实成交: {latest_24h_real_trade_text}",
         f"- last_72h 是否真实成交: {last_72h_real_trade_text}",
         f"- closed roundtrip gross/net bps: {closed_roundtrip_gross_net_text}",
