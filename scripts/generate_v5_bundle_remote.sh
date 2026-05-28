@@ -7511,43 +7511,98 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             not_obs,
         ))
 
-    def is_bnb_profit_lock_shadow_roundtrip(row):
-        if normalize_symbol_text(row.get("symbol")) != BNB_PROFIT_LOCK_SYMBOL:
-            return False
-        if row_has_truthy_key(row, "swing_hold_position"):
-            return True
-        haystack = " ".join(
-            flatten_value(first_observed(row.get(field), ""))
-            for field in (
-                "strategy_candidate",
-                "source_strategy_candidate",
-                "entry_strategy_candidate",
-                "entry_reason",
-                "reason",
-                "router_reason",
-                "dominant_factor",
-                "raw_json",
-            )
+    BNB_F3_CLASSIFICATION_VERSION = "v5.bnb_f3_classification.v1"
+
+    def is_bnb_symbol(row):
+        return normalize_symbol_text(row.get("symbol")) == BNB_PROFIT_LOCK_SYMBOL
+
+    def bnb_row_has_swing_hold_flag(row):
+        return row_has_truthy_key(row, "swing_hold_position")
+
+    def bnb_classification_text(row):
+        fields = (
+            "dominant_factor",
+            "strategy_candidate",
+            "source_strategy_candidate",
+            "entry_strategy_candidate",
+            "entry_reason",
+            "reason",
+            "router_reason",
+            "raw_json",
+            "raw_meta",
+        )
+        return " ".join(
+            flatten_value(first_nested_value_from_row(row, (field,)))
+            for field in fields
         ).lower()
-        return "f3_dominant" in haystack or "f3_vol_adj_ret" in haystack
+
+    def bnb_row_has_f3_dominant_signal(row):
+        dominant_factor = flatten_value(first_nested_value_from_row(row, ("dominant_factor",))).strip()
+        if dominant_factor == "f3_vol_adj_ret":
+            return True
+        text = bnb_classification_text(row)
+        return "f3_dominant" in text or "f3_vol_adj_ret" in text
+
+    def classify_bnb_swing_candidate(row):
+        is_bnb = is_bnb_symbol(row)
+        has_swing_hold_flag = bnb_row_has_swing_hold_flag(row) if is_bnb else False
+        has_f3_dominant_signal = bnb_row_has_f3_dominant_signal(row) if is_bnb else False
+        is_profit_lock_shadow_candidate = is_bnb and (has_swing_hold_flag or has_f3_dominant_signal)
+        is_f3_dominant_entry = is_bnb and has_f3_dominant_signal
+        is_f3_dominant_swing_hold = is_f3_dominant_entry and has_swing_hold_flag
+        missing_swing_hold_flag = is_f3_dominant_entry and not has_swing_hold_flag
+        if not is_bnb:
+            classification_reason = "not_bnb"
+        elif is_f3_dominant_swing_hold:
+            classification_reason = "bnb_f3_dominant_swing_hold"
+        elif missing_swing_hold_flag:
+            classification_reason = "bnb_f3_dominant_missing_swing_hold_flag"
+        elif has_swing_hold_flag:
+            classification_reason = "bnb_swing_hold_non_f3"
+        else:
+            classification_reason = "bnb_not_shadow_candidate"
+        return {
+            "is_bnb": is_bnb,
+            "has_swing_hold_flag": has_swing_hold_flag,
+            "has_f3_dominant_signal": has_f3_dominant_signal,
+            "is_profit_lock_shadow_candidate": is_profit_lock_shadow_candidate,
+            "is_f3_dominant_entry": is_f3_dominant_entry,
+            "is_f3_dominant_swing_hold": is_f3_dominant_swing_hold,
+            "missing_swing_hold_flag": missing_swing_hold_flag,
+            "classification_reason": classification_reason,
+        }
+
+    def source_entry_id_for_roundtrip(row):
+        source_entry_id = flatten_value(first_observed(
+            row.get("entry_trade_id"),
+            row.get("trade_id"),
+            row.get("order_id"),
+            row.get("source_entry_id"),
+            "",
+        ))
+        if source_entry_id and source_entry_id != not_obs:
+            return source_entry_id
+        return (
+            f"{flatten_value(row.get('run_id') or not_obs)}:"
+            f"{flatten_value(row.get('symbol') or BNB_PROFIT_LOCK_SYMBOL)}:"
+            f"{flatten_value(row.get('entry_ts') or not_obs)}"
+        )
 
     bnb_profit_lock_shadow_rows = []
     for row in closed_roundtrip_rows:
-        if not is_bnb_profit_lock_shadow_roundtrip(row):
+        bnb_classification = classify_bnb_swing_candidate(row)
+        if not bnb_classification.get("is_profit_lock_shadow_candidate"):
             continue
         entry_dt = parse_dt_utc(row.get("entry_ts"))
         exit_dt = parse_dt_utc(row.get("exit_ts"))
         actual_exit_net_bps = first_observed(row.get("net_bps"), row.get("realized_net_bps"), not_obs)
         max_unrealized_bps = bnb_profit_lock_max_unrealized_bps(row, entry_dt, exit_dt)
         exit_reason_text = flatten_value(row.get("exit_reason")).strip().lower()
-        source_entry_id = flatten_value(first_observed(row.get("entry_trade_id"), row.get("trade_id"), row.get("order_id"), row.get("source_entry_id"), ""))
-        if not source_entry_id or source_entry_id == not_obs:
-            source_entry_id = f"{flatten_value(row.get('run_id') or not_obs)}:{flatten_value(row.get('symbol') or BNB_PROFIT_LOCK_SYMBOL)}:{flatten_value(row.get('entry_ts') or not_obs)}"
         shadow_row = {
             "symbol": row.get("symbol", BNB_PROFIT_LOCK_SYMBOL),
             "strategy_candidate": bnb_profit_lock_entry_source(row),
             "entry_reason": flatten_value(first_observed(row.get("entry_reason"), row.get("reason"), not_obs)),
-            "source_entry_id": source_entry_id,
+            "source_entry_id": source_entry_id_for_roundtrip(row),
             "entry_ts": row.get("entry_ts", not_obs),
             "exit_ts": row.get("exit_ts", not_obs),
             "entry_px": row.get("entry_px", not_obs),
@@ -7621,28 +7676,6 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         shadow_row["recommendation"] = bnb_profit_lock_shadow_recommendation
         shadow_row["review_reason"] = bnb_profit_lock_shadow_review_reason
 
-    def is_bnb_f3_dominant_swing_roundtrip(row):
-        if normalize_symbol_text(row.get("symbol")) != BNB_PROFIT_LOCK_SYMBOL:
-            return False
-        if not row_has_truthy_key(row, "swing_hold_position"):
-            return False
-        dominant_factor = flatten_value(first_nested_value_from_row(row, ("dominant_factor",))).strip()
-        if dominant_factor == "f3_vol_adj_ret":
-            return True
-        haystack = " ".join(
-            flatten_value(first_observed(row.get(field), ""))
-            for field in (
-                "strategy_candidate",
-                "source_strategy_candidate",
-                "entry_strategy_candidate",
-                "entry_reason",
-                "reason",
-                "router_reason",
-                "raw_json",
-            )
-        ).lower()
-        return "f3_vol_adj_ret" in haystack or "f3_dominant" in haystack
-
     def bnb_f3_dominant_swing_diagnosis(row):
         realized = as_float(row.get("realized_net_bps"))
         if realized is None:
@@ -7660,12 +7693,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
 
     bnb_f3_dominant_swing_outcome_rows = []
     for row in closed_roundtrip_rows:
-        if not is_bnb_f3_dominant_swing_roundtrip(row):
+        bnb_classification = classify_bnb_swing_candidate(row)
+        if not bnb_classification.get("is_f3_dominant_entry"):
             continue
         exit_dt = parse_dt_utc(row.get("exit_ts"))
         realized_net_bps = first_observed(row.get("net_bps"), row.get("realized_net_bps"), not_obs)
         outcome_row = {
             "run_id": row.get("run_id", not_obs),
+            "strategy_candidate": bnb_profit_lock_entry_source(row),
+            "entry_reason": flatten_value(first_observed(row.get("entry_reason"), row.get("reason"), not_obs)),
+            "source_entry_id": source_entry_id_for_roundtrip(row),
+            "has_swing_hold_flag": str(bool(bnb_classification.get("has_swing_hold_flag"))).lower(),
+            "has_f3_dominant_signal": str(bool(bnb_classification.get("has_f3_dominant_signal"))).lower(),
+            "missing_swing_hold_flag": str(bool(bnb_classification.get("missing_swing_hold_flag"))).lower(),
+            "classification_reason": bnb_classification.get("classification_reason", not_obs),
             "entry_ts": row.get("entry_ts", not_obs),
             "exit_ts": row.get("exit_ts", not_obs),
             "entry_px": row.get("entry_px", not_obs),
@@ -7717,9 +7758,31 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if bnb_f3_if_held_12h_values
         else None
     )
-    if len(bnb_f3_dominant_swing_outcome_rows) < 5:
-        bnb_f3_dominant_swing_recommendation = "collect_more_samples"
-    elif bnb_f3_avg_realized_net_bps is not None and bnb_f3_avg_realized_net_bps < -50.0:
+    bnb_f3_entry_count = len(bnb_f3_dominant_swing_outcome_rows)
+    bnb_f3_swing_hold_count = sum(
+        1 for row in bnb_f3_dominant_swing_outcome_rows
+        if row.get("has_swing_hold_flag") == "true"
+    )
+    bnb_f3_missing_swing_flag_count = sum(
+        1 for row in bnb_f3_dominant_swing_outcome_rows
+        if row.get("missing_swing_hold_flag") == "true"
+    )
+    bnb_f3_missing_swing_flag_rate = (
+        bnb_f3_missing_swing_flag_count / bnb_f3_entry_count
+        if bnb_f3_entry_count
+        else 0.0
+    )
+    bnb_f3_min_samples_for_review = 5
+    bnb_f3_avg_realized_review_threshold = -50.0
+    if bnb_f3_entry_count < bnb_f3_min_samples_for_review:
+        bnb_f3_dominant_swing_recommendation = (
+            "collect_more_samples_classification_incomplete"
+            if bnb_f3_missing_swing_flag_count
+            else "collect_more_samples"
+        )
+    elif bnb_f3_missing_swing_flag_rate > 0.0:
+        bnb_f3_dominant_swing_recommendation = "keep_monitoring_classification_incomplete"
+    elif bnb_f3_avg_realized_net_bps is not None and bnb_f3_avg_realized_net_bps < bnb_f3_avg_realized_review_threshold:
         bnb_f3_dominant_swing_recommendation = "consider_block_bnb_f3_dominant_swing"
     elif bnb_f3_avg_realized_net_bps is None:
         bnb_f3_dominant_swing_recommendation = "outcome_not_observable"
@@ -7728,14 +7791,22 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     bnb_f3_dominant_swing_summary = {
         "schema_version": "v5.bnb_f3_dominant_swing_summary.v1",
         "diagnostic_only": True,
-        "sample_count": len(bnb_f3_dominant_swing_outcome_rows),
+        "classification_version": BNB_F3_CLASSIFICATION_VERSION,
+        "sample_scope": "bnb_f3_dominant_entries",
+        "live_order_effect": "none_diagnostic_only",
+        "sample_count": bnb_f3_entry_count,
+        "bnb_f3_entry_count": bnb_f3_entry_count,
+        "bnb_f3_swing_hold_count": bnb_f3_swing_hold_count,
+        "bnb_f3_missing_swing_flag_count": bnb_f3_missing_swing_flag_count,
+        "bnb_f3_missing_swing_flag_rate": bnb_f3_missing_swing_flag_rate,
+        "swing_hold_subset_sample_count": bnb_f3_swing_hold_count,
         "avg_realized_net_bps": bnb_f3_avg_realized_net_bps if bnb_f3_avg_realized_net_bps is not None else not_obs,
         "win_rate": bnb_f3_win_rate if bnb_f3_win_rate is not None else not_obs,
         "avg_if_held_12h_net_bps": bnb_f3_avg_if_held_12h_net_bps if bnb_f3_avg_if_held_12h_net_bps is not None else not_obs,
         "recommendation": bnb_f3_dominant_swing_recommendation,
         "thresholds": {
-            "min_samples_for_restriction_review": 5,
-            "avg_realized_net_bps_review_threshold": -50,
+            "min_samples_for_restriction_review": bnb_f3_min_samples_for_review,
+            "avg_realized_net_bps_review_threshold": bnb_f3_avg_realized_review_threshold,
         },
     }
 
@@ -9188,7 +9259,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     write_csv(
         "summaries/bnb_f3_dominant_swing_outcomes.csv",
         bnb_f3_dominant_swing_outcome_rows,
-        ["run_id", "entry_ts", "exit_ts", "entry_px", "exit_px", "realized_net_bps", "net_pnl_usdt", "dominant_factor", "dominant_factor_contribution_pct", "f4_volume_expansion", "f5_rsi_trend_confirm", "alpha6_score", "final_score", "exit_reason", "if_held_6h_net_bps", "if_held_12h_net_bps", "if_held_24h_net_bps", "diagnosis"],
+        ["run_id", "strategy_candidate", "entry_reason", "source_entry_id", "has_swing_hold_flag", "has_f3_dominant_signal", "missing_swing_hold_flag", "classification_reason", "entry_ts", "exit_ts", "entry_px", "exit_px", "realized_net_bps", "net_pnl_usdt", "dominant_factor", "dominant_factor_contribution_pct", "f4_volume_expansion", "f5_rsi_trend_confirm", "alpha6_score", "final_score", "exit_reason", "if_held_6h_net_bps", "if_held_12h_net_bps", "if_held_24h_net_bps", "diagnosis"],
     )
     write_text(
         "summaries/bnb_f3_dominant_swing_summary.json",
@@ -10958,10 +11029,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "bnb_profit_lock_shadow_best_policy_mix": bnb_profit_lock_shadow_best_policy_mix,
         "bnb_profit_lock_shadow_latest_best_policy": bnb_profit_lock_shadow_latest.get("best_shadow_exit_policy", not_obs),
         "bnb_f3_dominant_swing_sample_count": bnb_f3_dominant_swing_summary.get("sample_count", 0),
+        "bnb_f3_dominant_swing_entry_count": bnb_f3_dominant_swing_summary.get("bnb_f3_entry_count", 0),
+        "bnb_f3_dominant_swing_hold_count": bnb_f3_dominant_swing_summary.get("bnb_f3_swing_hold_count", 0),
+        "bnb_f3_dominant_swing_missing_swing_flag_count": bnb_f3_dominant_swing_summary.get("bnb_f3_missing_swing_flag_count", 0),
+        "bnb_f3_dominant_swing_missing_swing_flag_rate": bnb_f3_dominant_swing_summary.get("bnb_f3_missing_swing_flag_rate", 0.0),
         "bnb_f3_dominant_swing_avg_realized_net_bps": bnb_f3_dominant_swing_summary.get("avg_realized_net_bps", not_obs),
         "bnb_f3_dominant_swing_win_rate": bnb_f3_dominant_swing_summary.get("win_rate", not_obs),
         "bnb_f3_dominant_swing_avg_if_held_12h_net_bps": bnb_f3_dominant_swing_summary.get("avg_if_held_12h_net_bps", not_obs),
         "bnb_f3_dominant_swing_recommendation": bnb_f3_dominant_swing_summary.get("recommendation", not_obs),
+        "bnb_f3_dominant_swing_diagnostic_only": True,
         "high_score_blocked_target_count": len(high_score_blocked_rows),
         "high_score_blocked_labelable_target_count": len(high_score_labelable_rows),
         "high_score_blocked_non_entry_management_count": len(high_score_non_entry_management_rows),
@@ -11755,12 +11831,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "- output: summaries/bnb_profit_lock_shadow.csv",
         "",
         "## BNB f3-dominant swing outcome audit",
+        f"- diagnostic only: {str(bnb_f3_dominant_swing_summary.get('diagnostic_only', True)).lower()}",
+        f"- live_order_effect: {bnb_f3_dominant_swing_summary.get('live_order_effect', 'none_diagnostic_only')}",
+        f"- sample_scope: {bnb_f3_dominant_swing_summary.get('sample_scope', not_obs)}",
+        f"- classification_version: {bnb_f3_dominant_swing_summary.get('classification_version', not_obs)}",
         f"- sample_count: {bnb_f3_dominant_swing_summary.get('sample_count', 0)}",
+        f"- bnb_f3_entry_count: {bnb_f3_dominant_swing_summary.get('bnb_f3_entry_count', 0)}",
+        f"- bnb_f3_swing_hold_count: {bnb_f3_dominant_swing_summary.get('bnb_f3_swing_hold_count', 0)}",
+        f"- missing_swing_flag_count: {bnb_f3_dominant_swing_summary.get('bnb_f3_missing_swing_flag_count', 0)}",
+        f"- missing_swing_flag_rate: {fmt_num(bnb_f3_dominant_swing_summary.get('bnb_f3_missing_swing_flag_rate'), 6)}",
         f"- avg_realized_net_bps: {fmt_num(bnb_f3_dominant_swing_summary.get('avg_realized_net_bps'), 6)}",
         f"- win_rate: {fmt_num(bnb_f3_dominant_swing_summary.get('win_rate'), 6)}",
         f"- avg_if_held_12h_net_bps: {fmt_num(bnb_f3_dominant_swing_summary.get('avg_if_held_12h_net_bps'), 6)}",
         f"- recommendation: {bnb_f3_dominant_swing_summary.get('recommendation', not_obs)}",
-        "- interpretation: diagnostic only; do not tighten BNB f3-dominant swing eligibility until the sample gate is met.",
+        "- interpretation: diagnostic only; do not automatically modify live eligibility, BNB protect gate, or live order routing from this report.",
         "- output: summaries/bnb_f3_dominant_swing_outcomes.csv and summaries/bnb_f3_dominant_swing_summary.json",
         "",
         "## PROTECT SOL exception shadow",
@@ -11944,6 +12028,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "completion_attempts": len(copied_runs),
         "canonical_completion_count": len(completion_attempts_by_hour),
         "data_quality_warnings": data_quality_warnings,
+        "bnb_f3_dominant_swing_sample_count": bnb_f3_dominant_swing_summary.get("sample_count", 0),
+        "bnb_f3_dominant_swing_missing_swing_flag_count": bnb_f3_dominant_swing_summary.get("bnb_f3_missing_swing_flag_count", 0),
+        "bnb_f3_dominant_swing_diagnostic_only": True,
     }
 
 
@@ -12322,6 +12409,13 @@ manifest = {
     "completion_attempts": int(summary_meta.get("completion_attempts", 0) or 0),
     "canonical_completion_count": int(summary_meta.get("canonical_completion_count", 0) or 0),
     "data_quality_warnings": summary_meta.get("data_quality_warnings", []),
+    "bnb_f3_dominant_swing_sample_count": int(summary_meta.get("bnb_f3_dominant_swing_sample_count", 0) or 0),
+    "bnb_f3_dominant_swing_missing_swing_flag_count": int(
+        summary_meta.get("bnb_f3_dominant_swing_missing_swing_flag_count", 0) or 0
+    ),
+    "bnb_f3_dominant_swing_diagnostic_only": bool(
+        summary_meta.get("bnb_f3_dominant_swing_diagnostic_only", True)
+    ),
     "strategy_version": provenance_meta.get("strategy_version", "not_observable"),
     "strategy_hash": provenance_meta.get("strategy_hash", "not_observable"),
     "strategy_file_count": provenance_meta.get("strategy_file_count", 0),

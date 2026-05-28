@@ -2194,28 +2194,7 @@ def fixture_bnb_profit_lock_review_root(root):
         "window_end_ts": window_end,
         "current_level": "PROTECT",
         "regime": "Trending",
-        "router_decisions": [
-            {
-                "symbol": "BNB/USDT",
-                "action": "create",
-                "intent": "OPEN_LONG",
-                "side": "buy",
-                "reason": "normal_entry",
-                "entry_reason": "normal_entry",
-                "swing_hold_position": True,
-                "swing_min_hold_hours": 24,
-            },
-            {
-                "symbol": "BNB/USDT",
-                "action": "create",
-                "intent": "CLOSE_LONG",
-                "side": "sell",
-                "reason": "atr_trailing",
-                "source_reason": "atr_trailing",
-                "exit_priority": "soft",
-                "min_hold_hours": 24,
-            },
-        ],
+        "router_decisions": [],
     })
     write_text(run_dir / "trades.csv", "\n".join(trade_lines) + "\n")
     write_text(run_dir / "equity.jsonl", "{}\n")
@@ -4143,6 +4122,13 @@ def main():
             assert len(bnb_f3_outcomes) == 1, bnb_f3_outcomes
             bnb_f3 = bnb_f3_outcomes[0]
             assert bnb_f3["run_id"] == run_id, bnb_f3
+            assert bnb_f3["strategy_candidate"] == "normal_entry", bnb_f3
+            assert bnb_f3["entry_reason"] == "normal_entry", bnb_f3
+            assert "BNB/USDT" in bnb_f3["source_entry_id"], bnb_f3
+            assert bnb_f3["has_swing_hold_flag"] == "true", bnb_f3
+            assert bnb_f3["has_f3_dominant_signal"] == "true", bnb_f3
+            assert bnb_f3["missing_swing_hold_flag"] == "false", bnb_f3
+            assert bnb_f3["classification_reason"] == "bnb_f3_dominant_swing_hold", bnb_f3
             assert bnb_f3["realized_net_bps"] == "-100", bnb_f3
             assert bnb_f3["dominant_factor"] == "f3_vol_adj_ret", bnb_f3
             assert bnb_f3["dominant_factor_contribution_pct"] == "0.7", bnb_f3
@@ -4154,6 +4140,14 @@ def main():
             assert bnb_f3["if_held_24h_net_bps"] == "300", bnb_f3
             assert bnb_f3["diagnosis"] == "bnb_f3_dominant_swing_loss_better_if_held", bnb_f3
             assert bnb_f3_summary["sample_count"] == 1, bnb_f3_summary
+            assert bnb_f3_summary["classification_version"] == "v5.bnb_f3_classification.v1", bnb_f3_summary
+            assert bnb_f3_summary["sample_scope"] == "bnb_f3_dominant_entries", bnb_f3_summary
+            assert bnb_f3_summary["live_order_effect"] == "none_diagnostic_only", bnb_f3_summary
+            assert bnb_f3_summary["bnb_f3_entry_count"] == 1, bnb_f3_summary
+            assert bnb_f3_summary["bnb_f3_swing_hold_count"] == 1, bnb_f3_summary
+            assert bnb_f3_summary["bnb_f3_missing_swing_flag_count"] == 0, bnb_f3_summary
+            assert bnb_f3_summary["bnb_f3_missing_swing_flag_rate"] == 0.0, bnb_f3_summary
+            assert bnb_f3_summary["swing_hold_subset_sample_count"] == 1, bnb_f3_summary
             assert bnb_f3_summary["avg_realized_net_bps"] == -100.0, bnb_f3_summary
             assert bnb_f3_summary["win_rate"] == 0.0, bnb_f3_summary
             assert bnb_f3_summary["avg_if_held_12h_net_bps"] == 200.0, bnb_f3_summary
@@ -4194,6 +4188,11 @@ def main():
             assert window["bnb_profit_lock_shadow_avg_best_improvement_bps"] == 400.0, window
             assert window["bnb_profit_lock_shadow_latest_best_policy"] == "delayed_exit_24h", window
             assert window["bnb_f3_dominant_swing_sample_count"] == 1, window
+            assert window["bnb_f3_dominant_swing_entry_count"] == 1, window
+            assert window["bnb_f3_dominant_swing_hold_count"] == 1, window
+            assert window["bnb_f3_dominant_swing_missing_swing_flag_count"] == 0, window
+            assert window["bnb_f3_dominant_swing_missing_swing_flag_rate"] == 0.0, window
+            assert window["bnb_f3_dominant_swing_diagnostic_only"] is True, window
             assert window["bnb_f3_dominant_swing_avg_realized_net_bps"] == -100.0, window
             assert window["bnb_f3_dominant_swing_win_rate"] == 0.0, window
             assert window["bnb_f3_dominant_swing_avg_if_held_12h_net_bps"] == 200.0, window
@@ -4227,6 +4226,10 @@ def main():
             assert "latest profit_lock_30bps/50bps: 30 / 50" in readme, readme
             assert "latest best_shadow_exit_policy: delayed_exit_24h" in readme, readme
             assert "## BNB f3-dominant swing outcome audit" in readme, readme
+            assert "diagnostic only: true" in readme, readme
+            assert "live_order_effect: none_diagnostic_only" in readme, readme
+            assert "sample_scope: bnb_f3_dominant_entries" in readme, readme
+            assert "missing_swing_flag_count: 0" in readme, readme
             assert "avg_realized_net_bps: -100" in readme, readme
             assert "recommendation: collect_more_samples" in readme, readme
             assert "## BNB risk summary" in readme, readme
@@ -4244,7 +4247,10 @@ def main():
         try:
             with tarfile.open(bundle, "r:gz") as tf:
                 bnb_profit = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_profit_lock_shadow.csv")).read().decode().splitlines()))
+                bnb_f3_outcomes = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_f3_dominant_swing_outcomes.csv")).read().decode().splitlines()))
+                bnb_f3_summary = json.loads(tf.extractfile(extract_member(tf, "summaries/bnb_f3_dominant_swing_summary.json")).read().decode())
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
             assert len(bnb_profit) == 10, bnb_profit
             assert {row["sample_count"] for row in bnb_profit} == {"10"}, bnb_profit
@@ -4256,14 +4262,38 @@ def main():
             assert len(f3_rows) == 1, bnb_profit
             assert f3_rows[0]["strategy_candidate"] == "f3_dominant_entry", f3_rows
             assert "BNB/USDT" in f3_rows[0]["source_entry_id"], f3_rows
+            assert len(bnb_f3_outcomes) == 1, bnb_f3_outcomes
+            missing = bnb_f3_outcomes[0]
+            assert missing["entry_reason"] == "f3_dominant_entry", missing
+            assert missing["strategy_candidate"] == "f3_dominant_entry", missing
+            assert missing["has_f3_dominant_signal"] == "true", missing
+            assert missing["has_swing_hold_flag"] == "false", missing
+            assert missing["missing_swing_hold_flag"] == "true", missing
+            assert missing["classification_reason"] == "bnb_f3_dominant_missing_swing_hold_flag", missing
+            assert bnb_f3_summary["sample_count"] == 1, bnb_f3_summary
+            assert bnb_f3_summary["bnb_f3_entry_count"] == 1, bnb_f3_summary
+            assert bnb_f3_summary["bnb_f3_swing_hold_count"] == 0, bnb_f3_summary
+            assert bnb_f3_summary["bnb_f3_missing_swing_flag_count"] == 1, bnb_f3_summary
+            assert bnb_f3_summary["bnb_f3_missing_swing_flag_rate"] == 1.0, bnb_f3_summary
+            assert bnb_f3_summary["recommendation"] == "collect_more_samples_classification_incomplete", bnb_f3_summary
             assert window["bnb_profit_lock_shadow_rows"] == 10, window
             assert window["bnb_profit_lock_shadow_sample_gate_met"] is True, window
             assert window["bnb_profit_lock_shadow_recommendation"] == "REVIEW_EXIT_POLICY", window
             assert window["bnb_profit_lock_shadow_review_reason"] == "sample_gate_met_shadow_exit_outperforms_actual", window
             assert window["bnb_profit_lock_shadow_help_rate"] == 1.0, window
             assert window["bnb_profit_lock_shadow_avg_best_improvement_bps"] == 400.0, window
+            assert window["bnb_f3_dominant_swing_entry_count"] == 1, window
+            assert window["bnb_f3_dominant_swing_hold_count"] == 0, window
+            assert window["bnb_f3_dominant_swing_missing_swing_flag_count"] == 1, window
+            assert window["bnb_f3_dominant_swing_missing_swing_flag_rate"] == 1.0, window
+            assert window["bnb_f3_dominant_swing_diagnostic_only"] is True, window
+            assert manifest["bnb_f3_dominant_swing_sample_count"] == 1, manifest
+            assert manifest["bnb_f3_dominant_swing_missing_swing_flag_count"] == 1, manifest
+            assert manifest["bnb_f3_dominant_swing_diagnostic_only"] is True, manifest
             assert "recommendation: REVIEW_EXIT_POLICY" in readme, readme
             assert "interpretation: this is diagnostic only" in readme, readme
+            assert "missing_swing_flag_count: 1" in readme, readme
+            assert "live_order_effect: none_diagnostic_only" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
@@ -4281,6 +4311,12 @@ def main():
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
             assert len(outcomes) == 5, outcomes
             assert {row["dominant_factor"] for row in outcomes} == {"f3_vol_adj_ret"}, outcomes
+            assert {row["has_f3_dominant_signal"] for row in outcomes} == {"true"}, outcomes
+            assert {row["has_swing_hold_flag"] for row in outcomes} == {"true"}, outcomes
+            assert {row["missing_swing_hold_flag"] for row in outcomes} == {"false"}, outcomes
+            assert {row["classification_reason"] for row in outcomes} == {"bnb_f3_dominant_swing_hold"}, outcomes
+            assert {row["entry_reason"] for row in outcomes} == {"normal_entry"}, outcomes
+            assert {row["strategy_candidate"] for row in outcomes} == {"normal_entry"}, outcomes
             assert {row["dominant_factor_contribution_pct"] for row in outcomes} == {"0.846"}, outcomes
             assert {row["f4_volume_expansion"] for row in outcomes} == {"0.565"}, outcomes
             assert {row["f5_rsi_trend_confirm"] for row in outcomes} == {"0.614"}, outcomes
@@ -4290,13 +4326,28 @@ def main():
             assert {row["if_held_12h_net_bps"] for row in outcomes} == {"100"}, outcomes
             assert {row["diagnosis"] for row in outcomes} == {"bnb_f3_dominant_swing_loss_better_if_held"}, outcomes
             assert summary["sample_count"] == 5, summary
+            assert summary["sample_scope"] == "bnb_f3_dominant_entries", summary
+            assert summary["live_order_effect"] == "none_diagnostic_only", summary
+            assert summary["bnb_f3_entry_count"] == 5, summary
+            assert summary["bnb_f3_swing_hold_count"] == 5, summary
+            assert summary["bnb_f3_missing_swing_flag_count"] == 0, summary
+            assert summary["bnb_f3_missing_swing_flag_rate"] == 0.0, summary
+            assert summary["swing_hold_subset_sample_count"] == 5, summary
             assert summary["avg_realized_net_bps"] == -100.0, summary
             assert summary["win_rate"] == 0.0, summary
             assert summary["avg_if_held_12h_net_bps"] == 100.0, summary
             assert summary["recommendation"] == "consider_block_bnb_f3_dominant_swing", summary
             assert window["bnb_f3_dominant_swing_sample_count"] == 5, window
+            assert window["bnb_f3_dominant_swing_entry_count"] == 5, window
+            assert window["bnb_f3_dominant_swing_hold_count"] == 5, window
+            assert window["bnb_f3_dominant_swing_missing_swing_flag_count"] == 0, window
+            assert window["bnb_f3_dominant_swing_missing_swing_flag_rate"] == 0.0, window
+            assert window["bnb_f3_dominant_swing_diagnostic_only"] is True, window
             assert window["bnb_f3_dominant_swing_recommendation"] == "consider_block_bnb_f3_dominant_swing", window
             assert "## BNB f3-dominant swing outcome audit" in readme, readme
+            assert "diagnostic only: true" in readme, readme
+            assert "live_order_effect: none_diagnostic_only" in readme, readme
+            assert "missing_swing_flag_count: 0" in readme, readme
             assert "recommendation: consider_block_bnb_f3_dominant_swing" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
