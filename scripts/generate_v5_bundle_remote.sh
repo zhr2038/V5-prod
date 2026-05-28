@@ -192,6 +192,10 @@ STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = (
     "latest_local_generated_at",
     "latest_api_generated_at",
     "selected_latest_generated_at",
+    "local_latest_file_mtime",
+    "latest_quant_lab_bundle_seen",
+    "api_lake_generated_at",
+    "api_cache_hit",
     "advisory_age_sec",
     "advisory_max_age_sec",
     "advisory_expires_at",
@@ -200,6 +204,9 @@ STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = (
     "api_fallback_attempted",
     "api_fallback_success",
     "stale_reason",
+    "stale_reason_detail",
+    "selected_source_is_stale",
+    "suggested_fix",
     "warning",
     "freshness_inconsistency_warning",
 )
@@ -9764,6 +9771,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             collection_errors.append({"source": str(path), "error": f"entry_quality_api_env_read: {exc!r}"})
         return ""
 
+    strategy_advisory_source_selection = {}
+
+    def _http_header_value(headers, *names):
+        if not headers:
+            return ""
+        for name in names:
+            try:
+                value = headers.get(name)
+            except Exception:
+                value = None
+            if value not in (None, ""):
+                return flatten_value(value)
+        return ""
+
     def extract_strategy_advisory_items(payload):
         if isinstance(payload, list):
             return [item for item in payload if isinstance(item, dict)]
@@ -9779,15 +9800,66 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                     return nested
         return []
 
+    def strategy_advisory_payload_metadata(payload, headers=None):
+        items = extract_strategy_advisory_items(payload)
+        meta = {
+            "advisory_dataset_generated_at": _http_header_value(
+                headers,
+                "X-Advisory-Dataset-Generated-At",
+                "X-Quant-Lab-Advisory-Dataset-Generated-At",
+                "Advisory-Dataset-Generated-At",
+                "advisory_dataset_generated_at",
+            ),
+            "advisory_row_count": _http_header_value(
+                headers,
+                "X-Advisory-Row-Count",
+                "X-Quant-Lab-Advisory-Row-Count",
+                "Advisory-Row-Count",
+                "advisory_row_count",
+            ),
+            "lake_root_hash": _http_header_value(
+                headers,
+                "X-Lake-Root-Hash",
+                "X-Quant-Lab-Lake-Root-Hash",
+                "Lake-Root-Hash",
+                "lake_root_hash",
+            ),
+            "api_cache_hit": _http_header_value(
+                headers,
+                "X-Advisory-Cache-Hit",
+                "X-Quant-Lab-Api-Cache-Hit",
+                "Advisory-Cache-Hit",
+                "api_cache_hit",
+            ),
+        }
+        if isinstance(payload, dict):
+            for key in ("advisory_dataset_generated_at", "api_lake_generated_at", "generated_at"):
+                if not meta.get("advisory_dataset_generated_at") and payload.get(key) not in (None, ""):
+                    meta["advisory_dataset_generated_at"] = flatten_value(payload.get(key))
+            for key in ("advisory_row_count", "row_count", "count"):
+                if not meta.get("advisory_row_count") and payload.get(key) not in (None, ""):
+                    meta["advisory_row_count"] = flatten_value(payload.get(key))
+            for key in ("lake_root_hash", "lake_hash", "source_root_hash"):
+                if not meta.get("lake_root_hash") and payload.get(key) not in (None, ""):
+                    meta["lake_root_hash"] = flatten_value(payload.get(key))
+            for key in ("api_cache_hit", "cache_hit"):
+                if not meta.get("api_cache_hit") and payload.get(key) not in (None, ""):
+                    meta["api_cache_hit"] = flatten_value(payload.get(key))
+        if not meta.get("advisory_row_count"):
+            meta["advisory_row_count"] = str(len(items))
+        return meta
+
     def advisory_reference_dt(row):
         values = [
             parse_dt_utc(row.get("as_of_ts")),
             parse_dt_utc(row.get("generated_at")),
+            parse_dt_utc(row.get("advisory_dataset_generated_at")),
+            parse_dt_utc(row.get("api_lake_generated_at")),
         ]
         values = [value for value in values if value is not None]
         return max(values) if values else None
 
-    def assess_api_advisory_row(row):
+    def assess_strategy_advisory_row(row):
         max_age_minutes = config_number("quant_lab_strategy_opportunity_advisory_max_age_minutes") or 90.0
         require_contract = config_bool("quant_lab_strategy_opportunity_advisory_require_contract_version", True)
         reference_dt = advisory_reference_dt(row)
@@ -9798,10 +9870,73 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         contract = flatten_value(row.get("contract_version")).strip()
         contract_match = (not require_contract) or (contract == QUANT_LAB_CONTRACT_VERSION)
         fresh = bool(reference_dt is not None and age_ok and expires_ok and contract_match)
+        reasons = []
+        if reference_dt is None:
+            reasons.append("missing_reference_ts")
+        elif not age_ok:
+            reasons.append("age_exceeds_max")
+        if not expires_ok:
+            reasons.append("expired")
+        if not contract_match:
+            reasons.append("contract_mismatch")
+        return fresh, age_sec, contract_match, ";".join(reasons)
+
+    def assess_api_advisory_row(row):
+        fresh, age_sec, contract_match, _reason = assess_strategy_advisory_row(row)
         return fresh, age_sec, contract_match
 
-    def normalize_strategy_advisory_api_row(row, endpoint):
-        fresh, age_sec, contract_match = assess_api_advisory_row(row)
+    def latest_strategy_advisory_dt(rows):
+        values = [advisory_reference_dt(row) for row in rows]
+        values = [value for value in values if value is not None]
+        return max(values) if values else None
+
+    def mtime_iso(path):
+        try:
+            return dt.datetime.fromtimestamp(path.stat().st_mtime, tz=dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception:
+            return ""
+
+    def latest_file_mtime(paths):
+        latest = None
+        latest_path = None
+        for path in paths:
+            try:
+                if not path.is_file():
+                    continue
+                mtime = path.stat().st_mtime
+            except Exception:
+                continue
+            if latest is None or mtime > latest:
+                latest = mtime
+                latest_path = path
+        if latest is None:
+            return "", ""
+        iso = dt.datetime.fromtimestamp(latest, tz=dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return iso, str(latest_path)
+
+    def normalize_local_strategy_advisory_row(row, path):
+        payload = dict(row)
+        fresh, age_sec, contract_match, stale_reason = assess_strategy_advisory_row(payload)
+        payload.setdefault("source_path", path.as_posix())
+        payload.setdefault("advisory_source", "local")
+        payload.setdefault("advisory_fresh", str(bool(fresh)).lower())
+        payload.setdefault("advisory_age_sec", fmt_num(age_sec, 3) if age_sec is not None else not_obs)
+        payload.setdefault("advisory_contract_match", str(bool(contract_match)).lower())
+        payload.setdefault("stale_advisory_used", str(not bool(fresh)).lower())
+        payload.setdefault("stale_reason", stale_reason)
+        payload.setdefault("api_fallback_attempted", "false")
+        payload.setdefault("api_fallback_success", "false")
+        if not payload.get("max_live_notional_usdt") or not fresh:
+            payload["max_live_notional_usdt"] = "0"
+        return payload
+
+    def normalize_strategy_advisory_api_row(row, endpoint, api_meta=None):
+        api_meta = api_meta or {}
+        payload_for_freshness = dict(row)
+        if api_meta.get("advisory_dataset_generated_at"):
+            payload_for_freshness.setdefault("advisory_dataset_generated_at", api_meta.get("advisory_dataset_generated_at"))
+            payload_for_freshness.setdefault("api_lake_generated_at", api_meta.get("advisory_dataset_generated_at"))
+        fresh, age_sec, contract_match, stale_reason = assess_strategy_advisory_row(payload_for_freshness)
         return {
             "source_path": f"api:{endpoint}",
             "advisory_source": "api",
@@ -9809,8 +9944,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "advisory_age_sec": fmt_num(age_sec, 3) if age_sec is not None else not_obs,
             "advisory_contract_match": str(bool(contract_match)),
             "stale_advisory_used": str(not bool(fresh)).lower(),
+            "stale_reason": stale_reason,
             "api_fallback_attempted": "true",
             "api_fallback_success": "true",
+            "api_lake_generated_at": flatten_value(first_observed(api_meta.get("advisory_dataset_generated_at"), row.get("api_lake_generated_at"), "")),
+            "api_cache_hit": flatten_value(api_meta.get("api_cache_hit")),
+            "advisory_dataset_generated_at": flatten_value(first_observed(api_meta.get("advisory_dataset_generated_at"), row.get("advisory_dataset_generated_at"), "")),
+            "advisory_row_count": flatten_value(api_meta.get("advisory_row_count")),
+            "lake_root_hash": flatten_value(api_meta.get("lake_root_hash")),
             "as_of_ts": flatten_value(row.get("as_of_ts")),
             "generated_at": flatten_value(row.get("generated_at")),
             "expires_at": flatten_value(row.get("expires_at")),
@@ -9860,12 +10001,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
             try:
                 with urllib.request.urlopen(req, timeout=5) as response:
+                    headers = response.headers
                     payload = json.loads(response.read().decode("utf-8", errors="replace"))
             except Exception as exc:
                 collection_errors.append({"source": f"entry_quality_api_fallback:{endpoint}", "error": repr(exc)})
                 continue
+            api_meta = strategy_advisory_payload_metadata(payload, headers)
             for item in extract_strategy_advisory_items(payload):
-                normalized = normalize_strategy_advisory_api_row(item, endpoint)
+                normalized = normalize_strategy_advisory_api_row(item, endpoint, api_meta)
                 if entry_quality_strategy_key(normalized) or risk_on_multi_buy_strategy_key(normalized):
                     out_rows.append(normalized)
             if out_rows:
@@ -9880,31 +10023,164 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             deduped.append(row)
         return deduped
 
+    strategy_advisory_raw_paths = [
+        OUT / "raw" / "reports" / "strategy_opportunity_advisory.csv",
+        OUT / "raw" / "reports" / "quant_lab" / "strategy_opportunity_advisory.csv",
+        OUT / "raw" / "reports" / "quant_lab_latest" / "strategy_opportunity_advisory.csv",
+        OUT / "raw" / "reports" / "quant_lab" / "latest" / "reports" / "strategy_opportunity_advisory.csv",
+    ]
+    strategy_advisory_reader_path = OUT / "summaries" / "strategy_opportunity_advisory_reader.csv"
+    strategy_advisory_source_health_path = OUT / "summaries" / "strategy_opportunity_advisory_source_health.csv"
+
+    def dedupe_strategy_advisory_rows(rows):
+        deduped = []
+        seen = set()
+        for row in rows:
+            key = tuple(flatten_value(row.get(field)) for field in (
+                "strategy_id",
+                "strategy_candidate",
+                "symbol",
+                "decision",
+                "recommended_mode",
+                "horizon_hours",
+            ))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(row)
+        return deduped
+
     def strategy_advisory_summary_rows():
-        rows = load_csv_dicts(OUT / "summaries" / "strategy_opportunity_advisory_reader.csv")
-        if rows and any(entry_quality_strategy_key(row) or risk_on_multi_buy_strategy_key(row) for row in rows):
-            return rows
-        raw_paths = [
-            OUT / "raw" / "reports" / "strategy_opportunity_advisory.csv",
-            OUT / "raw" / "reports" / "quant_lab" / "strategy_opportunity_advisory.csv",
-            OUT / "raw" / "reports" / "quant_lab_latest" / "strategy_opportunity_advisory.csv",
-            OUT / "raw" / "reports" / "quant_lab" / "latest" / "reports" / "strategy_opportunity_advisory.csv",
+        previous_health_rows = load_csv_dicts(strategy_advisory_source_health_path)
+        previous_health = previous_health_rows[-1] if previous_health_rows else {}
+        summary_rows = [
+            normalize_local_strategy_advisory_row(row, strategy_advisory_reader_path)
+            for row in load_csv_dicts(strategy_advisory_reader_path)
         ]
         raw_rows = []
-        for path in raw_paths:
+        for path in strategy_advisory_raw_paths:
             for row in load_csv_dicts(path):
-                payload = dict(row)
-                payload.setdefault("source_path", path.as_posix())
-                payload.setdefault("advisory_source", "local")
-                raw_rows.append(payload)
-        if raw_rows and any(entry_quality_strategy_key(row) or risk_on_multi_buy_strategy_key(row) for row in raw_rows):
-            return raw_rows
+                raw_rows.append(normalize_local_strategy_advisory_row(row, path))
+        local_rows = dedupe_strategy_advisory_rows(raw_rows + summary_rows)
         api_rows = entry_quality_api_fallback_rows()
-        if api_rows:
-            return api_rows
-        if rows:
-            return rows
-        return raw_rows
+        local_latest_dt = latest_strategy_advisory_dt(local_rows)
+        api_latest_dt = latest_strategy_advisory_dt(api_rows)
+        previous_api_latest_dt = parse_dt_utc(first_observed(
+            previous_health.get("api_lake_generated_at"),
+            previous_health.get("latest_api_generated_at"),
+            "",
+        ))
+        comparable_api_latest_dt = api_latest_dt or previous_api_latest_dt
+        local_mtime, local_mtime_path = latest_file_mtime(strategy_advisory_raw_paths + [strategy_advisory_reader_path])
+        bundle_mtime, bundle_path = latest_file_mtime(entry_quality_archive_paths())
+
+        if local_rows and (
+            not api_rows
+            or comparable_api_latest_dt is None
+            or (local_latest_dt is not None and local_latest_dt >= comparable_api_latest_dt)
+        ):
+            selected_rows = local_rows
+            selected_source = "local"
+            selected_reason = "local_bundle_newer_or_api_missing"
+        elif api_rows:
+            selected_rows = api_rows
+            selected_source = "api"
+            selected_reason = "api_newer_than_local_bundle"
+        elif summary_rows:
+            selected_rows = summary_rows
+            selected_source = "local"
+            selected_reason = "local_summary_only"
+        else:
+            selected_rows = raw_rows
+            selected_source = "missing" if not raw_rows else "local"
+            selected_reason = "no_advisory_rows" if not raw_rows else "raw_local_only"
+
+        selected_latest_dt = latest_strategy_advisory_dt(selected_rows)
+        api_row_count = first_observed(
+            (api_rows[0].get("advisory_row_count") if api_rows else ""),
+            previous_health.get("advisory_row_count"),
+            previous_health.get("api_row_count"),
+            len(api_rows) if api_rows else "",
+        )
+        api_lake_generated_at = first_observed(
+            (api_rows[0].get("api_lake_generated_at") if api_rows else ""),
+            (api_rows[0].get("advisory_dataset_generated_at") if api_rows else ""),
+            previous_health.get("api_lake_generated_at"),
+            previous_health.get("latest_api_generated_at"),
+            "",
+        )
+        api_cache_hit = first_observed(
+            (api_rows[0].get("api_cache_hit") if api_rows else ""),
+            previous_health.get("api_cache_hit"),
+            "",
+        )
+        stale_reasons = sorted({
+            flatten_value(row.get("stale_reason")).strip()
+            for row in selected_rows
+            if flatten_value(row.get("stale_reason")).strip()
+        })
+        selected_age_sec = None
+        if selected_latest_dt is not None:
+            selected_age_sec = max(0.0, (NOW - selected_latest_dt).total_seconds())
+        max_age_sec = (config_number("quant_lab_strategy_opportunity_advisory_max_age_minutes") or 90.0) * 60.0
+        selected_source_is_stale = any(not truthy_text(row.get("advisory_fresh")) for row in selected_rows) if selected_rows else True
+        stale_reason = ";".join(stale_reasons)
+        stale_detail_parts = []
+        if selected_age_sec is not None:
+            stale_detail_parts.append(f"age_sec={fmt_num(selected_age_sec, 3)} max_age_sec={fmt_num(max_age_sec, 3)}")
+        if stale_reason:
+            stale_detail_parts.append(f"row_reasons={stale_reason}")
+        if selected_source == "api" and local_latest_dt and comparable_api_latest_dt and local_latest_dt > comparable_api_latest_dt:
+            stale_detail_parts.append("api_older_than_local_bundle")
+        if previous_api_latest_dt and api_latest_dt and api_latest_dt < previous_api_latest_dt:
+            stale_detail_parts.append("api_response_older_than_previous_health")
+        if bundle_path:
+            stale_detail_parts.append(f"latest_bundle={bundle_path}")
+        if selected_source == "api" and local_latest_dt and comparable_api_latest_dt and local_latest_dt > comparable_api_latest_dt:
+            suggested_fix = "use_newer_local_bundle_or_refresh_quant_lab_api_lake"
+        elif selected_source_is_stale and "expired" in stale_reason:
+            suggested_fix = "regenerate_quant_lab_advisory_or_extend_expires_at"
+        elif selected_source_is_stale and "age_exceeds_max" in stale_reason:
+            suggested_fix = "refresh_quant_lab_advisory_dataset"
+        elif selected_source == "missing":
+            suggested_fix = "sync_quant_lab_bundle_or_restore_strategy_advisory_api"
+        else:
+            suggested_fix = "none"
+        strategy_advisory_source_selection.clear()
+        strategy_advisory_source_selection.update({
+            "run_id": copied_runs[-1] if copied_runs else not_obs,
+            "ts_utc": NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "local_row_count": len(local_rows),
+            "api_row_count": api_row_count,
+            "selected_row_count": len(selected_rows),
+            "latest_local_generated_at": iso_or_not_obs(local_latest_dt),
+            "latest_api_generated_at": iso_or_not_obs(comparable_api_latest_dt),
+            "selected_latest_generated_at": iso_or_not_obs(selected_latest_dt),
+            "local_latest_file_mtime": local_mtime or not_obs,
+            "latest_quant_lab_bundle_seen": f"{bundle_path}@{bundle_mtime}" if bundle_path and bundle_mtime else not_obs,
+            "api_lake_generated_at": flatten_value(api_lake_generated_at),
+            "api_cache_hit": flatten_value(api_cache_hit) or not_obs,
+            "advisory_age_sec": fmt_num(selected_age_sec, 3) if selected_age_sec is not None else not_obs,
+            "advisory_max_age_sec": fmt_num(max_age_sec, 3),
+            "advisory_expires_at": "",
+            "advisory_source_lag_sec": fmt_num(
+                abs((local_latest_dt - comparable_api_latest_dt).total_seconds())
+                if local_latest_dt and comparable_api_latest_dt else None,
+                3,
+            ),
+            "selected_source": selected_source,
+            "api_fallback_attempted": str(bool(api_rows)).lower(),
+            "api_fallback_success": str(bool(api_rows)).lower(),
+            "stale_reason": stale_reason,
+            "stale_reason_detail": "; ".join(stale_detail_parts) or selected_reason,
+            "selected_source_is_stale": str(bool(selected_source_is_stale)).lower(),
+            "suggested_fix": suggested_fix,
+            "warning": "selected_advisory_older_than_local_bundle" if (
+                selected_source == "api" and local_latest_dt and comparable_api_latest_dt and local_latest_dt > comparable_api_latest_dt
+            ) else "",
+            "freshness_inconsistency_warning": "",
+        })
+        return selected_rows
 
     def advisory_value(row, *names, default=not_obs):
         for name in names:
@@ -10908,6 +11184,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if not isinstance(row, dict):
             return {}
         payload = dict(row)
+        for key, value in strategy_advisory_source_selection.items():
+            if value not in (None, ""):
+                payload[key] = flatten_value(value)
         max_age_sec = (config_number("quant_lab_strategy_opportunity_advisory_max_age_minutes") or 90.0) * 60.0
         if not payload.get("advisory_max_age_sec"):
             payload["advisory_max_age_sec"] = fmt_num(max_age_sec, 3)
@@ -10934,6 +11213,25 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 expires_values.append(expires_dt)
             if expires_values:
                 payload["advisory_expires_at"] = min(expires_values).isoformat().replace("+00:00", "Z")
+        if not payload.get("selected_source_is_stale"):
+            payload["selected_source_is_stale"] = str(bool(str(payload.get("stale_reason") or "").strip())).lower()
+        if not payload.get("stale_reason_detail"):
+            detail_parts = []
+            if payload.get("advisory_age_sec") and payload.get("advisory_max_age_sec"):
+                detail_parts.append(f"age_sec={payload.get('advisory_age_sec')} max_age_sec={payload.get('advisory_max_age_sec')}")
+            if payload.get("stale_reason"):
+                detail_parts.append(f"row_reasons={payload.get('stale_reason')}")
+            payload["stale_reason_detail"] = "; ".join(detail_parts)
+        if not payload.get("suggested_fix"):
+            stale_text = str(payload.get("stale_reason") or "").strip()
+            if "expired" in stale_text:
+                payload["suggested_fix"] = "regenerate_quant_lab_advisory_or_extend_expires_at"
+            elif "age_exceeds_max" in stale_text:
+                payload["suggested_fix"] = "refresh_quant_lab_advisory_dataset"
+            elif not payload.get("selected_source"):
+                payload["suggested_fix"] = "sync_quant_lab_bundle_or_restore_strategy_advisory_api"
+            else:
+                payload["suggested_fix"] = "none"
         if str(payload.get("stale_reason") or "").strip() and str(payload.get("freshness_inconsistency_warning") or "").strip():
             payload["freshness_inconsistency_warning"] = ""
         return payload
@@ -10941,6 +11239,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     advisory_source_health_rows = load_csv_dicts(OUT / "summaries" / "strategy_opportunity_advisory_source_health.csv")
     if advisory_source_health_rows:
         advisory_source_health_rows[-1] = enrich_strategy_advisory_source_health(advisory_source_health_rows[-1])
+    elif strategy_advisory_source_selection:
+        advisory_source_health_rows = [enrich_strategy_advisory_source_health(strategy_advisory_source_selection)]
+    if advisory_source_health_rows:
         write_csv(
             "summaries/strategy_opportunity_advisory_source_health.csv",
             advisory_source_health_rows,
@@ -11113,10 +11414,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "strategy_advisory_local_row_count": advisory_source_health.get("local_row_count", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_api_row_count": advisory_source_health.get("api_row_count", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_selected_row_count": advisory_source_health.get("selected_row_count", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_local_latest_file_mtime": advisory_source_health.get("local_latest_file_mtime", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_latest_quant_lab_bundle_seen": advisory_source_health.get("latest_quant_lab_bundle_seen", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_api_lake_generated_at": advisory_source_health.get("api_lake_generated_at", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_api_cache_hit": advisory_source_health.get("api_cache_hit", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_age_sec": advisory_source_health.get("advisory_age_sec", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_max_age_sec": advisory_source_health.get("advisory_max_age_sec", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_expires_at": advisory_source_health.get("advisory_expires_at", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_stale_reason": advisory_source_health.get("stale_reason", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_stale_reason_detail": advisory_source_health.get("stale_reason_detail", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_selected_source_is_stale": advisory_source_health.get("selected_source_is_stale", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_suggested_fix": advisory_source_health.get("suggested_fix", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_source_lag_sec": advisory_source_health.get("advisory_source_lag_sec", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_stale_count": strategy_advisory_stale_count,
         "strategy_advisory_stale_response_downgraded_count": strategy_advisory_stale_response_downgraded_count,
@@ -11863,6 +12171,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- latest_local_generated_at: {advisory_source_health.get('latest_local_generated_at', not_obs)}",
         f"- latest_api_generated_at: {advisory_source_health.get('latest_api_generated_at', not_obs)}",
         f"- selected_latest_generated_at: {advisory_source_health.get('selected_latest_generated_at', not_obs)}",
+        f"- local_latest_file_mtime: {advisory_source_health.get('local_latest_file_mtime', not_obs)}",
+        f"- latest_quant_lab_bundle_seen: {advisory_source_health.get('latest_quant_lab_bundle_seen', not_obs)}",
+        f"- api_lake_generated_at: {advisory_source_health.get('api_lake_generated_at', not_obs)}",
+        f"- api_cache_hit: {advisory_source_health.get('api_cache_hit', not_obs)}",
         f"- advisory_age_sec: {advisory_source_health.get('advisory_age_sec', not_obs)}",
         f"- advisory_max_age_sec: {advisory_source_health.get('advisory_max_age_sec', not_obs)}",
         f"- advisory_expires_at: {advisory_source_health.get('advisory_expires_at', not_obs)}",
@@ -11870,6 +12182,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- stale_response_downgraded_count: {window_summary.get('strategy_advisory_stale_response_downgraded_count', not_obs)}",
         f"- advisory_source_lag_sec: {advisory_source_health.get('advisory_source_lag_sec', not_obs)}",
         f"- stale_reason: {advisory_source_health.get('stale_reason', not_obs)}",
+        f"- stale_reason_detail: {advisory_source_health.get('stale_reason_detail', not_obs)}",
+        f"- selected_source_is_stale: {advisory_source_health.get('selected_source_is_stale', not_obs)}",
+        f"- suggested_fix: {advisory_source_health.get('suggested_fix', not_obs)}",
         f"- warning: {first_observed(advisory_source_health.get('warning'), advisory_source_health.get('freshness_inconsistency_warning'), not_obs)}",
         "- freshness_rule: advisory is fresh only when age <= advisory_max_age_sec, expires_at is not past, and contract matches. If age is below max age but stale_reason=expired, the shorter expires_at rule is the reason.",
         "",

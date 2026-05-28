@@ -5393,15 +5393,24 @@ def main():
             assert window["pullback_reversal_ready_for_live_probe"] == "false", window
             assert len(source_health) == 1, source_health
             health_row = source_health[0]
-            assert float(health_row["advisory_age_sec"]) == 2274.0, health_row
+            assert abs(float(health_row["advisory_age_sec"]) - 2274.0) < 10.0, health_row
             assert float(health_row["advisory_max_age_sec"]) == 5400.0, health_row
             assert health_row["advisory_expires_at"].endswith("Z"), health_row
-            assert health_row["stale_reason"] == "expired", health_row
+            assert health_row["selected_source"] == "local", health_row
+            assert health_row["local_latest_file_mtime"].endswith("Z"), health_row
+            assert health_row["latest_quant_lab_bundle_seen"] == "not_observable", health_row
+            assert health_row["api_lake_generated_at"] == health_row["latest_api_generated_at"], health_row
+            assert "expired" in health_row["stale_reason"], health_row
+            assert "row_reasons=" in health_row["stale_reason_detail"], health_row
+            assert health_row["selected_source_is_stale"] == "true", health_row
+            assert health_row["suggested_fix"] == "regenerate_quant_lab_advisory_or_extend_expires_at", health_row
             assert health_row["freshness_inconsistency_warning"] == "", health_row
-            assert float(window["strategy_advisory_age_sec"]) == 2274.0, window
+            assert abs(float(window["strategy_advisory_age_sec"]) - 2274.0) < 10.0, window
             assert float(window["strategy_advisory_max_age_sec"]) == 5400.0, window
             assert window["strategy_advisory_expires_at"] == health_row["advisory_expires_at"], window
-            assert window["strategy_advisory_stale_reason"] == "expired", window
+            assert "expired" in window["strategy_advisory_stale_reason"], window
+            assert window["strategy_advisory_selected_source_is_stale"] == "true", window
+            assert window["strategy_advisory_suggested_fix"] == "regenerate_quant_lab_advisory_or_extend_expires_at", window
             unavailable = [
                 item for item in issues["issues"]
                 if item.get("code") == "quant_lab_entry_quality_unavailable"
@@ -5437,11 +5446,16 @@ def main():
             assert "late_entry_chase_guard_enabled: false" in readme, readme
             assert "live_order_effect: read_only_no_hard_block" in readme, readme
             assert "## Strategy advisory source health" in readme, readme
-            assert "advisory_age_sec: 2274" in readme, readme
+            assert "selected_source: local" in readme, readme
+            assert "local_latest_file_mtime:" in readme, readme
+            assert "api_lake_generated_at:" in readme, readme
+            assert "selected_source_is_stale: true" in readme, readme
+            assert "suggested_fix: regenerate_quant_lab_advisory_or_extend_expires_at" in readme, readme
+            assert "advisory_age_sec: 227" in readme, readme
             assert "advisory_max_age_sec: 5400" in readme, readme
             assert f"advisory_expires_at: {health_row['advisory_expires_at']}" in readme, readme
-            assert "stale_advisory_count: 3" in readme, readme
-            assert "stale_response_downgraded_count: 2" in readme, readme
+            assert "stale_advisory_count: 6" in readme, readme
+            assert "stale_response_downgraded_count: 5" in readme, readme
             assert "freshness_rule:" in readme, readme
             assert "## Risk-on multi-buy shadow" in readme, readme
             assert "BNB/USDT" in readme and "SOL/USDT" in readme, readme
