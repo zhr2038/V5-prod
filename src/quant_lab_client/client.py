@@ -242,6 +242,7 @@ class QuantLabResponse:
     request_id: Optional[str] = None
     fallback_used: bool = False
     cached: bool = False
+    headers: Dict[str, str] = field(default_factory=dict)
 
     def summary(self) -> Dict[str, Any]:
         return {
@@ -436,6 +437,7 @@ class QuantLabClient:
                 data=cached_value,
                 latency_ms=0.0,
                 cached=True,
+                headers={"x-quant-lab-client-cache-hit": "true"},
             )
             self._log_request(
                 endpoint_path=endpoint,
@@ -478,6 +480,10 @@ class QuantLabClient:
                         status_code=status_code,
                         data=data,
                         latency_ms=latency_ms,
+                        headers={
+                            str(key).lower(): str(value)
+                            for key, value in dict(getattr(resp, "headers", {}) or {}).items()
+                        },
                     )
                     self._log_request(
                         endpoint_path=endpoint,
@@ -517,6 +523,7 @@ class QuantLabClient:
             data=data,
             error=error_type,
             latency_ms=latency_ms,
+            headers={},
         )
         if isinstance(last_error, QuantLabTimeout):
             raise QuantLabTimeout(str(last_error))

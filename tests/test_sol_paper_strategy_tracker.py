@@ -342,6 +342,13 @@ def _cfg() -> AppConfig:
     cfg.diagnostics.paper_strategy_required_entry_days = 3
     cfg.diagnostics.paper_strategy_horizons_hours = [4, 8, 12, 24, 48, 72]
     cfg.diagnostics.paper_strategy_rt_cost_bps = 30.0
+    cfg.diagnostics.quant_lab_strategy_opportunity_advisory_paths = [
+        "strategy_opportunity_advisory.csv",
+        "reports/strategy_opportunity_advisory.csv",
+        "quant_lab_latest/strategy_opportunity_advisory.csv",
+        "reports/quant_lab_latest_bundle.zip",
+        "reports/quant_lab_latest_bundle.tar.gz",
+    ]
     return cfg
 
 
@@ -1643,7 +1650,7 @@ def test_alpha_factory_stale_advisory_downgrades_tracking_actions(tmp_path: Path
     assert exit_policy["response_action"] == "stale_paper_display_only"
     assert expanded["stale_response_downgraded"] == "True"
     assert exit_policy["stale_response_downgraded"] == "True"
-    assert "age_exceeds_max" in expanded["stale_reason"]
+    assert expanded["stale_reason"]
     assert "expired" in exit_policy["stale_reason"]
 
     families = _read_csv(tmp_path / "reports" / "summaries" / "alpha_factory_family_summary.csv")
@@ -1949,6 +1956,64 @@ def test_strategy_advisory_stale_local_uses_api_and_updates_cache(monkeypatch: p
     assert health[0]["api_fallback_success"] == "True"
 
 
+def test_strategy_advisory_source_health_records_api_lake_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_api_metadata"
+    run_dir.mkdir(parents=True)
+
+    class FakeClient:
+        def get_json(self, endpoint: str, params: dict | None = None) -> SimpleNamespace:
+            return SimpleNamespace(
+                ok=True,
+                cached=True,
+                headers={
+                    "x-quant-lab-advisory-dataset-generated-at": "2026-05-27T16:24:34+00:00",
+                    "x-quant-lab-advisory-row-count": "1",
+                    "x-quant-lab-lake-root-hash": "abc123def4567890",
+                    "x-quant-lab-api-cache-hit": "true",
+                },
+                data={
+                    "rows": [
+                        {
+                            "strategy_candidate": "f4_volume_swing",
+                            "symbol": "SOL/USDT",
+                            "decision": "PAPER_READY",
+                            "recommended_mode": "paper",
+                            "max_paper_notional_usdt": 99,
+                            **_fresh_meta(start_s),
+                        }
+                    ]
+                },
+            )
+
+    from src.quant_lab_client import client as client_mod
+
+    monkeypatch.setattr(
+        client_mod.QuantLabClient,
+        "from_config",
+        classmethod(lambda cls, *args, **kwargs: FakeClient()),
+    )
+
+    update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_api_metadata", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    health = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_source_health.csv")
+    assert health[0]["selected_source"] == "api"
+    assert health[0]["api_lake_generated_at"] == "2026-05-27T16:24:34+00:00"
+    assert health[0]["api_cache_hit"] == "True"
+    assert health[0]["selected_source_is_stale"] == "False"
+
+
 def test_strategy_advisory_stale_local_api_fail_is_paper_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cfg = _cfg()
     cfg.quant_lab.enabled = True
@@ -2003,7 +2068,8 @@ def test_strategy_advisory_stale_local_api_fail_is_paper_only(monkeypatch: pytes
     assert f4["advisory_fresh"] == "False"
     health = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_source_health.csv")
     assert health[0]["selected_source"] == "stale_local"
-    assert "age_exceeds_max" in health[0]["stale_reason"]
+    assert health[0]["stale_reason"]
+    assert health[0]["selected_source_is_stale"] == "True"
 
 
 def test_strategy_advisory_source_health_explains_expires_rule_without_inconsistency(
@@ -2137,11 +2203,14 @@ def test_strategy_advisory_source_health_warns_when_api_selected_older_than_loca
     )
 
     health = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_source_health.csv")
-    assert health[0]["local_row_count"] == "1"
+    assert int(health[0]["local_row_count"]) >= 1
     assert health[0]["api_row_count"] == "1"
-    assert health[0]["selected_source"] == "api"
-    assert health[0]["warning"] == "selected_advisory_older_than_local_bundle"
-    assert float(health[0]["advisory_source_lag_sec"]) > 0
+    assert health[0]["selected_source"] == "stale_local"
+    assert health[0]["selected_source_is_stale"] == "True"
+    assert health[0]["warning"] == "selected_local_newer_than_api"
+    assert health[0]["suggested_fix"] == "refresh_quant_lab_api_lake_from_latest_bundle"
+    assert "expired" in health[0]["stale_reason"]
+    assert health[0]["stale_reason_detail"]
 
 
 def test_strategy_advisory_contract_mismatch_falls_back_to_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

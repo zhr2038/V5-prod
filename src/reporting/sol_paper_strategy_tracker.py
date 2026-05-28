@@ -272,15 +272,22 @@ STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = [
     "selected_row_count",
     "latest_local_generated_at",
     "latest_api_generated_at",
+    "local_latest_file_mtime",
+    "latest_quant_lab_bundle_seen",
+    "api_lake_generated_at",
+    "api_cache_hit",
     "selected_latest_generated_at",
     "advisory_age_sec",
     "advisory_max_age_sec",
     "advisory_expires_at",
     "advisory_source_lag_sec",
     "selected_source",
+    "selected_source_is_stale",
     "api_fallback_attempted",
     "api_fallback_success",
     "stale_reason",
+    "stale_reason_detail",
+    "suggested_fix",
     "warning",
     "freshness_inconsistency_warning",
 ]
@@ -410,6 +417,12 @@ RISK_ON_MULTI_BUY_SHADOW_FIELDS = [
 class AdvisoryReadResult:
     rows: list[dict[str, Any]]
     source_health_rows: list[dict[str, Any]]
+
+
+@dataclass
+class AdvisoryApiReadResult:
+    rows: list[dict[str, Any]]
+    meta: dict[str, Any]
 
 
 def _diagnostics_cfg(cfg: Any) -> DiagnosticsConfig:
@@ -946,12 +959,12 @@ def _read_strategy_opportunity_advisory_api(
     cfg: AppConfig,
     diagnostics: DiagnosticsConfig,
     run_id: str,
-) -> list[dict[str, Any]]:
+) -> AdvisoryApiReadResult:
     if not bool(getattr(diagnostics, "quant_lab_strategy_opportunity_advisory_api_enabled", True)):
-        return []
+        return AdvisoryApiReadResult(rows=[], meta={"api_fallback_attempted": False, "api_fallback_success": False})
     qcfg = getattr(cfg, "quant_lab", None)
     if qcfg is None or not bool(getattr(qcfg, "enabled", False)):
-        return []
+        return AdvisoryApiReadResult(rows=[], meta={"api_fallback_attempted": False, "api_fallback_success": False})
     endpoints = (
         getattr(diagnostics, "quant_lab_strategy_opportunity_advisory_api_paths", None)
         or _default_advisory_api_paths()
@@ -959,12 +972,18 @@ def _read_strategy_opportunity_advisory_api(
     try:
         from src.quant_lab_client.client import QuantLabClient
     except Exception:
-        return []
+        return AdvisoryApiReadResult(rows=[], meta={"api_fallback_attempted": True, "api_fallback_success": False})
     try:
         client = QuantLabClient.from_config(qcfg, run_id=run_id, phase="strategy_advisory_reader")
     except Exception:
-        return []
+        return AdvisoryApiReadResult(rows=[], meta={"api_fallback_attempted": True, "api_fallback_success": False})
     rows: list[dict[str, Any]] = []
+    meta: dict[str, Any] = {
+        "api_fallback_attempted": True,
+        "api_fallback_success": False,
+        "api_lake_generated_at": "",
+        "api_cache_hit": False,
+    }
     for endpoint in endpoints:
         try:
             response = client.get_json(str(endpoint), params={"format": "json"})
@@ -972,13 +991,31 @@ def _read_strategy_opportunity_advisory_api(
             continue
         if not bool(getattr(response, "ok", False)):
             continue
+        headers = getattr(response, "headers", {}) or {}
+        meta.update(
+            {
+                "api_fallback_success": True,
+                "api_lake_generated_at": _header_lookup(
+                    headers,
+                    "x-quant-lab-advisory-dataset-generated-at",
+                ),
+                "api_cache_hit": bool(getattr(response, "cached", False))
+                or _truthy(_header_lookup(headers, "x-quant-lab-api-cache-hit"))
+                or _truthy(_header_lookup(headers, "x-quant-lab-client-cache-hit")),
+                "advisory_row_count_header": _header_lookup(
+                    headers,
+                    "x-quant-lab-advisory-row-count",
+                ),
+                "lake_root_hash": _header_lookup(headers, "x-quant-lab-lake-root-hash"),
+            }
+        )
         for item in _extract_advisory_items(getattr(response, "data", None)):
             normalized = _normalize_advisory_row(item, source_path=f"api:{endpoint}")
             if normalized.get("strategy_id") or normalized.get("strategy_candidate") or normalized.get("experiment_name"):
                 rows.append(normalized)
         if rows:
             break
-    return rows
+    return AdvisoryApiReadResult(rows=rows, meta=meta)
 
 
 def _advisory_cache_write_path(
@@ -1011,6 +1048,62 @@ def _advisory_source_cache_path(rows: Iterable[Mapping[str, Any]]) -> Optional[P
             continue
         return Path(source_path)
     return None
+
+
+def _advisory_source_file_mtime_ms(row: Mapping[str, Any]) -> Optional[int]:
+    source_path = str(row.get("source_path") or "").strip()
+    if not source_path or source_path.startswith("api:"):
+        return None
+    path_text = source_path
+    for marker in (".tar.gz:", ".tgz:", ".tar:", ".zip:"):
+        if marker in path_text.lower():
+            idx = path_text.lower().find(marker)
+            path_text = path_text[: idx + len(marker) - 1]
+            break
+    return _path_mtime_ms(Path(path_text))
+
+
+def _advisory_dedupe_key(row: Mapping[str, Any]) -> tuple[str, str, str, str]:
+    identity = str(
+        row.get("strategy_id")
+        or row.get("strategy_candidate")
+        or row.get("experiment_name")
+        or ""
+    ).strip()
+    return (
+        identity,
+        str(row.get("strategy_candidate") or "").strip(),
+        str(row.get("symbol") or "").strip(),
+        str(row.get("horizon_hours") or "").strip(),
+    )
+
+
+def _preferred_advisory_row(new: Mapping[str, Any], current: Mapping[str, Any]) -> bool:
+    new_reference = _advisory_row_reference_ms(new) or -1
+    current_reference = _advisory_row_reference_ms(current) or -1
+    if new_reference != current_reference:
+        return new_reference > current_reference
+    new_mtime = _advisory_source_file_mtime_ms(new) or -1
+    current_mtime = _advisory_source_file_mtime_ms(current) or -1
+    if new_mtime != current_mtime:
+        return new_mtime > current_mtime
+    return len([value for value in new.values() if value not in (None, "")]) > len(
+        [value for value in current.values() if value not in (None, "")]
+    )
+
+
+def _dedupe_advisory_rows_by_identity(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    selected: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    passthrough: list[dict[str, Any]] = []
+    for row in rows:
+        key = _advisory_dedupe_key(row)
+        if not any(key):
+            passthrough.append(dict(row))
+            continue
+        current = selected.get(key)
+        if current is None or _preferred_advisory_row(row, current):
+            selected[key] = dict(row)
+    return passthrough + list(selected.values())
 
 
 def _write_advisory_cache_atomic(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -1048,6 +1141,112 @@ def _latest_advisory_generated_ms(rows: Iterable[Mapping[str, Any]]) -> Optional
 def _latest_advisory_generated_at(rows: Iterable[Mapping[str, Any]]) -> str:
     value = _latest_advisory_generated_ms(rows)
     return _iso_from_ms(value) if value is not None else ""
+
+
+def _path_mtime_ms(path: Path) -> Optional[int]:
+    try:
+        return int(path.stat().st_mtime * 1000.0)
+    except OSError:
+        return None
+
+
+def _latest_path_mtime_ms(paths: Iterable[Path]) -> Optional[int]:
+    values = [_path_mtime_ms(path) for path in paths]
+    values = [value for value in values if value is not None]
+    return max(values) if values else None
+
+
+def _is_quant_lab_bundle_path(path: Path) -> bool:
+    name = path.name.lower()
+    text = str(path).lower()
+    return (
+        "quant_lab" in text
+        and (
+            name.endswith((".zip", ".tar", ".tar.gz", ".tgz"))
+            or "bundle" in name
+            or "latest" in name
+        )
+    )
+
+
+def _latest_quant_lab_bundle_seen_ms(paths: Iterable[Path]) -> Optional[int]:
+    return _latest_path_mtime_ms(path for path in paths if _is_quant_lab_bundle_path(path))
+
+
+def _header_lookup(headers: Mapping[str, Any], name: str) -> str:
+    target = str(name or "").strip().lower()
+    for key, value in dict(headers or {}).items():
+        if str(key).strip().lower() == target:
+            return str(value or "").strip()
+    return ""
+
+
+def _stale_reason_detail(meta: Mapping[str, Any], *, now_ms: int) -> str:
+    reasons = [part for part in str(meta.get("stale_reason") or "").split(";") if part]
+    details: list[str] = []
+    age_sec = _normalize_float(meta.get("advisory_age_sec"))
+    max_age_sec = _normalize_float(meta.get("advisory_max_age_sec") or meta.get("max_age_sec"))
+    expires_at = str(meta.get("advisory_expires_at") or "").strip()
+    for reason in reasons:
+        if reason == "age_exceeds_max" and age_sec is not None and max_age_sec is not None:
+            details.append(f"age_sec={age_sec:.3f}>max_age_sec={max_age_sec:.3f}")
+        elif reason == "expired" and expires_at:
+            details.append(f"expires_at={expires_at}<=now={_iso_from_ms(now_ms)}")
+        elif reason == "contract_mismatch":
+            details.append("contract_version_mismatch")
+        else:
+            details.append(reason)
+    return ";".join(details)
+
+
+def _api_lake_generated_ms(api_meta: Mapping[str, Any], api_rows: Iterable[Mapping[str, Any]]) -> Optional[int]:
+    header_ms = _advisory_time_ms(api_meta.get("api_lake_generated_at"))
+    if header_ms is not None:
+        return header_ms
+    return _latest_advisory_generated_ms(api_rows)
+
+
+def _local_newer_than_api(
+    *,
+    local_meta: Mapping[str, Any],
+    local_rows: Iterable[Mapping[str, Any]],
+    api_meta: Mapping[str, Any],
+    api_rows: Iterable[Mapping[str, Any]],
+) -> bool:
+    api_ms = _api_lake_generated_ms(api_meta, api_rows)
+    if api_ms is None:
+        return False
+    local_candidates = [
+        _latest_advisory_generated_ms(local_rows),
+        _advisory_time_ms(local_meta.get("latest_quant_lab_bundle_seen")),
+    ]
+    local_candidates = [value for value in local_candidates if value is not None]
+    return bool(local_candidates and max(local_candidates) > api_ms)
+
+
+def _selected_source_suggested_fix(
+    *,
+    selected_meta: Mapping[str, Any],
+    local_meta: Mapping[str, Any],
+    api_meta: Mapping[str, Any] | None,
+    warning: str,
+) -> str:
+    stale_reason = str(selected_meta.get("stale_reason") or "").strip()
+    if "selected_api_older_than_local_bundle" in warning:
+        return "refresh_quant_lab_api_lake_or_use_latest_local_bundle"
+    if "selected_local_newer_than_api" in warning:
+        return "refresh_quant_lab_api_lake_from_latest_bundle"
+    if "expired" in stale_reason:
+        return "refresh_quant_lab_advisory_or_extend_expires_at"
+    if "age_exceeds_max" in stale_reason:
+        return "sync_latest_quant_lab_bundle_and_regenerate_advisory"
+    if "contract_mismatch" in stale_reason:
+        return "align_quant_lab_advisory_contract_version"
+    if not selected_meta.get("advisory_source") or selected_meta.get("advisory_source") == "missing":
+        return "sync_quant_lab_bundle_or_enable_api"
+    if not (api_meta or {}).get("api_fallback_success") and local_meta.get("stale_reason"):
+        return "check_quant_lab_api_connectivity_and_refresh_local_bundle"
+    return ""
 
 
 def _assess_advisory_rows(
@@ -1122,7 +1321,7 @@ def _assess_advisory_rows(
     advisory_source = source
     if source == "local" and not fresh:
         advisory_source = "stale_local"
-    return {
+    payload = {
         "advisory_source": advisory_source,
         "advisory_fresh": fresh,
         "advisory_age_sec": round(age_sec, 3) if age_sec is not None else None,
@@ -1135,6 +1334,8 @@ def _assess_advisory_rows(
         "stale_reason": ";".join(stale_reasons),
         "max_age_sec": float(max_age_minutes) * 60.0,
     }
+    payload["stale_reason_detail"] = _stale_reason_detail(payload, now_ms=now_ms)
+    return payload
 
 
 def _annotate_advisory_rows(rows: list[dict[str, Any]], meta: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -1166,6 +1367,25 @@ def _advisory_source_health_row(
     warning = ""
     if lag_sec is not None and lag_sec > 0:
         warning = "selected_advisory_older_than_local_bundle"
+    local_latest_file_mtime = str(local_meta.get("local_latest_file_mtime") or "")
+    latest_quant_lab_bundle_seen = str(local_meta.get("latest_quant_lab_bundle_seen") or "")
+    api_lake_generated_at = str((api_meta or {}).get("api_lake_generated_at") or "")
+    api_lake_ms = _advisory_time_ms(api_lake_generated_at)
+    local_compare_values = [
+        _advisory_time_ms(latest_quant_lab_bundle_seen),
+        local_latest_ms,
+    ]
+    local_compare_values = [value for value in local_compare_values if value is not None]
+    selected_source = str(selected_meta.get("advisory_source") or "missing")
+    if (
+        api_lake_ms is not None
+        and local_compare_values
+        and max(local_compare_values) > api_lake_ms
+    ):
+        if selected_source == "api":
+            warning = "selected_api_older_than_local_bundle"
+        elif selected_source in {"local", "stale_local"}:
+            warning = "selected_local_newer_than_api"
     max_age_sec = float(selected_meta.get("max_age_sec") or local_meta.get("max_age_sec") or 0.0)
     age_sec = _normalize_float(selected_meta.get("advisory_age_sec"))
     contract_match = _normalize_bool(selected_meta.get("advisory_contract_match"))
@@ -1177,9 +1397,16 @@ def _advisory_source_health_row(
         and max_age_sec > 0
         and age_sec < max_age_sec
         and contract_match is True
-        and not str(selected_meta.get("stale_reason") or "").strip()
+            and not str(selected_meta.get("stale_reason") or "").strip()
     ):
         freshness_inconsistency_warning = "freshness_inconsistency_warning"
+    selected_is_stale = not bool(_normalize_bool(selected_meta.get("advisory_fresh")))
+    suggested_fix = _selected_source_suggested_fix(
+        selected_meta=selected_meta,
+        local_meta=local_meta,
+        api_meta=api_meta,
+        warning=warning,
+    )
     return {
         "run_id": run_id,
         "ts_utc": _iso_from_ms(now_ms),
@@ -1188,12 +1415,17 @@ def _advisory_source_health_row(
         "selected_row_count": len(selected_rows),
         "latest_local_generated_at": _iso_from_ms(local_latest_ms) if local_latest_ms is not None else "",
         "latest_api_generated_at": _iso_from_ms(api_latest_ms) if api_latest_ms is not None else "",
+        "local_latest_file_mtime": local_latest_file_mtime,
+        "latest_quant_lab_bundle_seen": latest_quant_lab_bundle_seen,
+        "api_lake_generated_at": api_lake_generated_at,
+        "api_cache_hit": bool((api_meta or {}).get("api_cache_hit")),
         "selected_latest_generated_at": _iso_from_ms(selected_latest_ms) if selected_latest_ms is not None else "",
         "advisory_age_sec": selected_meta.get("advisory_age_sec") if selected_meta.get("advisory_age_sec") is not None else "",
         "advisory_max_age_sec": selected_meta.get("advisory_max_age_sec") or selected_meta.get("max_age_sec") or "",
         "advisory_expires_at": selected_meta.get("advisory_expires_at") or "",
         "advisory_source_lag_sec": round(lag_sec, 3) if lag_sec is not None else "",
-        "selected_source": selected_meta.get("advisory_source") or "missing",
+        "selected_source": selected_source,
+        "selected_source_is_stale": selected_is_stale,
         "api_fallback_attempted": bool(
             selected_meta.get("api_fallback_attempted")
             or (api_meta or {}).get("api_fallback_attempted")
@@ -1203,6 +1435,8 @@ def _advisory_source_health_row(
             or (api_meta or {}).get("api_fallback_success")
         ),
         "stale_reason": selected_meta.get("stale_reason") or "",
+        "stale_reason_detail": selected_meta.get("stale_reason_detail") or "",
+        "suggested_fix": suggested_fix,
         "warning": warning,
         "freshness_inconsistency_warning": freshness_inconsistency_warning,
     }
@@ -1225,6 +1459,7 @@ def _read_strategy_opportunity_advisory_result(
     )
     rows: list[dict[str, Any]] = []
     seen_paths: set[Path] = set()
+    local_source_paths: list[Path] = []
     for raw_path in configured:
         for path in _candidate_advisory_paths(str(raw_path), run_path=run_path, reports_dir=reports_dir):
             if path in seen_paths:
@@ -1232,31 +1467,22 @@ def _read_strategy_opportunity_advisory_result(
             seen_paths.add(path)
             if not path.is_file():
                 continue
+            local_source_paths.append(path)
             rows.extend(_read_advisory_path(path))
-    rows = _dedupe_rows(
-        rows,
-        [
-            "strategy_id",
-            "strategy_candidate",
-            "experiment_name",
-            "symbol",
-            "decision",
-            "recommended_mode",
-            "horizon_hours",
-            "sample_count",
-            "complete_sample_count",
-            "advisory_status",
-            "advisory_reason",
-            "max_paper_notional_usdt",
-            "max_live_notional_usdt",
-            "live_block_reasons",
-        ],
-    )
+    rows = _dedupe_advisory_rows_by_identity(rows)
     local_meta = _assess_advisory_rows(
         rows,
         diagnostics=diagnostics,
         now_ms=now_ms,
         source="local",
+    )
+    local_mtime_ms = _latest_path_mtime_ms(local_source_paths)
+    local_bundle_seen_ms = _latest_quant_lab_bundle_seen_ms(local_source_paths)
+    local_meta["local_latest_file_mtime"] = (
+        _iso_from_ms(local_mtime_ms) if local_mtime_ms is not None else ""
+    )
+    local_meta["latest_quant_lab_bundle_seen"] = (
+        _iso_from_ms(local_bundle_seen_ms) if local_bundle_seen_ms is not None else ""
     )
     if rows and bool(local_meta.get("advisory_fresh")):
         selected_rows = _annotate_advisory_rows(rows, local_meta)
@@ -1276,28 +1502,11 @@ def _read_strategy_opportunity_advisory_result(
             ],
         )
 
-    api_rows = _read_strategy_opportunity_advisory_api(cfg=cfg, diagnostics=diagnostics, run_id=run_id)
+    api_result = _read_strategy_opportunity_advisory_api(cfg=cfg, diagnostics=diagnostics, run_id=run_id)
+    api_rows = api_result.rows
     api_meta: dict[str, Any] | None = None
     if api_rows:
-        api_rows = _dedupe_rows(
-            api_rows,
-            [
-                "strategy_id",
-                "strategy_candidate",
-                "experiment_name",
-                "symbol",
-                "decision",
-                "recommended_mode",
-                "horizon_hours",
-                "sample_count",
-                "complete_sample_count",
-                "advisory_status",
-                "advisory_reason",
-                "max_paper_notional_usdt",
-                "max_live_notional_usdt",
-                "live_block_reasons",
-            ],
-        )
+        api_rows = _dedupe_advisory_rows_by_identity(api_rows)
         api_meta = _assess_advisory_rows(
             api_rows,
             diagnostics=diagnostics,
@@ -1306,6 +1515,40 @@ def _read_strategy_opportunity_advisory_result(
             api_fallback_attempted=True,
             api_fallback_success=True,
         )
+        api_meta.update(api_result.meta)
+        if not api_meta.get("api_lake_generated_at"):
+            latest_api_ms = _latest_advisory_generated_ms(api_rows)
+            api_meta["api_lake_generated_at"] = (
+                _iso_from_ms(latest_api_ms) if latest_api_ms is not None else ""
+            )
+        if rows and _local_newer_than_api(
+            local_meta=local_meta,
+            local_rows=rows,
+            api_meta=api_meta,
+            api_rows=api_rows,
+        ):
+            selected_meta = dict(local_meta)
+            selected_meta["api_fallback_attempted"] = True
+            selected_meta["api_fallback_success"] = True
+            if not bool(selected_meta.get("advisory_fresh")):
+                selected_meta["advisory_source"] = "stale_local"
+                selected_meta["stale_advisory_used"] = True
+            selected_rows = _annotate_advisory_rows(rows, selected_meta)
+            return AdvisoryReadResult(
+                rows=selected_rows,
+                source_health_rows=[
+                    _advisory_source_health_row(
+                        run_id=run_id,
+                        now_ms=now_ms,
+                        local_rows=rows,
+                        api_rows=api_rows,
+                        selected_rows=selected_rows,
+                        selected_meta=selected_meta,
+                        local_meta=local_meta,
+                        api_meta=api_meta,
+                    )
+                ],
+            )
         selected_rows = _annotate_advisory_rows(api_rows, api_meta)
         cache_path = _advisory_source_cache_path(rows) or _advisory_cache_write_path(
             configured,
