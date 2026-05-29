@@ -918,6 +918,90 @@ def fixture_order_lifecycle_fill_backfill_root(root):
     write_json(run_dir / "summary.json", {"run_id": run_id, "num_trades": 1, "budget": {"fills_count_today": 1}})
 
 
+def fixture_lifecycle_close_state_consistency_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    open_dt = now - dt.timedelta(hours=6)
+    close_dt = now - dt.timedelta(hours=1)
+    open_run_id = open_dt.strftime("%Y%m%d_%H")
+    close_run_id = close_dt.strftime("%Y%m%d_%H")
+    open_ts = int(open_dt.timestamp()) + 60
+    close_ts = int(close_dt.timestamp()) + 60
+
+    write_text(root / "configs/live_prod.yaml", "dust_usdt_ignore: 1\nmin_trade_value_usdt: 10\n")
+    for name in (
+        "kill_switch",
+        "ledger_status",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_json(
+        root / "reports/reconcile_status.json",
+        {
+            "ok": True,
+            "exchange_snapshot": {
+                "ccy_cashBal": {"BNB": "0.00001", "USDT": "10"},
+                "ccy_eqUsd": {"BNB": "0.006343", "USDT": "10"},
+            },
+            "local_snapshot": {"ccy_qty": {"BNB": "0.1", "USDT": "10"}},
+            "diffs": [
+                {
+                    "ccy": "BNB",
+                    "exchange": "0.00001",
+                    "local": "0.1",
+                    "delta": "-0.09999",
+                    "exchange_eq_usdt": "0.006343",
+                    "estimated_delta_usdt": "0.006343",
+                    "ignored_as_dust": True,
+                }
+            ],
+            "thresholds": {"dust_usdt_ignore": 1, "abs_base_tol": 1e-8},
+        },
+    )
+    write_json(root / "reports/ledger_state.json", {"balances": {"BNB": 0.1, "USDT": 10}})
+    write_json(
+        root / "reports/positions.json",
+        {
+            "open_position_count": 1,
+            "positions": [
+                {
+                    "symbol": "BNB/USDT",
+                    "qty": 0.1,
+                    "entry_px": 650,
+                    "current_px": 634.3,
+                    "current_value_usdt": 63.43,
+                    "entry_reason": "normal_entry",
+                }
+            ],
+        },
+    )
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    open_run = root / "reports/runs/prod" / open_run_id
+    write_json(open_run / "decision_audit.json", {"window_end_ts": int(open_dt.timestamp()), "router_decisions": []})
+    write_text(
+        open_run / "trades.csv",
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee,fee_ccy,fee_usdt,slippage_usdt,entry_reason\n"
+        f"{iso(open_ts)},{open_run_id},BNB/USDT,OPEN_LONG,buy,0.1,650,65,-0.01,USDT,0.01,0,normal_entry\n",
+    )
+    write_text(open_run / "equity.jsonl", "{}\n")
+    write_json(open_run / "summary.json", {"run_id": open_run_id, "num_trades": 1, "budget": {"fills_count_today": 1}})
+
+    close_run = root / "reports/runs/prod" / close_run_id
+    write_json(close_run / "decision_audit.json", {"window_end_ts": int(close_dt.timestamp()), "router_decisions": []})
+    write_text(
+        close_run / "trades.csv",
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee,fee_ccy,fee_usdt,slippage_usdt,order_id,trade_id\n",
+    )
+    write_text(
+        close_run / "order_lifecycle.csv",
+        "schema_version,lifecycle_id,run_id,ts_utc,symbol,normalized_symbol,side,intent,order_state,decision_ts,signal_price,arrival_bid,arrival_ask,arrival_mid,spread_bps_at_decision,submit_ts,order_type,order_px,cl_ord_id,exchange_order_id,first_fill_ts,last_fill_ts,fill_px,avg_fill_px,filled_qty,fee,fee_ccy,fee_usdt,notional_usdt,requested_notional_usdt,trade_ids,fill_count\n"
+        f"v5.order_lifecycle.v1,olc_bnb_close,{close_run_id},{iso(close_ts + 2)},BNB/USDT,BNB-USDT,sell,CLOSE_LONG,FILLED,{iso(close_ts - 30)},634.3,634.2,634.4,634.3,3.1,{iso(close_ts - 1)},market,null,clid-bnb-close,okx-bnb-close,{iso(close_ts)},{iso(close_ts)},634.3,634.3,0.1,-0.02,USDT,0.02,63.43,63.43,trade-bnb-close-1,1\n",
+    )
+    write_text(close_run / "equity.jsonl", "{}\n")
+    write_json(close_run / "summary.json", {"run_id": close_run_id, "num_trades": 0, "budget": {"fills_count_today": 0}})
+
+
 def fixture_config_runtime_consumption_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -3761,6 +3845,80 @@ def main():
             assert window["order_lifecycle_rows"] == 1, window
             assert window["order_lifecycle_trade_metric_fill_count"] == 1, window
             assert window["order_lifecycle_missing_high_issue"] is False, window
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-lifecycle-close-state-consistency-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_lifecycle_close_state_consistency_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                roundtrips = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/trades_roundtrips.csv")).read().decode().splitlines()))
+                open_positions = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/open_positions.csv")).read().decode().splitlines()))
+                positions = json.loads(tf.extractfile(extract_member(tf, "reports/positions.json")).read().decode())
+                consistency = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/trade_state_consistency.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+
+            bnb_roundtrip = next(row for row in roundtrips if row["symbol"] == "BNB/USDT")
+            assert bnb_roundtrip["roundtrip_status"] == "closed", roundtrips
+            assert bnb_roundtrip["exit_px"] == "634.3", bnb_roundtrip
+            assert bnb_roundtrip["exit_reason"] == "order_lifecycle_close_filled", bnb_roundtrip
+            assert bnb_roundtrip["fee_total_usdt"] == "0.03", bnb_roundtrip
+            assert bnb_roundtrip["gross_bps"] != "not_observable", bnb_roundtrip
+            assert bnb_roundtrip["net_bps"] != "not_observable", bnb_roundtrip
+            assert float(bnb_roundtrip["net_bps"]) < 0, bnb_roundtrip
+
+            assert open_positions == [], open_positions
+            assert positions["open_position_count"] == 0, positions
+            assert positions["effective_open_position_count"] == 0, positions
+            assert window["open_position_count"] == 0, window
+            assert window["effective_open_position_count"] == 0, window
+
+            missing_close = [
+                row for row in consistency
+                if row["code"] == "close_lifecycle_missing_trade_export"
+            ]
+            assert len(missing_close) == 1, consistency
+            assert missing_close[0]["severity"] == "warning", missing_close
+            assert missing_close[0]["synthetic_trade_event_created"] == "true", missing_close
+            assert missing_close[0]["raw_trade_export_present"] == "false", missing_close
+            assert not [row for row in consistency if row["code"] == "lifecycle_close_filled_but_position_open"], consistency
+            assert not [row for row in consistency if row["code"] == "reconcile_flat_but_open_positions_nonzero"], consistency
+
+            warning_issues = [
+                item for item in issues["issues"]
+                if item.get("severity") == "warning" and item.get("code") == "close_lifecycle_missing_trade_export"
+            ]
+            high_state_issues = [
+                item for item in issues["issues"]
+                if item.get("severity") == "high"
+                and item.get("code") in {
+                    "close_lifecycle_missing_trade_export",
+                    "lifecycle_close_filled_but_position_open",
+                    "reconcile_flat_but_open_positions_nonzero",
+                }
+            ]
+            assert len(warning_issues) == 1, issues
+            assert high_state_issues == [], issues
+            assert window["trade_state_consistency_rows"] == 1, window
+            assert window["close_lifecycle_missing_trade_export_count"] == 1, window
+            assert window["synthetic_close_trade_event_count"] == 1, window
+            assert window["lifecycle_close_filled_but_position_open_count"] == 0, window
+            assert window["reconcile_flat_but_open_positions_nonzero_count"] == 0, window
+            assert manifest["trade_state_consistency_rows"] == 1, manifest
+            assert manifest["close_lifecycle_missing_trade_export_count"] == 1, manifest
+            assert manifest["synthetic_close_trade_event_count"] == 1, manifest
+            assert manifest["lifecycle_close_filled_but_position_open_count"] == 0, manifest
+            assert manifest["reconcile_flat_but_open_positions_nonzero_count"] == 0, manifest
+            assert "## Trade state consistency" in readme, readme
+            assert "close_lifecycle_missing_trade_export_count: 1" in readme, readme
+            assert "synthetic_close_trade_event_count: 1" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

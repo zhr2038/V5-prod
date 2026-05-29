@@ -2100,6 +2100,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             return f"{text[:-4]}-USDT"
         return text
 
+    def base_ccy_for_symbol(value):
+        text = normalize_trade_symbol_for_contract(value)
+        if not text or text in {"null", not_obs}:
+            return ""
+        return text.split("-", 1)[0].upper()
+
     def csv_null(value):
         if value in (None, "", not_obs):
             return "null"
@@ -2306,6 +2312,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     trade_metrics_rows = []
     fill_metrics_rows = []
     order_lifecycle_rows = []
+    trade_state_consistency_rows = []
     summary_trade_count_mismatch_rows = []
     audit_high_score_but_not_executed_count = 0
     dust_residual_position_keys = set()
@@ -2335,6 +2342,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     negative_expectancy_state = state_map("negative_expectancy_cooldown.json")
     ledger_state = state_map("ledger_state.json")
     positions_state = state_map("positions.json")
+    reconcile_status = state_map("reconcile_status.json")
     state_maps = {
         "profit_taking_state_present": profit_state,
         "highest_px_state_present": highest_state,
@@ -3589,6 +3597,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                         item = {field: csv_null(row.get(field, "")) for field in ORDER_LIFECYCLE_FIELDS}
                         item["run_id"] = item.get("run_id") or run_id
                         item["schema_version"] = item.get("schema_version") or "v5.order_lifecycle.v1"
+                        item["_source_file"] = str(path.relative_to(OUT))
+                        item["_row_number"] = len(rows) + 1
                         rows.append(item)
             except Exception as exc:
                 collection_errors.append({"source": str(path), "error": f"order_lifecycle_csv: {exc!r}"})
@@ -3767,6 +3777,203 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "trade_metrics has counted trades but order_lifecycle.csv is empty.",
             {"trade_metric_fill_count": order_lifecycle_trade_metric_fill_count},
         )
+
+    def lifecycle_timestamp(row):
+        return first_observed(
+            row.get("last_fill_ts"),
+            row.get("first_fill_ts"),
+            row.get("ts_utc"),
+            row.get("submit_ts"),
+            row.get("decision_ts"),
+            not_obs,
+        )
+
+    def lifecycle_close_fill_px(row):
+        return as_float(first_observed(row.get("avg_fill_px"), row.get("fill_px"), row.get("order_px")))
+
+    def lifecycle_is_filled_close(row):
+        intent = flatten_value(row.get("intent")).strip().upper()
+        side = flatten_value(row.get("side")).strip().lower()
+        state = flatten_value(row.get("order_state")).strip().upper()
+        qty = as_float(row.get("filled_qty"))
+        px = lifecycle_close_fill_px(row)
+        ts = lifecycle_timestamp(row)
+        return (
+            intent == "CLOSE_LONG"
+            and side in {"sell", not_obs, "null", ""}
+            and state == "FILLED"
+            and qty is not None and qty > 0
+            and px is not None and px > 0
+            and flatten_value(ts) not in {"", "null", not_obs}
+        )
+
+    def raw_close_event_matches_lifecycle(event, lifecycle_row):
+        if event.get("intent") != "CLOSE_LONG":
+            return False
+        lifecycle_symbol = normalize_trade_symbol_for_contract(
+            first_observed(lifecycle_row.get("symbol"), lifecycle_row.get("normalized_symbol"))
+        )
+        event_symbol = normalize_trade_symbol_for_contract(event.get("symbol"))
+        if lifecycle_symbol != event_symbol:
+            return False
+        raw_item = event.get("raw_item", {}) if isinstance(event.get("raw_item"), dict) else {}
+        lifecycle_order_ids = {
+            lifecycle_identity(lifecycle_row.get("cl_ord_id")),
+            lifecycle_identity(lifecycle_row.get("exchange_order_id")),
+        }
+        lifecycle_order_ids = {value for value in lifecycle_order_ids if value}
+        event_order_ids = {
+            lifecycle_identity(raw_item.get("order_id")),
+            lifecycle_identity(raw_item.get("ord_id")),
+            lifecycle_identity(raw_item.get("cl_ord_id")),
+            lifecycle_identity(raw_item.get("exchange_order_id")),
+        }
+        event_order_ids = {value for value in event_order_ids if value}
+        if lifecycle_order_ids and event_order_ids and lifecycle_order_ids & event_order_ids:
+            return True
+        lifecycle_trade_ids = {
+            part.strip()
+            for part in lifecycle_identity(lifecycle_row.get("trade_ids")).replace(",", ";").split(";")
+            if part.strip()
+        }
+        event_trade_ids = {
+            lifecycle_identity(raw_item.get("trade_id")),
+            lifecycle_identity(raw_item.get("fill_id")),
+        }
+        event_trade_ids = {value for value in event_trade_ids if value}
+        if lifecycle_trade_ids and event_trade_ids and lifecycle_trade_ids & event_trade_ids:
+            return True
+        if lifecycle_identity(lifecycle_row.get("run_id")) != lifecycle_identity(event.get("run_id")):
+            return False
+        qty_match = numeric_close(lifecycle_row.get("filled_qty"), event.get("qty"), 1e-10)
+        px_match = numeric_close(lifecycle_close_fill_px(lifecycle_row), event.get("price"), 1e-6)
+        lifecycle_dt = parse_dt_utc(lifecycle_timestamp(lifecycle_row))
+        event_dt = event.get("ts_dt")
+        time_match = bool(
+            lifecycle_dt is not None
+            and event_dt is not None
+            and abs((event_dt - lifecycle_dt).total_seconds()) <= 300
+        )
+        return bool(qty_match and px_match and time_match)
+
+    def lifecycle_close_raw_trade_present(row):
+        return any(raw_close_event_matches_lifecycle(event, row) for event in raw_trade_events)
+
+    def synthetic_close_event_from_lifecycle(row, index):
+        timestamp = flatten_value(lifecycle_timestamp(row))
+        symbol = flatten_value(first_observed(row.get("symbol"), row.get("normalized_symbol"), not_obs))
+        if symbol not in ("", "null", not_obs):
+            symbol = normalize_trade_symbol_for_contract(symbol).replace("-", "/")
+        qty = as_float(row.get("filled_qty"))
+        price = lifecycle_close_fill_px(row)
+        if not symbol or symbol in {"null", not_obs} or qty is None or qty <= 0 or price is None or price <= 0:
+            return None
+        notional = as_float(row.get("notional_usdt"))
+        if notional is None:
+            notional = qty * price
+        source_file = flatten_value(row.get("_source_file") or "raw/reports/order_lifecycle.csv")
+        lifecycle_id = lifecycle_identity(row.get("lifecycle_id")) or f"close_lifecycle_{index + 1}"
+        raw_item = {
+            "ts": timestamp,
+            "run_id": lifecycle_identity(row.get("run_id")),
+            "symbol": symbol,
+            "intent": "CLOSE_LONG",
+            "side": "sell",
+            "qty": fmt_num(qty, 12),
+            "price": fmt_num(price, 10),
+            "notional_usdt": fmt_num(notional, 12),
+            "fee": row.get("fee", not_obs),
+            "fee_ccy": row.get("fee_ccy", not_obs),
+            "fee_usdt": row.get("fee_usdt", not_obs),
+            "order_id": first_observed(row.get("cl_ord_id"), row.get("exchange_order_id"), not_obs),
+            "trade_id": row.get("trade_ids", not_obs),
+            "exit_reason": "order_lifecycle_close_filled",
+            "synthetic_trade_event_from_order_lifecycle": "true",
+            "source_lifecycle_id": lifecycle_id,
+        }
+        event = {
+            "event_id": f"{source_file}:{lifecycle_id}:synthetic_close",
+            "run_id": lifecycle_identity(row.get("run_id")) or not_obs,
+            "source_file": f"{source_file}#synthetic_close",
+            "row_number": as_int(row.get("_row_number")) or index + 1,
+            "timestamp": timestamp,
+            "ts_dt": parse_dt_utc(timestamp) or parse_run_time(lifecycle_identity(row.get("run_id"))),
+            "symbol": symbol,
+            "intent": "CLOSE_LONG",
+            "side": "sell",
+            "qty": qty,
+            "price": price,
+            "notional_usdt": notional,
+            "fee_usdt": as_float(row.get("fee_usdt")),
+            "entry_reason": not_obs,
+            "exit_reason": "order_lifecycle_close_filled",
+            "probe_type": probe_type_from_reason("order_lifecycle_close_filled"),
+            "raw_item": raw_item,
+            "router_info": {},
+            "synthetic_trade_event_from_order_lifecycle": True,
+            "source_lifecycle_id": lifecycle_id,
+        }
+        event["remaining_qty"] = qty
+        event["remaining_fee_usdt"] = event["fee_usdt"]
+        event["matched_qty"] = 0.0
+        return event
+
+    filled_close_lifecycle_rows = [row for row in order_lifecycle_rows if lifecycle_is_filled_close(row)]
+    synthetic_close_trade_event_count = 0
+    for index, row in enumerate(filled_close_lifecycle_rows):
+        raw_present = lifecycle_close_raw_trade_present(row)
+        synthetic_event = None if raw_present else synthetic_close_event_from_lifecycle(row, index)
+        synthetic_created = False
+        if synthetic_event is not None:
+            raw_trade_events.append(synthetic_event)
+            synthetic_close_trade_event_count += 1
+            synthetic_created = True
+        if not raw_present:
+            severity = "warning" if synthetic_created else "high"
+            code = "close_lifecycle_missing_trade_export"
+            diagnosis = (
+                "filled_close_lifecycle_synthesized_close_trade_event"
+                if synthetic_created else
+                "high_issue_close_lifecycle_missing_trade_export_not_synthesizable"
+            )
+            add_issue(
+                severity,
+                code,
+                "A FILLED CLOSE_LONG order_lifecycle row had no matching trades.csv close row; bundle uses lifecycle fill as equivalent close event when possible.",
+                {
+                    "run_id": row.get("run_id", not_obs),
+                    "symbol": first_observed(row.get("symbol"), row.get("normalized_symbol"), not_obs),
+                    "filled_qty": row.get("filled_qty", not_obs),
+                    "avg_fill_px": first_observed(row.get("avg_fill_px"), row.get("fill_px"), not_obs),
+                    "order_state": row.get("order_state", not_obs),
+                    "source_file": row.get("_source_file", not_obs),
+                    "synthetic_trade_event_created": synthetic_created,
+                },
+            )
+            trade_state_consistency_rows.append({
+                "code": code,
+                "severity": severity,
+                "run_id": row.get("run_id", not_obs),
+                "symbol": first_observed(row.get("symbol"), row.get("normalized_symbol"), not_obs),
+                "entry_ts": not_obs,
+                "exit_ts": lifecycle_timestamp(row),
+                "filled_qty": row.get("filled_qty", not_obs),
+                "avg_fill_px": first_observed(row.get("avg_fill_px"), row.get("fill_px"), not_obs),
+                "order_state": row.get("order_state", not_obs),
+                "reconcile_flat_or_dust": not_obs,
+                "exchange_value_usdt": not_obs,
+                "dust_threshold_usdt": not_obs,
+                "raw_trade_export_present": "false",
+                "synthetic_trade_event_created": str(bool(synthetic_created)).lower(),
+                "open_position_present": not_obs,
+                "diagnosis": diagnosis,
+                "raw_json": safe_json(sanitize_obj(row)),
+            })
+    filled_close_lifecycle_by_symbol = defaultdict(list)
+    for row in filled_close_lifecycle_rows:
+        symbol = normalize_trade_symbol_for_contract(first_observed(row.get("symbol"), row.get("normalized_symbol")))
+        if symbol and symbol not in {"null", not_obs}:
+            filled_close_lifecycle_by_symbol[symbol.replace("-", "/")].append(row)
 
     raw_trade_events.sort(key=lambda event: (
         event["symbol"],
@@ -6140,11 +6347,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             {},
         )
 
-    raw_trade_file_rows = len(raw_trade_events)
+    raw_trade_file_rows = sum(
+        1 for event in raw_trade_events
+        if not event.get("synthetic_trade_event_from_order_lifecycle")
+    )
     raw_recent_runs_trade_rows = raw_trade_file_rows
     strict_window_trade_rows = sum(
         1 for event in raw_trade_events
-        if is_in_strict_trade_window(event.get("ts_dt"))
+        if not event.get("synthetic_trade_event_from_order_lifecycle")
+        and is_in_strict_trade_window(event.get("ts_dt"))
     )
     out_of_window_trade_rows = max(0, raw_recent_runs_trade_rows - strict_window_trade_rows)
     has_trade_data = bool(trade_paths) and trade_read_errors == 0
@@ -6157,7 +6368,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
 
     def symbol_asset(symbol):
         text = flatten_value(symbol)
-        return text.split("/", 1)[0] if "/" in text else text
+        if "/" in text:
+            return text.split("/", 1)[0].upper()
+        if "-" in text:
+            return text.split("-", 1)[0].upper()
+        return text.upper()
 
     def numeric_first(*values):
         for value in values:
@@ -6178,6 +6393,73 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             return value
         text = flatten_value(value).strip().lower()
         return text in {"true", "1", "yes", "y", "on"}
+
+    def reconcile_diff_for_asset(asset):
+        diffs = reconcile_status.get("diffs") if isinstance(reconcile_status, dict) else []
+        if not isinstance(diffs, list):
+            return {}
+        asset_text = flatten_value(asset).upper()
+        for item in diffs:
+            if isinstance(item, dict) and flatten_value(item.get("ccy")).upper() == asset_text:
+                return item
+        return {}
+
+    def reconcile_exchange_snapshot_for_symbol(symbol):
+        if not isinstance(reconcile_status, dict) or not reconcile_status:
+            return {
+                "snapshot_present": False,
+                "flat_or_dust": False,
+                "exchange_qty": None,
+                "exchange_value_usdt": None,
+                "local_qty": None,
+                "dust_threshold_usdt": dust_threshold_for_symbol(symbol),
+                "ignored_as_dust": False,
+            }
+        asset = base_ccy_for_symbol(symbol) or symbol_asset(symbol)
+        exchange_snapshot = reconcile_status.get("exchange_snapshot") if isinstance(reconcile_status.get("exchange_snapshot"), dict) else {}
+        local_snapshot = reconcile_status.get("local_snapshot") if isinstance(reconcile_status.get("local_snapshot"), dict) else {}
+        thresholds = reconcile_status.get("thresholds") if isinstance(reconcile_status.get("thresholds"), dict) else {}
+        cash_bal = exchange_snapshot.get("ccy_cashBal") if isinstance(exchange_snapshot.get("ccy_cashBal"), dict) else {}
+        eq_usd = exchange_snapshot.get("ccy_eqUsd") if isinstance(exchange_snapshot.get("ccy_eqUsd"), dict) else {}
+        local_qty_map = local_snapshot.get("ccy_qty") if isinstance(local_snapshot.get("ccy_qty"), dict) else {}
+        diff = reconcile_diff_for_asset(asset)
+        exchange_qty = numeric_first(cash_bal.get(asset), diff.get("exchange"))
+        local_qty = numeric_first(local_qty_map.get(asset), diff.get("local"))
+        exchange_value = numeric_first(eq_usd.get(asset), diff.get("exchange_eq_usdt"))
+        if exchange_value is None and exchange_qty is not None:
+            normalized_symbol = normalize_trade_symbol_for_contract(symbol).replace("-", "/")
+            context = latest_symbol_context.get(normalized_symbol, {})
+            px = numeric_first(context.get("current_px"), event_candidate_price_by_symbol.get(normalized_symbol))
+            if px is not None:
+                exchange_value = abs(exchange_qty * px)
+        dust_threshold = max(
+            value for value in (
+                dust_threshold_for_symbol(symbol),
+                numeric_first(thresholds.get("dust_usdt_ignore")),
+                global_dust_threshold_usdt,
+            )
+            if value is not None
+        )
+        ignored_as_dust = bool_value(diff.get("ignored_as_dust"))
+        snapshot_present = bool(asset in cash_bal or asset in eq_usd or diff)
+        flat_or_dust = False
+        if snapshot_present:
+            if ignored_as_dust:
+                flat_or_dust = True
+            elif exchange_value is not None:
+                flat_or_dust = abs(exchange_value) < dust_threshold
+            elif exchange_qty is not None:
+                abs_base_tol = numeric_first(thresholds.get("abs_base_tol"), 1e-8) or 1e-8
+                flat_or_dust = abs(exchange_qty) <= abs_base_tol
+        return {
+            "snapshot_present": snapshot_present,
+            "flat_or_dust": flat_or_dust,
+            "exchange_qty": exchange_qty,
+            "exchange_value_usdt": exchange_value,
+            "local_qty": local_qty,
+            "dust_threshold_usdt": dust_threshold,
+            "ignored_as_dust": ignored_as_dust,
+        }
 
     def position_entry_for_symbol(symbol):
         for source in (positions_state, ledger_state):
@@ -6257,9 +6539,60 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "raw_json": row.get("raw_json", "{}"),
         })
 
+    def lifecycle_close_ts(row):
+        return parse_dt_utc(lifecycle_timestamp(row))
+
+    def latest_filled_close_for_open_row(row):
+        symbol = normalize_trade_symbol_for_contract(row.get("symbol")).replace("-", "/")
+        candidates = filled_close_lifecycle_by_symbol.get(symbol, [])
+        if not candidates:
+            return None
+        entry_dt = parse_dt_utc(row.get("entry_ts"))
+        usable = []
+        for candidate in candidates:
+            close_dt = lifecycle_close_ts(candidate)
+            if close_dt is None:
+                continue
+            if entry_dt is not None and close_dt < entry_dt:
+                continue
+            usable.append((close_dt, candidate))
+        if not usable:
+            return None
+        usable.sort(key=lambda item: item[0])
+        return usable[-1][1]
+
+    def lifecycle_close_covers_open_row(row, lifecycle_row):
+        if lifecycle_row is None:
+            return False
+        close_qty = as_float(lifecycle_row.get("filled_qty"))
+        open_qty = as_float(row.get("qty"))
+        if close_qty is None or close_qty <= 0:
+            return False
+        if open_qty is None or open_qty <= 0:
+            return True
+        return close_qty + 1e-12 >= open_qty
+
     def open_position_row_from_trade(row):
         symbol = row.get("symbol", not_obs)
         if symbol in ("", not_obs):
+            return None
+        reconcile_snapshot = reconcile_exchange_snapshot_for_symbol(symbol)
+        if reconcile_snapshot.get("flat_or_dust"):
+            append_dust_position_from_roundtrip_row(
+                row,
+                reconcile_snapshot.get("exchange_value_usdt"),
+                reconcile_snapshot.get("dust_threshold_usdt"),
+                "reconcile_flat_or_dust_excluded_from_open_positions",
+            )
+            return None
+        latest_close = latest_filled_close_for_open_row(row)
+        if lifecycle_close_covers_open_row(row, latest_close):
+            append_dust_position_from_roundtrip_row(
+                row,
+                reconcile_snapshot.get("exchange_value_usdt"),
+                reconcile_snapshot.get("dust_threshold_usdt"),
+                "filled_close_lifecycle_excluded_from_open_positions",
+            )
             return None
         pos_entry = position_entry_for_symbol(symbol)
         profit_entry = state_entry(profit_state, symbol) or {}
@@ -6352,6 +6685,76 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             open_position = open_position_row_from_trade(row)
             if open_position:
                 open_position_rows.append(open_position)
+
+    for open_position in open_position_rows:
+        symbol = open_position.get("symbol", not_obs)
+        latest_close = latest_filled_close_for_open_row(open_position)
+        if lifecycle_close_covers_open_row(open_position, latest_close):
+            code = "lifecycle_close_filled_but_position_open"
+            add_issue(
+                "high",
+                code,
+                "A symbol remains in open_positions after a later FILLED CLOSE_LONG lifecycle row covers the open quantity.",
+                {
+                    "symbol": symbol,
+                    "entry_ts": open_position.get("entry_ts", not_obs),
+                    "close_ts": lifecycle_timestamp(latest_close) if latest_close else not_obs,
+                    "filled_qty": latest_close.get("filled_qty", not_obs) if latest_close else not_obs,
+                    "avg_fill_px": first_observed(latest_close.get("avg_fill_px"), latest_close.get("fill_px"), not_obs) if latest_close else not_obs,
+                },
+            )
+            trade_state_consistency_rows.append({
+                "code": code,
+                "severity": "high",
+                "run_id": latest_close.get("run_id", not_obs) if latest_close else not_obs,
+                "symbol": symbol,
+                "entry_ts": open_position.get("entry_ts", not_obs),
+                "exit_ts": lifecycle_timestamp(latest_close) if latest_close else not_obs,
+                "filled_qty": latest_close.get("filled_qty", not_obs) if latest_close else not_obs,
+                "avg_fill_px": first_observed(latest_close.get("avg_fill_px"), latest_close.get("fill_px"), not_obs) if latest_close else not_obs,
+                "order_state": latest_close.get("order_state", not_obs) if latest_close else not_obs,
+                "reconcile_flat_or_dust": not_obs,
+                "exchange_value_usdt": not_obs,
+                "dust_threshold_usdt": not_obs,
+                "raw_trade_export_present": not_obs,
+                "synthetic_trade_event_created": not_obs,
+                "open_position_present": "true",
+                "diagnosis": "high_issue_lifecycle_close_filled_but_position_open",
+                "raw_json": safe_json(sanitize_obj({"open_position": open_position, "lifecycle_close": latest_close or {}})),
+            })
+        reconcile_snapshot = reconcile_exchange_snapshot_for_symbol(symbol)
+        if reconcile_snapshot.get("flat_or_dust"):
+            code = "reconcile_flat_but_open_positions_nonzero"
+            add_issue(
+                "high",
+                code,
+                "Exchange reconcile snapshot is flat/dust for a symbol still reported in open_positions.",
+                {
+                    "symbol": symbol,
+                    "entry_ts": open_position.get("entry_ts", not_obs),
+                    "exchange_value_usdt": fmt_num(reconcile_snapshot.get("exchange_value_usdt"), 12),
+                    "dust_threshold_usdt": fmt_num(reconcile_snapshot.get("dust_threshold_usdt"), 12),
+                },
+            )
+            trade_state_consistency_rows.append({
+                "code": code,
+                "severity": "high",
+                "run_id": not_obs,
+                "symbol": symbol,
+                "entry_ts": open_position.get("entry_ts", not_obs),
+                "exit_ts": not_obs,
+                "filled_qty": not_obs,
+                "avg_fill_px": not_obs,
+                "order_state": not_obs,
+                "reconcile_flat_or_dust": "true",
+                "exchange_value_usdt": fmt_num(reconcile_snapshot.get("exchange_value_usdt"), 12),
+                "dust_threshold_usdt": fmt_num(reconcile_snapshot.get("dust_threshold_usdt"), 12),
+                "raw_trade_export_present": not_obs,
+                "synthetic_trade_event_created": not_obs,
+                "open_position_present": "true",
+                "diagnosis": "high_issue_reconcile_flat_but_open_positions_nonzero",
+                "raw_json": safe_json(sanitize_obj({"open_position": open_position, "reconcile": reconcile_snapshot})),
+            })
 
     closed_roundtrip_rows = [row for row in trade_rows if row.get("roundtrip_status") == "closed"]
     strict_window_roundtrip_rows = [
@@ -9158,6 +9561,29 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         ["run_id", "source_file", "row_number", "timestamp", "symbol", "side", "qty", "price", "entry_ts", "entry_px", "exit_ts", "exit_px", "entry_reason", "exit_reason", "probe_type", "roundtrip_status", "in_strict_window", "window_start_utc", "window_end_utc", "gross_pnl_usdt", "fee_total_usdt", "net_pnl_usdt", "gross_bps", "net_bps", "hold_minutes", "hold_hours", "min_hold_hours", "exit_allowed_before_min_hold", "exit_blocked_by_min_hold", "exit_priority", "min_hold_block_reason", "early_exit_opportunity_cost_bps", "would_have_held_24h_status", "would_have_held_24h_net_bps", "remaining_value_usdt", "dust_threshold_usdt", "raw_json"],
     )
     write_csv(
+        "summaries/trade_state_consistency.csv",
+        trade_state_consistency_rows,
+        [
+            "code",
+            "severity",
+            "run_id",
+            "symbol",
+            "entry_ts",
+            "exit_ts",
+            "filled_qty",
+            "avg_fill_px",
+            "order_state",
+            "reconcile_flat_or_dust",
+            "exchange_value_usdt",
+            "dust_threshold_usdt",
+            "raw_trade_export_present",
+            "synthetic_trade_event_created",
+            "open_position_present",
+            "diagnosis",
+            "raw_json",
+        ],
+    )
+    write_csv(
         "summaries/early_exit_cases.csv",
         early_exit_rows,
         ["ts_utc", "run_id", "symbol", "event_type", "exit_reason", "exit_priority", "hold_hours", "min_hold_hours", "exit_allowed_before_min_hold", "exit_blocked_by_min_hold", "min_hold_block_reason", "actual_net_bps", "would_have_held_24h_status", "would_have_held_24h_net_bps", "early_exit_opportunity_cost_bps", "diagnosis", "raw_json"],
@@ -11434,6 +11860,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "order_lifecycle_rows": len(order_lifecycle_rows),
         "order_lifecycle_trade_metric_fill_count": order_lifecycle_trade_metric_fill_count,
         "order_lifecycle_missing_high_issue": order_lifecycle_missing_high_issue,
+        "trade_state_consistency_rows": len(trade_state_consistency_rows),
+        "close_lifecycle_missing_trade_export_count": sum(
+            1 for row in trade_state_consistency_rows
+            if row.get("code") == "close_lifecycle_missing_trade_export"
+        ),
+        "synthetic_close_trade_event_count": synthetic_close_trade_event_count,
+        "lifecycle_close_filled_but_position_open_count": sum(
+            1 for row in trade_state_consistency_rows
+            if row.get("code") == "lifecycle_close_filled_but_position_open"
+        ),
+        "reconcile_flat_but_open_positions_nonzero_count": sum(
+            1 for row in trade_state_consistency_rows
+            if row.get("code") == "reconcile_flat_but_open_positions_nonzero"
+        ),
         "data_quality_warnings": data_quality_warnings,
         "negative_expectancy_consistency_rows": len(negative_consistency_rows),
         "negative_expectancy_mismatch_count": negative_expectancy_mismatch_count,
@@ -12343,6 +12783,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- 当前 stop 是否足够保护浮盈: {open_stop_protection_text}",
         f"- dust residual ignored: positions={dust_residual_position_count}, roundtrips={dust_residual_roundtrip_count}",
         "",
+        "## Trade state consistency",
+        f"- close_lifecycle_missing_trade_export_count: {window_summary.get('close_lifecycle_missing_trade_export_count', 0)}",
+        f"- synthetic_close_trade_event_count: {window_summary.get('synthetic_close_trade_event_count', 0)}",
+        f"- lifecycle_close_filled_but_position_open_count: {window_summary.get('lifecycle_close_filled_but_position_open_count', 0)}",
+        f"- reconcile_flat_but_open_positions_nonzero_count: {window_summary.get('reconcile_flat_but_open_positions_nonzero_count', 0)}",
+        "- rule: FILLED CLOSE_LONG order_lifecycle rows can synthesize equivalent close events for roundtrip diagnostics.",
+        "- output: summaries/trade_state_consistency.csv",
+        "",
         "## Active probe watch",
         f"- 当前是否有 active probe: {active_probe_text}",
         f"- 当前浮盈/浮亏 net bps: {active_probe_net_text}",
@@ -12606,6 +13054,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "order_lifecycle_rows": len(order_lifecycle_rows),
         "order_lifecycle_trade_metric_fill_count": order_lifecycle_trade_metric_fill_count,
         "order_lifecycle_missing_high_issue": order_lifecycle_missing_high_issue,
+        "trade_state_consistency_rows": len(trade_state_consistency_rows),
+        "close_lifecycle_missing_trade_export_count": sum(
+            1 for row in trade_state_consistency_rows
+            if row.get("code") == "close_lifecycle_missing_trade_export"
+        ),
+        "synthetic_close_trade_event_count": synthetic_close_trade_event_count,
+        "lifecycle_close_filled_but_position_open_count": sum(
+            1 for row in trade_state_consistency_rows
+            if row.get("code") == "lifecycle_close_filled_but_position_open"
+        ),
+        "reconcile_flat_but_open_positions_nonzero_count": sum(
+            1 for row in trade_state_consistency_rows
+            if row.get("code") == "reconcile_flat_but_open_positions_nonzero"
+        ),
         "positions_json_generated": True,
         "positions_json_path": "reports/positions.json",
         "positions_json_fallback_source": positions_json_summary.get("fallback_source", not_obs),
@@ -12988,6 +13450,17 @@ manifest = {
         summary_meta.get("order_lifecycle_trade_metric_fill_count", 0) or 0
     ),
     "order_lifecycle_missing_high_issue": bool(summary_meta.get("order_lifecycle_missing_high_issue", False)),
+    "trade_state_consistency_rows": int(summary_meta.get("trade_state_consistency_rows", 0) or 0),
+    "close_lifecycle_missing_trade_export_count": int(
+        summary_meta.get("close_lifecycle_missing_trade_export_count", 0) or 0
+    ),
+    "synthetic_close_trade_event_count": int(summary_meta.get("synthetic_close_trade_event_count", 0) or 0),
+    "lifecycle_close_filled_but_position_open_count": int(
+        summary_meta.get("lifecycle_close_filled_but_position_open_count", 0) or 0
+    ),
+    "reconcile_flat_but_open_positions_nonzero_count": int(
+        summary_meta.get("reconcile_flat_but_open_positions_nonzero_count", 0) or 0
+    ),
     "positions_json_generated": bool(summary_meta.get("positions_json_generated", False)),
     "positions_json_path": summary_meta.get("positions_json_path", "not_observable"),
     "positions_json_fallback_source": summary_meta.get("positions_json_fallback_source", "not_observable"),
