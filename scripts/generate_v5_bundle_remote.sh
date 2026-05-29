@@ -224,14 +224,18 @@ ENTRY_QUALITY_REPORT_FILES = [
     ("entry_quality_summary.md", "raw/reports/entry_quality/entry_quality_summary.md", "text"),
 ]
 ENTRY_QUALITY_SOURCE_DIRS = [
+    "raw/reports",
     "reports",
     "reports/entry_quality",
     "reports/quant_lab",
     "reports/quant_lab_latest",
+    "reports/quant_lab/latest/raw/reports",
     "reports/quant_lab/latest/reports",
+    "/var/lib/v5-prod/raw/reports",
     "/var/lib/v5-prod",
     "/var/lib/v5-prod/entry_quality",
     "/var/lib/v5-prod/quant_lab",
+    "/var/lib/v5-prod/quant_lab/latest/raw/reports",
     "/var/lib/v5-prod/quant_lab/latest/reports",
 ]
 ENTRY_QUALITY_SOURCE_ARCHIVES = [
@@ -254,9 +258,13 @@ ENTRY_QUALITY_REPORT_API_ENDPOINT_TEMPLATES = [
     "/v1/entry-quality/{filename}",
     "/v1/entry_quality/{filename}",
     "/v1/reports/{filename}",
+    "/v1/reports/raw/reports/{filename}",
+    "/v1/raw/reports/{filename}",
     "/v1/reports/download?path=reports/{filename}",
+    "/v1/reports/download?path=raw/reports/{filename}",
     "/v1/reports/download?path=entry_quality/{filename}",
     "/v1/report?path=reports/{filename}",
+    "/v1/report?path=raw/reports/{filename}",
     "/v1/report?path=entry_quality/{filename}",
 ]
 ENTRY_QUALITY_STRATEGY_CANDIDATES = {
@@ -988,6 +996,7 @@ def copy_current_reports():
         ("reports/quant_lab/strategy_opportunity_advisory.csv", "raw/reports/quant_lab/strategy_opportunity_advisory.csv"),
         ("reports/quant_lab_latest/strategy_opportunity_advisory.csv", "raw/reports/quant_lab_latest/strategy_opportunity_advisory.csv"),
         ("reports/quant_lab/latest/reports/strategy_opportunity_advisory.csv", "raw/reports/quant_lab/latest/reports/strategy_opportunity_advisory.csv"),
+        ("raw/reports/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
         ("reports/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
         ("reports/quant_lab/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
         ("reports/quant_lab_latest/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
@@ -11193,6 +11202,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             ROOT / "reports" / "quant_lab_latest" / "risk_on_multi_buy_shadow.csv",
             ROOT / "reports" / "quant_lab" / "latest" / "reports" / "risk_on_multi_buy_shadow.csv",
             ROOT / "reports" / "quant_lab" / "latest" / "raw" / "reports" / "risk_on_multi_buy_shadow.csv",
+            Path("/var/lib/v5-prod/raw/reports/risk_on_multi_buy_shadow.csv"),
+            Path("/var/lib/v5-prod/reports/risk_on_multi_buy_shadow.csv"),
+            Path("/var/lib/v5-prod/quant_lab/latest/raw/reports/risk_on_multi_buy_shadow.csv"),
+            Path("/var/lib/v5-prod/quant_lab/latest/reports/risk_on_multi_buy_shadow.csv"),
         ]
         rows = []
         seen_paths = set()
@@ -11243,6 +11256,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             candidates = [row for row in detail_rows if risk_on_multi_buy_strategy_key(row) == strategy_key]
         else:
             candidates = []
+        if candidates and top_k is not None:
+            same_top_k = [
+                row for row in candidates
+                if risk_on_top_k(row, risk_on_multi_buy_strategy_key(row)) == top_k
+            ]
+            if same_top_k:
+                candidates = same_top_k
         if not candidates and top_k is not None:
             candidates = [
                 row for row in detail_rows

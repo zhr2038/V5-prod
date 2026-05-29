@@ -3489,6 +3489,18 @@ def fixture_entry_quality_advisory_root(root):
 
 def fixture_risk_on_detail_only_root(root):
     run_id = fixture_root(root)
+    raw_detail_path = root / "raw/reports/risk_on_multi_buy_shadow.csv"
+    write_text(
+        raw_detail_path,
+        "\n".join(
+            [
+                "run_id,decision_ts,top_k,current_regime,selected_symbols,would_buy_symbols",
+                'r_raw_old,2026-05-25T00:00:00Z,1,ALT_IMPULSE,"[""ETH-USDT""]",ETH-USDT',
+                'r_raw_latest,2026-05-26T00:00:00Z,1,ALT_IMPULSE,"[""BNB-USDT""]",BNB-USDT',
+            ]
+        )
+        + "\n",
+    )
     detail_path = root / "reports/quant_lab/latest/raw/reports/risk_on_multi_buy_shadow.csv"
     write_text(
         detail_path,
@@ -5698,7 +5710,13 @@ def main():
             "entry_quality_summary.md",
         ):
             members[f"reports/{filename}"] = (source_dir / filename).read_text(encoding="utf-8")
-        members["reports/risk_on_multi_buy_shadow.csv"] = (
+        members["reports/risk_on_multi_buy_shadow.csv"] = "\n".join(
+            [
+                "run_id,decision_ts,top_k,current_regime,selected,would_buy_symbol",
+                'r_archive_old,2026-05-24T00:00:00Z,1,ALT_IMPULSE,"selected=[""ETH-USDT""]",ETH-USDT',
+            ]
+        ) + "\n"
+        members["raw/reports/risk_on_multi_buy_shadow.csv"] = (
             source_dir / "risk_on_multi_buy_shadow.csv"
         ).read_text(encoding="utf-8")
         shutil.rmtree(root / "reports/quant_lab/latest")
