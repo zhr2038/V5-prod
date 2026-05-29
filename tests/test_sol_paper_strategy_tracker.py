@@ -2110,6 +2110,9 @@ def test_strategy_advisory_source_health_explains_expires_rule_without_inconsist
     assert row["advisory_age_sec"] == "1200.0"
     assert row["advisory_max_age_sec"] == "5400.0"
     assert row["advisory_expires_at"]
+    assert row["expires_before_generated_at"] == "False"
+    assert row["expiry_corrected"] == "False"
+    assert row["freshness_basis"] == "row_expires_at"
     assert row["stale_reason"] == "expired"
     assert row["freshness_inconsistency_warning"] == ""
     advisory = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_reader.csv")
@@ -2138,10 +2141,41 @@ def test_strategy_advisory_invalid_expires_before_generated_is_not_marked_expire
         source="local",
     )
 
-    assert meta["advisory_fresh"] is False
+    assert meta["advisory_fresh"] is True
+    assert meta["expires_before_generated_at"] is True
+    assert meta["expiry_corrected"] is True
+    assert meta["freshness_basis"] == "generated_at_plus_advisory_max_age"
     assert "expired" not in str(meta["stale_reason"])
-    assert "invalid_expires_at_before_reference" in str(meta["stale_reason"])
-    assert meta["advisory_expires_at"] == ""
+    assert "age_exceeds_max" not in str(meta["stale_reason"])
+    assert meta["stale_reason"] == ""
+    assert meta["advisory_expires_at"] == "2026-05-17T08:10:00Z"
+
+
+def test_strategy_advisory_age_within_max_does_not_report_age_exceeds_max() -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+
+    meta = _assess_advisory_rows(
+        [
+            {
+                "strategy_candidate": "v5.entry_quality_missed_low_audit",
+                "generated_at": str(start_s),
+                "as_of_ts": str(start_s),
+                "expires_at": str(start_s - 60),
+                "contract_version": CONTRACT_VERSION,
+            }
+        ],
+        diagnostics=cfg.diagnostics,
+        now_ms=(start_s + 5_073) * 1000,
+        source="api",
+    )
+
+    assert meta["advisory_age_sec"] == 5073.0
+    assert meta["advisory_max_age_sec"] == 5400.0
+    assert "age_exceeds_max" not in str(meta["stale_reason"])
+    assert "expired" not in str(meta["stale_reason"])
+    assert meta["expires_before_generated_at"] is True
+    assert meta["expiry_corrected"] is True
 
 
 def test_strategy_advisory_source_health_warns_when_api_selected_older_than_local(

@@ -280,6 +280,9 @@ STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = [
     "advisory_age_sec",
     "advisory_max_age_sec",
     "advisory_expires_at",
+    "expires_before_generated_at",
+    "expiry_corrected",
+    "freshness_basis",
     "advisory_source_lag_sec",
     "selected_source",
     "selected_source_is_stale",
@@ -1270,14 +1273,20 @@ def _assess_advisory_rows(
     references = [value for value in references if value is not None]
     reference_ms = max(references) if references else None
     expires_values = []
-    invalid_expires_before_reference = False
+    expires_before_generated_at = False
+    expiry_corrected = False
+    max_age_ms = int(max_age_minutes * 60.0 * 1000.0)
     for row in rows:
         expires_ms = _advisory_time_ms(row.get("expires_at"))
-        if expires_ms is None:
-            continue
         row_reference_ms = _advisory_row_reference_ms(row)
-        if row_reference_ms is not None and expires_ms < row_reference_ms:
-            invalid_expires_before_reference = True
+        if expires_ms is not None and row_reference_ms is not None and expires_ms < row_reference_ms:
+            expires_before_generated_at = True
+            expires_ms = row_reference_ms + max_age_ms
+            expiry_corrected = True
+        if expires_ms is None and row_reference_ms is not None:
+            expires_ms = row_reference_ms + max_age_ms
+            expiry_corrected = True
+        if expires_ms is None:
             continue
         expires_values.append(expires_ms)
     min_expires_ms = min(expires_values) if expires_values else None
@@ -1303,7 +1312,6 @@ def _assess_advisory_rows(
         and age_ok
         and expires_ok
         and contract_match
-        and not invalid_expires_before_reference
     )
     stale_reasons: list[str] = []
     if not rows:
@@ -1314,10 +1322,16 @@ def _assess_advisory_rows(
         stale_reasons.append("age_exceeds_max")
     if rows and not expires_ok:
         stale_reasons.append("expired")
-    if rows and invalid_expires_before_reference:
-        stale_reasons.append("invalid_expires_at_before_reference")
     if rows and not contract_match:
         stale_reasons.append("contract_mismatch")
+    if expiry_corrected:
+        freshness_basis = "generated_at_plus_advisory_max_age"
+    elif min_expires_ms is not None:
+        freshness_basis = "row_expires_at"
+    elif reference_ms is not None:
+        freshness_basis = "age_only"
+    else:
+        freshness_basis = "missing_time_context"
     advisory_source = source
     if source == "local" and not fresh:
         advisory_source = "stale_local"
@@ -1327,6 +1341,9 @@ def _assess_advisory_rows(
         "advisory_age_sec": round(age_sec, 3) if age_sec is not None else None,
         "advisory_max_age_sec": float(max_age_minutes) * 60.0,
         "advisory_expires_at": _iso_from_ms(min_expires_ms) if min_expires_ms is not None else "",
+        "expires_before_generated_at": expires_before_generated_at,
+        "expiry_corrected": expiry_corrected,
+        "freshness_basis": freshness_basis,
         "advisory_contract_match": contract_match,
         "stale_advisory_used": advisory_source == "stale_local",
         "api_fallback_attempted": bool(api_fallback_attempted),
@@ -1423,6 +1440,9 @@ def _advisory_source_health_row(
         "advisory_age_sec": selected_meta.get("advisory_age_sec") if selected_meta.get("advisory_age_sec") is not None else "",
         "advisory_max_age_sec": selected_meta.get("advisory_max_age_sec") or selected_meta.get("max_age_sec") or "",
         "advisory_expires_at": selected_meta.get("advisory_expires_at") or "",
+        "expires_before_generated_at": bool(selected_meta.get("expires_before_generated_at")),
+        "expiry_corrected": bool(selected_meta.get("expiry_corrected")),
+        "freshness_basis": selected_meta.get("freshness_basis") or "",
         "advisory_source_lag_sec": round(lag_sec, 3) if lag_sec is not None else "",
         "selected_source": selected_source,
         "selected_source_is_stale": selected_is_stale,

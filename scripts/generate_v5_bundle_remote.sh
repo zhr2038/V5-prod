@@ -199,6 +199,9 @@ STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = (
     "advisory_age_sec",
     "advisory_max_age_sec",
     "advisory_expires_at",
+    "expires_before_generated_at",
+    "expiry_corrected",
+    "freshness_basis",
     "advisory_source_lag_sec",
     "selected_source",
     "api_fallback_attempted",
@@ -9901,11 +9904,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
 
     def assess_strategy_advisory_row(row):
         max_age_minutes = config_number("quant_lab_strategy_opportunity_advisory_max_age_minutes") or 90.0
+        max_age_sec = max_age_minutes * 60.0
         require_contract = config_bool("quant_lab_strategy_opportunity_advisory_require_contract_version", True)
         reference_dt = advisory_reference_dt(row)
         expires_dt = parse_dt_utc(row.get("expires_at"))
+        expires_before_generated_at = bool(reference_dt is not None and expires_dt is not None and expires_dt < reference_dt)
+        expiry_corrected = False
+        if expires_before_generated_at and reference_dt is not None:
+            expires_dt = reference_dt + dt.timedelta(seconds=max_age_sec)
+            expiry_corrected = True
+        elif expires_dt is None and reference_dt is not None:
+            expires_dt = reference_dt + dt.timedelta(seconds=max_age_sec)
+            expiry_corrected = True
         age_sec = (NOW - reference_dt).total_seconds() if reference_dt else None
-        age_ok = bool(age_sec is not None and age_sec <= max_age_minutes * 60.0)
+        age_ok = bool(age_sec is not None and age_sec <= max_age_sec)
         expires_ok = expires_dt is None or NOW <= expires_dt
         contract = flatten_value(row.get("contract_version")).strip()
         contract_match = (not require_contract) or (contract == QUANT_LAB_CONTRACT_VERSION)
@@ -9919,11 +9931,28 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             reasons.append("expired")
         if not contract_match:
             reasons.append("contract_mismatch")
-        return fresh, age_sec, contract_match, ";".join(reasons)
+        if expiry_corrected:
+            freshness_basis = "generated_at_plus_advisory_max_age"
+        elif expires_dt is not None:
+            freshness_basis = "row_expires_at"
+        elif reference_dt is not None:
+            freshness_basis = "age_only"
+        else:
+            freshness_basis = "missing_time_context"
+        return {
+            "fresh": fresh,
+            "age_sec": age_sec,
+            "contract_match": contract_match,
+            "stale_reason": ";".join(reasons),
+            "expires_at": expires_dt,
+            "expires_before_generated_at": expires_before_generated_at,
+            "expiry_corrected": expiry_corrected,
+            "freshness_basis": freshness_basis,
+        }
 
     def assess_api_advisory_row(row):
-        fresh, age_sec, contract_match, _reason = assess_strategy_advisory_row(row)
-        return fresh, age_sec, contract_match
+        assessed = assess_strategy_advisory_row(row)
+        return assessed["fresh"], assessed["age_sec"], assessed["contract_match"]
 
     def latest_strategy_advisory_dt(rows):
         values = [advisory_reference_dt(row) for row in rows]
@@ -9956,14 +9985,23 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
 
     def normalize_local_strategy_advisory_row(row, path):
         payload = dict(row)
-        fresh, age_sec, contract_match, stale_reason = assess_strategy_advisory_row(payload)
+        assessed = assess_strategy_advisory_row(payload)
+        fresh = bool(assessed["fresh"])
+        age_sec = assessed["age_sec"]
+        contract_match = bool(assessed["contract_match"])
+        stale_reason = flatten_value(assessed["stale_reason"])
+        corrected_expires_dt = assessed.get("expires_at")
         payload.setdefault("source_path", path.as_posix())
         payload.setdefault("advisory_source", "local")
-        payload.setdefault("advisory_fresh", str(bool(fresh)).lower())
-        payload.setdefault("advisory_age_sec", fmt_num(age_sec, 3) if age_sec is not None else not_obs)
-        payload.setdefault("advisory_contract_match", str(bool(contract_match)).lower())
-        payload.setdefault("stale_advisory_used", str(not bool(fresh)).lower())
-        payload.setdefault("stale_reason", stale_reason)
+        payload["advisory_fresh"] = str(fresh).lower()
+        payload["advisory_age_sec"] = fmt_num(age_sec, 3) if age_sec is not None else not_obs
+        payload["advisory_contract_match"] = str(contract_match).lower()
+        payload["advisory_expires_at"] = corrected_expires_dt.strftime("%Y-%m-%dT%H:%M:%SZ") if corrected_expires_dt else ""
+        payload["expires_before_generated_at"] = str(bool(assessed["expires_before_generated_at"])).lower()
+        payload["expiry_corrected"] = str(bool(assessed["expiry_corrected"])).lower()
+        payload["freshness_basis"] = flatten_value(assessed["freshness_basis"])
+        payload["stale_advisory_used"] = str(not fresh).lower()
+        payload["stale_reason"] = stale_reason
         payload.setdefault("api_fallback_attempted", "false")
         payload.setdefault("api_fallback_success", "false")
         if not payload.get("max_live_notional_usdt") or not fresh:
@@ -9976,14 +10014,23 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if api_meta.get("advisory_dataset_generated_at"):
             payload_for_freshness.setdefault("advisory_dataset_generated_at", api_meta.get("advisory_dataset_generated_at"))
             payload_for_freshness.setdefault("api_lake_generated_at", api_meta.get("advisory_dataset_generated_at"))
-        fresh, age_sec, contract_match, stale_reason = assess_strategy_advisory_row(payload_for_freshness)
+        assessed = assess_strategy_advisory_row(payload_for_freshness)
+        fresh = bool(assessed["fresh"])
+        age_sec = assessed["age_sec"]
+        contract_match = bool(assessed["contract_match"])
+        stale_reason = flatten_value(assessed["stale_reason"])
+        corrected_expires_dt = assessed.get("expires_at")
         return {
             "source_path": f"api:{endpoint}",
             "advisory_source": "api",
-            "advisory_fresh": str(bool(fresh)),
+            "advisory_fresh": str(fresh).lower(),
             "advisory_age_sec": fmt_num(age_sec, 3) if age_sec is not None else not_obs,
-            "advisory_contract_match": str(bool(contract_match)),
-            "stale_advisory_used": str(not bool(fresh)).lower(),
+            "advisory_contract_match": str(contract_match).lower(),
+            "advisory_expires_at": corrected_expires_dt.strftime("%Y-%m-%dT%H:%M:%SZ") if corrected_expires_dt else "",
+            "expires_before_generated_at": str(bool(assessed["expires_before_generated_at"])).lower(),
+            "expiry_corrected": str(bool(assessed["expiry_corrected"])).lower(),
+            "freshness_basis": flatten_value(assessed["freshness_basis"]),
+            "stale_advisory_used": str(not fresh).lower(),
             "stale_reason": stale_reason,
             "api_fallback_attempted": "true",
             "api_fallback_success": "true",
@@ -10165,6 +10212,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         max_age_sec = (config_number("quant_lab_strategy_opportunity_advisory_max_age_minutes") or 90.0) * 60.0
         selected_source_is_stale = any(not truthy_text(row.get("advisory_fresh")) for row in selected_rows) if selected_rows else True
         stale_reason = ";".join(stale_reasons)
+        selected_expires_values = [
+            parse_dt_utc(first_observed(row.get("advisory_expires_at"), row.get("expires_at"), ""))
+            for row in selected_rows
+        ]
+        selected_expires_values = [value for value in selected_expires_values if value is not None]
+        selected_expires_at = min(selected_expires_values) if selected_expires_values else None
+        expires_before_generated_at = any(truthy_text(row.get("expires_before_generated_at")) for row in selected_rows)
+        expiry_corrected = any(truthy_text(row.get("expiry_corrected")) for row in selected_rows)
+        freshness_basis_values = [row.get("freshness_basis") for row in selected_rows if row.get("freshness_basis")]
+        freshness_basis = first_observed(*(freshness_basis_values + [""]))
         stale_detail_parts = []
         if selected_age_sec is not None:
             stale_detail_parts.append(f"age_sec={fmt_num(selected_age_sec, 3)} max_age_sec={fmt_num(max_age_sec, 3)}")
@@ -10202,7 +10259,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "api_cache_hit": flatten_value(api_cache_hit) or not_obs,
             "advisory_age_sec": fmt_num(selected_age_sec, 3) if selected_age_sec is not None else not_obs,
             "advisory_max_age_sec": fmt_num(max_age_sec, 3),
-            "advisory_expires_at": "",
+            "advisory_expires_at": selected_expires_at.strftime("%Y-%m-%dT%H:%M:%SZ") if selected_expires_at else "",
+            "expires_before_generated_at": str(bool(expires_before_generated_at)).lower(),
+            "expiry_corrected": str(bool(expiry_corrected)).lower(),
+            "freshness_basis": flatten_value(freshness_basis),
             "advisory_source_lag_sec": fmt_num(
                 abs((local_latest_dt - comparable_api_latest_dt).total_seconds())
                 if local_latest_dt and comparable_api_latest_dt else None,
