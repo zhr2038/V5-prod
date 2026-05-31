@@ -365,8 +365,9 @@ FINAL_SCORE_ALPHA6_CONFLICT_FIELDS = (
     "expected_edge_bps",
     "required_edge_bps",
     "final_decision",
-    "no_signal_reason",
     "block_reason",
+    "no_signal_reason",
+    "negative_expectancy_stats",
     "future_4h_net_bps",
     "future_8h_net_bps",
     "future_12h_net_bps",
@@ -7368,7 +7369,31 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             return False
         final_score = as_float(row.get("final_score"))
         final_decision = str(row.get("final_decision") or "").strip().lower()
-        return (final_score is not None and final_score < 0.0) or final_decision == "no_order"
+        return (final_score is not None and final_score < 0.0) or final_decision in {"no_order", "blocked"}
+
+    def final_score_negative_expectancy_stats(symbol):
+        entry = multi_shadow_negative_expectancy_entry(symbol)
+        if not isinstance(entry, dict) or not entry:
+            return not_obs
+        fields = (
+            "closed_cycles",
+            "net_expectancy_bps",
+            "adjusted_entry_expectancy_bps",
+            "fast_fail_closed_cycles",
+            "fast_fail_net_expectancy_bps",
+            "adjusted_fast_fail_net_expectancy_bps",
+            "entry_bad_cycles",
+            "exit_bad_cycles",
+            "min_hold_violation_cycles",
+            "premature_soft_exit_count",
+            "excluded_from_fast_fail_count",
+        )
+        payload = {}
+        for field in fields:
+            value = first_value(entry, (field,), not_obs)
+            if value != not_obs:
+                payload[field] = value
+        return safe_json(payload) if payload else not_obs
 
     def build_final_score_alpha6_conflict_rows(rows):
         out = []
@@ -7403,8 +7428,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "expected_edge_bps": first_observed(row.get("expected_edge_bps"), not_obs),
                 "required_edge_bps": first_observed(row.get("required_edge_bps"), not_obs),
                 "final_decision": first_observed(row.get("final_decision"), not_obs),
-                "no_signal_reason": first_observed(row.get("no_signal_reason"), not_obs),
                 "block_reason": first_observed(row.get("block_reason"), not_obs),
+                "no_signal_reason": first_observed(row.get("no_signal_reason"), not_obs),
+                "negative_expectancy_stats": final_score_negative_expectancy_stats(symbol),
                 "future_4h_net_bps": future[4],
                 "future_8h_net_bps": future[8],
                 "future_12h_net_bps": future[12],
@@ -13623,6 +13649,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- symbol_breakdown: {window_summary.get('final_score_alpha6_conflict_symbol_breakdown', not_obs)}",
         f"- recommendation: {window_summary.get('final_score_alpha6_conflict_recommendation', not_obs)}",
         "- rule: diagnostic only; this audit checks high Alpha6 buy candidates suppressed by negative final_score/no_order.",
+        "- negative_expectancy_stats: included per row when the local cooldown state has symbol stats.",
         "- output: summaries/final_score_vs_alpha6_conflict.csv",
         "",
         "## Probe 生命周期检查",

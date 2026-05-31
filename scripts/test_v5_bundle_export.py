@@ -724,6 +724,20 @@ def fixture_final_score_alpha6_conflict_root(root):
         "negative_expectancy_cooldown",
     ):
         write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_json(root / "reports/negative_expectancy_cooldown.json", {
+        "stats": {
+            "BNB/USDT": {
+                "closed_cycles": 3,
+                "net_expectancy_bps": -151.83,
+                "adjusted_entry_expectancy_bps": 0.0,
+                "fast_fail_closed_cycles": 1,
+                "fast_fail_net_expectancy_bps": -142.89,
+                "entry_bad_cycles": 0,
+                "exit_bad_cycles": 1,
+                "min_hold_violation_cycles": 1,
+            }
+        }
+    })
     write_text(root / "logs/v5_runtime.log", "fixture log\n")
 
     current_run_id = now.strftime("%Y%m%d_%H")
@@ -5614,6 +5628,10 @@ def main():
             assert row["final_score"] == "-0.17", row
             assert row["final_decision"] == "no_order", row
             assert row["block_reason"] == "negative_expectancy_fast_fail_open_block", row
+            neg_stats = json.loads(row["negative_expectancy_stats"])
+            assert neg_stats["closed_cycles"] == 3, row
+            assert neg_stats["adjusted_entry_expectancy_bps"] == 0.0, row
+            assert neg_stats["min_hold_violation_cycles"] == 1, row
             assert float(row["future_4h_net_bps"]) > 400.0, row
             assert float(row["future_24h_net_bps"]) > 1100.0, row
             assert row["missed_profit_flag"] == "true", row
@@ -5631,6 +5649,7 @@ def main():
             assert window["bnb_strong_alpha6_bypass_negative_expectancy_count"] == 1, window
             assert manifest["bnb_strong_alpha6_bypass_shadow_rows"] == 1, manifest
             assert "Final score vs Alpha6 conflict audit" in readme, readme
+            assert "negative_expectancy_stats: included per row" in readme, readme
             assert "summaries/final_score_vs_alpha6_conflict.csv" in readme, readme
             assert "BNB strong Alpha6 bypass shadow" in readme, readme
             assert "summaries/bnb_strong_alpha6_bypass_shadow.csv" in readme, readme
