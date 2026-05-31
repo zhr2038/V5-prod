@@ -907,6 +907,18 @@ def copy_optional_quant_lab_report(filename, dest_rel, file_kind):
     return False
 
 
+def copy_quant_lab_report_from_latest_archive(filename, dest_rel, file_kind):
+    for archive_path in entry_quality_archive_paths():
+        text = read_entry_quality_from_archive(archive_path, filename)
+        if not text:
+            continue
+        text = normalize_entry_quality_report_text(text, file_kind)
+        write_text(dest_rel, text)
+        copied_sources[dest_rel] = f"{archive_path}:{filename}"
+        return True
+    return False
+
+
 def parse_run_time(run_name):
     for fmt in ("%Y%m%d_%H", "%Y%m%dT%H%M%SZ", "%Y%m%d_%H%M%S"):
         try:
@@ -1008,6 +1020,8 @@ def copy_current_reports():
             copy_sanitized(src_rel, dest_rel)
     if not (OUT / "raw" / "reports" / "risk_on_multi_buy_shadow.csv").is_file():
         copy_optional_quant_lab_report("risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv", "csv")
+    else:
+        copy_quant_lab_report_from_latest_archive("risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv", "csv")
     for filename, dest_rel, file_kind in ENTRY_QUALITY_REPORT_FILES:
         if not copy_entry_quality_report(filename, dest_rel, file_kind):
             collection_errors.append({
@@ -11186,9 +11200,35 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "raw_meta",
         )
 
-    def risk_on_actual_bought_symbols():
+    RISK_ON_ACTUAL_BUY_WINDOW = dt.timedelta(hours=2)
+
+    def risk_on_actual_event_dt(row):
+        if row.get("ts_dt") is not None:
+            return row.get("ts_dt")
+        return parse_dt_utc(first_observed(
+            row.get("ts_utc"),
+            row.get("timestamp"),
+            row.get("ts"),
+            row.get("time"),
+            row.get("decision_ts"),
+            row.get("entry_ts"),
+            row.get("run_ts"),
+        ))
+
+    def risk_on_in_decision_window(event_dt, decision_dt):
+        if event_dt is not None and not isinstance(event_dt, dt.datetime):
+            event_dt = parse_dt_utc(event_dt)
+        if event_dt is None or decision_dt is None:
+            return False
+        event_dt = event_dt.astimezone(dt.timezone.utc)
+        decision_dt = decision_dt.astimezone(dt.timezone.utc)
+        return decision_dt - RISK_ON_ACTUAL_BUY_WINDOW <= event_dt <= decision_dt + RISK_ON_ACTUAL_BUY_WINDOW
+
+    def risk_on_actual_bought_symbols(decision_dt):
         bought = set()
         for event in raw_trade_events:
+            if not risk_on_in_decision_window(risk_on_actual_event_dt(event), decision_dt):
+                continue
             intent = flatten_value(event.get("intent")).strip().upper()
             side = flatten_value(event.get("side")).strip().lower()
             if intent in {"OPEN_LONG", "BUY", "OPEN"} or (not intent and side == "buy"):
@@ -11196,6 +11236,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 if symbol:
                     bought.add(symbol)
         for row in candidate_snapshot_rows:
+            if not risk_on_in_decision_window(risk_on_actual_event_dt(row), decision_dt):
+                continue
             decision = flatten_value(row.get("final_decision")).strip().upper()
             if decision in {"OPEN_LONG", "BUY", "ALLOW_OPEN_LONG"}:
                 symbol = normalize_multi_symbol_text(row.get("symbol"))
@@ -11255,6 +11297,22 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 payload = dict(row)
                 payload.setdefault("source_path", key)
                 rows.append(payload)
+        archive_source_key = "risk_on_multi_buy_shadow.csv"
+        for archive_path in entry_quality_archive_paths():
+            text = read_entry_quality_from_archive(archive_path, archive_source_key)
+            if not text:
+                continue
+            key = f"{archive_path}:{archive_source_key}"
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            try:
+                for row in csv.DictReader(text.splitlines()):
+                    payload = dict(row)
+                    payload.setdefault("source_path", key)
+                    rows.append(payload)
+            except Exception as exc:
+                collection_errors.append({"source": key, "dest": "raw/reports/risk_on_multi_buy_shadow.csv", "error": repr(exc)})
         return rows
 
     def risk_on_row_dt(row):
@@ -11324,7 +11382,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     def risk_on_symbols_csv_value(symbols):
         return json.dumps(symbols, ensure_ascii=False) if symbols else not_obs
 
-    def build_risk_on_shadow_row(advisory_row, detail_row, top_k, actual_bought_symbols, default_run_id, response_action=None):
+    def build_risk_on_shadow_row(advisory_row, detail_row, top_k, default_run_id, response_action=None):
         source_row = detail_row or advisory_row
         selected_symbols = risk_on_symbols_from_row(source_row, risk_on_selected_field_names())
         would_buy_symbols = risk_on_symbols_from_row(source_row, risk_on_would_buy_field_names())
@@ -11335,7 +11393,6 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if top_k is not None and top_k > 0:
             selected_symbols = selected_symbols[:top_k]
             would_buy_symbols = would_buy_symbols[:top_k]
-        missed_symbols = [symbol for symbol in would_buy_symbols if symbol not in set(actual_bought_symbols)]
         row_ts = flatten_value(advisory_value(
             source_row,
             "decision_ts",
@@ -11359,6 +11416,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "as_of_ts",
                 default=NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
             ))
+        actual_bought_symbols = risk_on_actual_bought_symbols(parse_dt_utc(row_ts))
+        missed_symbols = [symbol for symbol in would_buy_symbols if symbol not in set(actual_bought_symbols)]
         return {
             "run_id": flatten_value(advisory_value(source_row, "run_id", default=advisory_value(advisory_row, "run_id", default=default_run_id))),
             "ts_utc": row_ts,
@@ -11377,14 +11436,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     risk_on_source_rows = risk_on_source_advisory_rows()
     risk_on_detail_source_rows = risk_on_detail_rows()
     risk_on_rows = []
-    actual_bought_symbols = risk_on_actual_bought_symbols()
     default_run_id = copied_runs[-1] if copied_runs else f"bundle_{STAMP}"
     if risk_on_source_rows:
         for advisory_row in risk_on_source_rows:
             strategy_key = risk_on_multi_buy_strategy_key(advisory_row)
             top_k = risk_on_top_k(advisory_row, strategy_key)
             detail_row = risk_on_detail_for(advisory_row, risk_on_detail_source_rows, top_k)
-            risk_on_rows.append(build_risk_on_shadow_row(advisory_row, detail_row, top_k, actual_bought_symbols, default_run_id))
+            risk_on_rows.append(build_risk_on_shadow_row(advisory_row, detail_row, top_k, default_run_id))
     elif risk_on_detail_source_rows:
         latest_dt = max([risk_on_row_dt(row) for row in risk_on_detail_source_rows if risk_on_row_dt(row) is not None], default=None)
         detail_candidates = risk_on_detail_source_rows
@@ -11397,7 +11455,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         for group_key in sorted(groups, key=lambda value: int(value) if isinstance(value, int) else 999):
             top_k = group_key if isinstance(group_key, int) else None
             detail_row = merge_risk_on_detail_rows(groups[group_key])
-            risk_on_rows.append(build_risk_on_shadow_row(detail_row, detail_row, top_k, actual_bought_symbols, default_run_id, response_action="shadow_tracking"))
+            risk_on_rows.append(build_risk_on_shadow_row(detail_row, detail_row, top_k, default_run_id, response_action="shadow_tracking"))
     else:
         risk_on_rows = existing_risk_on_rows
         for row in risk_on_rows:

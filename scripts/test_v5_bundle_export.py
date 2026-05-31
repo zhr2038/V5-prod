@@ -3489,6 +3489,13 @@ def fixture_entry_quality_advisory_root(root):
 
 def fixture_risk_on_detail_only_root(root):
     run_id = fixture_root(root)
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    run_dir = root / "reports/runs/prod" / run_id
+    write_text(
+        run_dir / "trades.csv",
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n"
+        f"{iso(int(now.timestamp()))},{run_id},BTC/USDT,OPEN_LONG,buy,1,100,100,0\n",
+    )
     raw_detail_path = root / "raw/reports/risk_on_multi_buy_shadow.csv"
     write_text(
         raw_detail_path,
@@ -5696,6 +5703,8 @@ def main():
             assert row["top_k"] == "1", row
             assert json.loads(row["selected_symbols"]) == ["BNB/USDT"], row
             assert json.loads(row["would_buy_symbols"]) == ["BNB/USDT"], row
+            assert json.loads(row["actual_bought_symbols"]) == [], row
+            assert json.loads(row["missed_symbols"]) == ["BNB/USDT"], row
             assert row["source_detail_available"] == "true", row
             assert row["response_action"] == "shadow_tracking", row
             assert row["live_order_effect"] == "read_only_no_live_order", row
@@ -5732,6 +5741,11 @@ def main():
             source_dir / "risk_on_multi_buy_shadow.csv"
         ).read_text(encoding="utf-8")
         shutil.rmtree(root / "reports/quant_lab/latest")
+        write_text(
+            root / "raw/reports/risk_on_multi_buy_shadow.csv",
+            "run_id,decision_ts,top_k,current_regime,selected,would_buy_symbol\n"
+            'r_stale_local,2026-05-20T00:00:00Z,2,ALT_IMPULSE,"selected=[""ETH-USDT""]",ETH-USDT\n',
+        )
         write_zip(root / "reports/quant_lab_latest_bundle.zip", members)
         bundle = run_bundle(root)
         try:
@@ -5759,6 +5773,7 @@ def main():
             assert "threshold_bps" in raw_late_sensitivity, raw_late_sensitivity
             assert "read-only fixture" in raw_summary, raw_summary
             assert "BNB-USDT" in raw_risk_on and "SOL-USDT" in raw_risk_on, raw_risk_on
+            assert "r_stale_local" not in raw_risk_on, raw_risk_on
             by_top_k = {row["top_k"]: row for row in risk_on_rows}
             assert json.loads(by_top_k["2"]["selected_symbols"]) == ["BNB/USDT", "SOL/USDT"], by_top_k
             assert by_top_k["2"]["source_detail_available"] == "true", by_top_k
