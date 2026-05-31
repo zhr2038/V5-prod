@@ -596,6 +596,15 @@ def test_negative_expectancy_excludes_premature_swing_soft_exit_from_fast_fail(
         "min_hold_violation",
         "trailing_too_early",
     ]
+    attribution_path = reports / "negative_expectancy_attribution.json"
+    attribution_report = json.loads(attribution_path.read_text(encoding="utf-8"))
+    bnb_attribution = attribution_report["symbols"]["BNB/USDT"]
+    assert attribution_report["diagnostic_only"] is True
+    assert attribution_report["live_order_effect"] == "none"
+    assert bnb_attribution["entry_bad_cycles"] == 0
+    assert bnb_attribution["exit_bad_cycles"] == 1
+    assert bnb_attribution["min_hold_violation_cycles"] == 1
+    assert bnb_attribution["adjusted_entry_expectancy_bps"] == 0.0
     assert state["symbols"] == {}
 
 

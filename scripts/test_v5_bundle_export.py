@@ -5540,6 +5540,7 @@ def main():
             with tarfile.open(bundle, "r:gz") as tf:
                 negexp = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/negative_expectancy_consistency.csv")).read().decode().splitlines()))
                 attribution = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_negative_expectancy_attribution.csv")).read().decode().splitlines()))
+                attribution_json = json.loads(tf.extractfile(extract_member(tf, "summaries/negative_expectancy_attribution.json")).read().decode())
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
             assert len(negexp) == 1, negexp
@@ -5558,6 +5559,10 @@ def main():
             assert len(attribution) == 1, attribution
             assert attribution[0]["min_hold_violation"] == "true", attribution
             assert attribution[0]["entry_bad"] == "false", attribution
+            assert attribution_json["diagnostic_only"] is True, attribution_json
+            assert attribution_json["live_order_effect"] == "none", attribution_json
+            assert attribution_json["symbols"]["BNB/USDT"]["min_hold_violation_cycles"] == 1, attribution_json
+            assert attribution_json["symbols"]["BNB/USDT"]["entry_bad_cycles"] == 0, attribution_json
             assert window["negative_expectancy_premature_soft_exit_count"] == 1, window
             assert window["negative_expectancy_excluded_from_fast_fail_count"] == 1, window
             assert window["negative_expectancy_entry_bad_cycles"] == 0, window
@@ -5565,6 +5570,7 @@ def main():
             assert window["negative_expectancy_min_hold_violation_cycles"] == 1, window
             assert "Premature swing soft exits are excluded from fast-fail hard blocks" in readme, readme
             assert "exit_bad/min_hold_violation" in readme, readme
+            assert "summaries/negative_expectancy_attribution.json" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

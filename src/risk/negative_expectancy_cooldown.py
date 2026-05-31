@@ -219,6 +219,47 @@ class NegativeExpectancyCooldown:
         tmp.write_text(json.dumps(self._cache, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(p)
 
+    def _attribution_path(self) -> Path:
+        return Path(self.cfg.state_path).with_name("negative_expectancy_attribution.json")
+
+    @staticmethod
+    def _attribution_counts_from_stat(stat: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "entry_bad_cycles": int(stat.get("entry_bad_cycles") or 0),
+            "exit_bad_cycles": int(stat.get("exit_bad_cycles") or 0),
+            "min_hold_violation_cycles": int(stat.get("min_hold_violation_cycles") or 0),
+            "gave_back_profit_cycles": int(stat.get("gave_back_profit_cycles") or 0),
+            "trailing_too_early_cycles": int(stat.get("trailing_too_early_cycles") or 0),
+            "unknown_attribution_cycles": int(stat.get("unknown_attribution_cycles") or 0),
+            "adjusted_entry_cycles": int(stat.get("adjusted_entry_cycles") or 0),
+            "adjusted_entry_expectancy_bps": float(stat.get("adjusted_entry_expectancy_bps") or 0.0),
+        }
+
+    def _save_attribution_report(self, *, now_ms: int, stats_cache: Dict[str, Dict[str, Any]]) -> None:
+        symbols: Dict[str, Any] = {}
+        for symbol, stat in sorted(stats_cache.items()):
+            if not isinstance(stat, dict):
+                continue
+            cycle_attributions = stat.get("cycle_attributions")
+            symbols[symbol] = {
+                **self._attribution_counts_from_stat(stat),
+                "closed_cycles": int(stat.get("closed_cycles") or 0),
+                "net_expectancy_bps": float(stat.get("net_expectancy_bps") or 0.0),
+                "cycle_attributions": list(cycle_attributions) if isinstance(cycle_attributions, list) else [],
+            }
+        payload = {
+            "schema_version": "v5.negative_expectancy_attribution.v1",
+            "diagnostic_only": True,
+            "live_order_effect": "none",
+            "updated_ts_ms": int(now_ms),
+            "symbols": symbols,
+        }
+        path = self._attribution_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(path)
+
     def set_scope(
         self,
         *,
@@ -2000,6 +2041,7 @@ class NegativeExpectancyCooldown:
         }
         self._last_refresh_ms = now_ms
         self._save_state()
+        self._save_attribution_report(now_ms=now_ms, stats_cache=stats_cache)
         return self._cache
 
     def is_blocked(self, symbol: str) -> Optional[Dict[str, Any]]:

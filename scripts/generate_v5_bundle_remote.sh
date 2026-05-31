@@ -45,6 +45,7 @@ STATE_FILES = [
     ("reports/ledger_state.json", "raw/state/ledger_state.json", True),
     ("reports/auto_risk_eval.json", "raw/state/auto_risk_eval.json", True),
     ("reports/negative_expectancy_cooldown.json", "raw/state/negative_expectancy_cooldown.json", True),
+    ("reports/negative_expectancy_attribution.json", "raw/state/negative_expectancy_attribution.json", False),
     ("reports/profit_taking_state.json", "raw/state/profit_taking_state.json", False),
     ("reports/highest_px_state.json", "raw/state/highest_px_state.json", False),
     ("reports/stop_loss_state.json", "raw/state/stop_loss_state.json", False),
@@ -9026,6 +9027,36 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "unknown": str("unknown" in attrs).lower(),
             })
 
+    def negative_expectancy_attribution_symbol_payload(symbol, entry):
+        if not isinstance(entry, dict):
+            return {}
+        cycles = entry.get("cycle_attributions")
+        return {
+            "closed_cycles": as_int(first_value(entry, ("closed_cycles",), 0)),
+            "net_expectancy_bps": first_observed(first_value(entry, ("net_expectancy_bps",), not_obs)),
+            "adjusted_entry_expectancy_bps": first_observed(first_value(entry, ("adjusted_entry_expectancy_bps",), not_obs)),
+            "entry_bad_cycles": as_int(first_value(entry, ("entry_bad_cycles",), 0)),
+            "exit_bad_cycles": as_int(first_value(entry, ("exit_bad_cycles",), 0)),
+            "min_hold_violation_cycles": as_int(first_value(entry, ("min_hold_violation_cycles",), 0)),
+            "gave_back_profit_cycles": as_int(first_value(entry, ("gave_back_profit_cycles",), 0)),
+            "trailing_too_early_cycles": as_int(first_value(entry, ("trailing_too_early_cycles",), 0)),
+            "unknown_attribution_cycles": as_int(first_value(entry, ("unknown_attribution_cycles",), 0)),
+            "cycle_attributions": list(cycles) if isinstance(cycles, list) else [],
+        }
+
+    negative_expectancy_attribution_payload = {
+        "schema_version": "v5.negative_expectancy_attribution.v1",
+        "diagnostic_only": True,
+        "live_order_effect": "none",
+        "generated_at": NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "source": "negative_expectancy_cooldown_state",
+        "symbols": {
+            normalize_symbol_text(symbol): negative_expectancy_attribution_symbol_payload(symbol, entry)
+            for symbol, entry in sorted(negative_entries.items())
+            if isinstance(entry, dict)
+        },
+    }
+
     BNB_RISK_SYMBOL = "BNB/USDT"
 
     def json_number_or_not_obs(value, digits=6):
@@ -10340,6 +10371,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "summaries/bnb_negative_expectancy_attribution.csv",
         bnb_negative_expectancy_attribution_rows,
         ["symbol", "cycle_index", "entry_ts", "exit_ts", "exit_reason", "exit_priority", "net_bps", "attribution", "entry_bad", "exit_bad", "min_hold_violation", "gave_back_profit", "trailing_too_early", "unknown"],
+    )
+    write_text(
+        "summaries/negative_expectancy_attribution.json",
+        json.dumps(negative_expectancy_attribution_payload, ensure_ascii=False, indent=2) + "\n",
     )
     write_text(
         "summaries/bnb_risk_summary.json",
@@ -13804,7 +13839,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- min_hold_violation_cycles: {negative_expectancy_min_hold_violation_cycles}",
         "- note: Premature swing soft exits are excluded from fast-fail hard blocks.",
         "- attribution: BNB min-hold soft-exit losses are tagged as exit_bad/min_hold_violation, not pure entry_bad.",
-        "- output: summaries/bnb_negative_expectancy_attribution.csv",
+        "- output: summaries/bnb_negative_expectancy_attribution.csv and summaries/negative_expectancy_attribution.json",
         f"- high issue present: {'yes' if negative_expectancy_mismatch_count else 'no'}",
         "",
         "## BNB recovery missed opportunity audit",
@@ -14284,6 +14319,7 @@ sanity = {
     "contains summaries/swing_atr_soft_exit_readiness_by_symbol.csv": (OUT / "summaries/swing_atr_soft_exit_readiness_by_symbol.csv").is_file(),
     "contains summaries/swing_atr_soft_exit_shadow.csv": (OUT / "summaries/swing_atr_soft_exit_shadow.csv").is_file(),
     "contains summaries/bnb_risk_summary.json": (OUT / "summaries/bnb_risk_summary.json").is_file(),
+    "contains summaries/negative_expectancy_attribution.json": (OUT / "summaries/negative_expectancy_attribution.json").is_file(),
     "contains summaries/bnb_recovery_missed_opportunity.csv": (OUT / "summaries/bnb_recovery_missed_opportunity.csv").is_file(),
     "contains summaries/bnb_strong_alpha6_bypass_shadow.csv": (OUT / "summaries/bnb_strong_alpha6_bypass_shadow.csv").is_file(),
     "contains summaries/final_score_vs_alpha6_conflict.csv": (OUT / "summaries/final_score_vs_alpha6_conflict.csv").is_file(),
