@@ -996,7 +996,8 @@ def test_live_execution_blocks_soft_swing_exit_before_min_hold() -> None:
         guard = req["swing_min_hold_guard"]
         assert result.state == "REJECTED"
         assert okx.place_calls == 0
-        assert row.last_error_code == "swing_atr_early_exit_guard"
+        assert row.last_error_code == "SWING_MIN_HOLD_GUARD"
+        assert "swing_atr_soft_exit_before_min_hold" in row.last_error_msg
         assert guard["reason"] == "swing_atr_early_exit_guard"
         assert guard["original_exit_reason"] == "atr_trailing"
         assert guard["source_reason"] == "atr_trailing"
@@ -1069,7 +1070,8 @@ def test_live_execution_blocks_atr_swing_exit_after_large_loss_before_min_hold()
         guard = req["swing_min_hold_guard"]
         assert result.state == "REJECTED"
         assert okx.place_calls == 0
-        assert row.last_error_code == "swing_atr_early_exit_guard"
+        assert row.last_error_code == "SWING_MIN_HOLD_GUARD"
+        assert "swing_atr_soft_exit_before_min_hold" in row.last_error_msg
         assert guard["source_reason"] == "atr_trailing"
         assert guard["net_bps"] == -100.0
         assert guard["swing_min_hold_guard_checked"] is True
@@ -1078,7 +1080,8 @@ def test_live_execution_blocks_atr_swing_exit_after_large_loss_before_min_hold()
         assert guard["blocked_exit_reason"] == "swing_min_hold_soft_exit_blocked"
 
 
-def test_live_execution_allows_hard_swing_exit_before_min_hold() -> None:
+@pytest.mark.parametrize("exit_reason", ["hard_stop_loss", "stop_loss", "fixed_stop_loss", "risk_off"])
+def test_live_execution_allows_hard_swing_exit_before_min_hold(exit_reason: str) -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()
         okx.balance_by_ccy["BNB"] = {"eq": "1", "availBal": "1", "cashBal": "1", "liab": "0"}
@@ -1114,7 +1117,7 @@ def test_live_execution_allows_hard_swing_exit_before_min_hold() -> None:
                 intent="CLOSE_LONG",
                 notional_usdt=12.0,
                 signal_price=600.0,
-                meta={"decision_hash": "bnb-hard-before-min-hold", "reason": "hard_stop_loss"},
+                meta={"decision_hash": f"bnb-{exit_reason}-before-min-hold", "reason": exit_reason},
             )
         )
 

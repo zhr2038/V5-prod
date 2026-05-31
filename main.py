@@ -420,6 +420,204 @@ def _external_rank_exit_decision(
     }
 
 
+def _event_close_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _event_close_json_obj(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(str(value))
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _event_close_float(value: Any) -> float | None:
+    try:
+        if value is None or str(value).strip() == "":
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _event_close_parse_utc(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _event_close_hard_exit_exception_reason(reason: str) -> str:
+    norm = str(reason or "").strip().lower()
+    if not norm:
+        return ""
+    exact = {
+        "hard_stop_loss",
+        "max_loss_hard_stop",
+        "stop_loss",
+        "fixed_stop_loss",
+        "exchange_risk",
+        "emergency_close",
+        "zero_target_close",
+        "position_reconcile_force_close",
+        "risk_off",
+        "risk_off_forced_close",
+        "risk_off_force_exit",
+        "kill_switch",
+        "manual_kill",
+        "manual_kill_switch",
+    }
+    if norm in exact:
+        return norm
+    for prefix in (
+        "hard_stop_",
+        "max_loss_",
+        "dynamic_stop_",
+        "exchange_",
+        "emergency_",
+        "position_reconcile_",
+        "risk_off_force",
+        "risk_off_forced",
+        "risk_off_",
+        "kill_switch_",
+    ):
+        if norm.startswith(prefix):
+            return norm
+    return ""
+
+
+def _event_close_exit_priority(reason: str, explicit: Any = None) -> str:
+    explicit_norm = str(explicit or "").strip().lower()
+    if explicit_norm in {"soft", "hard"}:
+        return explicit_norm
+    if _event_close_hard_exit_exception_reason(reason):
+        return "hard"
+    norm = str(reason or "").strip().lower()
+    soft_exact = {
+        "atr_trailing",
+        "profit_trailing",
+        "profit_taking",
+        "protect_profit_lock_trailing",
+        "rank_exit",
+        "regime_exit",
+        "zero_score_exit",
+        "normal_zero_target_close",
+        "target_rebalance_sell",
+        "force_close_unscored",
+        "target_churn",
+    }
+    if norm in soft_exact or norm.startswith(
+        (
+            "profit_taking_",
+            "profit_partial_",
+            "rank_exit_",
+            "weak_signal_",
+            "soft_stop_",
+            "zero_target",
+            "normal_zero_target",
+            "replacement_target",
+        )
+    ):
+        return "soft"
+    return "unknown"
+
+
+def _event_close_swing_min_hold_block_decision(
+    *,
+    action: dict[str, Any],
+    symbol: str,
+    reason: str,
+    pos,
+    cfg,
+) -> dict[str, Any] | None:
+    execution = getattr(cfg, "execution", None)
+    if not bool(getattr(execution, "swing_min_hold_exit_guard_enabled", True)):
+        return None
+
+    tags = _event_close_json_obj(getattr(pos, "tags_json", "{}"))
+    swing_tagged = bool(
+        _event_close_bool(tags.get("swing_hold_position"))
+        or _event_close_bool(action.get("swing_hold_position"))
+        or tags.get("swing_entry_ts") is not None
+        or action.get("swing_entry_ts") is not None
+    )
+    if not swing_tagged:
+        return None
+
+    hard_exception_reason = _event_close_hard_exit_exception_reason(reason)
+    priority = _event_close_exit_priority(reason, action.get("exit_priority"))
+    allowed_before_min_hold = bool(hard_exception_reason)
+    if priority != "soft" or allowed_before_min_hold:
+        return None
+
+    min_hold_hours = _event_close_float(action.get("min_hold_hours"))
+    if min_hold_hours is None:
+        min_hold_hours = _event_close_float(tags.get("swing_min_hold_hours"))
+    if min_hold_hours is None:
+        min_hold_hours = _event_close_float(getattr(execution, "swing_min_hold_hours", None))
+    if min_hold_hours is None or min_hold_hours <= 0:
+        return None
+
+    hold_hours = _event_close_float(action.get("hold_hours"))
+    if hold_hours is None:
+        entry_dt = _event_close_parse_utc(
+            action.get("swing_entry_ts")
+            or tags.get("swing_entry_ts")
+            or tags.get("entry_ts")
+            or getattr(pos, "entry_ts", None)
+        )
+        if entry_dt is not None:
+            hold_hours = max(0.0, (datetime.now(timezone.utc) - entry_dt).total_seconds() / 3600.0)
+    if hold_hours is None or float(hold_hours) >= float(min_hold_hours):
+        return None
+
+    min_hold_reason = "swing_atr_early_exit_guard" if str(reason).strip() == "atr_trailing" else "soft_exit_before_swing_min_hold"
+    return {
+        "symbol": symbol,
+        "action": "skip",
+        "reason": "swing_atr_early_exit_guard" if min_hold_reason == "swing_atr_early_exit_guard" else "swing_min_hold_exit_block",
+        "source_reason": reason,
+        "source": "event_action_bridge",
+        "external_rank_exit_action_consumed": bool(str(reason).startswith("rank_exit_")),
+        "source_file": action.get("source_file"),
+        "generated_ts": action.get("generated_at_ms"),
+        "generated_at_ms": action.get("generated_at_ms"),
+        "validation_result": "accepted_then_blocked_by_swing_min_hold",
+        "exit_priority": priority,
+        "exit_allowed_before_min_hold": False,
+        "exit_blocked_by_min_hold": True,
+        "swing_min_hold_guard_checked": True,
+        "swing_min_hold_guard_blocked": True,
+        "soft_exit_blocked_by_min_hold": True,
+        "hard_exit_exception_reason": hard_exception_reason,
+        "hold_hours": float(hold_hours),
+        "hold_hours_at_exit_check": float(hold_hours),
+        "min_hold_hours": float(min_hold_hours),
+        "swing_min_hold_hours": float(min_hold_hours),
+        "would_exit_shadow": True,
+        "blocked_exit_reason": "swing_min_hold_soft_exit_blocked",
+        "blocked_source_reason": reason,
+        "min_hold_block_reason": min_hold_reason,
+    }
+
+
 def _validate_external_rank_exit_action(
     *,
     action: dict[str, Any],
@@ -589,6 +787,27 @@ def _merge_event_close_override_orders(
         px = float(prices.get(symbol, 0.0) or 0.0)
         if pos is None or qty <= 0.0 or px <= 0.0:
             skipped.append(symbol)
+            continue
+
+        min_hold_block_decision = (
+            _event_close_swing_min_hold_block_decision(
+                action=action,
+                symbol=symbol,
+                reason=reason,
+                pos=pos,
+                cfg=cfg,
+            )
+            if cfg is not None
+            else None
+        )
+        if min_hold_block_decision is not None:
+            audit_decisions.append(min_hold_block_decision)
+            skipped.append(symbol)
+            if audit is not None:
+                try:
+                    audit.record_count(str(min_hold_block_decision.get("reason") or "swing_min_hold_exit_block"), symbol=symbol)
+                except Exception:
+                    pass
             continue
 
         appended.append(

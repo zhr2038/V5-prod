@@ -1672,10 +1672,11 @@ class LiveExecutionEngine:
         swing_min_hold_block = self._swing_min_hold_live_block_context(o)
         if swing_min_hold_block is not None:
             policy_reason = str(swing_min_hold_block.get("reason") or "swing_min_hold_exit_block")
-            policy_message = str(
-                swing_min_hold_block.get("min_hold_block_reason")
-                or swing_min_hold_block.get("reason")
-                or "soft_exit_before_swing_min_hold"
+            source_reason = str(swing_min_hold_block.get("source_reason") or "")
+            policy_message = (
+                "swing_atr_soft_exit_before_min_hold"
+                if source_reason == "atr_trailing"
+                else "swing_soft_exit_before_min_hold"
             )
             self.order_store.upsert_new(
                 cl_ord_id=clid,
@@ -1702,10 +1703,11 @@ class LiveExecutionEngine:
             self.order_store.update_state(
                 clid,
                 new_state="REJECTED",
-                last_error_code=policy_reason,
+                last_error_code="SWING_MIN_HOLD_GUARD",
                 last_error_msg=(
                     f"{policy_message}: {o.symbol} "
-                    f"reason={swing_min_hold_block.get('source_reason')} "
+                    f"reason={source_reason} "
+                    f"policy_reason={policy_reason} "
                     f"hold_hours={float(swing_min_hold_block.get('hold_hours') or 0.0):.4f} "
                     f"< min_hold_hours={float(swing_min_hold_block.get('min_hold_hours') or 0.0):.4f}"
                 ),

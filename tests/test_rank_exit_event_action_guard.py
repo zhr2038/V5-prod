@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -22,6 +24,28 @@ def _position(symbol: str = "BNB/USDT") -> Position:
         last_update_ts="2026-05-04T13:00:00Z",
         last_mark_px=622.0,
         unrealized_pnl_pct=-0.01,
+    )
+
+
+def _swing_position(symbol: str = "BNB/USDT", *, hold_hours: float = 5.0) -> Position:
+    entry_ts = (datetime.now(timezone.utc) - timedelta(hours=hold_hours)).isoformat().replace("+00:00", "Z")
+    return Position(
+        symbol=symbol,
+        qty=1.0,
+        avg_px=628.4,
+        entry_ts=entry_ts,
+        highest_px=628.4,
+        last_update_ts=entry_ts,
+        last_mark_px=622.0,
+        unrealized_pnl_pct=-0.01,
+        tags_json=json.dumps(
+            {
+                "swing_hold_position": True,
+                "swing_entry_ts": entry_ts,
+                "swing_min_hold_hours": 24.0,
+                "entry_reason": "normal_entry",
+            }
+        ),
     )
 
 
@@ -137,3 +161,47 @@ def test_external_rank_exit_event_action_can_be_consumed_after_validation(tmp_pa
         for d in audit.router_decisions
     )
     assert audit.exit_signals and audit.exit_signals[0]["reason"] == "rank_exit_6"
+
+
+def test_external_rank_exit_event_action_is_blocked_by_swing_min_hold(tmp_path: Path) -> None:
+    order_store_path = tmp_path / "orders.sqlite"
+    now_ms = int(time.time() * 1000)
+    persist_event_actions(
+        actions=[{"symbol": "BNB/USDT", "action": "close", "reason": "rank_exit_6", "priority": 0}],
+        target_run_id="run-1",
+        order_store_path=order_store_path,
+        generated_at_ms=now_ms,
+    )
+    cfg = AppConfig(symbols=["BTC/USDT", "BNB/USDT"])
+    cfg.execution.rank_exit_max_rank = 5
+    cfg.execution.swing_min_hold_exit_guard_enabled = True
+    cfg.execution.swing_min_hold_hours = 24.0
+    audit = DecisionAudit(run_id="run-1")
+    audit.top_scores = [{"symbol": "BTC/USDT", "rank": 1}, {"symbol": "BNB/USDT", "rank": 6}]
+
+    orders = main_module._merge_event_close_override_orders(
+        orders=[],
+        positions=[_swing_position()],
+        prices={"BNB/USDT": 622.0},
+        run_id="run-1",
+        order_store_path=order_store_path,
+        cfg=cfg,
+        targets_post_risk={"BNB/USDT": 0.0},
+        window_start_ts=int(now_ms / 1000) - 60,
+        audit=audit,
+    )
+
+    assert orders == []
+    accepted = next(d for d in audit.router_decisions if d.get("validation_result") == "accepted")
+    assert accepted["action"] == "create"
+    decision = next(d for d in audit.router_decisions if d.get("reason") == "swing_min_hold_exit_block")
+    assert decision["source"] == "event_action_bridge"
+    assert decision["source_reason"] == "rank_exit_6"
+    assert decision["exit_priority"] == "soft"
+    assert decision["swing_min_hold_guard_checked"] is True
+    assert decision["swing_min_hold_guard_blocked"] is True
+    assert decision["soft_exit_blocked_by_min_hold"] is True
+    assert decision["hold_hours_at_exit_check"] == pytest.approx(5.0, abs=0.05)
+    assert decision["swing_min_hold_hours"] == pytest.approx(24.0)
+    assert decision["blocked_exit_reason"] == "swing_min_hold_soft_exit_blocked"
+    assert audit.exit_signals == []

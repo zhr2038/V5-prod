@@ -2630,6 +2630,67 @@ def fixture_bnb_swing_early_exit_router_raw_root(root):
     return run_id
 
 
+def fixture_swing_min_hold_guard_diagnostics_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    window_end = int(now.timestamp())
+    run_id = now.strftime("%Y%m%d_%H")
+
+    write_text(
+        root / "configs/live_prod.yaml",
+        "execution:\n"
+        "  swing_min_hold_hours: 24\n"
+        "  swing_atr_early_exit_guard_enabled: true\n",
+    )
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(run_dir / "decision_audit.json", {
+        "now_ts": window_end + 15,
+        "window_end_ts": window_end,
+        "current_level": "PROTECT",
+        "regime": "Trending",
+        "router_decisions": [
+            {
+                "symbol": "BNB/USDT",
+                "action": "skip",
+                "intent": "CLOSE_LONG",
+                "side": "sell",
+                "reason": "swing_atr_early_exit_guard",
+                "source_reason": "atr_trailing",
+                "raw_json": json.dumps(
+                    {
+                        "source_reason": "atr_trailing",
+                        "exit_priority": "soft",
+                        "hold_hours": 5.0,
+                        "min_hold_hours": 24.0,
+                        "exit_allowed_before_min_hold": False,
+                        "exit_blocked_by_min_hold": True,
+                        "min_hold_block_reason": "swing_atr_early_exit_guard",
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ],
+    })
+    write_text(
+        run_dir / "order_lifecycle.csv",
+        "schema_version,lifecycle_id,run_id,ts_utc,symbol,normalized_symbol,side,intent,order_state,decision_ts,signal_price,arrival_bid,arrival_ask,arrival_mid,spread_bps_at_decision,submit_ts,order_type,order_px,cl_ord_id,exchange_order_id,last_error_code,last_error_msg,first_fill_ts,last_fill_ts,fill_px,avg_fill_px,filled_qty,fee,fee_ccy,fee_usdt,notional_usdt,requested_notional_usdt,trade_ids,fill_count\n"
+        f"v5.order_lifecycle.v1,olc_reject,{run_id},{iso(window_end + 2)},BNB/USDT,BNB-USDT,sell,CLOSE_LONG,REJECTED,{iso(window_end - 10)},634.3,634.2,634.4,634.3,3.1,{iso(window_end - 1)},market,null,clid-reject,,SWING_MIN_HOLD_GUARD,swing_atr_soft_exit_before_min_hold,,,,,,,,,,12,,0\n",
+    )
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id})
+    return run_id
+
+
 def fixture_multi_position_swing_shadow_from_audit_root(root):
     now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
     entry_dt = now - dt.timedelta(hours=50)
@@ -4409,6 +4470,34 @@ def main():
             assert raw_payload["entry_router_decision"]["swing_hold_position"] == "not_observable", raw_payload
             nested_router = json.loads(json.loads(raw_payload["entry_router_decision"]["raw_json"])["raw_json"])
             assert nested_router["swing_hold_position"] is True, raw_payload
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-swing-min-hold-guard-diagnostics-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_swing_min_hold_guard_diagnostics_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                early_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/early_exit_cases.csv")).read().decode().splitlines()))
+                lifecycle_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/order_lifecycle.csv")).read().decode().splitlines()))
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert window["swing_min_hold_guard_pipeline_block_count"] == 1, window
+            assert window["swing_min_hold_guard_execution_reject_count"] == 1, window
+            assert window["soft_exit_filled_before_min_hold_count"] == 0, window
+            assert manifest["swing_min_hold_guard_pipeline_block_count"] == 1, manifest
+            assert manifest["swing_min_hold_guard_execution_reject_count"] == 1, manifest
+            assert manifest["soft_exit_filled_before_min_hold_count"] == 0, manifest
+            assert early_rows[0]["event_type"] == "pending_soft_exit_blocked_by_min_hold", early_rows
+            assert early_rows[0]["exit_reason"] == "atr_trailing", early_rows
+            assert lifecycle_rows[0]["last_error_code"] == "SWING_MIN_HOLD_GUARD", lifecycle_rows
+            assert "pipeline guard block count: 1" in readme, readme
+            assert "execution guard reject count: 1" in readme, readme
+            assert "soft exit filled before min_hold count: 0" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

@@ -196,13 +196,13 @@ def test_swing_min_hold_blocks_atr_trailing_large_loss_before_24h(tmp_path):
         hold_hours=5.0,
         exit_reason="atr_trailing",
         avg_px=600.0,
-        signal_price=595.0,
+        signal_price=591.0,
     )
 
     assert not any(order.symbol == "BNB/USDT" and order.side == "sell" for order in out.orders)
     decision = next(d for d in audit.router_decisions if d.get("reason") == "swing_atr_early_exit_guard")
     assert decision["original_exit_reason"] == "atr_trailing"
-    assert decision["net_bps"] < -80.0
+    assert decision["net_bps"] < -150.0
     assert decision["exit_priority"] == "soft"
     assert decision["swing_min_hold_guard_checked"] is True
     assert decision["swing_min_hold_guard_blocked"] is True
@@ -259,6 +259,19 @@ def test_swing_min_hold_allows_hard_stop_loss_before_24h(tmp_path):
         and d.get("exit_allowed_before_min_hold") is True
         for d in audit.router_decisions
     )
+
+
+@pytest.mark.parametrize("exit_reason", ["stop_loss", "fixed_stop_loss"])
+def test_swing_min_hold_allows_configured_stop_loss_before_24h(tmp_path, exit_reason):
+    out, audit = _run_swing_min_hold_exit_case(tmp_path, hold_hours=5.0, exit_reason=exit_reason)
+
+    order = next(order for order in out.orders if order.symbol == "BNB/USDT" and order.side == "sell")
+    assert order.meta["exit_priority"] == "hard"
+    assert order.meta["exit_allowed_before_min_hold"] is True
+    assert order.meta["exit_blocked_by_min_hold"] is False
+    assert order.meta["hard_exit_exception_reason"] == exit_reason
+    assert order.meta["hold_hours"] == pytest.approx(5.0)
+    assert not any(d.get("reason") == "swing_min_hold_exit_block" for d in audit.router_decisions)
 
 
 def test_swing_min_hold_allows_risk_off_before_24h(tmp_path):

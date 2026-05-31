@@ -367,6 +367,8 @@ ORDER_LIFECYCLE_FIELDS = (
     "order_px",
     "cl_ord_id",
     "exchange_order_id",
+    "last_error_code",
+    "last_error_msg",
     "first_fill_ts",
     "last_fill_ts",
     "fill_px",
@@ -6973,8 +6975,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "raw_json": row.get("raw_json", "{}"),
             })
 
+    swing_min_hold_router_block_reasons = {"swing_min_hold_exit_block", "swing_atr_early_exit_guard"}
     for row in router_rows:
-        if row.get("reason") != "swing_min_hold_exit_block":
+        if row.get("reason") not in swing_min_hold_router_block_reasons:
             continue
         try:
             raw = json.loads(row.get("raw_json") or "{}")
@@ -7477,6 +7480,23 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         1 for row in early_exit_rows
         if row.get("event_type") == "pending_soft_exit_blocked_by_min_hold"
         or row.get("exit_blocked_by_min_hold") == "true"
+    )
+    swing_min_hold_guard_pipeline_block_count = sum(
+        1 for row in early_exit_rows
+        if row.get("event_type") == "pending_soft_exit_blocked_by_min_hold"
+    )
+    swing_min_hold_guard_execution_reject_count = sum(
+        1 for row in order_lifecycle_rows
+        if flatten_value(row.get("order_state")).strip().upper() == "REJECTED"
+        and (
+            flatten_value(row.get("last_error_code")).strip().upper() == "SWING_MIN_HOLD_GUARD"
+            or "swing_atr_soft_exit_before_min_hold" in flatten_value(row.get("last_error_msg")).lower()
+            or "swing_soft_exit_before_min_hold" in flatten_value(row.get("last_error_msg")).lower()
+        )
+    )
+    soft_exit_filled_before_min_hold_count = sum(
+        1 for row in early_exit_rows
+        if row.get("event_type") == "closed_soft_exit_before_min_hold"
     )
     if swing_post_fix_early_exit_sample_rows:
         add_issue(
@@ -12190,6 +12210,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "swing_blocked_by_min_hold_count": swing_blocked_by_min_hold_count,
         "swing_filled_soft_exit_before_min_hold_count": swing_filled_soft_exit_before_min_hold_count,
         "swing_early_exit_atr_trailing_count": swing_early_exit_atr_trailing_count,
+        "swing_min_hold_guard_pipeline_block_count": swing_min_hold_guard_pipeline_block_count,
+        "swing_min_hold_guard_execution_reject_count": swing_min_hold_guard_execution_reject_count,
+        "soft_exit_filled_before_min_hold_count": soft_exit_filled_before_min_hold_count,
         "swing_early_exit_better_to_hold_24h_rate": swing_early_exit_better_24_rate if swing_early_exit_better_24_rate is not None else not_obs,
         "swing_early_exit_medium_issue": bool(swing_early_exit_medium_issue_present),
         "swing_early_exit_historical_or_unknown_issue": bool(swing_early_exit_historical_or_unknown_issue_present),
@@ -13006,6 +13029,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- post-fix early exits: {swing_post_fix_early_exit_count}",
         f"- blocked_by_min_hold count: {swing_blocked_by_min_hold_count}",
         f"- filled soft exit before min_hold count: {swing_filled_soft_exit_before_min_hold_count}",
+        f"- pipeline guard block count: {window_summary.get('swing_min_hold_guard_pipeline_block_count', 0)}",
+        f"- execution guard reject count: {window_summary.get('swing_min_hold_guard_execution_reject_count', 0)}",
+        f"- soft exit filled before min_hold count: {window_summary.get('soft_exit_filled_before_min_hold_count', 0)}",
         f"- by reason: {swing_early_exit_by_reason_text}",
         f"- ATR trailing before min_hold: {swing_early_exit_atr_text}",
         f"- better_to_hold_24h_rate: {swing_early_exit_better_24_text}",
@@ -13278,6 +13304,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "bnb_f3_dominant_swing_sample_count": bnb_f3_dominant_swing_summary.get("sample_count", 0),
         "bnb_f3_dominant_swing_missing_swing_flag_count": bnb_f3_dominant_swing_summary.get("bnb_f3_missing_swing_flag_count", 0),
         "bnb_f3_dominant_swing_diagnostic_only": True,
+        "swing_min_hold_guard_pipeline_block_count": swing_min_hold_guard_pipeline_block_count,
+        "swing_min_hold_guard_execution_reject_count": swing_min_hold_guard_execution_reject_count,
+        "soft_exit_filled_before_min_hold_count": soft_exit_filled_before_min_hold_count,
     }
 
 
@@ -13676,6 +13705,15 @@ manifest = {
     ),
     "bnb_f3_dominant_swing_diagnostic_only": bool(
         summary_meta.get("bnb_f3_dominant_swing_diagnostic_only", True)
+    ),
+    "swing_min_hold_guard_pipeline_block_count": int(
+        summary_meta.get("swing_min_hold_guard_pipeline_block_count", 0) or 0
+    ),
+    "swing_min_hold_guard_execution_reject_count": int(
+        summary_meta.get("swing_min_hold_guard_execution_reject_count", 0) or 0
+    ),
+    "soft_exit_filled_before_min_hold_count": int(
+        summary_meta.get("soft_exit_filled_before_min_hold_count", 0) or 0
     ),
     "strategy_version": provenance_meta.get("strategy_version", "not_observable"),
     "strategy_hash": provenance_meta.get("strategy_hash", "not_observable"),
