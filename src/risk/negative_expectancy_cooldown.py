@@ -17,6 +17,59 @@ logger = logging.getLogger(__name__)
 RELEASE_START_NOT_OBSERVABLE = "not_observable"
 
 
+def negative_expectancy_adjusted_block_audit(
+    stat: Dict[str, Any] | None,
+    *,
+    net_floor_bps: float,
+    fast_fail_floor_bps: float,
+) -> Dict[str, Any]:
+    stat = stat or {}
+
+    def _float_value(key: str, default: float = 0.0) -> float:
+        try:
+            return float(stat.get(key) if stat.get(key) is not None else default)
+        except Exception:
+            return float(default)
+
+    def _int_value(key: str) -> int:
+        try:
+            return int(float(stat.get(key) or 0))
+        except Exception:
+            return 0
+
+    raw_expectancy_bps = _float_value("net_expectancy_bps", _float_value("expectancy_bps", 0.0))
+    adjusted_expectancy_bps = _float_value("adjusted_entry_expectancy_bps", raw_expectancy_bps)
+    fast_fail_expectancy_bps = _float_value(
+        "fast_fail_net_expectancy_bps",
+        _float_value("fast_fail_expectancy_bps", 0.0),
+    )
+    raw_net_breach = raw_expectancy_bps <= float(net_floor_bps)
+    adjusted_net_breach = adjusted_expectancy_bps <= float(net_floor_bps)
+    fast_fail_breach = fast_fail_expectancy_bps <= float(fast_fail_floor_bps)
+    would_unblock_if_adjusted = bool(raw_net_breach and not adjusted_net_breach)
+    attribution_conflict = bool(
+        would_unblock_if_adjusted
+        and (
+            _int_value("exit_bad_cycles") > 0
+            or _int_value("min_hold_violation_cycles") > 0
+            or _int_value("gave_back_profit_cycles") > 0
+            or _int_value("trailing_too_early_cycles") > 0
+        )
+    )
+    return {
+        "entry_bad_cycles": _int_value("entry_bad_cycles"),
+        "exit_bad_cycles": _int_value("exit_bad_cycles"),
+        "min_hold_violation_cycles": _int_value("min_hold_violation_cycles"),
+        "gave_back_profit_cycles": _int_value("gave_back_profit_cycles"),
+        "trailing_too_early_cycles": _int_value("trailing_too_early_cycles"),
+        "adjusted_entry_expectancy_bps": float(adjusted_expectancy_bps),
+        "raw_would_block": bool(raw_net_breach or fast_fail_breach),
+        "adjusted_would_block": bool(adjusted_net_breach or fast_fail_breach),
+        "would_unblock_if_adjusted": would_unblock_if_adjusted,
+        "block_attribution_conflict": attribution_conflict,
+    }
+
+
 def negative_expectancy_config_fingerprint(config: Any) -> str:
     execution_cfg = getattr(config, "execution", None)
     payload = {

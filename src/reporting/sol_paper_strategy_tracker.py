@@ -2554,6 +2554,7 @@ def _risk_on_multi_buy_detail_paths(*, run_path: Path, reports_dir: Path) -> lis
         reports_dir / "quant_lab_latest" / raw_rel,
         reports_dir / "quant_lab" / "latest" / "reports" / "risk_on_multi_buy_shadow.csv",
         reports_dir / "quant_lab" / "latest" / raw_rel,
+        reports_dir / raw_rel,
         reports_dir.parent / "reports" / "risk_on_multi_buy_shadow.csv",
         reports_dir.parent / raw_rel,
         reports_dir.parent / "reports" / "quant_lab" / "latest" / "reports" / "risk_on_multi_buy_shadow.csv",

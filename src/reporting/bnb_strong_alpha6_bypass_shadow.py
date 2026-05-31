@@ -1,0 +1,116 @@
+from __future__ import annotations
+
+import csv
+from pathlib import Path
+from typing import Any, Iterable, Mapping
+
+from src.reporting.final_score_alpha6_conflict import as_float, first_observed, normalize_symbol, truthy
+
+
+STRATEGY_ID = "BNB_STRONG_ALPHA6_BYPASS_SHADOW_V1"
+BYPASS_SHADOW_FIELDS = (
+    "run_id",
+    "ts_utc",
+    "strategy_id",
+    "symbol",
+    "final_score",
+    "alpha6_score",
+    "f3",
+    "f4",
+    "f5",
+    "expected_edge_bps",
+    "required_edge_bps",
+    "final_decision",
+    "block_reason",
+    "no_signal_reason",
+    "would_bypass_negative_expectancy",
+    "future_4h_net_bps",
+    "future_8h_net_bps",
+    "future_12h_net_bps",
+    "future_24h_net_bps",
+    "outcome",
+    "live_order_effect",
+)
+
+
+def is_bnb_strong_alpha6_bypass_candidate(row: Mapping[str, Any]) -> bool:
+    if normalize_symbol(row.get("symbol")) != "BNB/USDT":
+        return False
+    if str(row.get("alpha6_side") or "").strip().lower() != "buy":
+        return False
+    alpha6_score = as_float(row.get("alpha6_score"))
+    if alpha6_score is None or alpha6_score < 0.9:
+        return False
+    expected = as_float(row.get("expected_edge_bps"))
+    required = as_float(row.get("required_edge_bps"))
+    if expected is None or required is None or expected <= required:
+        return False
+    if not truthy(row.get("cost_gate_verified")):
+        return False
+    f3 = as_float(first_observed(row.get("f3"), row.get("f3_vol_adj_ret")))
+    f4 = as_float(first_observed(row.get("f4"), row.get("f4_volume_expansion")))
+    return bool((f4 is not None and f4 >= 1.0) or (f3 is not None and f3 >= 10.0))
+
+
+def shadow_outcome(values: Iterable[Any]) -> str:
+    observed = [as_float(value) for value in values]
+    observed = [value for value in observed if value is not None]
+    if observed:
+        return "profitable_shadow" if max(observed) > 0.0 else "nonprofitable_shadow"
+    if any(str(value or "").strip().lower() == "pending" for value in values):
+        return "pending"
+    return "not_observable"
+
+
+def build_bnb_strong_alpha6_bypass_rows(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    future_net_bps: Mapping[int, Any] | None = None,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    future_net_bps = future_net_bps or {}
+    for row in rows:
+        if not is_bnb_strong_alpha6_bypass_candidate(row):
+            continue
+        futures = {h: first_observed(future_net_bps.get(h)) for h in (4, 8, 12, 24)}
+        block_text = " ".join(
+            str(value or "").strip().lower()
+            for value in (row.get("block_reason"), row.get("no_signal_reason"), row.get("final_decision"))
+        )
+        out.append(
+            {
+                "run_id": first_observed(row.get("run_id")),
+                "ts_utc": first_observed(row.get("ts_utc"), row.get("timestamp"), row.get("ts")),
+                "strategy_id": STRATEGY_ID,
+                "symbol": "BNB/USDT",
+                "final_score": first_observed(row.get("final_score")),
+                "alpha6_score": first_observed(row.get("alpha6_score")),
+                "f3": first_observed(row.get("f3"), row.get("f3_vol_adj_ret")),
+                "f4": first_observed(row.get("f4"), row.get("f4_volume_expansion")),
+                "f5": first_observed(row.get("f5"), row.get("f5_rsi_trend_confirm")),
+                "expected_edge_bps": first_observed(row.get("expected_edge_bps")),
+                "required_edge_bps": first_observed(row.get("required_edge_bps")),
+                "final_decision": first_observed(row.get("final_decision")),
+                "block_reason": first_observed(row.get("block_reason")),
+                "no_signal_reason": first_observed(row.get("no_signal_reason")),
+                "would_bypass_negative_expectancy": str("negative_expectancy" in block_text).lower(),
+                "future_4h_net_bps": futures[4],
+                "future_8h_net_bps": futures[8],
+                "future_12h_net_bps": futures[12],
+                "future_24h_net_bps": futures[24],
+                "outcome": shadow_outcome([futures[4], futures[8], futures[12], futures[24]]),
+                "live_order_effect": "read_only_no_live_order",
+            }
+        )
+    out.sort(key=lambda item: (str(item.get("ts_utc") or ""), str(item.get("run_id") or "")))
+    return out
+
+
+def write_bnb_strong_alpha6_bypass_report(rows: Iterable[Mapping[str, Any]], output_path: Path) -> list[dict[str, Any]]:
+    report_rows = build_bnb_strong_alpha6_bypass_rows(rows)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=BYPASS_SHADOW_FIELDS)
+        writer.writeheader()
+        writer.writerows(report_rows)
+    return report_rows

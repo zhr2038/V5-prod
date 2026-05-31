@@ -1971,6 +1971,61 @@ def test_risk_on_multi_buy_prefers_detail_file_selected_symbols(tmp_path: Path) 
     assert row["source_detail_available"] == "True"
 
 
+def test_risk_on_multi_buy_reads_reports_raw_reports_detail_file(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    reports_dir = tmp_path / "reports"
+    run_dir = reports_dir / "runs" / "r_risk_on_reports_raw"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        reports_dir,
+        [
+            {
+                "strategy_candidate": "v5.risk_on_multi_buy_top1_shadow",
+                "decision": "KEEP_SHADOW",
+                "recommended_mode": "shadow",
+                "current_regime": "ALT_IMPULSE",
+                "symbol": "MULTI",
+                **_fresh_meta(start_s),
+            }
+        ],
+    )
+    detail_path = reports_dir / "raw" / "reports" / "risk_on_multi_buy_shadow.csv"
+    detail_path.parent.mkdir(parents=True, exist_ok=True)
+    with detail_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(
+            fh,
+            fieldnames=["run_id", "decision_ts", "top_k", "current_regime", "selected_symbols", "would_buy_symbol"],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "run_id": "r_risk_on_reports_raw",
+                "decision_ts": "2026-05-26T00:00:00Z",
+                "top_k": "1",
+                "current_regime": "ALT_IMPULSE",
+                "selected_symbols": '["BNB-USDT"]',
+                "would_buy_symbol": "BNB-USDT",
+            }
+        )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_risk_on_reports_raw", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["risk_on_multi_buy_shadow_rows"] == 1
+    rows = _read_csv(reports_dir / "summaries" / "risk_on_multi_buy_shadow.csv")
+    row = rows[0]
+    assert json.loads(row["selected_symbols"]) == ["BNB/USDT"]
+    assert json.loads(row["would_buy_symbols"]) == ["BNB/USDT"]
+    assert row["source_detail_available"] == "True"
+
+
 def test_risk_on_multi_buy_reads_quant_lab_bundle_reports_member(tmp_path: Path) -> None:
     cfg = _cfg()
     cfg.quant_lab.enabled = True

@@ -255,6 +255,7 @@ from src.risk.auto_risk_guard import extract_risk_level, get_auto_risk_guard  # 
 from src.risk.negative_expectancy_cooldown import (
     NegativeExpectancyCooldown,
     NegativeExpectancyConfig,
+    negative_expectancy_adjusted_block_audit,
     negative_expectancy_config_fingerprint,
 )
 from src.reporting.decision_audit import DecisionAudit
@@ -3695,6 +3696,11 @@ class V5Pipeline:
         fast_fail_breach = float(fast_fail_net_expectancy_bps) <= float(fast_fail_floor_bps)
         if not (net_breach or fast_fail_breach):
             return None
+        attribution_audit = negative_expectancy_adjusted_block_audit(
+            stat or {},
+            net_floor_bps=float(net_floor_bps),
+            fast_fail_floor_bps=float(fast_fail_floor_bps),
+        )
 
         return {
             "symbol": str(symbol),
@@ -3703,9 +3709,15 @@ class V5Pipeline:
             "closed_cycles": int(closed_cycles),
             "net_expectancy_bps": float(net_expectancy_bps),
             "adjusted_entry_expectancy_bps": float(adjusted_entry_expectancy_bps),
-            "entry_bad_cycles": int((stat or {}).get("entry_bad_cycles") or 0),
-            "exit_bad_cycles": int((stat or {}).get("exit_bad_cycles") or 0),
-            "min_hold_violation_cycles": int((stat or {}).get("min_hold_violation_cycles") or 0),
+            "entry_bad_cycles": int(attribution_audit.get("entry_bad_cycles") or 0),
+            "exit_bad_cycles": int(attribution_audit.get("exit_bad_cycles") or 0),
+            "min_hold_violation_cycles": int(attribution_audit.get("min_hold_violation_cycles") or 0),
+            "gave_back_profit_cycles": int(attribution_audit.get("gave_back_profit_cycles") or 0),
+            "trailing_too_early_cycles": int(attribution_audit.get("trailing_too_early_cycles") or 0),
+            "raw_would_block": bool(attribution_audit.get("raw_would_block")),
+            "adjusted_would_block": bool(attribution_audit.get("adjusted_would_block")),
+            "would_unblock_if_adjusted": bool(attribution_audit.get("would_unblock_if_adjusted")),
+            "block_attribution_conflict": bool(attribution_audit.get("block_attribution_conflict")),
             "fast_fail_net_expectancy_bps": float(fast_fail_net_expectancy_bps),
             "net_floor_bps": float(net_floor_bps),
             "fast_fail_floor_bps": float(fast_fail_floor_bps),

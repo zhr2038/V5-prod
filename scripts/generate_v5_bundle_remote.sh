@@ -23,6 +23,14 @@ from collections import Counter, defaultdict, deque
 from pathlib import Path
 
 ROOT = Path(sys.argv[1]).resolve()
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from src.reporting.bnb_strong_alpha6_bypass_shadow import (
+    is_bnb_strong_alpha6_bypass_candidate as report_bnb_strong_alpha6_bypass_candidate,
+)
+from src.reporting.final_score_alpha6_conflict import (
+    is_final_score_alpha6_conflict_candidate as report_final_score_alpha6_conflict_candidate,
+)
 NOW = dt.datetime.now(dt.timezone.utc)
 STAMP = NOW.strftime("%Y%m%dT%H%M%SZ")
 BUNDLE_STEM = f"v5_live_followup_bundle_{STAMP}"
@@ -378,6 +386,8 @@ FINAL_SCORE_ALPHA6_CONFLICT_FIELDS = (
 BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS = (
     "run_id",
     "ts_utc",
+    "strategy_id",
+    "symbol",
     "final_score",
     "alpha6_score",
     "f3",
@@ -394,6 +404,7 @@ BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS = (
     "future_12h_net_bps",
     "future_24h_net_bps",
     "outcome",
+    "live_order_effect",
 )
 ORDER_LIFECYCLE_FIELDS = (
     "schema_version",
@@ -1063,6 +1074,7 @@ def copy_current_reports():
         ("reports/quant_lab/latest/reports/strategy_opportunity_advisory.csv", "raw/reports/quant_lab/latest/reports/strategy_opportunity_advisory.csv"),
         ("raw/reports/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
         ("reports/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
+        ("reports/raw/reports/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
         ("reports/quant_lab/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
         ("reports/quant_lab_latest/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
         ("reports/quant_lab_latest/reports/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
@@ -7354,23 +7366,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         return configured if configured is not None else 0.0
 
     def is_final_score_alpha6_conflict_candidate(row):
-        symbol = normalize_symbol_text(row.get("symbol"))
-        if symbol not in CONFLICT_SYMBOLS:
-            return False
-        if str(row.get("alpha6_side") or "").strip().lower() != "buy":
-            return False
-        alpha6_score = as_float(row.get("alpha6_score"))
-        if alpha6_score is None or alpha6_score < 0.9:
-            return False
-        expected = as_float(row.get("expected_edge_bps"))
-        required = as_float(row.get("required_edge_bps"))
-        if expected is None or required is None or expected <= required:
-            return False
-        if not truthy(row.get("cost_gate_verified")):
-            return False
-        final_score = as_float(row.get("final_score"))
-        final_decision = str(row.get("final_decision") or "").strip().lower()
-        return (final_score is not None and final_score < 0.0) or final_decision in {"no_order", "blocked"}
+        return report_final_score_alpha6_conflict_candidate(row, symbols=CONFLICT_SYMBOLS)
 
     def final_score_negative_expectancy_stats(symbol):
         entry = multi_shadow_negative_expectancy_entry(symbol)
@@ -7503,27 +7499,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         return False
 
     def is_bnb_strong_alpha6_bypass_shadow_candidate(row):
-        if normalize_symbol_text(row.get("symbol")) != "BNB/USDT":
-            return False
-        if str(row.get("alpha6_side") or "").strip().lower() != "buy":
-            return False
-        alpha6_score = as_float(row.get("alpha6_score"))
-        if alpha6_score is None or alpha6_score < 0.9:
-            return False
-        expected = as_float(row.get("expected_edge_bps"))
-        required = as_float(row.get("required_edge_bps"))
-        if expected is None or required is None or expected <= required:
-            return False
-        if not truthy_text(row.get("cost_gate_verified")):
-            return False
-        f3 = as_float(first_observed(row.get("f3"), row.get("f3_vol_adj_ret"), not_obs))
-        f4 = as_float(first_observed(row.get("f4"), row.get("f4_volume_expansion"), not_obs))
-        if not ((f4 is not None and f4 >= 1.0) or (f3 is not None and f3 >= 10.0)):
-            return False
-        regime_norm = candidate_regime_text(row).replace("-", "_").replace(" ", "_").upper()
-        if regime_norm in {"TRENDING", "TREND_UP", "ALT_IMPULSE"}:
-            return True
-        return candidate_broad_market_positive(row)
+        return report_bnb_strong_alpha6_bypass_candidate(row)
 
     def bnb_strong_alpha6_shadow_outcome(future_values):
         observed = [as_float(value) for value in future_values]
@@ -7557,6 +7533,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             out.append({
                 "run_id": first_observed(row.get("run_id"), not_obs),
                 "ts_utc": ts_text,
+                "strategy_id": "BNB_STRONG_ALPHA6_BYPASS_SHADOW_V1",
+                "symbol": symbol,
                 "final_score": first_observed(row.get("final_score"), not_obs),
                 "alpha6_score": first_observed(row.get("alpha6_score"), not_obs),
                 "f3": first_observed(row.get("f3"), row.get("f3_vol_adj_ret"), not_obs),
@@ -7573,6 +7551,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "future_12h_net_bps": future[12],
                 "future_24h_net_bps": future[24],
                 "outcome": bnb_strong_alpha6_shadow_outcome([future[4], future[8], future[12], future[24]]),
+                "live_order_effect": "read_only_no_live_order",
             })
         out.sort(key=lambda item: (flatten_value(item.get("ts_utc")), flatten_value(item.get("run_id"))))
         return out
@@ -11985,6 +11964,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             OUT / "raw" / "reports" / "risk_on_multi_buy_shadow.csv",
             ROOT / "raw" / "reports" / "risk_on_multi_buy_shadow.csv",
             ROOT / "reports" / "risk_on_multi_buy_shadow.csv",
+            ROOT / "reports" / "raw" / "reports" / "risk_on_multi_buy_shadow.csv",
             ROOT / "reports" / "quant_lab" / "risk_on_multi_buy_shadow.csv",
             ROOT / "reports" / "quant_lab_latest" / "risk_on_multi_buy_shadow.csv",
             ROOT / "reports" / "quant_lab_latest" / "reports" / "risk_on_multi_buy_shadow.csv",
@@ -11993,6 +11973,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             ROOT / "reports" / "quant_lab" / "latest" / "raw" / "reports" / "risk_on_multi_buy_shadow.csv",
             Path("/var/lib/v5-prod/raw/reports/risk_on_multi_buy_shadow.csv"),
             Path("/var/lib/v5-prod/reports/risk_on_multi_buy_shadow.csv"),
+            Path("/var/lib/v5-prod/reports/raw/reports/risk_on_multi_buy_shadow.csv"),
             Path("/var/lib/v5-prod/quant_lab_latest/reports/risk_on_multi_buy_shadow.csv"),
             Path("/var/lib/v5-prod/quant_lab_latest/raw/reports/risk_on_multi_buy_shadow.csv"),
             Path("/var/lib/v5-prod/quant_lab/latest/raw/reports/risk_on_multi_buy_shadow.csv"),
@@ -13672,8 +13653,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- would_bypass_negative_expectancy_count: {window_summary.get('bnb_strong_alpha6_bypass_negative_expectancy_count', not_obs)}",
         f"- outcome_mix: {window_summary.get('bnb_strong_alpha6_bypass_outcome_mix', not_obs)}",
         "- strategy_id: BNB_STRONG_ALPHA6_BYPASS_SHADOW_V1",
-        "- trigger: BNB alpha6 buy >= 0.9, expected_edge_bps > required_edge_bps, cost_gate_verified=true, f4>=1.0 or f3>=10, and trending/ALT_IMPULSE/broad-positive market context.",
-        "- live_order_effect: none_shadow_only",
+        "- trigger: BNB alpha6 buy >= 0.9, expected_edge_bps > required_edge_bps, cost_gate_verified=true, and f4>=1.0 or f3>=10.",
+        "- live_order_effect: read_only_no_live_order",
         "- output: summaries/bnb_strong_alpha6_bypass_shadow.csv",
         "",
         "## Final score vs Alpha6 conflict audit",

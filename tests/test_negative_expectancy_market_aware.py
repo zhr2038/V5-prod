@@ -541,6 +541,10 @@ def test_protect_alt_short_cycle_blocks_bnb_fast_fail_negative_expectancy(tmp_pa
     assert decision["fast_fail_net_expectancy_bps"] == -36.55
     assert decision["net_floor_bps"] == -20.0
     assert decision["fast_fail_floor_bps"] == -30.0
+    assert decision["raw_would_block"] is True
+    assert decision["adjusted_would_block"] is True
+    assert decision["would_unblock_if_adjusted"] is False
+    assert decision["block_attribution_conflict"] is False
     assert audit.counts["protect_alt_short_cycle_negative_expectancy_count"] == 1
 
 
@@ -595,6 +599,39 @@ def test_protect_alt_short_cycle_uses_adjusted_entry_expectancy_bps(tmp_path: Pa
     assert not any(
         d.get("reason") == "protect_alt_short_cycle_negative_expectancy" for d in audit.router_decisions
     )
+
+
+def test_protect_alt_short_cycle_decision_includes_attribution_unblock_audit(tmp_path: Path) -> None:
+    out, audit = _run_alt_short_cycle_guard_case(
+        tmp_path,
+        stats={
+            "closed_cycles": 2,
+            "net_expectancy_bps": -142.89,
+            "adjusted_entry_expectancy_bps": 0.0,
+            "fast_fail_closed_cycles": 1,
+            "fast_fail_net_expectancy_bps": -142.89,
+            "entry_bad_cycles": 0,
+            "exit_bad_cycles": 1,
+            "min_hold_violation_cycles": 1,
+            "gave_back_profit_cycles": 1,
+            "trailing_too_early_cycles": 1,
+        },
+    )
+
+    assert not out.orders
+    decision = next(
+        d for d in audit.router_decisions if d.get("reason") == "protect_alt_short_cycle_negative_expectancy"
+    )
+    assert decision["entry_bad_cycles"] == 0
+    assert decision["exit_bad_cycles"] == 1
+    assert decision["min_hold_violation_cycles"] == 1
+    assert decision["gave_back_profit_cycles"] == 1
+    assert decision["trailing_too_early_cycles"] == 1
+    assert decision["adjusted_entry_expectancy_bps"] == 0.0
+    assert decision["raw_would_block"] is True
+    assert decision["adjusted_would_block"] is True
+    assert decision["would_unblock_if_adjusted"] is True
+    assert decision["block_attribution_conflict"] is True
 
 
 def test_buy_order_meta_includes_expected_edge_score_proxy(tmp_path: Path) -> None:

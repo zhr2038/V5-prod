@@ -5651,6 +5651,7 @@ def main():
             assert float(shadow["future_4h_net_bps"]) > 400.0, shadow
             assert float(shadow["future_24h_net_bps"]) > 1100.0, shadow
             assert shadow["outcome"] == "profitable_shadow", shadow
+            assert shadow["live_order_effect"] == "read_only_no_live_order", shadow
             assert window["bnb_strong_alpha6_bypass_shadow_rows"] == 1, window
             assert window["bnb_strong_alpha6_bypass_negative_expectancy_count"] == 1, window
             assert manifest["bnb_strong_alpha6_bypass_shadow_rows"] == 1, manifest
@@ -5659,7 +5660,7 @@ def main():
             assert "summaries/final_score_vs_alpha6_conflict.csv" in readme, readme
             assert "BNB strong Alpha6 bypass shadow" in readme, readme
             assert "summaries/bnb_strong_alpha6_bypass_shadow.csv" in readme, readme
-            assert "live_order_effect: none_shadow_only" in readme, readme
+            assert "live_order_effect: read_only_no_live_order" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
