@@ -311,7 +311,231 @@ class NegativeExpectancyCooldown:
             "closed_cycles_included_by_close_ts": 0.0,
             "closed_cycles_with_entry_before_window": 0.0,
             "missing_entry_leg_count": 0.0,
+            "premature_soft_exit_count": 0.0,
+            "premature_soft_exit_net_bps_sum": 0.0,
+            "premature_soft_exit_net_pnl_sum_usdt": 0.0,
+            "premature_soft_exit_closed_notional_usdt": 0.0,
+            "excluded_from_fast_fail_count": 0.0,
         }
+
+    @staticmethod
+    def _truthy(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _falsey_or_missing(value: Any) -> bool:
+        if value is None or str(value).strip() == "":
+            return True
+        if isinstance(value, bool):
+            return not value
+        return str(value).strip().lower() in {"0", "false", "no", "off"}
+
+    @staticmethod
+    def _json_obj(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        try:
+            parsed = json.loads(str(value or "{}"))
+        except Exception:
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+
+    @classmethod
+    def _order_meta_from_req_json(cls, value: Any) -> Dict[str, Any]:
+        req = cls._json_obj(value)
+        meta = req.get("_v5_order_meta")
+        return dict(meta) if isinstance(meta, dict) else {}
+
+    @staticmethod
+    def _missing_value(value: Any) -> bool:
+        if value is None:
+            return True
+        text = str(value).strip()
+        return text == "" or text.lower() in {"none", "null", "not_observable"}
+
+    @classmethod
+    def _expanded_exit_metadata(cls, row: Dict[str, Any]) -> Dict[str, Any]:
+        out = dict(row or {})
+
+        def merge_missing(mapping: Dict[str, Any]) -> None:
+            for key, value in mapping.items():
+                if cls._missing_value(out.get(key)):
+                    out[key] = value
+
+        for key in ("raw_meta", "raw_json", "req_json"):
+            obj = cls._json_obj(out.get(key))
+            if not obj:
+                continue
+            meta = obj.get("_v5_order_meta")
+            if isinstance(meta, dict):
+                merge_missing(dict(meta))
+            merge_missing(obj)
+        return out
+
+    @classmethod
+    def _diagnostic_text(cls, row: Dict[str, Any]) -> str:
+        parts: list[str] = []
+        for key in (
+            "diagnosis",
+            "issue_code",
+            "issue",
+            "router_reason",
+            "reason",
+            "min_hold_block_reason",
+            "blocked_exit_reason",
+            "raw_json",
+            "raw_meta",
+        ):
+            value = row.get(key)
+            if value is not None:
+                parts.append(str(value))
+        return " ".join(parts).lower()
+
+    @classmethod
+    def _is_premature_swing_soft_exit(cls, row: Dict[str, Any]) -> bool:
+        row = cls._expanded_exit_metadata(row)
+        if not cls._truthy(row.get("swing_hold_position")):
+            return False
+        reason = str(row.get("exit_reason") or row.get("reason") or row.get("source_reason") or "").strip().lower()
+        soft_reasons = {"atr_trailing", "zero_target_close", "rank_exit", "regime_exit"}
+        if reason not in soft_reasons and not any(reason.startswith(f"{prefix}_") for prefix in ("rank_exit", "regime_exit")):
+            return False
+        hold_hours = cls._coerce_float(row.get("hold_hours") or row.get("held_hours"))
+        if hold_hours is None:
+            hold_minutes = cls._coerce_float(row.get("hold_minutes") or row.get("held_minutes"))
+            if hold_minutes is not None:
+                hold_hours = float(hold_minutes) / 60.0
+        min_hold_hours = cls._coerce_float(
+            row.get("swing_min_hold_hours")
+            or row.get("min_hold_hours")
+            or row.get("required_hold_hours")
+        )
+        if hold_hours is None or min_hold_hours is None or not float(hold_hours) < float(min_hold_hours):
+            return False
+        priority = str(row.get("exit_priority") or "").strip().lower()
+        if priority and priority != "soft":
+            return False
+        if not priority and reason not in soft_reasons and not reason.startswith(("rank_exit", "regime_exit")):
+            return False
+        if not cls._falsey_or_missing(row.get("exit_blocked_by_min_hold")):
+            return False
+        diagnostic = cls._diagnostic_text(row)
+        markers = (
+            "soft_exit_violated_swing_min_hold",
+            "swing_soft_exit_before_min_hold_filled",
+            "post_fix_soft_exit_before_min_hold",
+        )
+        if any(marker in diagnostic for marker in markers):
+            return True
+        return cls._truthy(row.get("exited_before_min_hold")) and (
+            priority == "soft"
+            or reason in soft_reasons
+            or reason.startswith(("rank_exit", "regime_exit"))
+        )
+
+    @classmethod
+    def _record_premature_soft_exit(
+        cls,
+        st: Dict[str, float],
+        *,
+        net_pnl: float,
+        notional: float,
+        net_bps: Optional[float],
+        excluded_from_fast_fail: bool,
+    ) -> None:
+        observed_net_bps = float(net_bps) if net_bps is not None else (
+            float(net_pnl) / float(notional) * 10000.0 if float(notional) > 1e-12 else 0.0
+        )
+        st["premature_soft_exit_count"] += 1.0
+        st["premature_soft_exit_net_bps_sum"] += float(observed_net_bps)
+        st["premature_soft_exit_net_pnl_sum_usdt"] += float(net_pnl)
+        st["premature_soft_exit_closed_notional_usdt"] += float(notional)
+        if excluded_from_fast_fail:
+            st["excluded_from_fast_fail_count"] += 1.0
+
+    @classmethod
+    def _record_fast_fail_or_premature_soft_exit(
+        cls,
+        st: Dict[str, float],
+        *,
+        row: Dict[str, Any],
+        gross_pnl: float,
+        net_pnl: float,
+        notional: float,
+        hold_ms: float,
+        fast_fail_hold_ms: int,
+        net_bps: Optional[float] = None,
+    ) -> None:
+        ctx = cls._expanded_exit_metadata(row)
+        ctx.setdefault("hold_minutes", float(hold_ms) / 60000.0)
+        ctx.setdefault("hold_hours", float(hold_ms) / 3600000.0)
+        if net_bps is not None:
+            ctx.setdefault("net_bps", float(net_bps))
+
+        fast_fail_candidate = bool(fast_fail_hold_ms > 0 and float(hold_ms) <= float(fast_fail_hold_ms))
+        premature_soft_exit = cls._is_premature_swing_soft_exit(ctx)
+        if premature_soft_exit:
+            cls._record_premature_soft_exit(
+                st,
+                net_pnl=float(net_pnl),
+                notional=float(notional),
+                net_bps=net_bps,
+                excluded_from_fast_fail=fast_fail_candidate,
+            )
+            if fast_fail_candidate:
+                return
+
+        if fast_fail_candidate:
+            st["fast_fail_closed_cycles"] += 1.0
+            st["fast_fail_gross_pnl_sum_usdt"] += float(gross_pnl)
+            st["fast_fail_net_pnl_sum_usdt"] += float(net_pnl)
+            st["fast_fail_closed_notional_usdt"] += float(notional)
+            st["fast_fail_hold_minutes_sum"] += float(hold_ms / 60000.0)
+
+    def _load_order_meta_by_id(self) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+        p = Path(self.cfg.orders_db_path)
+        if not p.exists():
+            return {}, {}
+        by_clid: Dict[str, Dict[str, Any]] = {}
+        by_oid: Dict[str, Dict[str, Any]] = {}
+        conn = None
+        try:
+            conn = sqlite3.connect(str(p))
+            conn.row_factory = sqlite3.Row
+            col_rows = conn.execute("PRAGMA table_info(orders)").fetchall()
+            cols = {str(r["name"]) for r in col_rows}
+            if "req_json" not in cols:
+                return {}, {}
+            id_cols = [col for col in ("cl_ord_id", "ord_id") if col in cols]
+            if not id_cols:
+                return {}, {}
+            rows = conn.execute(
+                f"SELECT {', '.join(id_cols)}, req_json FROM orders WHERE req_json IS NOT NULL"
+            ).fetchall()
+            for row in rows:
+                meta = self._order_meta_from_req_json(row["req_json"])
+                if not meta:
+                    continue
+                if "cl_ord_id" in row.keys():
+                    clid = str(row["cl_ord_id"] or "").strip()
+                    if clid:
+                        by_clid[clid] = dict(meta)
+                if "ord_id" in row.keys():
+                    oid = str(row["ord_id"] or "").strip()
+                    if oid:
+                        by_oid[oid] = dict(meta)
+        except Exception:
+            return by_clid, by_oid
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return by_clid, by_oid
 
     @staticmethod
     def _build_expectancy_row(
@@ -332,6 +556,11 @@ class NegativeExpectancyCooldown:
         closed_cycles_included_by_close_ts: float = 0.0,
         closed_cycles_with_entry_before_window: float = 0.0,
         missing_entry_leg_count: float = 0.0,
+        premature_soft_exit_count: float = 0.0,
+        premature_soft_exit_net_bps_sum: float = 0.0,
+        premature_soft_exit_net_pnl_sum_usdt: float = 0.0,
+        premature_soft_exit_closed_notional_usdt: float = 0.0,
+        excluded_from_fast_fail_count: float = 0.0,
         lookback_filter_mode: str = "close_ts",
     ) -> Dict[str, Any]:
         n = int(closed_cycles or 0)
@@ -398,6 +627,12 @@ class NegativeExpectancyCooldown:
             "fast_fail_net_expectancy_usdt": float(fast_fail_net_expectancy_usdt),
             "fast_fail_gross_expectancy_bps": float(fast_fail_gross_expectancy_bps),
             "fast_fail_net_expectancy_bps": float(fast_fail_net_expectancy_bps),
+            "adjusted_fast_fail_net_expectancy_bps": float(fast_fail_net_expectancy_bps),
+            "premature_soft_exit_count": int(premature_soft_exit_count or 0),
+            "premature_soft_exit_net_bps_sum": float(premature_soft_exit_net_bps_sum or 0.0),
+            "premature_soft_exit_net_pnl_sum_usdt": float(premature_soft_exit_net_pnl_sum_usdt or 0.0),
+            "premature_soft_exit_closed_notional_usdt": float(premature_soft_exit_closed_notional_usdt or 0.0),
+            "excluded_from_fast_fail_count": int(excluded_from_fast_fail_count or 0),
             # legacy compatibility
             "fast_fail_pnl_sum_usdt": float(fast_fail_gross_pnl_sum_usdt),
             "fast_fail_expectancy_usdt": float(fast_fail_gross_expectancy_usdt),
@@ -476,7 +711,7 @@ class NegativeExpectancyCooldown:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
-                SELECT inst_id, side, fill_px, fill_sz, fee, fee_ccy, ts_ms
+                SELECT inst_id, trade_id, ord_id, cl_ord_id, side, fill_px, fill_sz, fee, fee_ccy, ts_ms, raw_json
                 FROM fills
                 WHERE fill_px IS NOT NULL
                   AND fill_sz IS NOT NULL
@@ -494,6 +729,7 @@ class NegativeExpectancyCooldown:
         inv_lots: Dict[str, list[Dict[str, float]]] = {}
         by_symbol: Dict[str, Dict[str, float]] = {}
         fast_fail_hold_ms = max(0, int(self.cfg.fast_fail_max_hold_minutes)) * 60 * 1000
+        order_meta_by_clid, order_meta_by_oid = self._load_order_meta_by_id()
 
         for r in rows:
             inst_id = str(r["inst_id"] or "")
@@ -509,6 +745,18 @@ class NegativeExpectancyCooldown:
                 continue
             if qty <= 0 or px <= 0 or event_ts <= 0 or side not in {"buy", "sell"}:
                 continue
+
+            event_meta: Dict[str, Any] = {}
+            clid = str(r["cl_ord_id"] or "").strip()
+            oid = str(r["ord_id"] or "").strip()
+            if clid:
+                event_meta.update(order_meta_by_clid.get(clid, {}))
+            if oid:
+                for key, value in order_meta_by_oid.get(oid, {}).items():
+                    event_meta.setdefault(key, value)
+            event_meta.setdefault("raw_json", r["raw_json"])
+            event_meta.setdefault("cl_ord_id", clid)
+            event_meta.setdefault("ord_id", oid)
 
             fee_cost_usdt = self._fee_to_usdt_cost(
                 fee=r["fee"],
@@ -526,6 +774,7 @@ class NegativeExpectancyCooldown:
                         "px": px,
                         "ts": float(event_ts),
                         "fee_cost_usdt_remaining": float(fee_cost_usdt),
+                        "meta": dict(event_meta),
                     }
                 )
                 continue
@@ -561,12 +810,22 @@ class NegativeExpectancyCooldown:
                     st["net_pnl_sum_usdt"] += float(net_pnl)
                     st["closed_notional_usdt"] += float(buy_notional)
                     st["last_close_ts_ms"] = max(float(st.get("last_close_ts_ms") or 0.0), float(event_ts))
-                    if fast_fail_hold_ms > 0 and hold_ms <= fast_fail_hold_ms:
-                        st["fast_fail_closed_cycles"] += 1.0
-                        st["fast_fail_gross_pnl_sum_usdt"] += float(gross_pnl)
-                        st["fast_fail_net_pnl_sum_usdt"] += float(net_pnl)
-                        st["fast_fail_closed_notional_usdt"] += float(buy_notional)
-                        st["fast_fail_hold_minutes_sum"] += float(hold_ms / 60000.0)
+                    ctx = dict(lot.get("meta") or {})
+                    ctx.update(event_meta)
+                    ctx.setdefault("exit_reason", ctx.get("reason") or ctx.get("source_reason"))
+                    ctx.setdefault("hold_minutes", float(hold_ms / 60000.0))
+                    ctx.setdefault("hold_hours", float(hold_ms / 3600000.0))
+                    net_bps = float(net_pnl) / float(buy_notional) * 10000.0 if float(buy_notional) > 1e-12 else None
+                    self._record_fast_fail_or_premature_soft_exit(
+                        st,
+                        row=ctx,
+                        gross_pnl=float(gross_pnl),
+                        net_pnl=float(net_pnl),
+                        notional=float(buy_notional),
+                        hold_ms=float(hold_ms),
+                        fast_fail_hold_ms=int(fast_fail_hold_ms),
+                        net_bps=net_bps,
+                    )
 
                 remaining = max(0.0, remaining - close_qty)
                 sell_fee_remaining = float(sell_fee_remaining - sell_fee_alloc)
@@ -605,6 +864,11 @@ class NegativeExpectancyCooldown:
                 closed_cycles_included_by_close_ts=float(st.get("closed_cycles_included_by_close_ts") or 0.0),
                 closed_cycles_with_entry_before_window=float(st.get("closed_cycles_with_entry_before_window") or 0.0),
                 missing_entry_leg_count=float(st.get("missing_entry_leg_count") or 0.0),
+                premature_soft_exit_count=float(st.get("premature_soft_exit_count") or 0.0),
+                premature_soft_exit_net_bps_sum=float(st.get("premature_soft_exit_net_bps_sum") or 0.0),
+                premature_soft_exit_net_pnl_sum_usdt=float(st.get("premature_soft_exit_net_pnl_sum_usdt") or 0.0),
+                premature_soft_exit_closed_notional_usdt=float(st.get("premature_soft_exit_closed_notional_usdt") or 0.0),
+                excluded_from_fast_fail_count=float(st.get("excluded_from_fast_fail_count") or 0.0),
                 lookback_filter_mode="close_ts",
             )
         return out
@@ -632,31 +896,33 @@ class NegativeExpectancyCooldown:
             conn.row_factory = sqlite3.Row
             col_rows = conn.execute("PRAGMA table_info(orders)").fetchall()
             cols = {str(r["name"]) for r in col_rows}
+            extra_cols = [col for col in ("cl_ord_id", "ord_id", "intent", "req_json") if col in cols]
+            extra_select = (", " + ", ".join(extra_cols)) if extra_cols else ""
             if "updated_ts" in cols and "created_ts" in cols:
                 sql = """
-                    SELECT inst_id, side, state, acc_fill_sz, avg_px, fee,
+                    SELECT inst_id, side, state, acc_fill_sz, avg_px, fee{extra_select},
                            COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts
                     FROM orders
                     WHERE state='FILLED'
                       AND acc_fill_sz IS NOT NULL AND avg_px IS NOT NULL
                     ORDER BY inst_id, COALESCE(NULLIF(updated_ts, 0), created_ts) ASC
-                """
+                """.format(extra_select=extra_select)
             elif "created_ts" in cols:
                 sql = """
-                    SELECT inst_id, side, state, acc_fill_sz, avg_px, fee, created_ts AS event_ts
+                    SELECT inst_id, side, state, acc_fill_sz, avg_px, fee{extra_select}, created_ts AS event_ts
                     FROM orders
                     WHERE state='FILLED'
                       AND acc_fill_sz IS NOT NULL AND avg_px IS NOT NULL
                     ORDER BY inst_id, created_ts ASC
-                """
+                """.format(extra_select=extra_select)
             elif "updated_ts" in cols:
                 sql = """
-                    SELECT inst_id, side, state, acc_fill_sz, avg_px, fee, updated_ts AS event_ts
+                    SELECT inst_id, side, state, acc_fill_sz, avg_px, fee{extra_select}, updated_ts AS event_ts
                     FROM orders
                     WHERE state='FILLED'
                       AND acc_fill_sz IS NOT NULL AND avg_px IS NOT NULL
                     ORDER BY inst_id, updated_ts ASC
-                """
+                """.format(extra_select=extra_select)
             else:
                 return {}
             rows = conn.execute(sql).fetchall()
@@ -686,6 +952,15 @@ class NegativeExpectancyCooldown:
             if qty <= 0 or px <= 0 or event_ts <= 0 or side not in {"buy", "sell"}:
                 continue
 
+            row_keys = set(r.keys())
+            event_meta = self._order_meta_from_req_json(r["req_json"]) if "req_json" in row_keys else {}
+            if "intent" in row_keys:
+                event_meta.setdefault("intent", r["intent"])
+            if "cl_ord_id" in row_keys:
+                event_meta.setdefault("cl_ord_id", r["cl_ord_id"])
+            if "ord_id" in row_keys:
+                event_meta.setdefault("ord_id", r["ord_id"])
+
             fee_cost_usdt = self._orders_fee_to_usdt_best_effort(fee=r["fee"])
 
             inv_lots.setdefault(sym, [])
@@ -697,6 +972,7 @@ class NegativeExpectancyCooldown:
                         "px": px,
                         "ts": float(event_ts),
                         "fee_cost_usdt_remaining": float(fee_cost_usdt),
+                        "meta": dict(event_meta),
                     }
                 )
                 continue
@@ -732,12 +1008,22 @@ class NegativeExpectancyCooldown:
                     st["net_pnl_sum_usdt"] += float(net_pnl)
                     st["closed_notional_usdt"] += float(buy_notional)
                     st["last_close_ts_ms"] = max(float(st.get("last_close_ts_ms") or 0.0), float(event_ts))
-                    if fast_fail_hold_ms > 0 and hold_ms <= fast_fail_hold_ms:
-                        st["fast_fail_closed_cycles"] += 1.0
-                        st["fast_fail_gross_pnl_sum_usdt"] += float(gross_pnl)
-                        st["fast_fail_net_pnl_sum_usdt"] += float(net_pnl)
-                        st["fast_fail_closed_notional_usdt"] += float(buy_notional)
-                        st["fast_fail_hold_minutes_sum"] += float(hold_ms / 60000.0)
+                    ctx = dict(lot.get("meta") or {})
+                    ctx.update(event_meta)
+                    ctx.setdefault("exit_reason", ctx.get("reason") or ctx.get("source_reason"))
+                    ctx.setdefault("hold_minutes", float(hold_ms / 60000.0))
+                    ctx.setdefault("hold_hours", float(hold_ms / 3600000.0))
+                    net_bps = float(net_pnl) / float(buy_notional) * 10000.0 if float(buy_notional) > 1e-12 else None
+                    self._record_fast_fail_or_premature_soft_exit(
+                        st,
+                        row=ctx,
+                        gross_pnl=float(gross_pnl),
+                        net_pnl=float(net_pnl),
+                        notional=float(buy_notional),
+                        hold_ms=float(hold_ms),
+                        fast_fail_hold_ms=int(fast_fail_hold_ms),
+                        net_bps=net_bps,
+                    )
 
                 remaining = max(0.0, remaining - close_qty)
                 sell_fee_remaining = float(sell_fee_remaining - sell_fee_alloc)
@@ -778,6 +1064,11 @@ class NegativeExpectancyCooldown:
                 closed_cycles_included_by_close_ts=float(st.get("closed_cycles_included_by_close_ts") or 0.0),
                 closed_cycles_with_entry_before_window=float(st.get("closed_cycles_with_entry_before_window") or 0.0),
                 missing_entry_leg_count=float(st.get("missing_entry_leg_count") or 0.0),
+                premature_soft_exit_count=float(st.get("premature_soft_exit_count") or 0.0),
+                premature_soft_exit_net_bps_sum=float(st.get("premature_soft_exit_net_bps_sum") or 0.0),
+                premature_soft_exit_net_pnl_sum_usdt=float(st.get("premature_soft_exit_net_pnl_sum_usdt") or 0.0),
+                premature_soft_exit_closed_notional_usdt=float(st.get("premature_soft_exit_closed_notional_usdt") or 0.0),
+                excluded_from_fast_fail_count=float(st.get("excluded_from_fast_fail_count") or 0.0),
                 lookback_filter_mode="close_ts",
             )
         return out
@@ -859,6 +1150,7 @@ class NegativeExpectancyCooldown:
                                 "px": float(px),
                                 "ts": int(event_ts),
                                 "fee_cost_usdt": float(fee_cost_usdt),
+                                "meta": dict(row),
                             }
                         )
             except Exception:
@@ -890,6 +1182,7 @@ class NegativeExpectancyCooldown:
                         "px": px,
                         "ts": float(event_ts),
                         "fee_cost_usdt_remaining": fee_cost_usdt,
+                        "meta": dict(event.get("meta") or {}),
                     }
                 )
                 continue
@@ -925,12 +1218,22 @@ class NegativeExpectancyCooldown:
                     st["net_pnl_sum_usdt"] += float(net_pnl)
                     st["closed_notional_usdt"] += float(buy_notional)
                     st["last_close_ts_ms"] = max(float(st.get("last_close_ts_ms") or 0.0), float(event_ts))
-                    if fast_fail_hold_ms > 0 and hold_ms <= fast_fail_hold_ms:
-                        st["fast_fail_closed_cycles"] += 1.0
-                        st["fast_fail_gross_pnl_sum_usdt"] += float(gross_pnl)
-                        st["fast_fail_net_pnl_sum_usdt"] += float(net_pnl)
-                        st["fast_fail_closed_notional_usdt"] += float(buy_notional)
-                        st["fast_fail_hold_minutes_sum"] += float(hold_ms / 60000.0)
+                    ctx = dict(lot.get("meta") or {})
+                    ctx.update(dict(event.get("meta") or {}))
+                    ctx.setdefault("exit_reason", ctx.get("reason") or ctx.get("source_reason"))
+                    ctx.setdefault("hold_minutes", float(hold_ms / 60000.0))
+                    ctx.setdefault("hold_hours", float(hold_ms / 3600000.0))
+                    net_bps = float(net_pnl) / float(buy_notional) * 10000.0 if float(buy_notional) > 1e-12 else None
+                    self._record_fast_fail_or_premature_soft_exit(
+                        st,
+                        row=ctx,
+                        gross_pnl=float(gross_pnl),
+                        net_pnl=float(net_pnl),
+                        notional=float(buy_notional),
+                        hold_ms=float(hold_ms),
+                        fast_fail_hold_ms=int(fast_fail_hold_ms),
+                        net_bps=net_bps,
+                    )
 
                 remaining = max(0.0, remaining - close_qty)
                 sell_fee_remaining = float(sell_fee_remaining - sell_fee_alloc)
@@ -971,6 +1274,11 @@ class NegativeExpectancyCooldown:
                 closed_cycles_included_by_close_ts=float(st.get("closed_cycles_included_by_close_ts") or 0.0),
                 closed_cycles_with_entry_before_window=float(st.get("closed_cycles_with_entry_before_window") or 0.0),
                 missing_entry_leg_count=float(st.get("missing_entry_leg_count") or 0.0),
+                premature_soft_exit_count=float(st.get("premature_soft_exit_count") or 0.0),
+                premature_soft_exit_net_bps_sum=float(st.get("premature_soft_exit_net_bps_sum") or 0.0),
+                premature_soft_exit_net_pnl_sum_usdt=float(st.get("premature_soft_exit_net_pnl_sum_usdt") or 0.0),
+                premature_soft_exit_closed_notional_usdt=float(st.get("premature_soft_exit_closed_notional_usdt") or 0.0),
+                excluded_from_fast_fail_count=float(st.get("excluded_from_fast_fail_count") or 0.0),
                 lookback_filter_mode="close_ts",
             )
         return out
@@ -1046,12 +1354,19 @@ class NegativeExpectancyCooldown:
                         st["net_pnl_sum_usdt"] += float(net_pnl)
                         st["closed_notional_usdt"] += float(notional)
                         st["last_close_ts_ms"] = max(float(st.get("last_close_ts_ms") or 0.0), float(close_ms))
-                        if fast_fail_hold_ms > 0 and hold_ms <= fast_fail_hold_ms:
-                            st["fast_fail_closed_cycles"] += 1.0
-                            st["fast_fail_gross_pnl_sum_usdt"] += float(gross_pnl)
-                            st["fast_fail_net_pnl_sum_usdt"] += float(net_pnl)
-                            st["fast_fail_closed_notional_usdt"] += float(notional)
-                            st["fast_fail_hold_minutes_sum"] += float(hold_ms / 60000.0)
+                        ctx = dict(row)
+                        ctx.setdefault("hold_minutes", float(hold_ms / 60000.0))
+                        ctx.setdefault("hold_hours", float(hold_ms / 3600000.0))
+                        self._record_fast_fail_or_premature_soft_exit(
+                            st,
+                            row=ctx,
+                            gross_pnl=float(gross_pnl),
+                            net_pnl=float(net_pnl),
+                            notional=float(notional),
+                            hold_ms=float(hold_ms),
+                            fast_fail_hold_ms=int(fast_fail_hold_ms),
+                            net_bps=net_bps,
+                        )
             except Exception:
                 continue
 
@@ -1074,6 +1389,11 @@ class NegativeExpectancyCooldown:
                 closed_cycles_included_by_close_ts=float(st.get("closed_cycles_included_by_close_ts") or 0.0),
                 closed_cycles_with_entry_before_window=float(st.get("closed_cycles_with_entry_before_window") or 0.0),
                 missing_entry_leg_count=float(st.get("missing_entry_leg_count") or 0.0),
+                premature_soft_exit_count=float(st.get("premature_soft_exit_count") or 0.0),
+                premature_soft_exit_net_bps_sum=float(st.get("premature_soft_exit_net_bps_sum") or 0.0),
+                premature_soft_exit_net_pnl_sum_usdt=float(st.get("premature_soft_exit_net_pnl_sum_usdt") or 0.0),
+                premature_soft_exit_closed_notional_usdt=float(st.get("premature_soft_exit_closed_notional_usdt") or 0.0),
+                excluded_from_fast_fail_count=float(st.get("excluded_from_fast_fail_count") or 0.0),
                 lookback_filter_mode="close_ts",
             )
         return out
@@ -1391,6 +1711,14 @@ class NegativeExpectancyCooldown:
                     "net_pnl_sum_usdt": float(st.get("net_pnl_sum_usdt", st.get("pnl_sum_usdt") or 0.0)),
                     "pnl_sum_usdt": float(st.get("pnl_sum_usdt") or st.get("gross_pnl_sum_usdt") or 0.0),
                     "closed_notional_usdt": float(st.get("closed_notional_usdt") or 0.0),
+                    "premature_soft_exit_count": int(st.get("premature_soft_exit_count") or 0),
+                    "premature_soft_exit_net_bps_sum": float(st.get("premature_soft_exit_net_bps_sum") or 0.0),
+                    "premature_soft_exit_net_pnl_sum_usdt": float(st.get("premature_soft_exit_net_pnl_sum_usdt") or 0.0),
+                    "premature_soft_exit_closed_notional_usdt": float(st.get("premature_soft_exit_closed_notional_usdt") or 0.0),
+                    "excluded_from_fast_fail_count": int(st.get("excluded_from_fast_fail_count") or 0),
+                    "adjusted_fast_fail_net_expectancy_bps": float(
+                        st.get("adjusted_fast_fail_net_expectancy_bps", st.get("fast_fail_net_expectancy_bps") or 0.0)
+                    ),
                     "source": str(st.get("source") or "orders"),
                     "degraded_fee_model": bool(st.get("degraded_fee_model", False)),
                     "degraded_reason": str(st.get("degraded_reason") or ""),

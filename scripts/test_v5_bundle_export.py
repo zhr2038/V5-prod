@@ -518,6 +518,64 @@ def fixture_negative_expectancy_missing_root(root):
     write_json(root / "reports/negative_expectancy_cooldown.json", {"stats": {}})
 
 
+def fixture_negative_expectancy_premature_soft_exit_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    write_text(root / "configs/live_prod.yaml", "probe_time_stop_hours: 4\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    current_run_id = now.strftime("%Y%m%d_%H")
+    current_run_dir = root / "reports/runs/prod" / current_run_id
+    write_json(current_run_dir / "decision_audit.json", {"window_end_ts": int(now.timestamp()), "router_decisions": []})
+    write_text(current_run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(current_run_dir / "equity.jsonl", "{}\n")
+    write_json(current_run_dir / "summary.json", {"run_id": current_run_id})
+
+    def add_trade_run(hours_ago, intent, side, price):
+        run_dt = now - dt.timedelta(hours=hours_ago)
+        run_id = run_dt.strftime("%Y%m%d_%H")
+        ts = int(run_dt.timestamp())
+        run_dir = root / "reports/runs/prod" / run_id
+        write_json(run_dir / "decision_audit.json", {
+            "window_end_ts": ts,
+            "router_decisions": [
+                {"symbol": "BNB/USDT", "action": "create", "intent": intent, "side": side, "reason": "atr_trailing"}
+            ],
+        })
+        write_text(
+            run_dir / "trades.csv",
+            "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,raw_meta\n"
+            f"{iso(ts + 20)},{run_id},BNB/USDT,{intent},{side},0.02,{price},{0.02 * price},0,"
+            "\"{\"\"swing_hold_position\"\": true, \"\"swing_min_hold_hours\"\": 24, \"\"exit_priority\"\": \"\"soft\"\", \"\"exit_blocked_by_min_hold\"\": false, \"\"diagnosis\"\": \"\"soft_exit_violated_swing_min_hold\"\"}\"\n",
+        )
+        write_text(run_dir / "equity.jsonl", "{}\n")
+        write_json(run_dir / "summary.json", {"run_id": run_id})
+
+    add_trade_run(6, "OPEN_LONG", "buy", 642.2)
+    add_trade_run(1, "CLOSE_LONG", "sell", 633.020)
+    write_json(root / "reports/negative_expectancy_cooldown.json", {
+        "stats": {
+            "BNB/USDT": {
+                "closed_cycles": 1,
+                "net_pnl_sum_usdt": -0.1836,
+                "net_expectancy_bps": -142.89,
+                "fast_fail_closed_cycles": 0,
+                "fast_fail_net_expectancy_bps": 0.0,
+                "adjusted_fast_fail_net_expectancy_bps": 0.0,
+                "premature_soft_exit_count": 1,
+                "excluded_from_fast_fail_count": 1,
+            }
+        }
+    })
+
+
 def fixture_quant_lab_summary_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -5153,6 +5211,31 @@ def main():
             assert row["diagnosis"] == "ok", row
             assert window["negative_expectancy_mismatch_count"] == 0, window
             assert not any(item.get("code") == "negative_expectancy_roundtrip_mismatch" for item in issues["issues"]), issues
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-negexp-premature-soft-exit-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_negative_expectancy_premature_soft_exit_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                negexp = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/negative_expectancy_consistency.csv")).read().decode().splitlines()))
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert len(negexp) == 1, negexp
+            row = negexp[0]
+            assert row["symbol"] == "BNB/USDT", row
+            assert row["premature_soft_exit_count"] == "1", row
+            assert row["excluded_from_fast_fail_count"] == "1", row
+            assert row["adjusted_fast_fail_net_expectancy_bps"] == "0", row
+            assert row["negexp_fast_fail_net_expectancy_bps"] == "0", row
+            assert row["mismatch_suspected"] == "false", row
+            assert window["negative_expectancy_premature_soft_exit_count"] == 1, window
+            assert window["negative_expectancy_excluded_from_fast_fail_count"] == 1, window
+            assert "Premature swing soft exits are excluded from fast-fail hard blocks" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

@@ -524,6 +524,128 @@ def test_negative_expectancy_roundtrip_summary_fallback_includes_bnb_closed_cycl
     assert state["symbols"] == {}
 
 
+def test_negative_expectancy_excludes_premature_swing_soft_exit_from_fast_fail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reports = tmp_path / "reports"
+    state_path = reports / "negative_expectancy_state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "config_fingerprint": "bnb-premature-soft-exit-fp",
+                "release_start_ts": _ts_ms("2026-05-28T00:00:00Z"),
+                "symbols": {},
+                "stats": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    summaries = reports / "summaries"
+    summaries.mkdir(parents=True, exist_ok=True)
+    summaries.joinpath("trades_roundtrips.csv").write_text(
+        "\n".join(
+            [
+                "open_time_utc,close_time_utc,symbol,qty,entry_px,exit_px,hold_minutes,gross_pnl_usdt,net_pnl_usdt,gross_bps,net_bps,exit_reason,swing_hold_position,swing_min_hold_hours,exit_priority,exit_blocked_by_min_hold,exited_before_min_hold,diagnosis",
+                "2026-05-28T22:00:59Z,2026-05-29T03:00:54Z,BNB/USDT,0.02,642.2,633.020,299.9167,-0.1836,-0.1836,-142.89,-142.89,atr_trailing,true,24,soft,false,true,soft_exit_violated_swing_min_hold",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "src.risk.negative_expectancy_cooldown.time.time",
+        lambda: _ts_ms("2026-05-29T04:00:00Z") / 1000.0,
+    )
+
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=72,
+            min_closed_cycles=4,
+            expectancy_threshold_bps=0.0,
+            state_path=str(state_path),
+            orders_db_path=str(reports / "orders.sqlite"),
+            fills_db_path=str(reports / "fills.sqlite"),
+            prefer_net_from_fills=True,
+            fast_fail_max_hold_minutes=360,
+        )
+    )
+    cooldown.set_scope(whitelist_symbols=["BNB/USDT"], config_fingerprint="bnb-premature-soft-exit-fp")
+
+    state = cooldown.refresh(force=True)
+    stats = state["stats"]["BNB/USDT"]
+
+    assert stats["source"] == "trades_roundtrips_csv"
+    assert stats["closed_cycles"] == 1
+    assert stats["net_expectancy_bps"] == pytest.approx(-142.95, abs=0.1)
+    assert stats["premature_soft_exit_count"] == 1
+    assert stats["premature_soft_exit_net_bps_sum"] == pytest.approx(-142.89)
+    assert stats["excluded_from_fast_fail_count"] == 1
+    assert stats["fast_fail_closed_cycles"] == 0
+    assert stats["fast_fail_net_expectancy_bps"] == 0.0
+    assert stats["adjusted_fast_fail_net_expectancy_bps"] == 0.0
+    assert state["symbols"] == {}
+
+
+def test_negative_expectancy_keeps_real_hard_stop_in_fast_fail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reports = tmp_path / "reports"
+    state_path = reports / "negative_expectancy_state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "config_fingerprint": "bnb-hard-stop-fp",
+                "release_start_ts": _ts_ms("2026-05-28T00:00:00Z"),
+                "symbols": {},
+                "stats": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    summaries = reports / "summaries"
+    summaries.mkdir(parents=True, exist_ok=True)
+    summaries.joinpath("trades_roundtrips.csv").write_text(
+        "\n".join(
+            [
+                "open_time_utc,close_time_utc,symbol,qty,entry_px,exit_px,hold_minutes,net_pnl_usdt,net_bps,exit_reason,swing_hold_position,swing_min_hold_hours,exit_priority,exited_before_min_hold,diagnosis",
+                "2026-05-28T22:00:59Z,2026-05-29T03:00:54Z,BNB/USDT,0.02,642.2,633.020,299.9167,-0.1836,-142.89,fixed_stop_loss,true,24,hard,true,max_loss_hard_stop",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "src.risk.negative_expectancy_cooldown.time.time",
+        lambda: _ts_ms("2026-05-29T04:00:00Z") / 1000.0,
+    )
+
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=72,
+            min_closed_cycles=4,
+            expectancy_threshold_bps=0.0,
+            state_path=str(state_path),
+            orders_db_path=str(reports / "orders.sqlite"),
+            fills_db_path=str(reports / "fills.sqlite"),
+            prefer_net_from_fills=True,
+            fast_fail_max_hold_minutes=360,
+        )
+    )
+    cooldown.set_scope(whitelist_symbols=["BNB/USDT"], config_fingerprint="bnb-hard-stop-fp")
+
+    state = cooldown.refresh(force=True)
+    stats = state["stats"]["BNB/USDT"]
+
+    assert stats["premature_soft_exit_count"] == 0
+    assert stats["excluded_from_fast_fail_count"] == 0
+    assert stats["fast_fail_closed_cycles"] == 1
+    assert stats["fast_fail_net_expectancy_bps"] == pytest.approx(-142.95, abs=0.1)
+
+
 def test_negative_expectancy_merges_recent_trades_when_fills_exist_for_other_symbol(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
