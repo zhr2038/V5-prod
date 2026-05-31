@@ -1600,12 +1600,16 @@ class V5Pipeline:
             return "unknown"
         hard_exact = {
             "hard_stop_loss",
+            "max_loss_hard_stop",
             "stop_loss",
             "fixed_stop_loss",
             "profit_taking_stop_loss_hit",
             "regime_exit",
             "risk_off",
             "risk_off_forced_close",
+            "risk_off_force_exit",
+            "exchange_risk",
+            "emergency_close",
             "kill_switch",
             "manual_kill",
             "manual_kill_switch",
@@ -1619,10 +1623,12 @@ class V5Pipeline:
             (
                 "dynamic_stop_",
                 "hard_stop_",
+                "max_loss_",
                 "risk_off_",
                 "reconcile_",
                 "kill_switch_",
                 "exchange_",
+                "emergency_",
                 "account_",
                 "profit_taking_stop_loss_hit",
             )
@@ -1657,11 +1663,48 @@ class V5Pipeline:
             return "soft"
         return "unknown"
 
+    @staticmethod
+    def _swing_min_hold_hard_exit_exception_reason(reason: str) -> str:
+        norm = str(reason or "").strip().lower()
+        if not norm:
+            return ""
+        exact = {
+            "hard_stop_loss",
+            "max_loss_hard_stop",
+            "stop_loss",
+            "fixed_stop_loss",
+            "exchange_risk",
+            "emergency_close",
+            "zero_target_close",
+            "risk_off",
+            "risk_off_forced_close",
+            "risk_off_force_exit",
+            "kill_switch",
+            "manual_kill",
+            "manual_kill_switch",
+        }
+        if norm in exact:
+            return norm
+        for prefix in (
+            "hard_stop_",
+            "max_loss_",
+            "dynamic_stop_",
+            "exchange_",
+            "emergency_",
+            "risk_off_force",
+            "risk_off_forced",
+            "risk_off_",
+            "kill_switch_",
+        ):
+            if norm.startswith(prefix):
+                return norm
+        return ""
+
     def _exit_allowed_before_min_hold(self, reason: str) -> bool:
         norm = str(reason or "").strip().lower()
         if norm.startswith("protect_profit_lock"):
             return bool(getattr(self.cfg.execution, "swing_allow_exit_on_profit_lock", True))
-        return self._exit_priority_for_reason(reason) == "hard"
+        return bool(self._swing_min_hold_hard_exit_exception_reason(reason))
 
     @staticmethod
     def _is_risk_off_regime_label(regime_state: Any) -> bool:
@@ -1696,20 +1739,6 @@ class V5Pipeline:
         f5_floor = float(getattr(self.cfg.execution, "swing_atr_early_exit_f5_floor", -0.30) or -0.30)
         risk_off = self._is_risk_off_regime_label(regime_state)
 
-        allow_reason = ""
-        if net_bps is None:
-            allow_reason = "net_bps_not_observable"
-        elif float(net_bps) <= float(min_loss_net_bps):
-            allow_reason = "loss_exceeded_swing_atr_guard_threshold"
-        elif risk_off and bool(getattr(self.cfg.execution, "swing_atr_early_exit_allow_if_risk_off", True)):
-            allow_reason = "risk_off"
-        elif (
-            f5_rsi_trend_confirm is not None
-            and float(f5_rsi_trend_confirm) < float(f5_floor)
-            and bool(getattr(self.cfg.execution, "swing_atr_early_exit_allow_if_f5_turns_negative", True))
-        ):
-            allow_reason = "f5_turns_negative"
-
         context = {
             "symbol": symbol,
             "side": side,
@@ -1727,15 +1756,6 @@ class V5Pipeline:
             "risk_off": bool(risk_off),
             "exit_priority": "soft",
         }
-        if allow_reason:
-            context.update(
-                {
-                    "swing_atr_early_exit_guard_active": True,
-                    "swing_atr_early_exit_guard_blocked": False,
-                    "swing_atr_early_exit_allow_reason": allow_reason,
-                }
-            )
-            return False, context
 
         context.update(
             {
@@ -1743,6 +1763,7 @@ class V5Pipeline:
                 "reason": "swing_atr_early_exit_guard",
                 "swing_atr_early_exit_guard_active": True,
                 "swing_atr_early_exit_guard_blocked": True,
+                "swing_atr_early_exit_allow_reason": "",
                 "exit_allowed_before_min_hold": False,
                 "exit_blocked_by_min_hold": True,
                 "min_hold_block_reason": "swing_atr_early_exit_guard",
@@ -2557,6 +2578,9 @@ class V5Pipeline:
 
         priority = self._exit_priority_for_reason(reason)
         allowed_before_min_hold = self._exit_allowed_before_min_hold(reason)
+        hard_exception_reason = self._swing_min_hold_hard_exit_exception_reason(reason)
+        if allowed_before_min_hold:
+            return None
         decision = {
             "symbol": str(getattr(position, "symbol", "") or ""),
             "action": "skip",
@@ -2568,6 +2592,10 @@ class V5Pipeline:
             "exit_priority": priority,
             "exit_allowed_before_min_hold": bool(allowed_before_min_hold),
             "exit_blocked_by_min_hold": True,
+            "swing_min_hold_guard_checked": True,
+            "swing_min_hold_guard_blocked": True,
+            "soft_exit_blocked_by_min_hold": priority == "soft" and not bool(hard_exception_reason),
+            "hard_exit_exception_reason": hard_exception_reason,
             "min_hold_block_reason": "soft_exit_before_swing_min_hold",
             "swing_hold_position": True,
             "swing_entry_ts": entry_ts,
@@ -6000,6 +6028,7 @@ class V5Pipeline:
                 reason = str(meta.get("reason") or "")
                 priority = self._exit_priority_for_reason(reason)
                 allowed_before_min_hold = self._exit_allowed_before_min_hold(reason)
+                hard_exception_reason = self._swing_min_hold_hard_exit_exception_reason(reason)
                 position = pos_by_symbol.get(str(order.symbol))
                 is_probe_exit = bool(meta.get("probe_exit", False) or meta.get("probe_type"))
                 if not is_probe_exit and position is not None:
@@ -6059,6 +6088,13 @@ class V5Pipeline:
                     if not atr_guard_blocked:
                         allowed_before_min_hold = True
 
+                swing_min_hold_guard_checked = bool(
+                    is_swing_hold_position
+                    and not is_probe_exit
+                    and hold_hours is not None
+                    and min_hold_hours is not None
+                    and float(min_hold_hours) > 0.0
+                )
                 blocked_by_min_hold = (
                     is_swing_hold_position
                     and not is_probe_exit
@@ -6085,6 +6121,10 @@ class V5Pipeline:
                         "net_bps": net_bps,
                         "f5_rsi_trend_confirm": f5_rsi_trend_confirm,
                         "early_exit_opportunity_cost_bps": None,
+                        "swing_min_hold_guard_checked": bool(swing_min_hold_guard_checked),
+                        "swing_min_hold_guard_blocked": bool(blocked_by_min_hold),
+                        "soft_exit_blocked_by_min_hold": bool(blocked_by_min_hold and priority == "soft"),
+                        "hard_exit_exception_reason": hard_exception_reason,
                     }
                 )
                 order.meta = meta
@@ -6109,6 +6149,10 @@ class V5Pipeline:
                             "exit_priority": priority,
                             "min_hold_block_reason": min_hold_block_reason,
                             "early_exit_opportunity_cost_bps": None,
+                            "swing_min_hold_guard_checked": True,
+                            "swing_min_hold_guard_blocked": True,
+                            "soft_exit_blocked_by_min_hold": bool(priority == "soft"),
+                            "hard_exit_exception_reason": hard_exception_reason,
                         }
                     )
                     swing_min_hold_blocked_decisions.append(decision)
@@ -6190,6 +6234,10 @@ class V5Pipeline:
                 "swing_atr_early_exit_guard_active": meta.get("swing_atr_early_exit_guard_active"),
                 "swing_atr_early_exit_guard_blocked": meta.get("swing_atr_early_exit_guard_blocked"),
                 "swing_atr_early_exit_allow_reason": meta.get("swing_atr_early_exit_allow_reason"),
+                "swing_min_hold_guard_checked": meta.get("swing_min_hold_guard_checked"),
+                "swing_min_hold_guard_blocked": meta.get("swing_min_hold_guard_blocked"),
+                "soft_exit_blocked_by_min_hold": meta.get("soft_exit_blocked_by_min_hold"),
+                "hard_exit_exception_reason": meta.get("hard_exit_exception_reason"),
             }
             if bool(meta.get("probe_exit", False)):
                 router_payload.update(
@@ -6270,6 +6318,10 @@ class V5Pipeline:
                         "swing_atr_early_exit_guard_active": meta.get("swing_atr_early_exit_guard_active"),
                         "swing_atr_early_exit_guard_blocked": meta.get("swing_atr_early_exit_guard_blocked"),
                         "swing_atr_early_exit_allow_reason": meta.get("swing_atr_early_exit_allow_reason"),
+                        "swing_min_hold_guard_checked": meta.get("swing_min_hold_guard_checked"),
+                        "swing_min_hold_guard_blocked": meta.get("swing_min_hold_guard_blocked"),
+                        "soft_exit_blocked_by_min_hold": meta.get("soft_exit_blocked_by_min_hold"),
+                        "hard_exit_exception_reason": meta.get("hard_exit_exception_reason"),
                         "exit_reason": meta.get("exit_reason", meta.get("reason")),
                     }
                 )

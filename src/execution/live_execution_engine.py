@@ -934,12 +934,16 @@ class LiveExecutionEngine:
             return "unknown"
         hard_exact = {
             "hard_stop_loss",
+            "max_loss_hard_stop",
             "stop_loss",
             "fixed_stop_loss",
             "profit_taking_stop_loss_hit",
             "regime_exit",
             "risk_off",
             "risk_off_forced_close",
+            "risk_off_force_exit",
+            "exchange_risk",
+            "emergency_close",
             "kill_switch",
             "manual_kill",
             "manual_kill_switch",
@@ -953,10 +957,12 @@ class LiveExecutionEngine:
             (
                 "dynamic_stop_",
                 "hard_stop_",
+                "max_loss_",
                 "risk_off_",
                 "reconcile_",
                 "kill_switch_",
                 "exchange_",
+                "emergency_",
                 "account_",
                 "profit_taking_stop_loss_hit",
             )
@@ -991,11 +997,48 @@ class LiveExecutionEngine:
             return "soft"
         return "unknown"
 
+    @staticmethod
+    def _swing_min_hold_hard_exit_exception_reason(reason: str) -> str:
+        norm = str(reason or "").strip().lower()
+        if not norm:
+            return ""
+        exact = {
+            "hard_stop_loss",
+            "max_loss_hard_stop",
+            "stop_loss",
+            "fixed_stop_loss",
+            "exchange_risk",
+            "emergency_close",
+            "zero_target_close",
+            "risk_off",
+            "risk_off_forced_close",
+            "risk_off_force_exit",
+            "kill_switch",
+            "manual_kill",
+            "manual_kill_switch",
+        }
+        if norm in exact:
+            return norm
+        for prefix in (
+            "hard_stop_",
+            "max_loss_",
+            "dynamic_stop_",
+            "exchange_",
+            "emergency_",
+            "risk_off_force",
+            "risk_off_forced",
+            "risk_off_",
+            "kill_switch_",
+        ):
+            if norm.startswith(prefix):
+                return norm
+        return ""
+
     def _exit_allowed_before_min_hold(self, reason: str) -> bool:
         norm = str(reason or "").strip().lower()
         if norm.startswith("protect_profit_lock"):
             return bool(getattr(self.cfg, "swing_allow_exit_on_profit_lock", True))
-        return self._exit_priority_for_reason(reason) == "hard"
+        return bool(self._swing_min_hold_hard_exit_exception_reason(reason))
 
     @staticmethod
     def _is_risk_off_regime_label(regime_state: Any) -> bool:
@@ -1042,20 +1085,6 @@ class LiveExecutionEngine:
         regime = str(meta.get("regime") or meta.get("current_regime") or tags.get("regime") or tags.get("current_regime") or "")
         risk_off = self._is_risk_off_regime_label(regime)
 
-        allow_reason = ""
-        if net_bps is None:
-            allow_reason = "net_bps_not_observable"
-        elif float(net_bps) <= float(min_loss_net_bps):
-            allow_reason = "loss_exceeded_swing_atr_guard_threshold"
-        elif risk_off and bool(getattr(self.cfg, "swing_atr_early_exit_allow_if_risk_off", True)):
-            allow_reason = "risk_off"
-        elif (
-            f5 is not None
-            and float(f5) < float(f5_floor)
-            and bool(getattr(self.cfg, "swing_atr_early_exit_allow_if_f5_turns_negative", True))
-        ):
-            allow_reason = "f5_turns_negative"
-
         context = {
             "symbol": o.symbol,
             "side": str(getattr(o, "side", "") or "").lower(),
@@ -1074,19 +1103,12 @@ class LiveExecutionEngine:
             "exit_priority": "soft",
             "swing_atr_early_exit_guard_active": True,
         }
-        if allow_reason:
-            context.update(
-                {
-                    "swing_atr_early_exit_guard_blocked": False,
-                    "swing_atr_early_exit_allow_reason": allow_reason,
-                }
-            )
-            return False, context
         context.update(
             {
                 "action": "skip",
                 "reason": "swing_atr_early_exit_guard",
                 "swing_atr_early_exit_guard_blocked": True,
+                "swing_atr_early_exit_allow_reason": "",
                 "exit_allowed_before_min_hold": False,
                 "exit_blocked_by_min_hold": True,
                 "min_hold_block_reason": "swing_atr_early_exit_guard",
@@ -1106,6 +1128,7 @@ class LiveExecutionEngine:
         reason = str(meta.get("reason") or meta.get("exit_reason") or "").strip()
         priority = self._exit_priority_for_reason(reason)
         allowed_before_min_hold = self._exit_allowed_before_min_hold(reason)
+        hard_exception_reason = self._swing_min_hold_hard_exit_exception_reason(reason)
         if priority != "soft" or allowed_before_min_hold:
             return None
         if bool(meta.get("probe_exit", False)) or probe_type_from_meta(meta) in PROBE_POSITION_TYPES:
@@ -1165,6 +1188,10 @@ class LiveExecutionEngine:
                         "exit_allowed_before_min_hold": True,
                         "exit_blocked_by_min_hold": False,
                         "min_hold_block_reason": "",
+                        "swing_min_hold_guard_checked": True,
+                        "swing_min_hold_guard_blocked": False,
+                        "soft_exit_blocked_by_min_hold": False,
+                        "hard_exit_exception_reason": hard_exception_reason,
                     }
                 )
                 o.meta = meta
@@ -1184,6 +1211,10 @@ class LiveExecutionEngine:
             "exit_priority": priority,
             "exit_allowed_before_min_hold": bool(allowed_before_min_hold),
             "exit_blocked_by_min_hold": bool(blocked),
+            "swing_min_hold_guard_checked": True,
+            "swing_min_hold_guard_blocked": bool(blocked),
+            "soft_exit_blocked_by_min_hold": bool(blocked and priority == "soft"),
+            "hard_exit_exception_reason": hard_exception_reason,
             "min_hold_block_reason": (
                 str(atr_guard_context.get("min_hold_block_reason") or "soft_exit_before_swing_min_hold")
                 if blocked

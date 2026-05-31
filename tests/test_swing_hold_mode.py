@@ -700,7 +700,7 @@ def test_same_symbol_filled_memory_overrides_pending_without_duplicate(tmp_path:
     assert rec["net_bps"] == 128.0
 
 
-def test_swing_guard_blocks_zero_target_close_before_min_hold(tmp_path: Path) -> None:
+def test_swing_guard_allows_zero_target_close_exception_before_min_hold(tmp_path: Path) -> None:
     cfg = _base_cfg(tmp_path)
     _write_auto_risk_level(cfg.execution.order_store_path, "NORMAL")
     pipe = _build_pipe(cfg, tmp_path)
@@ -723,12 +723,10 @@ def test_swing_guard_blocks_zero_target_close_before_min_hold(tmp_path: Path) ->
         precomputed_regime=_regime(),
     )
 
-    assert not [order for order in out.orders if order.side == "sell"]
-    decision = next(d for d in audit.router_decisions if d.get("reason") == "swing_min_hold_guard")
-    assert decision["blocked_exit_reason"] == "zero_target_close"
-    assert decision["hold_hours"] == 6.0
-    assert decision["required_hold_hours"] == 24.0
-    assert audit.counts["swing_min_hold_guard_count"] == 1
+    sell_orders = [order for order in out.orders if order.side == "sell"]
+    assert sell_orders
+    assert not any(d.get("reason") == "swing_min_hold_guard" for d in audit.router_decisions)
+    assert audit.counts["swing_min_hold_guard_count"] == 0
 
 
 def test_swing_post_min_hold_keeps_current_when_replacement_is_blocked(tmp_path: Path) -> None:
