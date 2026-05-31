@@ -2340,6 +2340,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     fill_metrics_rows = []
     order_lifecycle_rows = []
     trade_state_consistency_rows = []
+    target_explain_rows = []
     summary_trade_count_mismatch_rows = []
     audit_high_score_but_not_executed_count = 0
     dust_residual_position_keys = set()
@@ -2649,6 +2650,46 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             if not isinstance(item, dict):
                 continue
             symbol = flatten_value(item.get("symbol")) or not_obs
+            target_explain_rows.append({
+                "run_id": run_id,
+                "ts_utc": audit_ts,
+                "symbol": symbol,
+                "router_action": first_observed(item.get("router_action"), item.get("action"), not_obs),
+                "router_reason": first_observed(item.get("router_reason"), item.get("blocked_reason"), item.get("reason"), not_obs),
+                "current_px": first_observed(first_value(item, ("current_px", "latest_px", "entry_px", "price", "px"), not_obs)),
+                "alpha6_score": first_observed(item.get("alpha6_score")),
+                "trend_score": first_observed(item.get("trend_score")),
+                "f4_volume_expansion": first_observed(item.get("f4_volume_expansion")),
+                "f5_rsi_trend_confirm": first_observed(item.get("f5_rsi_trend_confirm")),
+                "final_score": first_observed(item.get("final_score")),
+                "final_score_before_penalty": first_observed(
+                    first_value(
+                        item,
+                        (
+                            "final_score_before_penalty",
+                            "pre_penalty_final_score",
+                            "raw_final_score",
+                            "final_score_before_negative_expectancy",
+                            "score_before_penalty",
+                        ),
+                        not_obs,
+                    )
+                ),
+                "final_score_after_penalty": first_observed(
+                    first_value(
+                        item,
+                        (
+                            "final_score_after_penalty",
+                            "penalized_final_score",
+                            "final_score_after_negative_expectancy",
+                            "score_after_penalty",
+                        ),
+                        not_obs,
+                    )
+                ),
+                "high_score_but_not_executed": bool_text(item.get("high_score_but_not_executed", not_obs)),
+                "raw_json": safe_json(item),
+            })
             if symbol != not_obs:
                 alpha6_signal = alpha6_lookup.get(symbol, {})
                 trend_signal = trend_lookup.get(symbol, {})
@@ -8768,6 +8809,182 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             },
         )
 
+    def is_bnb_premature_soft_exit(row):
+        if normalize_symbol_text(row.get("symbol")) != BNB_RISK_SYMBOL:
+            return False
+        if row.get("roundtrip_status") != "closed":
+            return False
+        if not row_has_truthy_key(row, "swing_hold_position"):
+            return False
+        exit_reason = flatten_value(row.get("exit_reason")).strip().lower()
+        if not swing_early_exit_reason(exit_reason):
+            return False
+        exit_priority = first_observed(row.get("exit_priority"), exit_priority_for_reason(exit_reason))
+        if flatten_value(exit_priority).strip().lower() != "soft":
+            return False
+        hold_hours = as_float(row.get("hold_hours"))
+        if hold_hours is None:
+            hold_minutes = as_float(row.get("hold_minutes"))
+            hold_hours = hold_minutes / 60.0 if hold_minutes is not None else None
+        min_hold_hours = swing_required_hold_hours(row)
+        if hold_hours is None or min_hold_hours is None or hold_hours >= min_hold_hours:
+            return False
+        if bool_text(row.get("exit_blocked_by_min_hold")) == "true":
+            return False
+        payload_text = flatten_value(row.get("raw_json")).lower()
+        return (
+            "soft_exit_violated_swing_min_hold" in payload_text
+            or "swing_soft_exit_before_min_hold_filled" in payload_text
+            or exit_reason in {"atr_trailing", "zero_target_close", "rank_exit", "regime_exit"}
+            or exit_reason.startswith(("rank_exit", "regime_exit"))
+        )
+
+    def bnb_negative_block_reason(row):
+        return flatten_value(first_value(row, ("router_reason", "blocked_reason", "block_reason", "skip_reason", "reason"), not_obs))
+
+    def bnb_recovery_candidate_ts(row):
+        return parse_dt_utc(first_observed(first_value(row, ("ts_utc", "audit_timestamp", "timestamp", "ts"), not_obs)))
+
+    def bnb_recovery_candidate_px(row, ts_dt):
+        price = positive_float(first_value(row, ("current_px", "latest_px", "entry_px", "price", "px"), not_obs))
+        if price is not None:
+            return price
+        future_px, _source, _reason = future_price_for_symbol(BNB_RISK_SYMBOL, ts_dt)
+        return future_px
+
+    def bnb_recovery_candidate_rows():
+        rows = []
+        for row in target_explain_rows:
+            if normalize_symbol_text(row.get("symbol")) != BNB_RISK_SYMBOL:
+                continue
+            reason = bnb_negative_block_reason(row)
+            if "negative_expectancy" not in reason:
+                continue
+            payload = dict(row)
+            payload["_source"] = "target_execution_explain"
+            rows.append(payload)
+        for row in high_score_blocked_rows:
+            if normalize_symbol_text(row.get("symbol")) != BNB_RISK_SYMBOL:
+                continue
+            reason = bnb_negative_block_reason(row)
+            if "negative_expectancy" not in reason:
+                continue
+            payload = dict(row)
+            payload.setdefault("router_reason", reason)
+            payload["_source"] = "high_score_blocked"
+            rows.append(payload)
+        for row in candidate_snapshot_rows:
+            if normalize_symbol_text(row.get("symbol")) != BNB_RISK_SYMBOL:
+                continue
+            reason = bnb_negative_block_reason(row)
+            if "negative_expectancy" not in reason:
+                continue
+            payload = dict(row)
+            payload.setdefault("router_reason", reason)
+            payload.setdefault("current_px", first_observed(first_value(row, ("current_px", "latest_px", "entry_px", "price", "px"), not_obs)))
+            payload["_source"] = "candidate_snapshot"
+            rows.append(payload)
+        deduped = {}
+        for row in rows:
+            key = (
+                canonical_ts_utc(first_observed(first_value(row, ("ts_utc", "audit_timestamp", "timestamp", "ts"), not_obs))),
+                flatten_value(first_value(row, ("run_id",), not_obs)),
+                bnb_negative_block_reason(row),
+            )
+            existing = deduped.get(key)
+            if existing is None or flatten_value(row.get("_source")) == "target_execution_explain":
+                deduped[key] = row
+        return sorted(
+            deduped.values(),
+            key=lambda row: (
+                bnb_recovery_candidate_ts(row) or dt.datetime.min.replace(tzinfo=dt.timezone.utc),
+                flatten_value(row.get("_source")),
+            ),
+        )
+
+    def bnb_recovery_final_score_before(row):
+        return first_observed(
+            first_value(
+                row,
+                (
+                    "final_score_before_penalty",
+                    "pre_penalty_final_score",
+                    "raw_final_score",
+                    "final_score_before_negative_expectancy",
+                    "score_before_penalty",
+                ),
+                not_obs,
+            ),
+            row.get("final_score"),
+            not_obs,
+        )
+
+    def bnb_recovery_final_score_after(row):
+        return first_observed(
+            first_value(
+                row,
+                (
+                    "final_score_after_penalty",
+                    "penalized_final_score",
+                    "final_score_after_negative_expectancy",
+                    "score_after_penalty",
+                ),
+                not_obs,
+            ),
+            row.get("final_score"),
+            not_obs,
+        )
+
+    def bnb_recovery_diagnosis(blocked, horizon_values):
+        observed = [as_float(value) for value in horizon_values]
+        observed = [value for value in observed if value is not None]
+        if not blocked or not observed:
+            return "not_observable"
+        if max(observed) > 0:
+            return "premature_exit_poisoned_reentry"
+        return "negative_expectancy_block_helped"
+
+    bnb_premature_soft_exit_rows = [
+        row for row in closed_roundtrip_rows
+        if is_bnb_premature_soft_exit(row)
+    ]
+    bnb_recovery_candidates = bnb_recovery_candidate_rows()
+    bnb_recovery_missed_opportunity_rows = []
+    rt_cost_for_reentry = configured_roundtrip_cost_bps()
+    for exit_row in bnb_premature_soft_exit_rows:
+        exit_dt = parse_dt_utc(exit_row.get("exit_ts"))
+        if exit_dt is None:
+            continue
+        for candidate in bnb_recovery_candidates:
+            candidate_dt = bnb_recovery_candidate_ts(candidate)
+            if candidate_dt is None or candidate_dt <= exit_dt:
+                continue
+            candidate_px = bnb_recovery_candidate_px(candidate, candidate_dt)
+            reason = bnb_negative_block_reason(candidate)
+            blocked = "negative_expectancy" in reason
+            net_4h = forward_net_bps(BNB_RISK_SYMBOL, candidate_dt, candidate_px, 4, rt_cost_for_reentry)
+            net_8h = forward_net_bps(BNB_RISK_SYMBOL, candidate_dt, candidate_px, 8, rt_cost_for_reentry)
+            net_24h = forward_net_bps(BNB_RISK_SYMBOL, candidate_dt, candidate_px, 24, rt_cost_for_reentry)
+            bnb_recovery_missed_opportunity_rows.append({
+                "symbol": BNB_RISK_SYMBOL,
+                "premature_exit_ts": exit_row.get("exit_ts", not_obs),
+                "premature_exit_px": exit_row.get("exit_px", not_obs),
+                "premature_exit_net_bps": first_observed(exit_row.get("actual_exit_net_bps"), exit_row.get("net_bps"), exit_row.get("realized_net_bps"), not_obs),
+                "subsequent_ts": candidate_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "subsequent_px": fmt_num(candidate_px, 10),
+                "subsequent_alpha6_score": first_observed(candidate.get("alpha6_score"), not_obs),
+                "subsequent_trend_score": first_observed(candidate.get("trend_score"), not_obs),
+                "subsequent_f4": first_observed(candidate.get("f4_volume_expansion"), candidate.get("f4"), not_obs),
+                "subsequent_f5": first_observed(candidate.get("f5_rsi_trend_confirm"), candidate.get("f5"), not_obs),
+                "blocked_by_negative_expectancy": str(bool(blocked)).lower(),
+                "final_score_before_penalty": bnb_recovery_final_score_before(candidate),
+                "final_score_after_penalty": bnb_recovery_final_score_after(candidate),
+                "if_reentered_net_bps_4h": net_4h,
+                "if_reentered_net_bps_8h": net_8h,
+                "if_reentered_net_bps_24h": net_24h,
+                "diagnosis": bnb_recovery_diagnosis(blocked, (net_4h, net_8h, net_24h)),
+            })
+
     def is_rank_exit_reason(value):
         return flatten_value(value).startswith("rank_exit")
 
@@ -9770,6 +9987,29 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     write_text(
         "summaries/bnb_risk_summary.json",
         json.dumps(bnb_risk_summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    )
+    write_csv(
+        "summaries/bnb_recovery_missed_opportunity.csv",
+        bnb_recovery_missed_opportunity_rows,
+        [
+            "symbol",
+            "premature_exit_ts",
+            "premature_exit_px",
+            "premature_exit_net_bps",
+            "subsequent_ts",
+            "subsequent_px",
+            "subsequent_alpha6_score",
+            "subsequent_trend_score",
+            "subsequent_f4",
+            "subsequent_f5",
+            "blocked_by_negative_expectancy",
+            "final_score_before_penalty",
+            "final_score_after_penalty",
+            "if_reentered_net_bps_4h",
+            "if_reentered_net_bps_8h",
+            "if_reentered_net_bps_24h",
+            "diagnosis",
+        ],
     )
     write_csv(
         "summaries/summary_trade_count_mismatch.csv",
@@ -12094,6 +12334,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "bnb_latest_roundtrip_net_bps": bnb_risk_summary.get("latest_roundtrip_net_bps", not_obs),
         "bnb_latest_roundtrip_if_held_current_net_bps": bnb_risk_summary.get("latest_roundtrip_if_held_current_net_bps", not_obs),
         "bnb_protect_alt_short_cycle_guard_active": bnb_risk_summary.get("protect_alt_short_cycle_guard_active", False),
+        "bnb_recovery_missed_opportunity_rows": len(bnb_recovery_missed_opportunity_rows),
+        "bnb_recovery_premature_exit_poisoned_reentry_count": sum(
+            1 for row in bnb_recovery_missed_opportunity_rows
+            if row.get("diagnosis") == "premature_exit_poisoned_reentry"
+        ),
+        "bnb_recovery_negative_expectancy_block_helped_count": sum(
+            1 for row in bnb_recovery_missed_opportunity_rows
+            if row.get("diagnosis") == "negative_expectancy_block_helped"
+        ),
         "config_runtime_consumption_rows": len(config_runtime_consumption_rows),
         "config_runtime_not_consumed_count": config_runtime_not_consumed_count,
         "split_order_runtime_active": False,
@@ -13119,6 +13368,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "- note: Premature swing soft exits are excluded from fast-fail hard blocks.",
         f"- high issue present: {'yes' if negative_expectancy_mismatch_count else 'no'}",
         "",
+        "## BNB recovery missed opportunity audit",
+        f"- diagnostic only: true",
+        f"- live_order_effect: none",
+        f"- rows: {len(bnb_recovery_missed_opportunity_rows)}",
+        f"- premature_exit_poisoned_reentry_count: {sum(1 for row in bnb_recovery_missed_opportunity_rows if row.get('diagnosis') == 'premature_exit_poisoned_reentry')}",
+        f"- negative_expectancy_block_helped_count: {sum(1 for row in bnb_recovery_missed_opportunity_rows if row.get('diagnosis') == 'negative_expectancy_block_helped')}",
+        "- interpretation: diagnoses whether a premature swing soft exit later poisoned BNB re-entry through negative expectancy; this report does not change live gates.",
+        "- output: summaries/bnb_recovery_missed_opportunity.csv",
+        "",
         "## BNB risk summary",
         f"- closed_cycles: {bnb_risk_summary.get('closed_cycles', not_obs)}",
         f"- net_expectancy_bps: {bnb_risk_summary.get('net_expectancy_bps', not_obs)}",
@@ -13301,6 +13559,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "canonical_completion_count": len(completion_attempts_by_hour),
         "data_quality_warnings": data_quality_warnings,
         "bnb_profit_lock_metadata_incomplete_count": bnb_profit_lock_metadata_incomplete_count,
+        "bnb_recovery_missed_opportunity_rows": len(bnb_recovery_missed_opportunity_rows),
+        "bnb_recovery_premature_exit_poisoned_reentry_count": sum(
+            1 for row in bnb_recovery_missed_opportunity_rows
+            if row.get("diagnosis") == "premature_exit_poisoned_reentry"
+        ),
         "bnb_f3_dominant_swing_sample_count": bnb_f3_dominant_swing_summary.get("sample_count", 0),
         "bnb_f3_dominant_swing_missing_swing_flag_count": bnb_f3_dominant_swing_summary.get("bnb_f3_missing_swing_flag_count", 0),
         "bnb_f3_dominant_swing_diagnostic_only": True,
@@ -13577,6 +13840,7 @@ sanity = {
     "contains summaries/swing_atr_soft_exit_readiness_by_symbol.csv": (OUT / "summaries/swing_atr_soft_exit_readiness_by_symbol.csv").is_file(),
     "contains summaries/swing_atr_soft_exit_shadow.csv": (OUT / "summaries/swing_atr_soft_exit_shadow.csv").is_file(),
     "contains summaries/bnb_risk_summary.json": (OUT / "summaries/bnb_risk_summary.json").is_file(),
+    "contains summaries/bnb_recovery_missed_opportunity.csv": (OUT / "summaries/bnb_recovery_missed_opportunity.csv").is_file(),
     "contains summaries/quant_lab_compliance.csv": (OUT / "summaries/quant_lab_compliance.csv").is_file(),
     "contains summaries/quant_lab_permission_audit.csv": (OUT / "summaries/quant_lab_permission_audit.csv").is_file(),
     "contains summaries/quant_lab_mode_audit.csv": (OUT / "summaries/quant_lab_mode_audit.csv").is_file(),
@@ -13619,6 +13883,7 @@ failure_check_names = [
     "contains summaries/swing_atr_soft_exit_readiness_by_symbol.csv",
     "contains summaries/swing_atr_soft_exit_shadow.csv",
     "contains summaries/bnb_risk_summary.json",
+    "contains summaries/bnb_recovery_missed_opportunity.csv",
     "contains summaries/quant_lab_compliance.csv",
     "contains summaries/quant_lab_permission_audit.csv",
     "contains summaries/quant_lab_mode_audit.csv",
@@ -13698,6 +13963,12 @@ manifest = {
     "data_quality_warnings": summary_meta.get("data_quality_warnings", []),
     "bnb_profit_lock_metadata_incomplete_count": int(
         summary_meta.get("bnb_profit_lock_metadata_incomplete_count", 0) or 0
+    ),
+    "bnb_recovery_missed_opportunity_rows": int(
+        summary_meta.get("bnb_recovery_missed_opportunity_rows", 0) or 0
+    ),
+    "bnb_recovery_premature_exit_poisoned_reentry_count": int(
+        summary_meta.get("bnb_recovery_premature_exit_poisoned_reentry_count", 0) or 0
     ),
     "bnb_f3_dominant_swing_sample_count": int(summary_meta.get("bnb_f3_dominant_swing_sample_count", 0) or 0),
     "bnb_f3_dominant_swing_missing_swing_flag_count": int(

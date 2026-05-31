@@ -576,6 +576,121 @@ def fixture_negative_expectancy_premature_soft_exit_root(root):
     })
 
 
+def fixture_bnb_recovery_missed_opportunity_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    write_text(
+        root / "configs/live_prod.yaml",
+        "execution:\n"
+        "  swing_min_hold_hours: 24\n"
+        "  fee_bps: 0\n"
+        "  slippage_bps: 0\n",
+    )
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    current_run_id = now.strftime("%Y%m%d_%H")
+    current_run_dir = root / "reports/runs/prod" / current_run_id
+    write_json(current_run_dir / "decision_audit.json", {"window_end_ts": int(now.timestamp()), "router_decisions": []})
+    write_text(current_run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(current_run_dir / "equity.jsonl", "{}\n")
+    write_json(current_run_dir / "summary.json", {"run_id": current_run_id})
+
+    entry_dt = now - dt.timedelta(hours=36)
+    exit_dt = now - dt.timedelta(hours=31)
+    subsequent_dt = now - dt.timedelta(hours=26)
+    entry_run_id = entry_dt.strftime("%Y%m%d_%H")
+    exit_run_id = exit_dt.strftime("%Y%m%d_%H")
+    subsequent_run_id = subsequent_dt.strftime("%Y%m%d_%H")
+    entry_ts = int(entry_dt.timestamp())
+    exit_ts = int(exit_dt.timestamp())
+    subsequent_ts = int(subsequent_dt.timestamp())
+
+    entry_dir = root / "reports/runs/prod" / entry_run_id
+    write_json(entry_dir / "decision_audit.json", {"window_end_ts": entry_ts, "router_decisions": []})
+    write_text(
+        entry_dir / "trades.csv",
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,raw_meta\n"
+        f"{iso(entry_ts)},{entry_run_id},BNB/USDT,OPEN_LONG,buy,0.02,642.2,12.844,0,"
+        "\"{\"\"swing_hold_position\"\": true, \"\"swing_min_hold_hours\"\": 24}\"\n",
+    )
+    write_text(entry_dir / "equity.jsonl", "{}\n")
+    write_json(entry_dir / "summary.json", {"run_id": entry_run_id})
+
+    exit_dir = root / "reports/runs/prod" / exit_run_id
+    write_json(exit_dir / "decision_audit.json", {"window_end_ts": exit_ts, "router_decisions": []})
+    write_text(
+        exit_dir / "trades.csv",
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,exit_reason,raw_meta\n"
+        f"{iso(exit_ts)},{exit_run_id},BNB/USDT,CLOSE_LONG,sell,0.02,633.02,12.6604,0,atr_trailing,"
+        "\"{\"\"swing_hold_position\"\": true, \"\"swing_min_hold_hours\"\": 24, \"\"exit_priority\"\": \"\"soft\"\", \"\"exit_blocked_by_min_hold\"\": false, \"\"diagnosis\"\": \"\"soft_exit_violated_swing_min_hold\"\"}\"\n",
+    )
+    write_text(exit_dir / "equity.jsonl", "{}\n")
+    write_json(exit_dir / "summary.json", {"run_id": exit_run_id})
+
+    subsequent_dir = root / "reports/runs/prod" / subsequent_run_id
+    write_json(
+        subsequent_dir / "decision_audit.json",
+        {
+            "window_end_ts": subsequent_ts,
+            "router_decisions": [
+                {
+                    "symbol": "BNB/USDT",
+                    "action": "skip",
+                    "side": "buy",
+                    "intent": "OPEN_LONG",
+                    "reason": "negative_expectancy_fast_fail_open_block",
+                }
+            ],
+            "target_execution_explain": [
+                {
+                    "symbol": "BNB/USDT",
+                    "router_action": "skip",
+                    "router_reason": "negative_expectancy_fast_fail_open_block",
+                    "current_px": 660.0,
+                    "alpha6_score": 0.994,
+                    "trend_score": 1.0,
+                    "f4_volume_expansion": 5.82,
+                    "f5_rsi_trend_confirm": 0.832,
+                    "final_score_before_penalty": 0.91,
+                    "final_score_after_penalty": 0.0,
+                    "final_score": 0.0,
+                    "high_score_but_not_executed": True,
+                }
+            ],
+        },
+    )
+    write_text(subsequent_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(subsequent_dir / "equity.jsonl", "{}\n")
+    write_json(subsequent_dir / "summary.json", {"run_id": subsequent_run_id})
+
+    write_ohlcv_cache(
+        root,
+        "BNB/USDT",
+        [
+            (subsequent_ts, 660.0),
+            (subsequent_ts + 4 * 3600, 670.0),
+            (subsequent_ts + 8 * 3600, 675.0),
+            (subsequent_ts + 24 * 3600, 690.0),
+        ],
+    )
+    write_json(root / "reports/negative_expectancy_cooldown.json", {
+        "stats": {
+            "BNB/USDT": {
+                "closed_cycles": 1,
+                "net_expectancy_bps": -142.89,
+                "fast_fail_net_expectancy_bps": -142.89,
+            }
+        }
+    })
+
+
 def fixture_quant_lab_summary_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -5325,6 +5440,45 @@ def main():
             assert window["negative_expectancy_premature_soft_exit_count"] == 1, window
             assert window["negative_expectancy_excluded_from_fast_fail_count"] == 1, window
             assert "Premature swing soft exits are excluded from fast-fail hard blocks" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-bnb-recovery-missed-opportunity-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_bnb_recovery_missed_opportunity_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_recovery_missed_opportunity.csv")).read().decode().splitlines()))
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert len(rows) == 1, rows
+            row = rows[0]
+            assert row["symbol"] == "BNB/USDT", row
+            assert float(row["premature_exit_px"]) == 633.02, row
+            assert float(row["premature_exit_net_bps"]) < -100.0, row
+            assert float(row["subsequent_px"]) == 660.0, row
+            assert row["subsequent_alpha6_score"] == "0.994", row
+            assert float(row["subsequent_trend_score"]) == 1.0, row
+            assert row["subsequent_f4"] == "5.82", row
+            assert row["subsequent_f5"] == "0.832", row
+            assert row["blocked_by_negative_expectancy"] == "true", row
+            assert row["final_score_before_penalty"] == "0.91", row
+            assert float(row["final_score_after_penalty"]) == 0.0, row
+            assert float(row["if_reentered_net_bps_4h"]) > 100.0, row
+            assert float(row["if_reentered_net_bps_8h"]) > 200.0, row
+            assert float(row["if_reentered_net_bps_24h"]) > 400.0, row
+            assert row["diagnosis"] == "premature_exit_poisoned_reentry", row
+            assert window["bnb_recovery_missed_opportunity_rows"] == 1, window
+            assert window["bnb_recovery_premature_exit_poisoned_reentry_count"] == 1, window
+            assert manifest["bnb_recovery_missed_opportunity_rows"] == 1, manifest
+            assert manifest["bnb_recovery_premature_exit_poisoned_reentry_count"] == 1, manifest
+            assert "BNB recovery missed opportunity audit" in readme, readme
+            assert "summaries/bnb_recovery_missed_opportunity.csv" in readme, readme
+            assert "live_order_effect: none" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
