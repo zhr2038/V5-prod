@@ -657,6 +657,59 @@ class NegativeExpectancyCooldown:
         except Exception:
             return 0
 
+    @staticmethod
+    def _int_stat(row: Optional[Dict[str, Any]], key: str) -> int:
+        try:
+            return int(float((row or {}).get(key) or 0))
+        except Exception:
+            return 0
+
+    def _overlay_premature_soft_exit_diagnostics(
+        self,
+        existing: Dict[str, Any],
+        diagnostic: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if self._int_stat(diagnostic, "premature_soft_exit_count") <= self._int_stat(existing, "premature_soft_exit_count"):
+            return existing
+        existing_cycles = self._closed_cycle_count(existing)
+        diagnostic_cycles = self._closed_cycle_count(diagnostic)
+        existing_fast_fail = self._int_stat(existing, "fast_fail_closed_cycles")
+        diagnostic_fast_fail = self._int_stat(diagnostic, "fast_fail_closed_cycles")
+        diagnostic_excluded = self._int_stat(diagnostic, "excluded_from_fast_fail_count")
+        can_overlay_fast_fail = bool(
+            existing_cycles == diagnostic_cycles
+            or existing_fast_fail <= diagnostic_fast_fail + diagnostic_excluded
+        )
+        out = dict(existing)
+        for key in (
+            "premature_soft_exit_count",
+            "premature_soft_exit_net_bps_sum",
+            "premature_soft_exit_net_pnl_sum_usdt",
+            "premature_soft_exit_closed_notional_usdt",
+            "excluded_from_fast_fail_count",
+        ):
+            out[key] = diagnostic.get(key, out.get(key))
+        out["premature_soft_exit_diagnostic_source"] = str(diagnostic.get("source") or "")
+        if can_overlay_fast_fail:
+            for key in (
+                "fast_fail_closed_cycles",
+                "fast_fail_closed_notional_usdt",
+                "fast_fail_gross_pnl_sum_usdt",
+                "fast_fail_net_pnl_sum_usdt",
+                "fast_fail_gross_expectancy_usdt",
+                "fast_fail_net_expectancy_usdt",
+                "fast_fail_gross_expectancy_bps",
+                "fast_fail_net_expectancy_bps",
+                "adjusted_fast_fail_net_expectancy_bps",
+                "fast_fail_pnl_sum_usdt",
+                "fast_fail_expectancy_usdt",
+                "fast_fail_expectancy_bps",
+                "fast_fail_avg_hold_minutes",
+            ):
+                if key in diagnostic:
+                    out[key] = diagnostic.get(key)
+        return out
+
     def _merge_missing_symbol_stats(self, *sources: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         merged: Dict[str, Dict[str, Any]] = {}
         for source in sources:
@@ -669,6 +722,8 @@ class NegativeExpectancyCooldown:
                     continue
                 if self._closed_cycle_count(existing) <= 0 and self._closed_cycle_count(stat) > 0:
                     merged[sym] = dict(stat)
+                    continue
+                merged[sym] = self._overlay_premature_soft_exit_diagnostics(dict(existing), dict(stat))
         return merged
 
     def _empty_expectancy_row(self, *, source: str = "no_closed_cycles") -> Dict[str, Any]:
