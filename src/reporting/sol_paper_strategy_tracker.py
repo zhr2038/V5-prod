@@ -2546,11 +2546,56 @@ def _risk_on_multi_buy_detail_paths(*, run_path: Path, reports_dir: Path) -> lis
         reports_dir / "risk_on_multi_buy_shadow.csv",
         reports_dir / "quant_lab" / "risk_on_multi_buy_shadow.csv",
         reports_dir / "quant_lab_latest" / "risk_on_multi_buy_shadow.csv",
+        reports_dir / "quant_lab_latest" / "reports" / "risk_on_multi_buy_shadow.csv",
+        reports_dir / "quant_lab_latest" / raw_rel,
         reports_dir / "quant_lab" / "latest" / "reports" / "risk_on_multi_buy_shadow.csv",
+        reports_dir / "quant_lab" / "latest" / raw_rel,
         reports_dir.parent / "reports" / "risk_on_multi_buy_shadow.csv",
         reports_dir.parent / raw_rel,
+        reports_dir.parent / "reports" / "quant_lab" / "latest" / "reports" / "risk_on_multi_buy_shadow.csv",
+        reports_dir.parent / "reports" / "quant_lab" / "latest" / raw_rel,
         run_path / "risk_on_multi_buy_shadow.csv",
+        reports_dir / "quant_lab_latest_bundle.zip",
+        reports_dir / "quant_lab_latest_bundle.tar.gz",
+        reports_dir / "quant_lab" / "latest_bundle.zip",
+        reports_dir / "quant_lab" / "latest_bundle.tar.gz",
+        reports_dir.parent / "reports" / "quant_lab_latest_bundle.zip",
+        reports_dir.parent / "reports" / "quant_lab_latest_bundle.tar.gz",
+        reports_dir.parent / "reports" / "quant_lab" / "latest_bundle.zip",
+        reports_dir.parent / "reports" / "quant_lab" / "latest_bundle.tar.gz",
+        Path("/var/lib/v5-prod/raw/reports/risk_on_multi_buy_shadow.csv"),
+        Path("/var/lib/v5-prod/reports/risk_on_multi_buy_shadow.csv"),
+        Path("/var/lib/v5-prod/quant_lab_latest/reports/risk_on_multi_buy_shadow.csv"),
+        Path("/var/lib/v5-prod/quant_lab_latest/raw/reports/risk_on_multi_buy_shadow.csv"),
+        Path("/var/lib/v5-prod/quant_lab/latest/reports/risk_on_multi_buy_shadow.csv"),
+        Path("/var/lib/v5-prod/quant_lab/latest/raw/reports/risk_on_multi_buy_shadow.csv"),
+        Path("/var/lib/v5-prod/quant_lab_latest_bundle.zip"),
+        Path("/var/lib/v5-prod/quant_lab_latest_bundle.tar.gz"),
     ]
+    for pattern in (
+        reports_dir / "quant_lab_latest_bundle*.zip",
+        reports_dir / "quant_lab_latest_bundle*.tar.gz",
+        reports_dir / "quant_lab_expert_pack*.zip",
+        reports_dir / "quant_lab_expert_pack*.tar.gz",
+        reports_dir.parent / "reports" / "quant_lab_latest_bundle*.zip",
+        reports_dir.parent / "reports" / "quant_lab_latest_bundle*.tar.gz",
+        reports_dir.parent / "reports" / "quant_lab_expert_pack*.zip",
+        reports_dir.parent / "reports" / "quant_lab_expert_pack*.tar.gz",
+        Path("/var/lib/v5-prod/quant_lab_latest_bundle*.zip"),
+        Path("/var/lib/v5-prod/quant_lab_latest_bundle*.tar.gz"),
+        Path("/var/lib/v5-prod/quant_lab_expert_pack*.zip"),
+        Path("/var/lib/v5-prod/quant_lab_expert_pack*.tar.gz"),
+    ):
+        try:
+            candidates.extend(
+                sorted(
+                    pattern.parent.glob(pattern.name),
+                    key=lambda path: path.stat().st_mtime if path.exists() else 0,
+                    reverse=True,
+                )
+            )
+        except Exception:
+            continue
     return list(dict.fromkeys(path.resolve() for path in candidates))
 
 

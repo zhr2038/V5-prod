@@ -6295,6 +6295,44 @@ def main():
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
             shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
 
+    with tempfile.TemporaryDirectory(prefix="v5-risk-on-reports-archive-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_entry_quality_advisory_root(root)
+        shutil.rmtree(root / "reports/quant_lab/latest")
+        write_text(
+            root / "raw/reports/risk_on_multi_buy_shadow.csv",
+            "run_id,decision_ts,top_k,current_regime,selected_symbols,would_buy_symbol\n"
+            'r_stale_local,2026-05-20T00:00:00Z,1,ALT_IMPULSE,"[""ETH-USDT""]",ETH-USDT\n',
+        )
+        write_zip(
+            root / "reports/quant_lab_latest_bundle.zip",
+            {
+                "reports/risk_on_multi_buy_shadow.csv": "\n".join(
+                    [
+                        "run_id,decision_ts,top_k,current_regime,selected_symbols,would_buy_symbol",
+                        'r_archive_latest,2026-05-26T00:00:00Z,1,ALT_IMPULSE,"[""BNB-USDT""]",BNB-USDT',
+                    ]
+                )
+                + "\n",
+            },
+        )
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                risk_on_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/risk_on_multi_buy_shadow.csv")).read().decode().splitlines()))
+                raw_risk_on = tf.extractfile(extract_member(tf, "raw/reports/risk_on_multi_buy_shadow.csv")).read().decode()
+
+            by_top_k = {row["top_k"]: row for row in risk_on_rows}
+            assert json.loads(by_top_k["1"]["selected_symbols"]) == ["BNB/USDT"], by_top_k
+            assert json.loads(by_top_k["1"]["would_buy_symbols"]) == ["BNB/USDT"], by_top_k
+            assert by_top_k["1"]["source_detail_available"] == "true", by_top_k
+            assert "BNB-USDT" in raw_risk_on, raw_risk_on
+            assert "r_stale_local" not in raw_risk_on, raw_risk_on
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
     print("btc leadership labeler tests passed")
 
 
