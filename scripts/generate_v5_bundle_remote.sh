@@ -202,6 +202,8 @@ STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = (
     "expires_before_generated_at",
     "expiry_corrected",
     "freshness_basis",
+    "freshness_status",
+    "freshness_reason",
     "advisory_source_lag_sec",
     "selected_source",
     "api_fallback_attempted",
@@ -10396,12 +10398,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         expires_dt = parse_dt_utc(row.get("expires_at"))
         expires_before_generated_at = bool(reference_dt is not None and expires_dt is not None and expires_dt < reference_dt)
         expiry_corrected = False
+        freshness_reason_parts = []
         if expires_before_generated_at and reference_dt is not None:
             expires_dt = reference_dt + dt.timedelta(seconds=max_age_sec)
             expiry_corrected = True
+            freshness_reason_parts.append("invalid_expiry_corrected")
         elif expires_dt is None and reference_dt is not None:
             expires_dt = reference_dt + dt.timedelta(seconds=max_age_sec)
             expiry_corrected = True
+            freshness_reason_parts.append("missing_expiry_defaulted")
         age_sec = (NOW - reference_dt).total_seconds() if reference_dt else None
         age_ok = bool(age_sec is not None and age_sec <= max_age_sec)
         expires_ok = expires_dt is None or NOW <= expires_dt
@@ -10417,6 +10422,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             reasons.append("expired")
         if not contract_match:
             reasons.append("contract_mismatch")
+        if fresh:
+            freshness_status = "fresh"
+            reasons = []
+        elif reference_dt is None:
+            freshness_status = "invalid_timestamp"
+        else:
+            freshness_status = "stale"
+        if reasons:
+            freshness_reason_parts.extend(reasons)
+        if not freshness_reason_parts:
+            freshness_reason_parts.append("fresh" if fresh else freshness_status)
         if expiry_corrected:
             freshness_basis = "generated_at_plus_advisory_max_age"
         elif expires_dt is not None:
@@ -10430,6 +10446,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "age_sec": age_sec,
             "contract_match": contract_match,
             "stale_reason": ";".join(reasons),
+            "freshness_status": freshness_status,
+            "freshness_reason": ";".join(freshness_reason_parts),
             "expires_at": expires_dt,
             "expires_before_generated_at": expires_before_generated_at,
             "expiry_corrected": expiry_corrected,
@@ -10486,8 +10504,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         payload["expires_before_generated_at"] = str(bool(assessed["expires_before_generated_at"])).lower()
         payload["expiry_corrected"] = str(bool(assessed["expiry_corrected"])).lower()
         payload["freshness_basis"] = flatten_value(assessed["freshness_basis"])
+        payload["freshness_status"] = flatten_value(assessed["freshness_status"])
+        payload["freshness_reason"] = flatten_value(assessed["freshness_reason"])
         payload["stale_advisory_used"] = str(not fresh).lower()
-        payload["stale_reason"] = stale_reason
+        payload["stale_reason"] = stale_reason if not fresh else ""
         payload.setdefault("api_fallback_attempted", "false")
         payload.setdefault("api_fallback_success", "false")
         if not payload.get("max_live_notional_usdt") or not fresh:
@@ -10516,8 +10536,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "expires_before_generated_at": str(bool(assessed["expires_before_generated_at"])).lower(),
             "expiry_corrected": str(bool(assessed["expiry_corrected"])).lower(),
             "freshness_basis": flatten_value(assessed["freshness_basis"]),
+            "freshness_status": flatten_value(assessed["freshness_status"]),
+            "freshness_reason": flatten_value(assessed["freshness_reason"]),
             "stale_advisory_used": str(not fresh).lower(),
-            "stale_reason": stale_reason,
+            "stale_reason": stale_reason if not fresh else "",
             "api_fallback_attempted": "true",
             "api_fallback_success": "true",
             "api_lake_generated_at": flatten_value(first_observed(api_meta.get("advisory_dataset_generated_at"), row.get("api_lake_generated_at"), "")),
@@ -10687,16 +10709,35 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             previous_health.get("api_cache_hit"),
             "",
         )
-        stale_reasons = sorted({
-            flatten_value(row.get("stale_reason")).strip()
-            for row in selected_rows
-            if flatten_value(row.get("stale_reason")).strip()
-        })
         selected_age_sec = None
         if selected_latest_dt is not None:
             selected_age_sec = max(0.0, (NOW - selected_latest_dt).total_seconds())
         max_age_sec = (config_number("quant_lab_strategy_opportunity_advisory_max_age_minutes") or 90.0) * 60.0
         selected_source_is_stale = any(not truthy_text(row.get("advisory_fresh")) for row in selected_rows) if selected_rows else True
+        freshness_status_values = sorted({
+            flatten_value(row.get("freshness_status")).strip()
+            for row in selected_rows
+            if flatten_value(row.get("freshness_status")).strip()
+        })
+        if any(value == "invalid_timestamp" for value in freshness_status_values):
+            freshness_status = "invalid_timestamp"
+        elif selected_source_is_stale:
+            freshness_status = "stale"
+        elif selected_rows:
+            freshness_status = "fresh"
+        else:
+            freshness_status = "invalid_timestamp"
+        row_stale_reasons = sorted({
+            flatten_value(row.get("stale_reason")).strip()
+            for row in selected_rows
+            if flatten_value(row.get("stale_reason")).strip()
+        })
+        freshness_reason_values = sorted({
+            flatten_value(row.get("freshness_reason")).strip()
+            for row in selected_rows
+            if flatten_value(row.get("freshness_reason")).strip()
+        })
+        stale_reasons = row_stale_reasons if selected_source_is_stale else []
         stale_reason = ";".join(stale_reasons)
         selected_expires_values = [
             parse_dt_utc(first_observed(row.get("advisory_expires_at"), row.get("expires_at"), ""))
@@ -10708,6 +10749,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         expiry_corrected = any(truthy_text(row.get("expiry_corrected")) for row in selected_rows)
         freshness_basis_values = [row.get("freshness_basis") for row in selected_rows if row.get("freshness_basis")]
         freshness_basis = first_observed(*(freshness_basis_values + [""]))
+        if stale_reason:
+            freshness_reason = stale_reason
+        elif freshness_reason_values:
+            freshness_reason = ";".join(freshness_reason_values)
+        else:
+            freshness_reason = freshness_status
         stale_detail_parts = []
         if selected_age_sec is not None:
             stale_detail_parts.append(f"age_sec={fmt_num(selected_age_sec, 3)} max_age_sec={fmt_num(max_age_sec, 3)}")
@@ -10749,6 +10796,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "expires_before_generated_at": str(bool(expires_before_generated_at)).lower(),
             "expiry_corrected": str(bool(expiry_corrected)).lower(),
             "freshness_basis": flatten_value(freshness_basis),
+            "freshness_status": freshness_status,
+            "freshness_reason": flatten_value(freshness_reason),
             "advisory_source_lag_sec": fmt_num(
                 abs((local_latest_dt - comparable_api_latest_dt).total_seconds())
                 if local_latest_dt and comparable_api_latest_dt else None,
@@ -11856,6 +11905,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 payload["advisory_expires_at"] = min(expires_values).isoformat().replace("+00:00", "Z")
         if not payload.get("selected_source_is_stale"):
             payload["selected_source_is_stale"] = str(bool(str(payload.get("stale_reason") or "").strip())).lower()
+        selected_is_stale = truthy_text(payload.get("selected_source_is_stale"))
+        if not selected_is_stale:
+            payload["stale_reason"] = ""
+        if not payload.get("freshness_status"):
+            payload["freshness_status"] = "stale" if selected_is_stale else "fresh"
+        if not payload.get("freshness_reason"):
+            payload["freshness_reason"] = payload.get("stale_reason") if selected_is_stale else "fresh"
         if not payload.get("stale_reason_detail"):
             detail_parts = []
             if payload.get("advisory_age_sec") and payload.get("advisory_max_age_sec"):
@@ -12079,6 +12135,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "strategy_advisory_stale_reason": advisory_source_health.get("stale_reason", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_stale_reason_detail": advisory_source_health.get("stale_reason_detail", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_selected_source_is_stale": advisory_source_health.get("selected_source_is_stale", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_freshness_status": advisory_source_health.get("freshness_status", not_obs) if 'advisory_source_health' in locals() else not_obs,
+        "strategy_advisory_freshness_reason": advisory_source_health.get("freshness_reason", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_suggested_fix": advisory_source_health.get("suggested_fix", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_source_lag_sec": advisory_source_health.get("advisory_source_lag_sec", not_obs) if 'advisory_source_health' in locals() else not_obs,
         "strategy_advisory_stale_count": strategy_advisory_stale_count,
@@ -12839,12 +12897,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- stale_advisory_count: {window_summary.get('strategy_advisory_stale_count', not_obs)}",
         f"- stale_response_downgraded_count: {window_summary.get('strategy_advisory_stale_response_downgraded_count', not_obs)}",
         f"- advisory_source_lag_sec: {advisory_source_health.get('advisory_source_lag_sec', not_obs)}",
-        f"- stale_reason: {advisory_source_health.get('stale_reason', not_obs)}",
+        f"- freshness_status: {advisory_source_health.get('freshness_status', not_obs)}",
+        f"- freshness_reason: {advisory_source_health.get('freshness_reason', not_obs)}",
         f"- stale_reason_detail: {advisory_source_health.get('stale_reason_detail', not_obs)}",
         f"- selected_source_is_stale: {advisory_source_health.get('selected_source_is_stale', not_obs)}",
         f"- suggested_fix: {advisory_source_health.get('suggested_fix', not_obs)}",
         f"- warning: {first_observed(advisory_source_health.get('warning'), advisory_source_health.get('freshness_inconsistency_warning'), not_obs)}",
-        "- freshness_rule: advisory is fresh only when age <= advisory_max_age_sec, expires_at is not past, and contract matches. If age is below max age but stale_reason=expired, the shorter expires_at rule is the reason.",
+        "- freshness_rule: advisory is fresh only when age <= advisory_max_age_sec, expires_at is not past, and contract matches. stale_reason is populated only when selected_source_is_stale=true; invalid expires_at is recorded in freshness_reason.",
         "",
         "## Entry quality advisory",
         f"- missed_low late_chase_loss_count: {window_summary.get('missed_low_late_chase_loss_count', not_obs)}",

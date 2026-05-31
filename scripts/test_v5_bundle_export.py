@@ -3523,6 +3523,27 @@ def fixture_risk_on_detail_only_root(root):
     return run_id
 
 
+def fixture_fresh_advisory_with_stale_reason_root(root, *, invalid_expiry=False):
+    run_id = fixture_root(root)
+    now = dt.datetime.now(dt.timezone.utc)
+    generated_at = (now - dt.timedelta(seconds=25)).isoformat().replace("+00:00", "Z")
+    if invalid_expiry:
+        expires_at = (now - dt.timedelta(minutes=2)).isoformat().replace("+00:00", "Z")
+    else:
+        expires_at = (now + dt.timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    write_text(
+        root / "reports/strategy_opportunity_advisory.csv",
+        "\n".join(
+            [
+                "strategy_candidate,symbol,decision,recommended_mode,generated_at,expires_at,contract_version,stale_reason",
+                f"v5.entry_quality_missed_low_audit,BTC/USDT,KEEP_RESEARCH,research,{generated_at},{expires_at},v5.quant_lab.telemetry.v2,age_exceeds_max;expired",
+            ]
+        )
+        + "\n",
+    )
+    return run_id
+
+
 def run_bundle(root):
     script_path = bash_path(SCRIPT)
     root_path = bash_path(root)
@@ -5710,6 +5731,60 @@ def main():
             assert row["live_order_effect"] == "read_only_no_live_order", row
             assert "BNB/USDT" in readme, readme
             assert "source_detail_available: true" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-fresh-advisory-health-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_fresh_advisory_with_stale_reason_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                source_health = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/strategy_opportunity_advisory_source_health.csv")).read().decode().splitlines()))
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert len(source_health) == 1, source_health
+            health_row = source_health[0]
+            assert health_row["selected_source_is_stale"] == "false", health_row
+            assert health_row["freshness_status"] == "fresh", health_row
+            assert health_row["freshness_reason"] == "fresh", health_row
+            assert health_row["stale_reason"] == "", health_row
+            assert "age_exceeds_max" not in health_row["stale_reason_detail"], health_row
+            assert "expired" not in health_row["stale_reason_detail"], health_row
+            assert float(health_row["advisory_age_sec"]) <= float(health_row["advisory_max_age_sec"]), health_row
+            assert window["strategy_advisory_selected_source_is_stale"] == "false", window
+            assert window["strategy_advisory_freshness_status"] == "fresh", window
+            assert window["strategy_advisory_freshness_reason"] == "fresh", window
+            assert window["strategy_advisory_stale_reason"] == "", window
+            assert "freshness_status: fresh" in readme, readme
+            assert "freshness_reason: fresh" in readme, readme
+            assert "stale_reason: age_exceeds_max" not in readme, readme
+            assert "stale_reason: expired" not in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-invalid-expiry-advisory-health-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_fresh_advisory_with_stale_reason_root(root, invalid_expiry=True)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                source_health = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/strategy_opportunity_advisory_source_health.csv")).read().decode().splitlines()))
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            health_row = source_health[0]
+            assert health_row["selected_source_is_stale"] == "false", health_row
+            assert health_row["freshness_status"] == "fresh", health_row
+            assert "invalid_expiry" in health_row["freshness_reason"], health_row
+            assert health_row["expires_before_generated_at"] == "true", health_row
+            assert health_row["expiry_corrected"] == "true", health_row
+            assert health_row["stale_reason"] == "", health_row
+            assert "age_exceeds_max" not in health_row["freshness_reason"], health_row
+            assert "expired" not in health_row["stale_reason"], health_row
+            assert "freshness_reason: invalid_expiry" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
