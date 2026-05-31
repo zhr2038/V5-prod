@@ -903,6 +903,8 @@ def _copy_sol_paper_strategy_files(staging: Path, reports: Path) -> None:
     summary_specs = (
         ("paper_strategy_runs.csv", PAPER_RUN_FIELDS),
         ("paper_strategy_daily.csv", PAPER_DAILY_FIELDS),
+        ("bnb_paper_strategy_runs.csv", PAPER_RUN_FIELDS),
+        ("bnb_paper_strategy_daily.csv", PAPER_DAILY_FIELDS),
         ("paper_slippage_coverage.csv", PAPER_SLIPPAGE_FIELDS),
         ("strategy_opportunity_advisory_reader.csv", STRATEGY_ADVISORY_FIELDS),
         ("strategy_opportunity_advisory_source_health.csv", STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS),

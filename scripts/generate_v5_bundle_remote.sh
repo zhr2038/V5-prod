@@ -64,6 +64,8 @@ CURRENT_REPORT_FILES = [
     ("reports/order_lifecycle.csv", "raw/reports/order_lifecycle.csv", False),
     ("reports/summaries/paper_strategy_runs.csv", "summaries/paper_strategy_runs.csv", False),
     ("reports/summaries/paper_strategy_daily.csv", "summaries/paper_strategy_daily.csv", False),
+    ("reports/summaries/bnb_paper_strategy_runs.csv", "summaries/bnb_paper_strategy_runs.csv", False),
+    ("reports/summaries/bnb_paper_strategy_daily.csv", "summaries/bnb_paper_strategy_daily.csv", False),
     ("reports/summaries/paper_slippage_coverage.csv", "summaries/paper_slippage_coverage.csv", False),
     ("reports/quant_lab_usage.jsonl", "raw/reports/quant_lab_usage.jsonl", False),
     ("reports/quant_lab_requests.jsonl", "raw/reports/quant_lab_requests.jsonl", False),
@@ -11799,6 +11801,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         risk_on_latest_selected_symbols = json.dumps(latest_payload, ensure_ascii=False, sort_keys=True)
         risk_on_source_detail_available = any(truthy_text(row.get("source_detail_available")) for row in latest_rows)
 
+    bnb_paper_run_rows = load_csv_dicts(OUT / "summaries" / "bnb_paper_strategy_runs.csv")
+    bnb_paper_daily_rows = load_csv_dicts(OUT / "summaries" / "bnb_paper_strategy_daily.csv")
+    bnb_paper_would_enter_count = sum(1 for row in bnb_paper_run_rows if truthy_text(row.get("would_enter")))
+    bnb_paper_strategy_ids = sorted({
+        flatten_value(row.get("strategy_id"))
+        for row in bnb_paper_run_rows
+        if flatten_value(row.get("strategy_id"))
+    })
+
     high_count = sum(1 for item in issues if item.get("severity") == "high")
     medium_count = sum(1 for item in issues if item.get("severity") == "medium")
     warning_count = sum(1 for item in issues if item.get("severity") == "warning")
@@ -12442,6 +12453,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "risk_on_multi_buy_shadow_rows": len(risk_on_rows),
         "risk_on_multi_buy_latest_selected_symbols": risk_on_latest_selected_symbols,
         "risk_on_multi_buy_source_detail_available": bool(risk_on_source_detail_available),
+        "bnb_paper_strategy_run_rows": len(bnb_paper_run_rows),
+        "bnb_paper_strategy_daily_rows": len(bnb_paper_daily_rows),
+        "bnb_paper_would_enter_count": bnb_paper_would_enter_count,
+        "bnb_paper_strategy_ids": json.dumps(bnb_paper_strategy_ids, ensure_ascii=False),
         "telemetry_contract_version": QUANT_LAB_CONTRACT_VERSION,
         "telemetry_schema_version": QUANT_LAB_SCHEMA_VERSION,
         "rank_exit_sell_count": len(rank_exit_consistency_rows),
@@ -13217,6 +13232,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- source_detail_available: {str(window_summary.get('risk_on_multi_buy_source_detail_available', False)).lower()}",
         "- live_order_effect: read_only_no_live_order",
         "- output: summaries/risk_on_multi_buy_shadow.csv",
+        "",
+        "## BNB paper strategy tracking",
+        f"- run_rows: {window_summary.get('bnb_paper_strategy_run_rows', not_obs)}",
+        f"- daily_rows: {window_summary.get('bnb_paper_strategy_daily_rows', not_obs)}",
+        f"- would_enter_count: {window_summary.get('bnb_paper_would_enter_count', not_obs)}",
+        f"- strategy_ids: {window_summary.get('bnb_paper_strategy_ids', not_obs)}",
+        "- trigger: BNB alpha6 buy >= 0.9, expected_edge_bps > required_edge_bps, cost_gate_verified=true, and risk-on/trending regime.",
+        "- live_order_effect: none_paper_only",
+        "- output: summaries/bnb_paper_strategy_runs.csv and summaries/bnb_paper_strategy_daily.csv",
         "",
         "## Probe 生命周期检查",
         f"- 今天是否有 market_impulse_probe / btc_leadership_probe: market_impulse_probe={bool(market_probe_seen or probe_counts['market_impulse_probe_candidate_count'] or probe_counts['market_impulse_probe_open_count'])}, btc_leadership_probe={bool(btc_seen_in_decision_audit or probe_counts['btc_leadership_probe_candidate_count'] or probe_counts['btc_leadership_probe_open_count'] or probe_counts['btc_leadership_probe_blocked_count'])}",

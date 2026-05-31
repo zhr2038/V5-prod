@@ -315,6 +315,47 @@ diagnostics:
         - f4_volume_expansion
       allowed_block_reasons: []
       min_f4_volume_expansion: 0.0
+    - strategy_id: BNB_F3_DOMINANT_ENTRY_PAPER_V1
+      experiment_name: v5.bnb_f3_dominant_entry
+      source_strategy_candidates:
+        - f3_dominant_entry
+        - v5.f3_dominant_entry
+        - v5.bnb_f3_dominant_entry
+      allowed_block_reasons: []
+      symbol: BNB/USDT
+      primary_horizon_hours: 24
+      require_protect_level: false
+      require_no_cooldown: false
+      require_alpha6_buy: true
+      min_alpha6_score: 0.9
+      require_expected_edge_gt_required: true
+      require_cost_gate_verified: true
+      allowed_current_regimes:
+        - ALT_IMPULSE
+        - TRENDING
+        - TREND_UP
+      extra_live_block_reasons:
+        - bnb_paper_only_no_live
+        - bnb_negative_expectancy_recovery_research_only
+    - strategy_id: BNB_RISK_ON_BUY_PAPER_V1
+      experiment_name: v5.bnb_risk_on_buy
+      source_strategy_candidates: []
+      allowed_block_reasons: []
+      symbol: BNB/USDT
+      primary_horizon_hours: 24
+      require_protect_level: false
+      require_no_cooldown: false
+      require_alpha6_buy: true
+      min_alpha6_score: 0.9
+      require_expected_edge_gt_required: true
+      require_cost_gate_verified: true
+      allowed_current_regimes:
+        - ALT_IMPULSE
+        - TRENDING
+        - TREND_UP
+      extra_live_block_reasons:
+        - bnb_paper_only_no_live
+        - bnb_negative_expectancy_recovery_research_only
 
 execution:
   mode: live

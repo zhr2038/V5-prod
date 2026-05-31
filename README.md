@@ -477,6 +477,8 @@ V5 内置 SOL paper tracking，用于跟踪 quant-style 研究候选，但不生
 SOL_PROTECT_ALPHA6_LOW_EXCEPTION_PAPER_V1
 SOL_F4_VOLUME_EXPANSION_PAPER_V1
 ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1
+BNB_F3_DOMINANT_ENTRY_PAPER_V1
+BNB_RISK_ON_BUY_PAPER_V1
 ```
 
 每轮都会输出 heartbeat，即使没有 qualifying candidate。heartbeat 的目的不是交易，而是解释为什么没有入场。
@@ -526,6 +528,8 @@ quant_lab_advisory_kill
 - `reports/sol_paper_strategy_labels.jsonl`
 - `summaries/paper_strategy_runs.csv`
 - `summaries/paper_strategy_daily.csv`
+- `summaries/bnb_paper_strategy_runs.csv`
+- `summaries/bnb_paper_strategy_daily.csv`
 - `summaries/paper_slippage_coverage.csv`
 - `summaries/strategy_opportunity_advisory_reader.csv`
 
@@ -534,6 +538,8 @@ Live small ready 前必须满足 paper days、entry day count、arrival mid cove
 V5 也会只读 quant-lab `strategy_opportunity_advisory.csv`。生产优先从 `/var/lib/v5-prod/strategy_opportunity_advisory.csv` 或 `/var/lib/v5-prod/quant_lab_latest_bundle.zip` 这类运行时同步文件读取，避免把中台包写进 Git 工作树；输入也可以是仓库内本地同步 CSV，或同步过来的 quant-lab expert pack `zip/tar/tar.gz`，reader 会从包内提取 `reports/strategy_opportunity_advisory.csv`；本地文件缺失时才尝试 quant-lab API JSON fallback。支持字段包括 `strategy_candidate`、`symbol`、`decision`、`recommended_mode`、`max_paper_notional_usdt`、`max_live_notional_usdt` 和 `live_block_reasons`。当前只响应 `recommended_mode=paper` 或 `recommended_mode=shadow` 的 advisory：SOL `PAPER_READY` 继续进入 paper tracking；`KILL` 会被记录为 negative advisory，不会生成 live order。`max_live_notional_usdt` 默认忽略，除非本地显式设置 `enable_live_small_from_quant_lab=true` 且 advisory 为 `LIVE_SMALL_READY`。生产默认值为 `false`。
 
 V5 还会只读 quant-lab `paper_strategy_proposals.csv`。当前仅把 `ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1` 转为 paper-only tracker：要求 `symbol=ETH/USDT`、`strategy_candidate=f3_dominant_entry`、`horizon=48h`，并且当前上下文不能是 Risk-Off。该策略不产生真实订单，live 阻断原因固定包含 `cost_source_not_actual_or_mixed`、`f3_global_evidence_negative` 和 `no_paper_pnl_observations`。
+
+BNB paper tracking 只用于复盘 missed recovery，不影响 live。`BNB_F3_DOMINANT_ENTRY_PAPER_V1` 和 `BNB_RISK_ON_BUY_PAPER_V1` 要求 `symbol=BNB/USDT`、`alpha6_side=buy`、`alpha6_score>=0.9`、`expected_edge_bps>required_edge_bps`、`cost_gate_verified=true`，并且 regime 为 `TREND_UP` / `ALT_IMPULSE` / `Trending`。它们不要求 `final_score>0`，因此能覆盖 final_score 被 negative expectancy 或其他 penalty 压负但 Alpha6/f4/f5 已恢复的 no_order 样本。输出始终是 paper-only，`live_small_ready=false`，不会产生真实订单。
 
 ---
 

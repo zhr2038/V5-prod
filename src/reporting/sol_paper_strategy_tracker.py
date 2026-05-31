@@ -35,7 +35,10 @@ from src.reporting.skipped_candidate_tracker import (
 
 SOL_SYMBOL = "SOL/USDT"
 ETH_SYMBOL = "ETH/USDT"
+BNB_SYMBOL = "BNB/USDT"
 ETH_F3_DOMINANT_STRATEGY_ID = "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1"
+BNB_F3_DOMINANT_STRATEGY_ID = "BNB_F3_DOMINANT_ENTRY_PAPER_V1"
+BNB_RISK_ON_BUY_STRATEGY_ID = "BNB_RISK_ON_BUY_PAPER_V1"
 ETH_F3_DOMINANT_MIN_48H_COMPLETE_COUNT = 30
 ETH_F3_ALPHA6_NOT_BUY_REASON = "eth_f3_alpha6_side_not_buy_no_new_entry"
 ETH_F3_DOMINANT_LIVE_BLOCK_REASONS = [
@@ -43,6 +46,11 @@ ETH_F3_DOMINANT_LIVE_BLOCK_REASONS = [
     "f3_global_evidence_negative",
     "eth_f3_paper_only_no_live",
 ]
+BNB_PAPER_LIVE_BLOCK_REASONS = [
+    "bnb_paper_only_no_live",
+    "bnb_negative_expectancy_recovery_research_only",
+]
+BNB_ALLOWED_PAPER_REGIMES = {"TREND_UP", "ALT_IMPULSE", "TRENDING"}
 DEFAULT_HORIZONS = [4, 8, 12, 24, 48, 72]
 PRIMARY_HORIZON = 24
 LIVE_SMALL_READY_COST_SOURCES = {"actual_fills", "mixed_actual_proxy"}
@@ -87,6 +95,42 @@ DEFAULT_PAPER_STRATEGY_CONFIGS = [
         ],
         "allowed_block_reasons": [],
         "min_f4_volume_expansion": 0.0,
+    },
+    {
+        "strategy_id": BNB_F3_DOMINANT_STRATEGY_ID,
+        "experiment_name": "v5.bnb_f3_dominant_entry",
+        "source_strategy_candidates": [
+            "f3_dominant_entry",
+            "v5.f3_dominant_entry",
+            "v5.bnb_f3_dominant_entry",
+        ],
+        "allowed_block_reasons": [],
+        "symbol": BNB_SYMBOL,
+        "primary_horizon_hours": 24,
+        "require_protect_level": False,
+        "require_no_cooldown": False,
+        "require_alpha6_buy": True,
+        "min_alpha6_score": 0.9,
+        "require_expected_edge_gt_required": True,
+        "require_cost_gate_verified": True,
+        "allowed_current_regimes": sorted(BNB_ALLOWED_PAPER_REGIMES),
+        "extra_live_block_reasons": list(BNB_PAPER_LIVE_BLOCK_REASONS),
+    },
+    {
+        "strategy_id": BNB_RISK_ON_BUY_STRATEGY_ID,
+        "experiment_name": "v5.bnb_risk_on_buy",
+        "source_strategy_candidates": [],
+        "allowed_block_reasons": [],
+        "symbol": BNB_SYMBOL,
+        "primary_horizon_hours": 24,
+        "require_protect_level": False,
+        "require_no_cooldown": False,
+        "require_alpha6_buy": True,
+        "min_alpha6_score": 0.9,
+        "require_expected_edge_gt_required": True,
+        "require_cost_gate_verified": True,
+        "allowed_current_regimes": sorted(BNB_ALLOWED_PAPER_REGIMES),
+        "extra_live_block_reasons": list(BNB_PAPER_LIVE_BLOCK_REASONS),
     },
 ]
 
@@ -2878,6 +2922,26 @@ def _is_risk_off_context(audit: DecisionAudit, row: Mapping[str, Any], risk_leve
     return False
 
 
+def _regime_text(value: Any) -> str:
+    return str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
+
+
+def _regime_for_row(row: Mapping[str, Any], audit: DecisionAudit) -> str:
+    for value in (
+        row.get("current_regime"),
+        row.get("regime_state"),
+        row.get("regime"),
+        row.get("market_regime"),
+        getattr(audit, "current_regime", None),
+        getattr(audit, "regime_state", None),
+        getattr(audit, "regime", None),
+    ):
+        text = _regime_text(value)
+        if text:
+            return text
+    return ""
+
+
 def _has_active_cooldown(row: Mapping[str, Any], *, asof_ts_ms: int) -> bool:
     for key in (
         "active_cooldown",
@@ -2962,18 +3026,24 @@ def _row_condition_diagnostics(
 ) -> dict[str, Any]:
     risk_level = _risk_level_for_row(row, audit)
     alpha6_side = str(row.get("alpha6_side") or "").strip()
+    alpha6_score = _normalize_float(row.get("alpha6_score"))
     f4 = _normalize_float(row.get("f4_volume_expansion"))
     cooldown_active = _has_active_cooldown(row, asof_ts_ms=asof_ts_ms)
     risk_off = _is_risk_off_context(audit, row, risk_level)
+    current_regime = _regime_for_row(row, audit)
     original_block_reason = str(row.get("block_reason") or row.get("no_signal_reason") or "")
     return {
         "sol_candidate_present": bool(sol_candidate_present),
         "risk_level": risk_level,
-        "alpha6_score": _normalize_float(row.get("alpha6_score")),
+        "current_regime": current_regime,
+        "alpha6_score": alpha6_score,
         "alpha6_side": alpha6_side,
         "f4_volume_expansion": f4,
         "f4_threshold": _normalize_float(spec.get("min_f4_volume_expansion")),
         "f5_rsi_trend_confirm": _normalize_float(row.get("f5_rsi_trend_confirm")),
+        "expected_edge_bps": _normalize_float(row.get("expected_edge_bps")),
+        "required_edge_bps": _normalize_float(row.get("required_edge_bps")),
+        "cost_gate_verified": _normalize_bool(row.get("cost_gate_verified")),
         "original_block_reason": original_block_reason,
         "cooldown_active": bool(cooldown_active),
         "risk_off": bool(risk_off),
@@ -3004,6 +3074,25 @@ def _condition_block_reason(
         if str(spec.get("strategy_id") or "") == ETH_F3_DOMINANT_STRATEGY_ID:
             return ETH_F3_ALPHA6_NOT_BUY_REASON
         return "alpha6_not_buy"
+    min_alpha6 = _normalize_float(spec.get("min_alpha6_score"))
+    alpha6_score = _normalize_float(diagnostics.get("alpha6_score"))
+    if min_alpha6 is not None and (alpha6_score is None or alpha6_score < min_alpha6):
+        return "alpha6_score_below_threshold"
+    if _spec_bool(spec, "require_expected_edge_gt_required", False):
+        expected = _normalize_float(diagnostics.get("expected_edge_bps"))
+        required = _normalize_float(diagnostics.get("required_edge_bps"))
+        if expected is None or required is None or expected <= required:
+            return "edge_not_above_required"
+    if _spec_bool(spec, "require_cost_gate_verified", False):
+        if _normalize_bool(diagnostics.get("cost_gate_verified")) is not True:
+            return "cost_gate_not_verified"
+    allowed_regimes = {
+        _regime_text(value)
+        for value in (spec.get("allowed_current_regimes") or [])
+        if _regime_text(value)
+    }
+    if allowed_regimes and _regime_text(diagnostics.get("current_regime")) not in allowed_regimes:
+        return "regime_not_allowed"
     min_f4 = _normalize_float(spec.get("min_f4_volume_expansion"))
     f4 = _normalize_float(diagnostics.get("f4_volume_expansion"))
     if min_f4 is not None and (f4 is None or f4 < min_f4):
@@ -3764,6 +3853,17 @@ def _slippage_rows(records: list[dict[str, Any]], diagnostics: DiagnosticsConfig
     return out
 
 
+def _bnb_paper_records(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        record
+        for record in records
+        if str(record.get("strategy_id") or "") in {
+            BNB_F3_DOMINANT_STRATEGY_ID,
+            BNB_RISK_ON_BUY_STRATEGY_ID,
+        }
+    ]
+
+
 def update_sol_paper_strategy_tracker(
     *,
     run_dir: str | Path,
@@ -3901,6 +4001,17 @@ def update_sol_paper_strategy_tracker(
     _write_csv(summaries_dir / "paper_strategy_runs.csv", run_rows, fields)
     _write_csv(summaries_dir / "paper_strategy_daily.csv", _daily_rows(records), PAPER_DAILY_FIELDS)
     _write_csv(summaries_dir / "paper_slippage_coverage.csv", _slippage_rows(records, diagnostics), PAPER_SLIPPAGE_FIELDS)
+    bnb_records = _bnb_paper_records(records)
+    _write_csv(
+        summaries_dir / "bnb_paper_strategy_runs.csv",
+        [_row_for_csv(record, horizons) for record in bnb_records],
+        fields,
+    )
+    _write_csv(
+        summaries_dir / "bnb_paper_strategy_daily.csv",
+        _daily_rows(bnb_records),
+        PAPER_DAILY_FIELDS,
+    )
     _write_csv(
         summaries_dir / "strategy_opportunity_advisory_reader.csv",
         _advisory_summary_rows(advisory_rows, diagnostics),
@@ -3948,6 +4059,7 @@ def update_sol_paper_strategy_tracker(
         "alpha_factory_advisory_rows": int(len(alpha_factory_rows)),
         "alpha_factory_family_rows": int(len(alpha_factory_family_rows)),
         "risk_on_multi_buy_shadow_rows": int(len(risk_on_multi_buy_rows)),
+        "bnb_paper_strategy_rows": int(len(bnb_records)),
         "proposal_rows": int(len(proposal_rows)),
         "eth_f3_alpha6_gate_rewrites": int(eth_f3_alpha6_gate_rewrites),
         "labels_path": str(labels_path),

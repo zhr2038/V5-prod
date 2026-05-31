@@ -332,7 +332,7 @@ def _write_candidate_snapshot(run_dir: Path) -> None:
         writer.writerows(rows)
 
 
-def _cfg() -> AppConfig:
+def _cfg(*, include_bnb: bool = False) -> AppConfig:
     cfg = AppConfig(symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT"])
     cfg.diagnostics.paper_strategy_tracking_enabled = True
     cfg.diagnostics.paper_strategy_enabled_shadow_only = True
@@ -342,6 +342,81 @@ def _cfg() -> AppConfig:
     cfg.diagnostics.paper_strategy_required_entry_days = 3
     cfg.diagnostics.paper_strategy_horizons_hours = [4, 8, 12, 24, 48, 72]
     cfg.diagnostics.paper_strategy_rt_cost_bps = 30.0
+    cfg.diagnostics.paper_strategy_configs = [
+        {
+            "strategy_id": "SOL_PROTECT_ALPHA6_LOW_EXCEPTION_PAPER_V1",
+            "experiment_name": "v5.sol_protect_alpha6_low_exception",
+            "source_strategy_candidates": [
+                "sol_protect_alpha6_low_exception",
+                "sol_protect_rsi_weak_exception",
+            ],
+            "allowed_block_reasons": [
+                "protect_entry_alpha6_score_too_low",
+                "protect_entry_rsi_confirm_too_weak",
+            ],
+            "min_f4_volume_expansion": 0.0,
+        },
+        {
+            "strategy_id": "SOL_F4_VOLUME_EXPANSION_PAPER_V1",
+            "experiment_name": "v5.f4_volume_expansion_entry",
+            "source_strategy_candidates": [
+                "f4_volume_swing",
+                "f4_volume_expansion_entry",
+                "v5.f4_volume_expansion_entry",
+                "f4_volume_expansion",
+            ],
+            "allowed_block_reasons": [],
+            "min_f4_volume_expansion": 0.0,
+        },
+    ]
+    if include_bnb:
+        cfg.symbols.append("BNB/USDT")
+        cfg.diagnostics.paper_strategy_configs.extend(
+            [
+                {
+                    "strategy_id": "BNB_F3_DOMINANT_ENTRY_PAPER_V1",
+                    "experiment_name": "v5.bnb_f3_dominant_entry",
+                    "source_strategy_candidates": [
+                        "f3_dominant_entry",
+                        "v5.f3_dominant_entry",
+                        "v5.bnb_f3_dominant_entry",
+                    ],
+                    "allowed_block_reasons": [],
+                    "symbol": "BNB/USDT",
+                    "primary_horizon_hours": 24,
+                    "require_protect_level": False,
+                    "require_no_cooldown": False,
+                    "require_alpha6_buy": True,
+                    "min_alpha6_score": 0.9,
+                    "require_expected_edge_gt_required": True,
+                    "require_cost_gate_verified": True,
+                    "allowed_current_regimes": ["ALT_IMPULSE", "TRENDING", "TREND_UP"],
+                    "extra_live_block_reasons": [
+                        "bnb_paper_only_no_live",
+                        "bnb_negative_expectancy_recovery_research_only",
+                    ],
+                },
+                {
+                    "strategy_id": "BNB_RISK_ON_BUY_PAPER_V1",
+                    "experiment_name": "v5.bnb_risk_on_buy",
+                    "source_strategy_candidates": [],
+                    "allowed_block_reasons": [],
+                    "symbol": "BNB/USDT",
+                    "primary_horizon_hours": 24,
+                    "require_protect_level": False,
+                    "require_no_cooldown": False,
+                    "require_alpha6_buy": True,
+                    "min_alpha6_score": 0.9,
+                    "require_expected_edge_gt_required": True,
+                    "require_cost_gate_verified": True,
+                    "allowed_current_regimes": ["ALT_IMPULSE", "TRENDING", "TREND_UP"],
+                    "extra_live_block_reasons": [
+                        "bnb_paper_only_no_live",
+                        "bnb_negative_expectancy_recovery_research_only",
+                    ],
+                },
+            ]
+        )
     cfg.diagnostics.quant_lab_strategy_opportunity_advisory_paths = [
         "strategy_opportunity_advisory.csv",
         "reports/strategy_opportunity_advisory.csv",
@@ -542,6 +617,95 @@ def test_sol_paper_strategy_tracker_writes_runs_daily_and_slippage(tmp_path: Pat
     assert alpha6_low["latest_cost_source"] == "local_estimate"
     assert "cost_source_not_actual_or_mixed" in alpha6_low["live_block_reason"]
     assert "no_live_slippage_coverage" in alpha6_low["live_block_reason"]
+
+
+def test_bnb_paper_strategy_tracks_alpha6_buy_no_order_without_live(tmp_path: Path) -> None:
+    cfg = _cfg(include_bnb=True)
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_bnb"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    row = {
+        "candidate_id": "bnb_20260530_03",
+        "run_id": "r_bnb",
+        "ts_utc": "2026-05-30T03:00:00Z",
+        "symbol": "BNB/USDT",
+        "final_decision": "no_order",
+        "block_reason": "negative_expectancy_fast_fail_open_block",
+        "strategy_candidate": "f3_dominant_entry",
+        "target_weight_raw": "0.12",
+        "target_weight_after_risk": "0",
+        "final_score": "-0.12",
+        "alpha6_score": "0.994",
+        "alpha6_side": "buy",
+        "f4_volume_expansion": "5.82",
+        "f5_rsi_trend_confirm": "0.832",
+        "risk_level": "NORMAL",
+        "current_regime": "TREND_UP",
+        "expected_edge_bps": "180",
+        "required_edge_bps": "45",
+        "cost_gate_verified": "true",
+        "cost_source": "mixed_actual_proxy",
+        "cost_source_quality": "mixed_actual_proxy",
+        "cost_bps": "28",
+    }
+    with (run_dir / "candidate_snapshot.csv").open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(row))
+        writer.writeheader()
+        writer.writerow(row)
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_bnb", start_s),
+        market_data_1h={
+            "BNB/USDT": _series(
+                "BNB/USDT",
+                start_s,
+                {0: 642.3, 4: 660.0, 8: 670.0, 12: 675.0, 24: 716.8, 48: 720.0, 72: 725.0},
+            )
+        },
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+        top_of_book={"BNB/USDT": {"bid": 642.2, "ask": 642.4}},
+    )
+
+    assert result["enabled"] is True
+    assert result["bnb_paper_strategy_rows"] == 2
+
+    mature_result = update_sol_paper_strategy_tracker(
+        run_dir=tmp_path / "reports" / "runs" / "r_bnb_mature",
+        audit=_audit("r_bnb_mature", start_s + 72 * 3600),
+        market_data_1h={
+            "BNB/USDT": _series(
+                "BNB/USDT",
+                start_s,
+                {0: 642.3, 4: 660.0, 8: 670.0, 12: 675.0, 24: 716.8, 48: 720.0, 72: 725.0},
+            )
+        },
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+    assert mature_result["bnb_paper_strategy_rows"] == 4
+
+    bnb_runs = _read_csv(tmp_path / "reports" / "summaries" / "bnb_paper_strategy_runs.csv")
+    entered_bnb_runs = [item for item in bnb_runs if item["would_enter"] == "True"]
+    assert {item["strategy_id"] for item in entered_bnb_runs} == {
+        "BNB_F3_DOMINANT_ENTRY_PAPER_V1",
+        "BNB_RISK_ON_BUY_PAPER_V1",
+    }
+    assert {item["final_decision"] for item in entered_bnb_runs} == {"no_order"}
+    assert {item["enable_live_experiment"] for item in entered_bnb_runs} == {"False"}
+    assert {item["live_small_ready"] for item in bnb_runs} == {"False"}
+    assert all("bnb_paper_only_no_live" in item["live_block_reason"] for item in bnb_runs)
+    assert all(float(item["paper_pnl_bps_4h"]) > 200.0 for item in entered_bnb_runs)
+    assert all(float(item["paper_pnl_bps_24h"]) > 1000.0 for item in entered_bnb_runs)
+
+    bnb_daily = _read_csv(tmp_path / "reports" / "summaries" / "bnb_paper_strategy_daily.csv")
+    entry_daily = [item for item in bnb_daily if item["entry_count"] == "1"]
+    assert {item["strategy_id"] for item in entry_daily} == {
+        "BNB_F3_DOMINANT_ENTRY_PAPER_V1",
+        "BNB_RISK_ON_BUY_PAPER_V1",
+    }
+    assert all("24h" in json.loads(item["avg_paper_pnl_bps_by_horizon"]) for item in entry_daily)
 
 
 def test_sol_paper_strategy_tracker_writes_strategy_heartbeats_without_candidate(tmp_path: Path) -> None:
