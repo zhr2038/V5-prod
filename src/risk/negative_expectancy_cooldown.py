@@ -296,7 +296,7 @@ class NegativeExpectancyCooldown:
         return float(0.0 - fee_val)
 
     @staticmethod
-    def _empty_expectancy_accumulator() -> Dict[str, float]:
+    def _empty_expectancy_accumulator() -> Dict[str, Any]:
         return {
             "gross_pnl_sum_usdt": 0.0,
             "net_pnl_sum_usdt": 0.0,
@@ -316,6 +316,16 @@ class NegativeExpectancyCooldown:
             "premature_soft_exit_net_pnl_sum_usdt": 0.0,
             "premature_soft_exit_closed_notional_usdt": 0.0,
             "excluded_from_fast_fail_count": 0.0,
+            "entry_bad_cycles": 0.0,
+            "exit_bad_cycles": 0.0,
+            "min_hold_violation_cycles": 0.0,
+            "gave_back_profit_cycles": 0.0,
+            "trailing_too_early_cycles": 0.0,
+            "unknown_attribution_cycles": 0.0,
+            "adjusted_entry_cycles": 0.0,
+            "adjusted_entry_net_pnl_sum_usdt": 0.0,
+            "adjusted_entry_closed_notional_usdt": 0.0,
+            "cycle_attributions": [],
         }
 
     @staticmethod
@@ -458,9 +468,90 @@ class NegativeExpectancyCooldown:
             st["excluded_from_fast_fail_count"] += 1.0
 
     @classmethod
+    def _cycle_attribution(cls, row: Dict[str, Any], *, net_bps: Optional[float]) -> list[str]:
+        ctx = cls._expanded_exit_metadata(row)
+        reason = str(ctx.get("exit_reason") or ctx.get("reason") or ctx.get("source_reason") or "").strip().lower()
+        attrs: list[str] = []
+        if cls._is_premature_swing_soft_exit(ctx):
+            attrs.extend(["exit_bad", "min_hold_violation"])
+            if reason == "atr_trailing":
+                attrs.append("trailing_too_early")
+        max_unrealized = cls._coerce_float(
+            ctx.get("max_unrealized_bps")
+            or ctx.get("highest_net_bps")
+            or ctx.get("highest_unrealized_net_bps")
+        )
+        if max_unrealized is not None and net_bps is not None:
+            if float(max_unrealized) >= 30.0 and float(max_unrealized) - float(net_bps) >= 50.0:
+                attrs.extend(["exit_bad", "gave_back_profit"])
+        if net_bps is not None and float(net_bps) < 0.0 and "exit_bad" not in attrs:
+            attrs.append("entry_bad")
+        if not attrs:
+            attrs.append("unknown")
+        return list(dict.fromkeys(attrs))
+
+    @classmethod
+    def _record_cycle_attribution(
+        cls,
+        st: Dict[str, Any],
+        *,
+        row: Dict[str, Any],
+        net_pnl: float,
+        notional: float,
+        net_bps: Optional[float],
+    ) -> list[str]:
+        attrs = cls._cycle_attribution(row, net_bps=net_bps)
+        for attr, key in (
+            ("entry_bad", "entry_bad_cycles"),
+            ("exit_bad", "exit_bad_cycles"),
+            ("min_hold_violation", "min_hold_violation_cycles"),
+            ("gave_back_profit", "gave_back_profit_cycles"),
+            ("trailing_too_early", "trailing_too_early_cycles"),
+            ("unknown", "unknown_attribution_cycles"),
+        ):
+            if attr in attrs:
+                st[key] = float(st.get(key) or 0.0) + 1.0
+
+        exit_attributed = bool(
+            {"exit_bad", "min_hold_violation", "gave_back_profit", "trailing_too_early"}.intersection(attrs)
+        )
+        if not exit_attributed and net_bps is not None:
+            st["adjusted_entry_cycles"] = float(st.get("adjusted_entry_cycles") or 0.0) + 1.0
+            st["adjusted_entry_net_pnl_sum_usdt"] = float(st.get("adjusted_entry_net_pnl_sum_usdt") or 0.0) + float(net_pnl)
+            st["adjusted_entry_closed_notional_usdt"] = (
+                float(st.get("adjusted_entry_closed_notional_usdt") or 0.0) + float(notional)
+            )
+
+        cycles = st.setdefault("cycle_attributions", [])
+        if isinstance(cycles, list) and len(cycles) < 50:
+            expanded = cls._expanded_exit_metadata(row)
+            cycles.append(
+                {
+                    "entry_ts": str(
+                        expanded.get("entry_ts")
+                        or expanded.get("open_time_utc")
+                        or expanded.get("open_ts")
+                        or ""
+                    ),
+                    "exit_ts": str(
+                        expanded.get("exit_ts")
+                        or expanded.get("close_time_utc")
+                        or expanded.get("ts")
+                        or expanded.get("timestamp")
+                        or ""
+                    ),
+                    "exit_reason": str(expanded.get("exit_reason") or expanded.get("reason") or ""),
+                    "exit_priority": str(expanded.get("exit_priority") or ""),
+                    "net_bps": float(net_bps) if net_bps is not None else None,
+                    "attribution": attrs,
+                }
+            )
+        return attrs
+
+    @classmethod
     def _record_fast_fail_or_premature_soft_exit(
         cls,
-        st: Dict[str, float],
+        st: Dict[str, Any],
         *,
         row: Dict[str, Any],
         gross_pnl: float,
@@ -475,6 +566,14 @@ class NegativeExpectancyCooldown:
         ctx.setdefault("hold_hours", float(hold_ms) / 3600000.0)
         if net_bps is not None:
             ctx.setdefault("net_bps", float(net_bps))
+
+        cls._record_cycle_attribution(
+            st,
+            row=ctx,
+            net_pnl=float(net_pnl),
+            notional=float(notional),
+            net_bps=net_bps,
+        )
 
         fast_fail_candidate = bool(fast_fail_hold_ms > 0 and float(hold_ms) <= float(fast_fail_hold_ms))
         premature_soft_exit = cls._is_premature_swing_soft_exit(ctx)
@@ -561,6 +660,16 @@ class NegativeExpectancyCooldown:
         premature_soft_exit_net_pnl_sum_usdt: float = 0.0,
         premature_soft_exit_closed_notional_usdt: float = 0.0,
         excluded_from_fast_fail_count: float = 0.0,
+        entry_bad_cycles: float = 0.0,
+        exit_bad_cycles: float = 0.0,
+        min_hold_violation_cycles: float = 0.0,
+        gave_back_profit_cycles: float = 0.0,
+        trailing_too_early_cycles: float = 0.0,
+        unknown_attribution_cycles: float = 0.0,
+        adjusted_entry_cycles: float = 0.0,
+        adjusted_entry_net_pnl_sum_usdt: float = 0.0,
+        adjusted_entry_closed_notional_usdt: float = 0.0,
+        cycle_attributions: Optional[list[Dict[str, Any]]] = None,
         lookback_filter_mode: str = "close_ts",
     ) -> Dict[str, Any]:
         n = int(closed_cycles or 0)
@@ -593,6 +702,11 @@ class NegativeExpectancyCooldown:
         fast_fail_net_expectancy_bps = (
             float(fast_fail_net_pnl_sum_usdt) / float(fast_fail_closed_notional_usdt) * 10000.0
             if float(fast_fail_closed_notional_usdt) > 1e-12
+            else 0.0
+        )
+        adjusted_entry_expectancy_bps = (
+            float(adjusted_entry_net_pnl_sum_usdt) / float(adjusted_entry_closed_notional_usdt) * 10000.0
+            if float(adjusted_entry_closed_notional_usdt) > 1e-12
             else 0.0
         )
         ff_hold_minutes_avg = float(fast_fail_hold_minutes_sum) / ff_n if ff_n > 0 else 0.0
@@ -633,6 +747,17 @@ class NegativeExpectancyCooldown:
             "premature_soft_exit_net_pnl_sum_usdt": float(premature_soft_exit_net_pnl_sum_usdt or 0.0),
             "premature_soft_exit_closed_notional_usdt": float(premature_soft_exit_closed_notional_usdt or 0.0),
             "excluded_from_fast_fail_count": int(excluded_from_fast_fail_count or 0),
+            "entry_bad_cycles": int(entry_bad_cycles or 0),
+            "exit_bad_cycles": int(exit_bad_cycles or 0),
+            "min_hold_violation_cycles": int(min_hold_violation_cycles or 0),
+            "gave_back_profit_cycles": int(gave_back_profit_cycles or 0),
+            "trailing_too_early_cycles": int(trailing_too_early_cycles or 0),
+            "unknown_attribution_cycles": int(unknown_attribution_cycles or 0),
+            "adjusted_entry_cycles": int(adjusted_entry_cycles or 0),
+            "adjusted_entry_net_pnl_sum_usdt": float(adjusted_entry_net_pnl_sum_usdt or 0.0),
+            "adjusted_entry_closed_notional_usdt": float(adjusted_entry_closed_notional_usdt or 0.0),
+            "adjusted_entry_expectancy_bps": float(adjusted_entry_expectancy_bps),
+            "cycle_attributions": list(cycle_attributions or []),
             # legacy compatibility
             "fast_fail_pnl_sum_usdt": float(fast_fail_gross_pnl_sum_usdt),
             "fast_fail_expectancy_usdt": float(fast_fail_gross_expectancy_usdt),
@@ -687,6 +812,17 @@ class NegativeExpectancyCooldown:
             "premature_soft_exit_net_pnl_sum_usdt",
             "premature_soft_exit_closed_notional_usdt",
             "excluded_from_fast_fail_count",
+            "entry_bad_cycles",
+            "exit_bad_cycles",
+            "min_hold_violation_cycles",
+            "gave_back_profit_cycles",
+            "trailing_too_early_cycles",
+            "unknown_attribution_cycles",
+            "adjusted_entry_cycles",
+            "adjusted_entry_net_pnl_sum_usdt",
+            "adjusted_entry_closed_notional_usdt",
+            "adjusted_entry_expectancy_bps",
+            "cycle_attributions",
         ):
             out[key] = diagnostic.get(key, out.get(key))
         out["premature_soft_exit_diagnostic_source"] = str(diagnostic.get("source") or "")
@@ -924,6 +1060,16 @@ class NegativeExpectancyCooldown:
                 premature_soft_exit_net_pnl_sum_usdt=float(st.get("premature_soft_exit_net_pnl_sum_usdt") or 0.0),
                 premature_soft_exit_closed_notional_usdt=float(st.get("premature_soft_exit_closed_notional_usdt") or 0.0),
                 excluded_from_fast_fail_count=float(st.get("excluded_from_fast_fail_count") or 0.0),
+                entry_bad_cycles=float(st.get("entry_bad_cycles") or 0.0),
+                exit_bad_cycles=float(st.get("exit_bad_cycles") or 0.0),
+                min_hold_violation_cycles=float(st.get("min_hold_violation_cycles") or 0.0),
+                gave_back_profit_cycles=float(st.get("gave_back_profit_cycles") or 0.0),
+                trailing_too_early_cycles=float(st.get("trailing_too_early_cycles") or 0.0),
+                unknown_attribution_cycles=float(st.get("unknown_attribution_cycles") or 0.0),
+                adjusted_entry_cycles=float(st.get("adjusted_entry_cycles") or 0.0),
+                adjusted_entry_net_pnl_sum_usdt=float(st.get("adjusted_entry_net_pnl_sum_usdt") or 0.0),
+                adjusted_entry_closed_notional_usdt=float(st.get("adjusted_entry_closed_notional_usdt") or 0.0),
+                cycle_attributions=st.get("cycle_attributions") if isinstance(st.get("cycle_attributions"), list) else [],
                 lookback_filter_mode="close_ts",
             )
         return out
@@ -1124,6 +1270,16 @@ class NegativeExpectancyCooldown:
                 premature_soft_exit_net_pnl_sum_usdt=float(st.get("premature_soft_exit_net_pnl_sum_usdt") or 0.0),
                 premature_soft_exit_closed_notional_usdt=float(st.get("premature_soft_exit_closed_notional_usdt") or 0.0),
                 excluded_from_fast_fail_count=float(st.get("excluded_from_fast_fail_count") or 0.0),
+                entry_bad_cycles=float(st.get("entry_bad_cycles") or 0.0),
+                exit_bad_cycles=float(st.get("exit_bad_cycles") or 0.0),
+                min_hold_violation_cycles=float(st.get("min_hold_violation_cycles") or 0.0),
+                gave_back_profit_cycles=float(st.get("gave_back_profit_cycles") or 0.0),
+                trailing_too_early_cycles=float(st.get("trailing_too_early_cycles") or 0.0),
+                unknown_attribution_cycles=float(st.get("unknown_attribution_cycles") or 0.0),
+                adjusted_entry_cycles=float(st.get("adjusted_entry_cycles") or 0.0),
+                adjusted_entry_net_pnl_sum_usdt=float(st.get("adjusted_entry_net_pnl_sum_usdt") or 0.0),
+                adjusted_entry_closed_notional_usdt=float(st.get("adjusted_entry_closed_notional_usdt") or 0.0),
+                cycle_attributions=st.get("cycle_attributions") if isinstance(st.get("cycle_attributions"), list) else [],
                 lookback_filter_mode="close_ts",
             )
         return out
@@ -1334,6 +1490,16 @@ class NegativeExpectancyCooldown:
                 premature_soft_exit_net_pnl_sum_usdt=float(st.get("premature_soft_exit_net_pnl_sum_usdt") or 0.0),
                 premature_soft_exit_closed_notional_usdt=float(st.get("premature_soft_exit_closed_notional_usdt") or 0.0),
                 excluded_from_fast_fail_count=float(st.get("excluded_from_fast_fail_count") or 0.0),
+                entry_bad_cycles=float(st.get("entry_bad_cycles") or 0.0),
+                exit_bad_cycles=float(st.get("exit_bad_cycles") or 0.0),
+                min_hold_violation_cycles=float(st.get("min_hold_violation_cycles") or 0.0),
+                gave_back_profit_cycles=float(st.get("gave_back_profit_cycles") or 0.0),
+                trailing_too_early_cycles=float(st.get("trailing_too_early_cycles") or 0.0),
+                unknown_attribution_cycles=float(st.get("unknown_attribution_cycles") or 0.0),
+                adjusted_entry_cycles=float(st.get("adjusted_entry_cycles") or 0.0),
+                adjusted_entry_net_pnl_sum_usdt=float(st.get("adjusted_entry_net_pnl_sum_usdt") or 0.0),
+                adjusted_entry_closed_notional_usdt=float(st.get("adjusted_entry_closed_notional_usdt") or 0.0),
+                cycle_attributions=st.get("cycle_attributions") if isinstance(st.get("cycle_attributions"), list) else [],
                 lookback_filter_mode="close_ts",
             )
         return out
@@ -1449,6 +1615,16 @@ class NegativeExpectancyCooldown:
                 premature_soft_exit_net_pnl_sum_usdt=float(st.get("premature_soft_exit_net_pnl_sum_usdt") or 0.0),
                 premature_soft_exit_closed_notional_usdt=float(st.get("premature_soft_exit_closed_notional_usdt") or 0.0),
                 excluded_from_fast_fail_count=float(st.get("excluded_from_fast_fail_count") or 0.0),
+                entry_bad_cycles=float(st.get("entry_bad_cycles") or 0.0),
+                exit_bad_cycles=float(st.get("exit_bad_cycles") or 0.0),
+                min_hold_violation_cycles=float(st.get("min_hold_violation_cycles") or 0.0),
+                gave_back_profit_cycles=float(st.get("gave_back_profit_cycles") or 0.0),
+                trailing_too_early_cycles=float(st.get("trailing_too_early_cycles") or 0.0),
+                unknown_attribution_cycles=float(st.get("unknown_attribution_cycles") or 0.0),
+                adjusted_entry_cycles=float(st.get("adjusted_entry_cycles") or 0.0),
+                adjusted_entry_net_pnl_sum_usdt=float(st.get("adjusted_entry_net_pnl_sum_usdt") or 0.0),
+                adjusted_entry_closed_notional_usdt=float(st.get("adjusted_entry_closed_notional_usdt") or 0.0),
+                cycle_attributions=st.get("cycle_attributions") if isinstance(st.get("cycle_attributions"), list) else [],
                 lookback_filter_mode="close_ts",
             )
         return out
@@ -1774,6 +1950,17 @@ class NegativeExpectancyCooldown:
                     "adjusted_fast_fail_net_expectancy_bps": float(
                         st.get("adjusted_fast_fail_net_expectancy_bps", st.get("fast_fail_net_expectancy_bps") or 0.0)
                     ),
+                    "entry_bad_cycles": int(st.get("entry_bad_cycles") or 0),
+                    "exit_bad_cycles": int(st.get("exit_bad_cycles") or 0),
+                    "min_hold_violation_cycles": int(st.get("min_hold_violation_cycles") or 0),
+                    "gave_back_profit_cycles": int(st.get("gave_back_profit_cycles") or 0),
+                    "trailing_too_early_cycles": int(st.get("trailing_too_early_cycles") or 0),
+                    "unknown_attribution_cycles": int(st.get("unknown_attribution_cycles") or 0),
+                    "adjusted_entry_cycles": int(st.get("adjusted_entry_cycles") or 0),
+                    "adjusted_entry_net_pnl_sum_usdt": float(st.get("adjusted_entry_net_pnl_sum_usdt") or 0.0),
+                    "adjusted_entry_closed_notional_usdt": float(st.get("adjusted_entry_closed_notional_usdt") or 0.0),
+                    "adjusted_entry_expectancy_bps": float(st.get("adjusted_entry_expectancy_bps") or 0.0),
+                    "cycle_attributions": list(st.get("cycle_attributions") or []) if isinstance(st.get("cycle_attributions"), list) else [],
                     "source": str(st.get("source") or "orders"),
                     "degraded_fee_model": bool(st.get("degraded_fee_model", False)),
                     "degraded_reason": str(st.get("degraded_reason") or ""),

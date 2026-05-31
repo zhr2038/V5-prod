@@ -8755,6 +8755,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         neg_net_bps = as_float(first_value(neg, ("net_expectancy_bps",), not_obs))
         neg_fast_fail_net_bps = as_float(first_value(neg, ("fast_fail_net_expectancy_bps", "fast_fail_expectancy_bps"), not_obs))
         neg_adjusted_fast_fail_net_bps = as_float(first_value(neg, ("adjusted_fast_fail_net_expectancy_bps", "fast_fail_net_expectancy_bps", "fast_fail_expectancy_bps"), not_obs))
+        adjusted_entry_expectancy_bps = as_float(first_value(neg, ("adjusted_entry_expectancy_bps", "net_expectancy_bps"), not_obs))
+        entry_bad_cycles = as_float(first_value(neg, ("entry_bad_cycles",), 0)) or 0.0
+        exit_bad_cycles = as_float(first_value(neg, ("exit_bad_cycles",), 0)) or 0.0
+        min_hold_violation_cycles = as_float(first_value(neg, ("min_hold_violation_cycles",), 0)) or 0.0
+        gave_back_profit_cycles = as_float(first_value(neg, ("gave_back_profit_cycles",), 0)) or 0.0
+        trailing_too_early_cycles = as_float(first_value(neg, ("trailing_too_early_cycles",), 0)) or 0.0
+        unknown_attribution_cycles = as_float(first_value(neg, ("unknown_attribution_cycles",), 0)) or 0.0
         premature_soft_exit_count = as_float(first_value(neg, ("premature_soft_exit_count",), 0)) or 0.0
         excluded_from_fast_fail_count = as_float(first_value(neg, ("excluded_from_fast_fail_count",), 0)) or 0.0
         pnl_mismatch = (rt_net_pnl - neg_net_pnl) if rt_net_pnl is not None and neg_net_pnl is not None else None
@@ -8819,6 +8826,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "negexp_net_pnl_sum_usdt": fmt_num(neg_net_pnl, 12),
             "negexp_net_expectancy_bps": fmt_num(neg_net_bps, 4),
             "negexp_fast_fail_net_expectancy_bps": fmt_num(neg_fast_fail_net_bps, 4),
+            "adjusted_entry_expectancy_bps": fmt_num(adjusted_entry_expectancy_bps, 4),
+            "entry_bad_cycles": fmt_num(entry_bad_cycles, 0),
+            "exit_bad_cycles": fmt_num(exit_bad_cycles, 0),
+            "min_hold_violation_cycles": fmt_num(min_hold_violation_cycles, 0),
+            "gave_back_profit_cycles": fmt_num(gave_back_profit_cycles, 0),
+            "trailing_too_early_cycles": fmt_num(trailing_too_early_cycles, 0),
+            "unknown_attribution_cycles": fmt_num(unknown_attribution_cycles, 0),
             "premature_soft_exit_count": fmt_num(premature_soft_exit_count, 0),
             "excluded_from_fast_fail_count": fmt_num(excluded_from_fast_fail_count, 0),
             "adjusted_fast_fail_net_expectancy_bps": fmt_num(neg_adjusted_fast_fail_net_bps, 4),
@@ -8827,6 +8841,33 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "mismatch_suspected": str(mismatch_suspected).lower(),
             "diagnosis": diagnosis,
         })
+
+    bnb_negative_expectancy_attribution_rows = []
+    bnb_neg = negative_entries.get("BNB/USDT", {})
+    cycle_attributions = bnb_neg.get("cycle_attributions") if isinstance(bnb_neg, dict) else []
+    if isinstance(cycle_attributions, list):
+        for index, cycle in enumerate(cycle_attributions):
+            if not isinstance(cycle, dict):
+                continue
+            attrs = cycle.get("attribution")
+            if not isinstance(attrs, list):
+                attrs = [flatten_value(attrs)] if flatten_value(attrs) else []
+            bnb_negative_expectancy_attribution_rows.append({
+                "symbol": "BNB/USDT",
+                "cycle_index": index,
+                "entry_ts": flatten_value(cycle.get("entry_ts")) or not_obs,
+                "exit_ts": flatten_value(cycle.get("exit_ts")) or not_obs,
+                "exit_reason": flatten_value(cycle.get("exit_reason")) or not_obs,
+                "exit_priority": flatten_value(cycle.get("exit_priority")) or not_obs,
+                "net_bps": fmt_num(as_float(cycle.get("net_bps")), 4),
+                "attribution": json.dumps(attrs, ensure_ascii=False),
+                "entry_bad": str("entry_bad" in attrs).lower(),
+                "exit_bad": str("exit_bad" in attrs).lower(),
+                "min_hold_violation": str("min_hold_violation" in attrs).lower(),
+                "gave_back_profit": str("gave_back_profit" in attrs).lower(),
+                "trailing_too_early": str("trailing_too_early" in attrs).lower(),
+                "unknown": str("unknown" in attrs).lower(),
+            })
 
     BNB_RISK_SYMBOL = "BNB/USDT"
 
@@ -10136,7 +10177,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     write_csv(
         "summaries/negative_expectancy_consistency.csv",
         negative_consistency_rows,
-        ["symbol", "roundtrip_closed_count", "roundtrip_net_pnl_sum_usdt", "roundtrip_weighted_net_bps", "negexp_closed_cycles", "negexp_net_pnl_sum_usdt", "negexp_net_expectancy_bps", "negexp_fast_fail_net_expectancy_bps", "premature_soft_exit_count", "excluded_from_fast_fail_count", "adjusted_fast_fail_net_expectancy_bps", "pnl_mismatch_usdt", "bps_mismatch", "mismatch_suspected", "diagnosis"],
+        ["symbol", "roundtrip_closed_count", "roundtrip_net_pnl_sum_usdt", "roundtrip_weighted_net_bps", "negexp_closed_cycles", "negexp_net_pnl_sum_usdt", "negexp_net_expectancy_bps", "negexp_fast_fail_net_expectancy_bps", "adjusted_entry_expectancy_bps", "entry_bad_cycles", "exit_bad_cycles", "min_hold_violation_cycles", "gave_back_profit_cycles", "trailing_too_early_cycles", "unknown_attribution_cycles", "premature_soft_exit_count", "excluded_from_fast_fail_count", "adjusted_fast_fail_net_expectancy_bps", "pnl_mismatch_usdt", "bps_mismatch", "mismatch_suspected", "diagnosis"],
+    )
+    write_csv(
+        "summaries/bnb_negative_expectancy_attribution.csv",
+        bnb_negative_expectancy_attribution_rows,
+        ["symbol", "cycle_index", "entry_ts", "exit_ts", "exit_reason", "exit_priority", "net_bps", "attribution", "entry_bad", "exit_bad", "min_hold_violation", "gave_back_profit", "trailing_too_early", "unknown"],
     )
     write_text(
         "summaries/bnb_risk_summary.json",
@@ -12030,6 +12076,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         as_int(row.get("excluded_from_fast_fail_count"))
         for row in negative_consistency_rows
     )
+    negative_expectancy_entry_bad_cycles = sum(as_int(row.get("entry_bad_cycles")) for row in negative_consistency_rows)
+    negative_expectancy_exit_bad_cycles = sum(as_int(row.get("exit_bad_cycles")) for row in negative_consistency_rows)
+    negative_expectancy_min_hold_violation_cycles = sum(
+        as_int(row.get("min_hold_violation_cycles"))
+        for row in negative_consistency_rows
+    )
     rank_exit_conflict_count = sum(1 for row in rank_exit_consistency_rows if row.get("conflict_suspected") == "true")
     rank_exit_target_positive_sell_count = sum(1 for row in rank_exit_consistency_rows if row.get("target_positive") == "true" or row.get("has_target_still_positive_note") == "true")
     protect_sideways_win_rate = (
@@ -12499,6 +12551,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "negative_expectancy_mismatch_count": negative_expectancy_mismatch_count,
         "negative_expectancy_premature_soft_exit_count": negative_expectancy_premature_soft_exit_count,
         "negative_expectancy_excluded_from_fast_fail_count": negative_expectancy_excluded_from_fast_fail_count,
+        "negative_expectancy_entry_bad_cycles": negative_expectancy_entry_bad_cycles,
+        "negative_expectancy_exit_bad_cycles": negative_expectancy_exit_bad_cycles,
+        "negative_expectancy_min_hold_violation_cycles": negative_expectancy_min_hold_violation_cycles,
+        "bnb_negative_expectancy_attribution_rows": len(bnb_negative_expectancy_attribution_rows),
         "bnb_risk_recommendation": bnb_risk_summary.get("recommendation", not_obs),
         "bnb_negative_expectancy_closed_cycles": bnb_risk_summary.get("closed_cycles", not_obs),
         "bnb_negative_expectancy_bps": bnb_risk_summary.get("net_expectancy_bps", not_obs),
@@ -13566,7 +13622,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- mismatch_suspected_count: {negative_expectancy_mismatch_count}",
         f"- premature_soft_exit_count: {negative_expectancy_premature_soft_exit_count}",
         f"- excluded_from_fast_fail_count: {negative_expectancy_excluded_from_fast_fail_count}",
+        f"- entry_bad_cycles: {negative_expectancy_entry_bad_cycles}",
+        f"- exit_bad_cycles: {negative_expectancy_exit_bad_cycles}",
+        f"- min_hold_violation_cycles: {negative_expectancy_min_hold_violation_cycles}",
         "- note: Premature swing soft exits are excluded from fast-fail hard blocks.",
+        "- attribution: BNB min-hold soft-exit losses are tagged as exit_bad/min_hold_violation, not pure entry_bad.",
+        "- output: summaries/bnb_negative_expectancy_attribution.csv",
         f"- high issue present: {'yes' if negative_expectancy_mismatch_count else 'no'}",
         "",
         "## BNB recovery missed opportunity audit",

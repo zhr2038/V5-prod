@@ -569,8 +569,25 @@ def fixture_negative_expectancy_premature_soft_exit_root(root):
                 "fast_fail_closed_cycles": 0,
                 "fast_fail_net_expectancy_bps": 0.0,
                 "adjusted_fast_fail_net_expectancy_bps": 0.0,
+                "adjusted_entry_expectancy_bps": 0.0,
+                "entry_bad_cycles": 0,
+                "exit_bad_cycles": 1,
+                "min_hold_violation_cycles": 1,
+                "gave_back_profit_cycles": 0,
+                "trailing_too_early_cycles": 1,
+                "unknown_attribution_cycles": 0,
                 "premature_soft_exit_count": 1,
                 "excluded_from_fast_fail_count": 1,
+                "cycle_attributions": [
+                    {
+                        "entry_ts": iso(int((now - dt.timedelta(hours=6)).timestamp()) + 20),
+                        "exit_ts": iso(int((now - dt.timedelta(hours=1)).timestamp()) + 20),
+                        "exit_reason": "atr_trailing",
+                        "exit_priority": "soft",
+                        "net_bps": -142.89,
+                        "attribution": ["exit_bad", "min_hold_violation", "trailing_too_early"],
+                    }
+                ],
             }
         }
     })
@@ -5508,19 +5525,32 @@ def main():
         try:
             with tarfile.open(bundle, "r:gz") as tf:
                 negexp = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/negative_expectancy_consistency.csv")).read().decode().splitlines()))
+                attribution = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_negative_expectancy_attribution.csv")).read().decode().splitlines()))
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
             assert len(negexp) == 1, negexp
             row = negexp[0]
             assert row["symbol"] == "BNB/USDT", row
+            assert row["adjusted_entry_expectancy_bps"] == "0", row
+            assert row["entry_bad_cycles"] == "0", row
+            assert row["exit_bad_cycles"] == "1", row
+            assert row["min_hold_violation_cycles"] == "1", row
+            assert row["trailing_too_early_cycles"] == "1", row
             assert row["premature_soft_exit_count"] == "1", row
             assert row["excluded_from_fast_fail_count"] == "1", row
             assert row["adjusted_fast_fail_net_expectancy_bps"] == "0", row
             assert row["negexp_fast_fail_net_expectancy_bps"] == "0", row
             assert row["mismatch_suspected"] == "false", row
+            assert len(attribution) == 1, attribution
+            assert attribution[0]["min_hold_violation"] == "true", attribution
+            assert attribution[0]["entry_bad"] == "false", attribution
             assert window["negative_expectancy_premature_soft_exit_count"] == 1, window
             assert window["negative_expectancy_excluded_from_fast_fail_count"] == 1, window
+            assert window["negative_expectancy_entry_bad_cycles"] == 0, window
+            assert window["negative_expectancy_exit_bad_cycles"] == 1, window
+            assert window["negative_expectancy_min_hold_violation_cycles"] == 1, window
             assert "Premature swing soft exits are excluded from fast-fail hard blocks" in readme, readme
+            assert "exit_bad/min_hold_violation" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

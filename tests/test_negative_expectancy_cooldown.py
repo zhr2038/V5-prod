@@ -585,6 +585,17 @@ def test_negative_expectancy_excludes_premature_swing_soft_exit_from_fast_fail(
     assert stats["fast_fail_closed_cycles"] == 0
     assert stats["fast_fail_net_expectancy_bps"] == 0.0
     assert stats["adjusted_fast_fail_net_expectancy_bps"] == 0.0
+    assert stats["entry_bad_cycles"] == 0
+    assert stats["exit_bad_cycles"] == 1
+    assert stats["min_hold_violation_cycles"] == 1
+    assert stats["trailing_too_early_cycles"] == 1
+    assert stats["adjusted_entry_cycles"] == 0
+    assert stats["adjusted_entry_expectancy_bps"] == 0.0
+    assert stats["cycle_attributions"][0]["attribution"] == [
+        "exit_bad",
+        "min_hold_violation",
+        "trailing_too_early",
+    ]
     assert state["symbols"] == {}
 
 
@@ -675,6 +686,9 @@ def test_negative_expectancy_roundtrip_diagnostic_overlay_adjusts_fills_fast_fai
     assert stats["premature_soft_exit_diagnostic_source"] == "trades_roundtrips_csv"
     assert stats["fast_fail_closed_cycles"] == 0
     assert stats["fast_fail_net_expectancy_bps"] == 0.0
+    assert stats["exit_bad_cycles"] == 1
+    assert stats["min_hold_violation_cycles"] == 1
+    assert stats["adjusted_entry_expectancy_bps"] == 0.0
 
 
 def test_negative_expectancy_keeps_real_hard_stop_in_fast_fail(
@@ -731,6 +745,10 @@ def test_negative_expectancy_keeps_real_hard_stop_in_fast_fail(
 
     assert stats["premature_soft_exit_count"] == 0
     assert stats["excluded_from_fast_fail_count"] == 0
+    assert stats["entry_bad_cycles"] == 1
+    assert stats["exit_bad_cycles"] == 0
+    assert stats["adjusted_entry_cycles"] == 1
+    assert stats["adjusted_entry_expectancy_bps"] == pytest.approx(-142.95, abs=0.1)
     assert stats["fast_fail_closed_cycles"] == 1
     assert stats["fast_fail_net_expectancy_bps"] == pytest.approx(-142.95, abs=0.1)
 

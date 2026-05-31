@@ -3684,8 +3684,14 @@ class V5Pipeline:
             )
         )
         net_expectancy_bps = self._negative_expectancy_bps(stat or {})
+        adjusted_entry_expectancy_bps = net_expectancy_bps
+        if isinstance(stat, dict) and stat.get("adjusted_entry_expectancy_bps") is not None:
+            try:
+                adjusted_entry_expectancy_bps = float(stat.get("adjusted_entry_expectancy_bps") or 0.0)
+            except Exception:
+                adjusted_entry_expectancy_bps = net_expectancy_bps
         fast_fail_net_expectancy_bps = self._negative_expectancy_bps(stat or {}, fast_fail=True)
-        net_breach = float(net_expectancy_bps) <= float(net_floor_bps)
+        net_breach = float(adjusted_entry_expectancy_bps) <= float(net_floor_bps)
         fast_fail_breach = float(fast_fail_net_expectancy_bps) <= float(fast_fail_floor_bps)
         if not (net_breach or fast_fail_breach):
             return None
@@ -3696,12 +3702,16 @@ class V5Pipeline:
             "reason": "protect_alt_short_cycle_negative_expectancy",
             "closed_cycles": int(closed_cycles),
             "net_expectancy_bps": float(net_expectancy_bps),
+            "adjusted_entry_expectancy_bps": float(adjusted_entry_expectancy_bps),
+            "entry_bad_cycles": int((stat or {}).get("entry_bad_cycles") or 0),
+            "exit_bad_cycles": int((stat or {}).get("exit_bad_cycles") or 0),
+            "min_hold_violation_cycles": int((stat or {}).get("min_hold_violation_cycles") or 0),
             "fast_fail_net_expectancy_bps": float(fast_fail_net_expectancy_bps),
             "net_floor_bps": float(net_floor_bps),
             "fast_fail_floor_bps": float(fast_fail_floor_bps),
             "min_cycles": int(min_cycles),
             "current_level": str(current_auto_risk_level or ""),
-            "breach": "net_expectancy_bps" if net_breach else "fast_fail_net_expectancy_bps",
+            "breach": "adjusted_entry_expectancy_bps" if net_breach else "fast_fail_net_expectancy_bps",
         }
 
     def _apply_negative_expectancy_score_penalty(

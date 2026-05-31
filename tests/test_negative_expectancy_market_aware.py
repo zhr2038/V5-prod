@@ -576,6 +576,27 @@ def test_protect_alt_short_cycle_allows_positive_expectancy_bnb(tmp_path: Path) 
     )
 
 
+def test_protect_alt_short_cycle_uses_adjusted_entry_expectancy_bps(tmp_path: Path) -> None:
+    out, audit = _run_alt_short_cycle_guard_case(
+        tmp_path,
+        stats={
+            "closed_cycles": 2,
+            "net_expectancy_bps": -142.89,
+            "adjusted_entry_expectancy_bps": 0.0,
+            "fast_fail_closed_cycles": 0,
+            "fast_fail_net_expectancy_bps": 0.0,
+            "entry_bad_cycles": 0,
+            "exit_bad_cycles": 1,
+            "min_hold_violation_cycles": 1,
+        },
+    )
+
+    assert any(order.symbol == "BNB/USDT" and order.intent == "OPEN_LONG" for order in out.orders)
+    assert not any(
+        d.get("reason") == "protect_alt_short_cycle_negative_expectancy" for d in audit.router_decisions
+    )
+
+
 def test_buy_order_meta_includes_expected_edge_score_proxy(tmp_path: Path) -> None:
     out, _audit = _run_alt_short_cycle_guard_case(
         tmp_path,
