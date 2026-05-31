@@ -4320,6 +4320,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             symbol = normalize_multi_symbol_text(item)
             if symbol == "MULTI":
                 continue
+            if "/" not in symbol:
+                continue
             if not symbol or symbol in seen:
                 continue
             seen.add(symbol)
@@ -11645,7 +11647,6 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "top_n_symbols",
             "symbols",
             "would_buy_symbols",
-            "would_buy",
             "would_buy_symbol",
             "symbol",
             "raw_json",
@@ -11655,7 +11656,6 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     def risk_on_would_buy_field_names():
         return (
             "would_buy_symbols",
-            "would_buy",
             "would_buy_symbol",
             "would_enter_symbols",
             "would_open_symbols",

@@ -2446,7 +2446,11 @@ def _symbol_list_from_row(row: Mapping[str, Any], names: Iterable[str]) -> list[
 
 def _risk_on_symbol_list_from_row(row: Mapping[str, Any], names: Iterable[str]) -> list[str]:
     for name in names:
-        symbols = [symbol for symbol in _symbol_list(row.get(name)) if symbol != "MULTI"]
+        symbols = [
+            symbol
+            for symbol in _symbol_list(row.get(name))
+            if symbol != "MULTI" and "/" in symbol
+        ]
         if symbols:
             return symbols
     return []

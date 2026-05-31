@@ -2014,7 +2014,15 @@ def test_risk_on_multi_buy_reads_quant_lab_bundle_reports_member(tmp_path: Path)
     buffer = io.StringIO()
     writer = csv.DictWriter(
         buffer,
-        fieldnames=["run_id", "decision_ts", "top_k", "current_regime", "selected_symbols", "would_buy_symbol"],
+        fieldnames=[
+            "run_id",
+            "decision_ts",
+            "top_k",
+            "current_regime",
+            "selected_symbols",
+            "would_buy",
+            "would_buy_symbol",
+        ],
     )
     writer.writeheader()
     writer.writerow(
@@ -2024,6 +2032,7 @@ def test_risk_on_multi_buy_reads_quant_lab_bundle_reports_member(tmp_path: Path)
             "top_k": "1",
             "current_regime": "ALT_IMPULSE",
             "selected_symbols": '["BNB-USDT"]',
+            "would_buy": "True",
             "would_buy_symbol": "BNB-USDT",
         }
     )
