@@ -691,6 +691,87 @@ def fixture_bnb_recovery_missed_opportunity_root(root):
     })
 
 
+def fixture_final_score_alpha6_conflict_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    candidate_dt = now - dt.timedelta(hours=25)
+    run_id = candidate_dt.strftime("%Y%m%d_%H")
+    ts = int(candidate_dt.timestamp())
+
+    write_text(root / "configs/live_prod.yaml", "execution:\n  cost_aware_roundtrip_cost_bps: 30\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    current_run_id = now.strftime("%Y%m%d_%H")
+    current_run_dir = root / "reports/runs/prod" / current_run_id
+    write_json(current_run_dir / "decision_audit.json", {"window_end_ts": int(now.timestamp()), "router_decisions": []})
+    write_text(current_run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(current_run_dir / "equity.jsonl", "{}\n")
+    write_json(current_run_dir / "summary.json", {"run_id": current_run_id})
+
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(
+        run_dir / "decision_audit.json",
+        {
+            "window_end_ts": ts,
+            "router_decisions": [],
+            "target_execution_explain": [
+                {"symbol": "BNB/USDT", "current_px": 642.3},
+            ],
+        },
+    )
+    write_text(run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id})
+    candidate = {
+        "candidate_id": "bnb-final-score-alpha6-conflict",
+        "run_id": run_id,
+        "ts_utc": iso(ts),
+        "symbol": "BNB/USDT",
+        "regime_state": "Trending",
+        "final_score": "-0.17",
+        "rank": "1",
+        "f1_mom_5d": "0.2",
+        "f2_mom_20d": "0.3",
+        "f3_vol_adj_ret": "0.91",
+        "f4_volume_expansion": "5.82",
+        "f5_rsi_trend_confirm": "0.832",
+        "alpha6_score": "0.994",
+        "alpha6_side": "buy",
+        "expected_edge_bps": "180",
+        "required_edge_bps": "45",
+        "cost_bps": "30",
+        "cost_gate_verified": "true",
+        "final_decision": "no_order",
+        "no_signal_reason": "final_score_negative",
+        "block_reason": "negative_expectancy_fast_fail_open_block",
+        "strategy_candidate": "f3_dominant_entry",
+    }
+    with (run_dir / "candidate_snapshot.csv").open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(candidate))
+        writer.writeheader()
+        writer.writerow(candidate)
+
+    write_ohlcv_cache(
+        root,
+        "BNB/USDT",
+        [
+            (ts, 642.3),
+            (ts + 4 * 3600, 675.0),
+            (ts + 8 * 3600, 680.0),
+            (ts + 12 * 3600, 690.0),
+            (ts + 24 * 3600, 720.0),
+        ],
+    )
+
+
 def fixture_quant_lab_summary_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -5479,6 +5560,36 @@ def main():
             assert "BNB recovery missed opportunity audit" in readme, readme
             assert "summaries/bnb_recovery_missed_opportunity.csv" in readme, readme
             assert "live_order_effect: none" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-final-score-alpha6-conflict-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_final_score_alpha6_conflict_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/final_score_vs_alpha6_conflict.csv")).read().decode().splitlines()))
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert len(rows) == 1, rows
+            row = rows[0]
+            assert row["symbol"] == "BNB/USDT", row
+            assert row["alpha6_side"] == "buy", row
+            assert row["alpha6_score"] == "0.994", row
+            assert row["final_score"] == "-0.17", row
+            assert row["final_decision"] == "no_order", row
+            assert row["block_reason"] == "negative_expectancy_fast_fail_open_block", row
+            assert float(row["future_4h_net_bps"]) > 400.0, row
+            assert float(row["future_24h_net_bps"]) > 1100.0, row
+            assert row["missed_profit_flag"] == "true", row
+            assert window["final_score_alpha6_conflict_count"] == 1, window
+            assert window["final_score_alpha6_conflict_recommendation"] == "review_final_score_alpha6_conflict", window
+            assert "BNB/USDT" in window["final_score_alpha6_conflict_symbol_breakdown"], window
+            assert "Final score vs Alpha6 conflict audit" in readme, readme
+            assert "summaries/final_score_vs_alpha6_conflict.csv" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

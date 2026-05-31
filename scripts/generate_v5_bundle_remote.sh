@@ -348,6 +348,29 @@ CANDIDATE_SNAPSHOT_FIELDS = (
     "no_signal_reason",
     "strategy_candidate",
 )
+FINAL_SCORE_ALPHA6_CONFLICT_FIELDS = (
+    "run_id",
+    "ts_utc",
+    "symbol",
+    "final_score",
+    "alpha6_score",
+    "alpha6_side",
+    "f1",
+    "f2",
+    "f3",
+    "f4",
+    "f5",
+    "expected_edge_bps",
+    "required_edge_bps",
+    "final_decision",
+    "no_signal_reason",
+    "block_reason",
+    "future_4h_net_bps",
+    "future_8h_net_bps",
+    "future_12h_net_bps",
+    "future_24h_net_bps",
+    "missed_profit_flag",
+)
 ORDER_LIFECYCLE_FIELDS = (
     "schema_version",
     "lifecycle_id",
@@ -7274,6 +7297,129 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             return not_obs
         return fmt_num(((future_px / base_price) - 1.0) * 10000.0 - rt_cost_bps, 6)
 
+    CONFLICT_SYMBOLS = {"BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"}
+
+    def candidate_conflict_entry_price(row, symbol, ts_dt):
+        for field in ("entry_close", "entry_px", "current_px", "latest_px", "signal_price", "price", "close"):
+            value = as_float(row.get(field))
+            if value is not None and value > 0:
+                return value
+        provider_price, _provider_source = provider_entry_price_for_symbol(symbol, ts_dt)
+        if provider_price is not None and provider_price > 0:
+            return provider_price
+        current_price, _source, _reason = future_price_for_symbol(symbol, ts_dt)
+        if current_price is not None and current_price > 0:
+            return current_price
+        return None
+
+    def candidate_conflict_cost_bps(row):
+        for field in (
+            "selected_entry_gate_cost_bps",
+            "roundtrip_all_in_cost_bps",
+            "selected_total_cost_bps",
+            "cost_bps",
+        ):
+            value = as_float(row.get(field))
+            if value is not None:
+                return max(value, 0.0)
+        configured = configured_roundtrip_cost_bps()
+        return configured if configured is not None else 0.0
+
+    def is_final_score_alpha6_conflict_candidate(row):
+        symbol = normalize_symbol_text(row.get("symbol"))
+        if symbol not in CONFLICT_SYMBOLS:
+            return False
+        if str(row.get("alpha6_side") or "").strip().lower() != "buy":
+            return False
+        alpha6_score = as_float(row.get("alpha6_score"))
+        if alpha6_score is None or alpha6_score < 0.9:
+            return False
+        expected = as_float(row.get("expected_edge_bps"))
+        required = as_float(row.get("required_edge_bps"))
+        if expected is None or required is None or expected <= required:
+            return False
+        if not truthy(row.get("cost_gate_verified")):
+            return False
+        final_score = as_float(row.get("final_score"))
+        final_decision = str(row.get("final_decision") or "").strip().lower()
+        return (final_score is not None and final_score < 0.0) or final_decision == "no_order"
+
+    def build_final_score_alpha6_conflict_rows(rows):
+        out = []
+        for row in rows:
+            if not is_final_score_alpha6_conflict_candidate(row):
+                continue
+            symbol = normalize_symbol_text(row.get("symbol"))
+            ts_text = first_observed(row.get("ts_utc"), row.get("timestamp"), row.get("ts"), not_obs)
+            ts_dt = parse_dt_utc(ts_text)
+            entry_price = candidate_conflict_entry_price(row, symbol, ts_dt)
+            cost_bps = candidate_conflict_cost_bps(row)
+            future = {
+                horizon: forward_net_bps(symbol, ts_dt, entry_price, horizon, cost_bps)
+                for horizon in (4, 8, 12, 24)
+            }
+            observed_future = [
+                value for value in (as_float(future[horizon]) for horizon in (4, 8, 12, 24))
+                if value is not None
+            ]
+            out.append({
+                "run_id": first_observed(row.get("run_id"), not_obs),
+                "ts_utc": ts_text,
+                "symbol": symbol,
+                "final_score": first_observed(row.get("final_score"), not_obs),
+                "alpha6_score": first_observed(row.get("alpha6_score"), not_obs),
+                "alpha6_side": first_observed(row.get("alpha6_side"), not_obs),
+                "f1": first_observed(row.get("f1"), row.get("f1_mom_5d"), not_obs),
+                "f2": first_observed(row.get("f2"), row.get("f2_mom_20d"), not_obs),
+                "f3": first_observed(row.get("f3"), row.get("f3_vol_adj_ret"), not_obs),
+                "f4": first_observed(row.get("f4"), row.get("f4_volume_expansion"), not_obs),
+                "f5": first_observed(row.get("f5"), row.get("f5_rsi_trend_confirm"), not_obs),
+                "expected_edge_bps": first_observed(row.get("expected_edge_bps"), not_obs),
+                "required_edge_bps": first_observed(row.get("required_edge_bps"), not_obs),
+                "final_decision": first_observed(row.get("final_decision"), not_obs),
+                "no_signal_reason": first_observed(row.get("no_signal_reason"), not_obs),
+                "block_reason": first_observed(row.get("block_reason"), not_obs),
+                "future_4h_net_bps": future[4],
+                "future_8h_net_bps": future[8],
+                "future_12h_net_bps": future[12],
+                "future_24h_net_bps": future[24],
+                "missed_profit_flag": str(bool(observed_future and max(observed_future) > 0)).lower(),
+            })
+        out.sort(key=lambda item: (flatten_value(item.get("ts_utc")), flatten_value(item.get("symbol"))))
+        return out
+
+    def summarize_final_score_alpha6_conflicts(rows):
+        def avg_for(field):
+            values = [as_float(row.get(field)) for row in rows]
+            values = [value for value in values if value is not None]
+            return round(sum(values) / len(values), 6) if values else not_obs
+
+        symbol_counts = Counter(row.get("symbol") or not_obs for row in rows)
+        conflict_count = len(rows)
+        profitable_count = sum(1 for row in rows if truthy(row.get("missed_profit_flag")))
+        if conflict_count == 0:
+            recommendation = "no_conflict_observed"
+        elif profitable_count > 0:
+            recommendation = "review_final_score_alpha6_conflict"
+        else:
+            recommendation = "collect_more_samples"
+        return {
+            "conflict_count": conflict_count,
+            "avg_future_4h_net_bps": avg_for("future_4h_net_bps"),
+            "avg_future_8h_net_bps": avg_for("future_8h_net_bps"),
+            "avg_future_24h_net_bps": avg_for("future_24h_net_bps"),
+            "symbol_breakdown": json.dumps(dict(sorted(symbol_counts.items())), ensure_ascii=False, sort_keys=True),
+            "recommendation": recommendation,
+        }
+
+    final_score_alpha6_conflict_rows = build_final_score_alpha6_conflict_rows(candidate_snapshot_rows)
+    final_score_alpha6_conflict_summary = summarize_final_score_alpha6_conflicts(final_score_alpha6_conflict_rows)
+    write_csv(
+        "summaries/final_score_vs_alpha6_conflict.csv",
+        final_score_alpha6_conflict_rows,
+        FINAL_SCORE_ALPHA6_CONFLICT_FIELDS,
+    )
+
     def better_to_hold_text(future_net_bps, realized_net_bps):
         if future_net_bps == "pending":
             return "pending"
@@ -12457,6 +12603,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "bnb_paper_strategy_daily_rows": len(bnb_paper_daily_rows),
         "bnb_paper_would_enter_count": bnb_paper_would_enter_count,
         "bnb_paper_strategy_ids": json.dumps(bnb_paper_strategy_ids, ensure_ascii=False),
+        "final_score_alpha6_conflict_count": final_score_alpha6_conflict_summary.get("conflict_count", 0),
+        "final_score_alpha6_conflict_avg_future_4h_net_bps": final_score_alpha6_conflict_summary.get("avg_future_4h_net_bps", not_obs),
+        "final_score_alpha6_conflict_avg_future_8h_net_bps": final_score_alpha6_conflict_summary.get("avg_future_8h_net_bps", not_obs),
+        "final_score_alpha6_conflict_avg_future_24h_net_bps": final_score_alpha6_conflict_summary.get("avg_future_24h_net_bps", not_obs),
+        "final_score_alpha6_conflict_symbol_breakdown": final_score_alpha6_conflict_summary.get("symbol_breakdown", "{}"),
+        "final_score_alpha6_conflict_recommendation": final_score_alpha6_conflict_summary.get("recommendation", not_obs),
         "telemetry_contract_version": QUANT_LAB_CONTRACT_VERSION,
         "telemetry_schema_version": QUANT_LAB_SCHEMA_VERSION,
         "rank_exit_sell_count": len(rank_exit_consistency_rows),
@@ -13242,6 +13394,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "- live_order_effect: none_paper_only",
         "- output: summaries/bnb_paper_strategy_runs.csv and summaries/bnb_paper_strategy_daily.csv",
         "",
+        "## Final score vs Alpha6 conflict audit",
+        f"- conflict_count: {window_summary.get('final_score_alpha6_conflict_count', not_obs)}",
+        f"- avg_future_4h_net_bps: {window_summary.get('final_score_alpha6_conflict_avg_future_4h_net_bps', not_obs)}",
+        f"- avg_future_8h_net_bps: {window_summary.get('final_score_alpha6_conflict_avg_future_8h_net_bps', not_obs)}",
+        f"- avg_future_24h_net_bps: {window_summary.get('final_score_alpha6_conflict_avg_future_24h_net_bps', not_obs)}",
+        f"- symbol_breakdown: {window_summary.get('final_score_alpha6_conflict_symbol_breakdown', not_obs)}",
+        f"- recommendation: {window_summary.get('final_score_alpha6_conflict_recommendation', not_obs)}",
+        "- rule: diagnostic only; this audit checks high Alpha6 buy candidates suppressed by negative final_score/no_order.",
+        "- output: summaries/final_score_vs_alpha6_conflict.csv",
+        "",
         "## Probe 生命周期检查",
         f"- 今天是否有 market_impulse_probe / btc_leadership_probe: market_impulse_probe={bool(market_probe_seen or probe_counts['market_impulse_probe_candidate_count'] or probe_counts['market_impulse_probe_open_count'])}, btc_leadership_probe={bool(btc_seen_in_decision_audit or probe_counts['btc_leadership_probe_candidate_count'] or probe_counts['btc_leadership_probe_open_count'] or probe_counts['btc_leadership_probe_blocked_count'])}",
         f"- latest_24h_trade_count: {window_summary['latest_24h_trade_count']}",
@@ -13865,6 +14027,7 @@ sanity = {
     "contains summaries/swing_atr_soft_exit_shadow.csv": (OUT / "summaries/swing_atr_soft_exit_shadow.csv").is_file(),
     "contains summaries/bnb_risk_summary.json": (OUT / "summaries/bnb_risk_summary.json").is_file(),
     "contains summaries/bnb_recovery_missed_opportunity.csv": (OUT / "summaries/bnb_recovery_missed_opportunity.csv").is_file(),
+    "contains summaries/final_score_vs_alpha6_conflict.csv": (OUT / "summaries/final_score_vs_alpha6_conflict.csv").is_file(),
     "contains summaries/quant_lab_compliance.csv": (OUT / "summaries/quant_lab_compliance.csv").is_file(),
     "contains summaries/quant_lab_permission_audit.csv": (OUT / "summaries/quant_lab_permission_audit.csv").is_file(),
     "contains summaries/quant_lab_mode_audit.csv": (OUT / "summaries/quant_lab_mode_audit.csv").is_file(),

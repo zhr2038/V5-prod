@@ -541,6 +541,8 @@ V5 还会只读 quant-lab `paper_strategy_proposals.csv`。当前仅把 `ETH_USD
 
 BNB paper tracking 只用于复盘 missed recovery，不影响 live。`BNB_F3_DOMINANT_ENTRY_PAPER_V1` 和 `BNB_RISK_ON_BUY_PAPER_V1` 要求 `symbol=BNB/USDT`、`alpha6_side=buy`、`alpha6_score>=0.9`、`expected_edge_bps>required_edge_bps`、`cost_gate_verified=true`，并且 regime 为 `TREND_UP` / `ALT_IMPULSE` / `Trending`。它们不要求 `final_score>0`，因此能覆盖 final_score 被 negative expectancy 或其他 penalty 压负但 Alpha6/f4/f5 已恢复的 no_order 样本。输出始终是 paper-only，`live_small_ready=false`，不会产生真实订单。
 
+`summaries/final_score_vs_alpha6_conflict.csv` 用于审计 Alpha6 很强但 final score 为负或最终 no_order 的候选。筛选条件固定为 BTC/ETH/SOL/BNB、`alpha6_side=buy`、`alpha6_score>=0.9`、`expected_edge_bps>required_edge_bps`、`cost_gate_verified=true`，并记录 4h/8h/12h/24h 后验净收益。该报告只量化 final_score 是否压制了有效 Alpha6 机会，不改变 live 下单逻辑。
+
 ---
 
 ## Alt Impulse Regime Shadow
