@@ -5602,7 +5602,9 @@ def main():
         try:
             with tarfile.open(bundle, "r:gz") as tf:
                 rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/final_score_vs_alpha6_conflict.csv")).read().decode().splitlines()))
+                shadow_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_strong_alpha6_bypass_shadow.csv")).read().decode().splitlines()))
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
             assert len(rows) == 1, rows
             row = rows[0]
@@ -5618,8 +5620,21 @@ def main():
             assert window["final_score_alpha6_conflict_count"] == 1, window
             assert window["final_score_alpha6_conflict_recommendation"] == "review_final_score_alpha6_conflict", window
             assert "BNB/USDT" in window["final_score_alpha6_conflict_symbol_breakdown"], window
+            assert len(shadow_rows) == 1, shadow_rows
+            shadow = shadow_rows[0]
+            assert shadow["alpha6_score"] == "0.994", shadow
+            assert shadow["would_bypass_negative_expectancy"] == "true", shadow
+            assert float(shadow["future_4h_net_bps"]) > 400.0, shadow
+            assert float(shadow["future_24h_net_bps"]) > 1100.0, shadow
+            assert shadow["outcome"] == "profitable_shadow", shadow
+            assert window["bnb_strong_alpha6_bypass_shadow_rows"] == 1, window
+            assert window["bnb_strong_alpha6_bypass_negative_expectancy_count"] == 1, window
+            assert manifest["bnb_strong_alpha6_bypass_shadow_rows"] == 1, manifest
             assert "Final score vs Alpha6 conflict audit" in readme, readme
             assert "summaries/final_score_vs_alpha6_conflict.csv" in readme, readme
+            assert "BNB strong Alpha6 bypass shadow" in readme, readme
+            assert "summaries/bnb_strong_alpha6_bypass_shadow.csv" in readme, readme
+            assert "live_order_effect: none_shadow_only" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

@@ -373,6 +373,26 @@ FINAL_SCORE_ALPHA6_CONFLICT_FIELDS = (
     "future_24h_net_bps",
     "missed_profit_flag",
 )
+BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS = (
+    "run_id",
+    "ts_utc",
+    "final_score",
+    "alpha6_score",
+    "f3",
+    "f4",
+    "f5",
+    "expected_edge_bps",
+    "required_edge_bps",
+    "final_decision",
+    "block_reason",
+    "no_signal_reason",
+    "would_bypass_negative_expectancy",
+    "future_4h_net_bps",
+    "future_8h_net_bps",
+    "future_12h_net_bps",
+    "future_24h_net_bps",
+    "outcome",
+)
 ORDER_LIFECYCLE_FIELDS = (
     "schema_version",
     "lifecycle_id",
@@ -7426,6 +7446,117 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         FINAL_SCORE_ALPHA6_CONFLICT_FIELDS,
     )
 
+    def candidate_regime_text(row):
+        return flatten_value(first_observed(
+            row.get("regime_state"),
+            row.get("current_regime"),
+            row.get("market_regime"),
+            row.get("risk_regime"),
+            not_obs,
+        )).strip()
+
+    def candidate_broad_market_positive(row):
+        for field in (
+            "market_broad_positive",
+            "broad_market_positive",
+            "broad_market_positive_signal",
+            "is_broad_market_positive",
+        ):
+            if truthy_text(row.get(field)):
+                return True
+        for field in (
+            "broad_market_positive_count",
+            "whitelist_positive_4h_count",
+            "positive_symbol_count",
+            "market_positive_count",
+        ):
+            value = as_float(row.get(field))
+            if value is not None and value > 0:
+                return True
+        return False
+
+    def is_bnb_strong_alpha6_bypass_shadow_candidate(row):
+        if normalize_symbol_text(row.get("symbol")) != "BNB/USDT":
+            return False
+        if str(row.get("alpha6_side") or "").strip().lower() != "buy":
+            return False
+        alpha6_score = as_float(row.get("alpha6_score"))
+        if alpha6_score is None or alpha6_score < 0.9:
+            return False
+        expected = as_float(row.get("expected_edge_bps"))
+        required = as_float(row.get("required_edge_bps"))
+        if expected is None or required is None or expected <= required:
+            return False
+        if not truthy_text(row.get("cost_gate_verified")):
+            return False
+        f3 = as_float(first_observed(row.get("f3"), row.get("f3_vol_adj_ret"), not_obs))
+        f4 = as_float(first_observed(row.get("f4"), row.get("f4_volume_expansion"), not_obs))
+        if not ((f4 is not None and f4 >= 1.0) or (f3 is not None and f3 >= 10.0)):
+            return False
+        regime_norm = candidate_regime_text(row).replace("-", "_").replace(" ", "_").upper()
+        if regime_norm in {"TRENDING", "TREND_UP", "ALT_IMPULSE"}:
+            return True
+        return candidate_broad_market_positive(row)
+
+    def bnb_strong_alpha6_shadow_outcome(future_values):
+        observed = [as_float(value) for value in future_values]
+        observed = [value for value in observed if value is not None]
+        if observed:
+            if max(observed) > 0:
+                return "profitable_shadow"
+            return "nonprofitable_shadow"
+        if any(flatten_value(value) == "pending" for value in future_values):
+            return "pending"
+        return not_obs
+
+    def build_bnb_strong_alpha6_bypass_shadow_rows(rows):
+        out = []
+        for row in rows:
+            if not is_bnb_strong_alpha6_bypass_shadow_candidate(row):
+                continue
+            symbol = "BNB/USDT"
+            ts_text = first_observed(row.get("ts_utc"), row.get("timestamp"), row.get("ts"), not_obs)
+            ts_dt = parse_dt_utc(ts_text)
+            entry_price = candidate_conflict_entry_price(row, symbol, ts_dt)
+            cost_bps = candidate_conflict_cost_bps(row)
+            future = {
+                horizon: forward_net_bps(symbol, ts_dt, entry_price, horizon, cost_bps)
+                for horizon in (4, 8, 12, 24)
+            }
+            block_text = " ".join(
+                flatten_value(value).lower()
+                for value in (row.get("block_reason"), row.get("no_signal_reason"), row.get("final_decision"))
+            )
+            out.append({
+                "run_id": first_observed(row.get("run_id"), not_obs),
+                "ts_utc": ts_text,
+                "final_score": first_observed(row.get("final_score"), not_obs),
+                "alpha6_score": first_observed(row.get("alpha6_score"), not_obs),
+                "f3": first_observed(row.get("f3"), row.get("f3_vol_adj_ret"), not_obs),
+                "f4": first_observed(row.get("f4"), row.get("f4_volume_expansion"), not_obs),
+                "f5": first_observed(row.get("f5"), row.get("f5_rsi_trend_confirm"), not_obs),
+                "expected_edge_bps": first_observed(row.get("expected_edge_bps"), not_obs),
+                "required_edge_bps": first_observed(row.get("required_edge_bps"), not_obs),
+                "final_decision": first_observed(row.get("final_decision"), not_obs),
+                "block_reason": first_observed(row.get("block_reason"), not_obs),
+                "no_signal_reason": first_observed(row.get("no_signal_reason"), not_obs),
+                "would_bypass_negative_expectancy": str("negative_expectancy" in block_text).lower(),
+                "future_4h_net_bps": future[4],
+                "future_8h_net_bps": future[8],
+                "future_12h_net_bps": future[12],
+                "future_24h_net_bps": future[24],
+                "outcome": bnb_strong_alpha6_shadow_outcome([future[4], future[8], future[12], future[24]]),
+            })
+        out.sort(key=lambda item: (flatten_value(item.get("ts_utc")), flatten_value(item.get("run_id"))))
+        return out
+
+    bnb_strong_alpha6_bypass_shadow_rows = build_bnb_strong_alpha6_bypass_shadow_rows(candidate_snapshot_rows)
+    write_csv(
+        "summaries/bnb_strong_alpha6_bypass_shadow.csv",
+        bnb_strong_alpha6_bypass_shadow_rows,
+        BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS,
+    )
+
     def better_to_hold_text(future_net_bps, realized_net_bps):
         if future_net_bps == "pending":
             return "pending"
@@ -12674,6 +12805,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "bnb_paper_strategy_daily_rows": len(bnb_paper_daily_rows),
         "bnb_paper_would_enter_count": bnb_paper_would_enter_count,
         "bnb_paper_strategy_ids": json.dumps(bnb_paper_strategy_ids, ensure_ascii=False),
+        "bnb_strong_alpha6_bypass_shadow_rows": len(bnb_strong_alpha6_bypass_shadow_rows),
+        "bnb_strong_alpha6_bypass_negative_expectancy_count": sum(
+            1 for row in bnb_strong_alpha6_bypass_shadow_rows
+            if truthy_text(row.get("would_bypass_negative_expectancy"))
+        ),
+        "bnb_strong_alpha6_bypass_outcome_mix": json.dumps(
+            dict(sorted(Counter(row.get("outcome") or not_obs for row in bnb_strong_alpha6_bypass_shadow_rows).items())),
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
         "final_score_alpha6_conflict_count": final_score_alpha6_conflict_summary.get("conflict_count", 0),
         "final_score_alpha6_conflict_avg_future_4h_net_bps": final_score_alpha6_conflict_summary.get("avg_future_4h_net_bps", not_obs),
         "final_score_alpha6_conflict_avg_future_8h_net_bps": final_score_alpha6_conflict_summary.get("avg_future_8h_net_bps", not_obs),
@@ -13465,6 +13606,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "- live_order_effect: none_paper_only",
         "- output: summaries/bnb_paper_strategy_runs.csv and summaries/bnb_paper_strategy_daily.csv",
         "",
+        "## BNB strong Alpha6 bypass shadow",
+        f"- rows: {window_summary.get('bnb_strong_alpha6_bypass_shadow_rows', not_obs)}",
+        f"- would_bypass_negative_expectancy_count: {window_summary.get('bnb_strong_alpha6_bypass_negative_expectancy_count', not_obs)}",
+        f"- outcome_mix: {window_summary.get('bnb_strong_alpha6_bypass_outcome_mix', not_obs)}",
+        "- strategy_id: BNB_STRONG_ALPHA6_BYPASS_SHADOW_V1",
+        "- trigger: BNB alpha6 buy >= 0.9, expected_edge_bps > required_edge_bps, cost_gate_verified=true, f4>=1.0 or f3>=10, and trending/ALT_IMPULSE/broad-positive market context.",
+        "- live_order_effect: none_shadow_only",
+        "- output: summaries/bnb_strong_alpha6_bypass_shadow.csv",
+        "",
         "## Final score vs Alpha6 conflict audit",
         f"- conflict_count: {window_summary.get('final_score_alpha6_conflict_count', not_obs)}",
         f"- avg_future_4h_net_bps: {window_summary.get('final_score_alpha6_conflict_avg_future_4h_net_bps', not_obs)}",
@@ -13826,6 +13976,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             1 for row in bnb_recovery_missed_opportunity_rows
             if row.get("diagnosis") == "premature_exit_poisoned_reentry"
         ),
+        "bnb_strong_alpha6_bypass_shadow_rows": len(bnb_strong_alpha6_bypass_shadow_rows),
+        "bnb_strong_alpha6_bypass_negative_expectancy_count": sum(
+            1 for row in bnb_strong_alpha6_bypass_shadow_rows
+            if truthy_text(row.get("would_bypass_negative_expectancy"))
+        ),
         "bnb_f3_dominant_swing_sample_count": bnb_f3_dominant_swing_summary.get("sample_count", 0),
         "bnb_f3_dominant_swing_missing_swing_flag_count": bnb_f3_dominant_swing_summary.get("bnb_f3_missing_swing_flag_count", 0),
         "bnb_f3_dominant_swing_diagnostic_only": True,
@@ -14103,6 +14258,7 @@ sanity = {
     "contains summaries/swing_atr_soft_exit_shadow.csv": (OUT / "summaries/swing_atr_soft_exit_shadow.csv").is_file(),
     "contains summaries/bnb_risk_summary.json": (OUT / "summaries/bnb_risk_summary.json").is_file(),
     "contains summaries/bnb_recovery_missed_opportunity.csv": (OUT / "summaries/bnb_recovery_missed_opportunity.csv").is_file(),
+    "contains summaries/bnb_strong_alpha6_bypass_shadow.csv": (OUT / "summaries/bnb_strong_alpha6_bypass_shadow.csv").is_file(),
     "contains summaries/final_score_vs_alpha6_conflict.csv": (OUT / "summaries/final_score_vs_alpha6_conflict.csv").is_file(),
     "contains summaries/quant_lab_compliance.csv": (OUT / "summaries/quant_lab_compliance.csv").is_file(),
     "contains summaries/quant_lab_permission_audit.csv": (OUT / "summaries/quant_lab_permission_audit.csv").is_file(),
@@ -14232,6 +14388,12 @@ manifest = {
     ),
     "bnb_recovery_premature_exit_poisoned_reentry_count": int(
         summary_meta.get("bnb_recovery_premature_exit_poisoned_reentry_count", 0) or 0
+    ),
+    "bnb_strong_alpha6_bypass_shadow_rows": int(
+        summary_meta.get("bnb_strong_alpha6_bypass_shadow_rows", 0) or 0
+    ),
+    "bnb_strong_alpha6_bypass_negative_expectancy_count": int(
+        summary_meta.get("bnb_strong_alpha6_bypass_negative_expectancy_count", 0) or 0
     ),
     "bnb_f3_dominant_swing_sample_count": int(summary_meta.get("bnb_f3_dominant_swing_sample_count", 0) or 0),
     "bnb_f3_dominant_swing_missing_swing_flag_count": int(
