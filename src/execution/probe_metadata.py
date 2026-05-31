@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -13,6 +14,32 @@ def _float_or_none(value: Any) -> Optional[float]:
     except Exception:
         return None
     return parsed
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _explicit_false(value: Any) -> bool:
+    if isinstance(value, bool):
+        return not value
+    return str(value or "").strip().lower() in {"0", "false", "no", "off"}
+
+
+def _dict_or_none(value: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return None
+        return dict(parsed) if isinstance(parsed, dict) else None
+    return None
 
 
 def probe_type_from_meta(meta: Any) -> Optional[str]:
@@ -81,19 +108,44 @@ def swing_tags_from_order_meta(
 ) -> Optional[Dict[str, Any]]:
     if not isinstance(meta, dict):
         return None
-    if not bool(meta.get("swing_hold_position", False)):
+    if "swing_hold_position" in meta and _explicit_false(meta.get("swing_hold_position")):
+        return None
+    candidates = [meta]
+    for key in (
+        "swing_meta",
+        "swing_decision_meta",
+        "entry_router_decision",
+        "router_decision",
+        "raw_meta",
+        "raw_json",
+    ):
+        nested = _dict_or_none(meta.get(key))
+        if nested:
+            candidates.append(nested)
+
+    source = next((candidate for candidate in candidates if _truthy(candidate.get("swing_hold_position"))), None)
+    if source is None:
         return None
 
-    ts = str(entry_ts or meta.get("swing_entry_ts") or meta.get("entry_ts") or "").strip()
+    ts = str(
+        entry_ts
+        or meta.get("swing_entry_ts")
+        or meta.get("entry_ts")
+        or source.get("swing_entry_ts")
+        or source.get("entry_ts")
+        or ""
+    ).strip()
     if not ts:
         ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     out: Dict[str, Any] = {
         "swing_hold_position": True,
         "swing_entry_ts": ts,
-        "entry_reason": str(meta.get("entry_reason") or "normal_entry"),
+        "entry_reason": str(meta.get("entry_reason") or source.get("entry_reason") or "normal_entry"),
     }
     min_hold = _float_or_none(meta.get("swing_min_hold_hours"))
+    if min_hold is None:
+        min_hold = _float_or_none(source.get("swing_min_hold_hours"))
     if min_hold is not None:
         out["swing_min_hold_hours"] = float(min_hold)
 
@@ -106,6 +158,8 @@ def swing_tags_from_order_meta(
     ):
         if key in meta and meta.get(key) is not None:
             out[key] = meta.get(key)
+        elif key in source and source.get(key) is not None:
+            out[key] = source.get(key)
     return out
 
 

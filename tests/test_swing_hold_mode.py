@@ -943,6 +943,8 @@ def test_swing_guard_blocks_rank_exit_before_min_hold(tmp_path: Path) -> None:
     )
     assert decision["symbol"] == "BNB/USDT"
     assert decision["rank"] == 4
+    assert decision["would_exit_shadow"] is True
+    assert decision["blocked_policy_reason"] == "swing_min_hold_soft_exit_blocked"
 
 
 def test_stop_loss_and_profit_lock_exits_are_not_blocked_by_swing_guard(tmp_path: Path) -> None:

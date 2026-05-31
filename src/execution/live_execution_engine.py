@@ -949,6 +949,7 @@ class LiveExecutionEngine:
             "manual_kill_switch",
             "reconcile_fail",
             "reconcile_failure",
+            "position_reconcile_force_close",
             "exchange_account_anomaly",
             "account_anomaly",
             "exchange_anomaly",
@@ -960,6 +961,7 @@ class LiveExecutionEngine:
                 "max_loss_",
                 "risk_off_",
                 "reconcile_",
+                "position_reconcile_",
                 "kill_switch_",
                 "exchange_",
                 "emergency_",
@@ -1010,6 +1012,7 @@ class LiveExecutionEngine:
             "exchange_risk",
             "emergency_close",
             "zero_target_close",
+            "position_reconcile_force_close",
             "risk_off",
             "risk_off_forced_close",
             "risk_off_force_exit",
@@ -1025,6 +1028,7 @@ class LiveExecutionEngine:
             "dynamic_stop_",
             "exchange_",
             "emergency_",
+            "position_reconcile_",
             "risk_off_force",
             "risk_off_forced",
             "risk_off_",
@@ -1039,6 +1043,11 @@ class LiveExecutionEngine:
         if norm.startswith("protect_profit_lock"):
             return bool(getattr(self.cfg, "swing_allow_exit_on_profit_lock", True))
         return bool(self._swing_min_hold_hard_exit_exception_reason(reason))
+
+    @staticmethod
+    def _explicit_exit_priority(value: Any) -> Optional[str]:
+        norm = str(value or "").strip().lower()
+        return norm if norm in {"soft", "hard"} else None
 
     @staticmethod
     def _is_risk_off_regime_label(regime_state: Any) -> bool:
@@ -1126,9 +1135,13 @@ class LiveExecutionEngine:
 
         meta = dict(getattr(o, "meta", None) or {})
         reason = str(meta.get("reason") or meta.get("exit_reason") or "").strip()
-        priority = self._exit_priority_for_reason(reason)
-        allowed_before_min_hold = self._exit_allowed_before_min_hold(reason)
         hard_exception_reason = self._swing_min_hold_hard_exit_exception_reason(reason)
+        priority = (
+            "hard"
+            if hard_exception_reason
+            else self._explicit_exit_priority(meta.get("exit_priority")) or self._exit_priority_for_reason(reason)
+        )
+        allowed_before_min_hold = self._exit_allowed_before_min_hold(reason)
         if priority != "soft" or allowed_before_min_hold:
             return None
         if bool(meta.get("probe_exit", False)) or probe_type_from_meta(meta) in PROBE_POSITION_TYPES:
@@ -1207,7 +1220,9 @@ class LiveExecutionEngine:
             "side": side,
             "intent": intent,
             "hold_hours": float(hold_hours),
+            "hold_hours_at_exit_check": float(hold_hours),
             "min_hold_hours": float(min_hold_hours),
+            "swing_min_hold_hours": float(min_hold_hours),
             "exit_priority": priority,
             "exit_allowed_before_min_hold": bool(allowed_before_min_hold),
             "exit_blocked_by_min_hold": bool(blocked),
@@ -1215,6 +1230,9 @@ class LiveExecutionEngine:
             "swing_min_hold_guard_blocked": bool(blocked),
             "soft_exit_blocked_by_min_hold": bool(blocked and priority == "soft"),
             "hard_exit_exception_reason": hard_exception_reason,
+            "would_exit_shadow": bool(blocked),
+            "blocked_exit_reason": "swing_min_hold_soft_exit_blocked" if blocked else "",
+            "blocked_source_reason": reason if blocked else "",
             "min_hold_block_reason": (
                 str(atr_guard_context.get("min_hold_block_reason") or "soft_exit_before_swing_min_hold")
                 if blocked

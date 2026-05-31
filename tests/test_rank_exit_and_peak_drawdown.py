@@ -182,6 +182,11 @@ def test_swing_atr_early_exit_guard_blocks_small_loss_before_24h(tmp_path):
     assert decision["swing_min_hold_guard_blocked"] is True
     assert decision["soft_exit_blocked_by_min_hold"] is True
     assert decision["hard_exit_exception_reason"] == ""
+    assert decision["hold_hours_at_exit_check"] == pytest.approx(5.0)
+    assert decision["swing_min_hold_hours"] == pytest.approx(24.0)
+    assert decision["would_exit_shadow"] is True
+    assert decision["blocked_exit_reason"] == "swing_min_hold_soft_exit_blocked"
+    assert decision["blocked_source_reason"] == "atr_trailing"
     assert audit.counts["swing_atr_early_exit_guard_count"] == 1
 
 
@@ -244,6 +249,10 @@ def test_swing_min_hold_allows_hard_stop_loss_before_24h(tmp_path):
     assert order.meta["soft_exit_blocked_by_min_hold"] is False
     assert order.meta["hard_exit_exception_reason"] == "hard_stop_loss"
     assert order.meta["hold_hours"] == pytest.approx(5.0)
+    assert order.meta["hold_hours_at_exit_check"] == pytest.approx(5.0)
+    assert order.meta["swing_min_hold_hours"] == pytest.approx(24.0)
+    assert order.meta["would_exit_shadow"] is False
+    assert order.meta["blocked_exit_reason"] == ""
     assert any(
         d.get("source_reason") == "hard_stop_loss"
         and d.get("exit_priority") == "hard"

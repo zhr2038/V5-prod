@@ -295,7 +295,9 @@ min-hold 前不应直接退出的软原因：
 soft exit 被拦截时会写：
 
 - `hold_hours`
+- `hold_hours_at_exit_check`
 - `min_hold_hours`
+- `swing_min_hold_hours`
 - `exit_priority`
 - `exit_allowed_before_min_hold`
 - `exit_blocked_by_min_hold`
@@ -304,6 +306,9 @@ soft exit 被拦截时会写：
 - `soft_exit_blocked_by_min_hold`
 - `hard_exit_exception_reason`
 - `min_hold_block_reason`
+- `would_exit_shadow`
+- `blocked_exit_reason=swing_min_hold_soft_exit_blocked`
+- `blocked_source_reason`
 
 ### swing ATR trailing early-exit soft guard
 

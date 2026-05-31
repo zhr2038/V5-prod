@@ -24,6 +24,7 @@ from src.execution.live_execution_engine import (
 )
 from src.execution.order_store import OrderStore
 from src.execution.position_store import Position, PositionStore
+from src.execution.probe_metadata import position_tags_from_order_meta
 
 
 class FakeOKX:
@@ -1009,6 +1010,11 @@ def test_live_execution_blocks_soft_swing_exit_before_min_hold() -> None:
         assert guard["swing_min_hold_guard_blocked"] is True
         assert guard["soft_exit_blocked_by_min_hold"] is True
         assert guard["hard_exit_exception_reason"] == ""
+        assert guard["hold_hours_at_exit_check"] == pytest.approx(5.0, abs=0.05)
+        assert guard["swing_min_hold_hours"] == pytest.approx(24.0)
+        assert guard["would_exit_shadow"] is True
+        assert guard["blocked_exit_reason"] == "swing_min_hold_soft_exit_blocked"
+        assert guard["blocked_source_reason"] == "atr_trailing"
 
 
 def test_live_execution_blocks_atr_swing_exit_after_large_loss_before_min_hold() -> None:
@@ -1069,6 +1075,7 @@ def test_live_execution_blocks_atr_swing_exit_after_large_loss_before_min_hold()
         assert guard["swing_min_hold_guard_checked"] is True
         assert guard["swing_min_hold_guard_blocked"] is True
         assert guard["soft_exit_blocked_by_min_hold"] is True
+        assert guard["blocked_exit_reason"] == "swing_min_hold_soft_exit_blocked"
 
 
 def test_live_execution_allows_hard_swing_exit_before_min_hold() -> None:
@@ -1157,6 +1164,139 @@ def test_live_execution_allows_emergency_swing_exit_before_min_hold() -> None:
 
         assert result.state in {"OPEN", "FILLED"}
         assert okx.place_calls == 1
+
+
+def test_live_execution_allows_atr_swing_exit_after_min_hold() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        okx.balance_by_ccy["BNB"] = {"eq": "1", "availBal": "1", "cashBal": "1", "liab": "0"}
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        entry_dt = datetime.now(timezone.utc) - timedelta(hours=25)
+        entry_ts = entry_dt.isoformat().replace("+00:00", "Z")
+        pos.upsert_position(
+            Position(
+                symbol="BNB/USDT",
+                qty=0.02,
+                avg_px=600.0,
+                entry_ts=entry_ts,
+                highest_px=630.0,
+                last_update_ts=entry_ts,
+                last_mark_px=600.0,
+                unrealized_pnl_pct=0.0,
+                tags_json=json.dumps({"swing_hold_position": True, "swing_entry_ts": entry_ts, "swing_min_hold_hours": 24}),
+            )
+        )
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            swing_min_hold_exit_guard_enabled=True,
+            swing_min_hold_hours=24,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        result = eng.place(
+            Order(
+                symbol="BNB/USDT",
+                side="sell",
+                intent="CLOSE_LONG",
+                notional_usdt=12.0,
+                signal_price=600.0,
+                meta={"decision_hash": "bnb-atr-after-min-hold", "reason": "atr_trailing"},
+            )
+        )
+
+        row = store.get(result.cl_ord_id)
+        req = json.loads(row.req_json)
+        order_meta = req["_v5_order_meta"]
+        assert result.state in {"OPEN", "FILLED"}
+        assert okx.place_calls == 1
+        assert order_meta["swing_min_hold_guard_checked"] is True
+        assert order_meta["swing_min_hold_guard_blocked"] is False
+        assert order_meta["soft_exit_blocked_by_min_hold"] is False
+        assert order_meta["hold_hours_at_exit_check"] == pytest.approx(25.0, abs=0.05)
+
+
+def test_live_execution_does_not_block_non_swing_atr_exit_before_min_hold() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        okx.balance_by_ccy["BNB"] = {"eq": "1", "availBal": "1", "cashBal": "1", "liab": "0"}
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        entry_dt = datetime.now(timezone.utc) - timedelta(hours=5)
+        entry_ts = entry_dt.isoformat().replace("+00:00", "Z")
+        pos.upsert_position(
+            Position(
+                symbol="BNB/USDT",
+                qty=0.02,
+                avg_px=600.0,
+                entry_ts=entry_ts,
+                highest_px=630.0,
+                last_update_ts=entry_ts,
+                last_mark_px=600.0,
+                unrealized_pnl_pct=0.0,
+                tags_json="{}",
+            )
+        )
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            swing_min_hold_exit_guard_enabled=True,
+            swing_min_hold_hours=24,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        result = eng.place(
+            Order(
+                symbol="BNB/USDT",
+                side="sell",
+                intent="CLOSE_LONG",
+                notional_usdt=12.0,
+                signal_price=600.0,
+                meta={"decision_hash": "bnb-non-swing-atr-before-min-hold", "reason": "atr_trailing"},
+            )
+        )
+
+        assert result.state in {"OPEN", "FILLED"}
+        assert okx.place_calls == 1
+
+
+def test_position_tags_preserve_nested_swing_router_metadata() -> None:
+    tags = position_tags_from_order_meta(
+        {
+            "entry_reason": "normal_entry",
+            "entry_router_decision": {
+                "swing_hold_position": True,
+                "swing_entry_ts": "2026-05-28T22:00:59Z",
+                "swing_min_hold_hours": 24,
+                "f5_rsi_trend_confirm": 0.61,
+            },
+        },
+        entry_px=657.9,
+    )
+
+    assert tags is not None
+    assert tags["swing_hold_position"] is True
+    assert tags["swing_entry_ts"] == "2026-05-28T22:00:59Z"
+    assert tags["swing_min_hold_hours"] == 24.0
+    assert tags["f5_rsi_trend_confirm"] == 0.61
+    assert tags["entry_px"] == 657.9
+
+
+def test_position_tags_top_level_swing_false_overrides_nested_metadata() -> None:
+    tags = position_tags_from_order_meta(
+        {
+            "swing_hold_position": False,
+            "entry_router_decision": {
+                "swing_hold_position": True,
+                "swing_entry_ts": "2026-05-28T22:00:59Z",
+                "swing_min_hold_hours": 24,
+            },
+        },
+        entry_px=657.9,
+    )
+
+    assert tags is None
 
 
 def test_buy_guard_respects_zero_borrow_liability_epsilon(monkeypatch) -> None:
