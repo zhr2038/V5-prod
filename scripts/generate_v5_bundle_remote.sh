@@ -11790,12 +11790,19 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         return rows
 
     def risk_on_row_dt(row):
-        values = [
+        decision_values = [
             parse_dt_utc(row.get(name))
-            for name in ("decision_ts", "decision_time", "ts_utc", "timestamp", "sampled_at", "generated_at", "as_of_ts", "run_ts")
+            for name in ("decision_ts", "decision_time", "ts_utc", "timestamp", "run_ts")
         ]
-        values = [value for value in values if value is not None]
-        return max(values) if values else None
+        decision_values = [value for value in decision_values if value is not None]
+        if decision_values:
+            return max(decision_values)
+        fallback_values = [
+            parse_dt_utc(row.get(name))
+            for name in ("sampled_at", "as_of_ts", "generated_at")
+        ]
+        fallback_values = [value for value in fallback_values if value is not None]
+        return max(fallback_values) if fallback_values else None
 
     def merge_risk_on_detail_rows(rows):
         candidates = list(rows)

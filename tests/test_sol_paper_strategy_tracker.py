@@ -2019,6 +2019,7 @@ def test_risk_on_multi_buy_reads_quant_lab_bundle_reports_member(tmp_path: Path)
             "decision_ts",
             "top_k",
             "current_regime",
+            "generated_at",
             "selected_symbols",
             "would_buy",
             "would_buy_symbol",
@@ -2027,10 +2028,23 @@ def test_risk_on_multi_buy_reads_quant_lab_bundle_reports_member(tmp_path: Path)
     writer.writeheader()
     writer.writerow(
         {
+            "run_id": "r_old_archive",
+            "decision_ts": "2026-05-25T00:00:00Z",
+            "top_k": "1",
+            "current_regime": "ALT_IMPULSE",
+            "generated_at": "2026-05-31T03:36:34Z",
+            "selected_symbols": '["BTC-USDT"]',
+            "would_buy": "True",
+            "would_buy_symbol": "BTC-USDT",
+        }
+    )
+    writer.writerow(
+        {
             "run_id": "r_risk_on_archive",
             "decision_ts": "2026-05-26T00:00:00Z",
             "top_k": "1",
             "current_regime": "ALT_IMPULSE",
+            "generated_at": "2026-05-31T03:36:34Z",
             "selected_symbols": '["BNB-USDT"]',
             "would_buy": "True",
             "would_buy_symbol": "BNB-USDT",

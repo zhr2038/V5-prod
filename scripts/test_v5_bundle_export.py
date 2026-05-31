@@ -6309,8 +6309,9 @@ def main():
             {
                 "reports/risk_on_multi_buy_shadow.csv": "\n".join(
                     [
-                        "run_id,decision_ts,top_k,current_regime,selected_symbols,would_buy,would_buy_symbol",
-                        'r_archive_latest,2026-05-26T00:00:00Z,1,ALT_IMPULSE,"[""BNB-USDT""]",True,BNB-USDT',
+                        "run_id,decision_ts,generated_at,top_k,current_regime,selected_symbols,would_buy,would_buy_symbol",
+                        'r_archive_old,2026-05-25T00:00:00Z,2026-05-31T03:36:34Z,1,ALT_IMPULSE,"[""BTC-USDT""]",True,BTC-USDT',
+                        'r_archive_latest,2026-05-26T00:00:00Z,2026-05-31T03:36:34Z,1,ALT_IMPULSE,"[""BNB-USDT""]",True,BNB-USDT',
                     ]
                 )
                 + "\n",
