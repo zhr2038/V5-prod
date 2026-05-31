@@ -3714,6 +3714,7 @@ class V5Pipeline:
             "min_hold_violation_cycles": int(attribution_audit.get("min_hold_violation_cycles") or 0),
             "gave_back_profit_cycles": int(attribution_audit.get("gave_back_profit_cycles") or 0),
             "trailing_too_early_cycles": int(attribution_audit.get("trailing_too_early_cycles") or 0),
+            "exit_metadata_missing_cycles": int(attribution_audit.get("exit_metadata_missing_cycles") or 0),
             "adjusted_entry_cycles": int(attribution_audit.get("adjusted_entry_cycles") or 0),
             "raw_would_block": bool(attribution_audit.get("raw_would_block")),
             "adjusted_would_block": bool(attribution_audit.get("adjusted_would_block")),

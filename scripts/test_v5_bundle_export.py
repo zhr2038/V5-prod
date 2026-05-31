@@ -5557,6 +5557,7 @@ def main():
             assert row["exit_bad_cycles"] == "1", row
             assert row["min_hold_violation_cycles"] == "1", row
             assert row["trailing_too_early_cycles"] == "1", row
+            assert row["exit_metadata_missing_cycles"] == "0", row
             assert row["premature_soft_exit_count"] == "1", row
             assert row["excluded_from_fast_fail_count"] == "1", row
             assert row["adjusted_fast_fail_net_expectancy_bps"] == "0", row
@@ -5565,9 +5566,11 @@ def main():
             assert len(attribution) == 1, attribution
             assert attribution[0]["min_hold_violation"] == "true", attribution
             assert attribution[0]["entry_bad"] == "false", attribution
+            assert attribution[0]["exit_metadata_missing"] == "false", attribution
             assert len(all_attribution) == 1, all_attribution
             assert all_attribution[0]["symbol"] == "BNB/USDT", all_attribution
             assert all_attribution[0]["min_hold_violation"] == "true", all_attribution
+            assert all_attribution[0]["exit_metadata_missing"] == "false", all_attribution
             assert all_attribution[0]["would_unblock_if_adjusted"] == "true", all_attribution
             assert attribution_json["diagnostic_only"] is True, attribution_json
             assert attribution_json["live_order_effect"] == "none", attribution_json
@@ -5655,7 +5658,13 @@ def main():
             assert float(row["negative_expectancy_fast_fail_net_bps"]) < -100.0, row
             assert float(row["future_4h_net_bps"]) > 400.0, row
             assert float(row["future_24h_net_bps"]) > 1100.0, row
-            assert row["label_status"] == "shadow_pending", row
+            assert row["label_4h_status"] == "complete", row
+            assert row["label_8h_status"] == "complete", row
+            assert row["label_12h_status"] == "complete", row
+            assert row["label_24h_status"] == "complete", row
+            assert row["any_label_complete"] == "true", row
+            assert row["all_labels_complete"] == "true", row
+            assert row["label_status"] == "complete", row
             assert row["missed_profit_flag"] == "true", row
             assert window["final_score_alpha6_conflict_count"] == 1, window
             assert window["final_score_alpha6_conflict_recommendation"] == "review_final_score_alpha6_conflict", window

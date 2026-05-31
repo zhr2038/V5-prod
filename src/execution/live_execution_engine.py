@@ -1242,6 +1242,102 @@ class LiveExecutionEngine:
         o.meta = meta
         return context if blocked else None
 
+    @staticmethod
+    def _set_meta_if_missing(meta: Dict[str, Any], key: str, value: Any) -> None:
+        if value is None:
+            return
+        current = meta.get(key)
+        if current is None or str(current).strip() == "":
+            meta[key] = value
+
+    def _enrich_close_order_meta_for_attribution(self, o: Order) -> None:
+        """Attach close-order attribution fields without changing execution behavior."""
+
+        side = str(getattr(o, "side", "") or "").lower()
+        intent = str(getattr(o, "intent", "") or "").upper()
+        if side != "sell" or intent != "CLOSE_LONG":
+            return
+
+        meta = dict(getattr(o, "meta", None) or {})
+        reason = str(
+            meta.get("exit_reason")
+            or meta.get("reason")
+            or meta.get("source_reason")
+            or ""
+        ).strip()
+        if reason:
+            self._set_meta_if_missing(meta, "exit_reason", reason)
+            self._set_meta_if_missing(meta, "source_reason", reason)
+
+        hard_exception_reason = self._swing_min_hold_hard_exit_exception_reason(reason)
+        priority = (
+            "hard"
+            if hard_exception_reason
+            else self._explicit_exit_priority(meta.get("exit_priority"))
+            or self._exit_priority_for_reason(reason)
+        )
+        self._set_meta_if_missing(meta, "exit_priority", priority)
+        self._set_meta_if_missing(
+            meta,
+            "exit_allowed_before_min_hold",
+            bool(self._exit_allowed_before_min_hold(reason)),
+        )
+        self._set_meta_if_missing(meta, "exit_blocked_by_min_hold", False)
+
+        position = self.position_store.get(o.symbol)
+        tags: Dict[str, Any] = {}
+        if position is not None:
+            tags = _safe_json_obj(getattr(position, "tags_json", "{}"))
+            self._set_meta_if_missing(meta, "entry_px", getattr(position, "avg_px", None))
+
+        swing_entry_ts = (
+            meta.get("swing_entry_ts")
+            or tags.get("swing_entry_ts")
+            or tags.get("entry_ts")
+            or (getattr(position, "entry_ts", None) if position is not None else None)
+        )
+        self._set_meta_if_missing(meta, "swing_entry_ts", swing_entry_ts)
+
+        swing_hold_position = bool(
+            _to_bool(meta.get("swing_hold_position"))
+            or _to_bool(tags.get("swing_hold_position"))
+            or swing_entry_ts is not None
+        )
+        self._set_meta_if_missing(meta, "swing_hold_position", swing_hold_position)
+
+        min_hold_hours = _safe_float(
+            meta.get("swing_min_hold_hours")
+            or meta.get("min_hold_hours")
+            or tags.get("swing_min_hold_hours")
+            or getattr(self.cfg, "swing_min_hold_hours", None)
+        )
+        self._set_meta_if_missing(meta, "swing_min_hold_hours", min_hold_hours)
+
+        hold_hours = _safe_float(meta.get("hold_hours") or meta.get("held_hours"))
+        if hold_hours is None:
+            entry_dt = _parse_iso_utc(swing_entry_ts)
+            if entry_dt is not None:
+                hold_hours = max(0.0, (datetime.now(timezone.utc) - entry_dt).total_seconds() / 3600.0)
+        self._set_meta_if_missing(meta, "hold_hours", hold_hours)
+        if hold_hours is not None and min_hold_hours is not None:
+            self._set_meta_if_missing(meta, "exited_before_min_hold", float(hold_hours) < float(min_hold_hours))
+
+        max_unrealized_bps = _safe_float(
+            meta.get("max_unrealized_bps")
+            or meta.get("highest_net_bps")
+            or tags.get("max_unrealized_bps")
+            or tags.get("highest_net_bps")
+            or tags.get("highest_unrealized_net_bps")
+        )
+        if max_unrealized_bps is None and position is not None:
+            entry_px = _safe_float(meta.get("entry_px") or getattr(position, "avg_px", None))
+            highest_px = _safe_float(getattr(position, "highest_px", None))
+            if entry_px and highest_px:
+                max_unrealized_bps = (float(highest_px) / float(entry_px) - 1.0) * 10000.0
+        self._set_meta_if_missing(meta, "max_unrealized_bps", max_unrealized_bps)
+
+        o.meta = meta
+
     def _build_place_payload(self, o: Order, *, inst_id: str, cl_ord_id: str) -> Dict[str, Any]:
         # Minimal market order payload.
         side = str(o.side)
@@ -1715,6 +1811,8 @@ class LiveExecutionEngine:
             )
             log.warning("SWING_MIN_HOLD_LIVE_BLOCK: %s", swing_min_hold_block)
             return LiveExecutionResult(cl_ord_id=clid, state="REJECTED")
+
+        self._enrich_close_order_meta_for_attribution(o)
 
         quant_lab_meta = dict((o.meta or {}).get("quant_lab") or {})
         quant_lab_permission = str(

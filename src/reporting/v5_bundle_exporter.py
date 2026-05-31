@@ -59,6 +59,7 @@ NEGATIVE_EXPECTANCY_ATTRIBUTION_FIELDS = (
     "gave_back_profit",
     "trailing_too_early",
     "unknown",
+    "exit_metadata_missing",
     "adjusted_entry_expectancy_bps",
     "raw_would_block",
     "adjusted_would_block",

@@ -2273,6 +2273,76 @@ def test_strategy_advisory_stale_local_uses_api_and_updates_cache(monkeypatch: p
     assert health[0]["api_fallback_success"] == "True"
 
 
+def test_alpha_factory_reader_uses_selected_api_advisory_rows(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_alpha_api"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "source_module": "alpha_factory",
+                "strategy_candidate": "v5.expanded_relative_strength_top1_shadow",
+                "symbol": "TRX/USDT",
+                "decision": "KILL",
+                "recommended_mode": "shadow",
+                "alpha_factory_score": "0.1",
+                **_stale_meta(start_s),
+            }
+        ],
+    )
+
+    class FakeClient:
+        def get_json(self, endpoint: str, params: dict | None = None) -> SimpleNamespace:
+            return SimpleNamespace(
+                ok=True,
+                data={
+                    "rows": [
+                        {
+                            "source_module": "alpha_factory",
+                            "strategy_candidate": "v5.expanded_relative_strength_top1_shadow",
+                            "symbol": "TRX/USDT",
+                            "decision": "KEEP_SHADOW",
+                            "recommended_mode": "shadow",
+                            "promotion_state": "stage2_shadow",
+                            "alpha_factory_score": "0.77",
+                            **_fresh_meta(start_s),
+                        }
+                    ]
+                },
+            )
+
+    from src.quant_lab_client import client as client_mod
+
+    monkeypatch.setattr(
+        client_mod.QuantLabClient,
+        "from_config",
+        classmethod(lambda cls, *args, **kwargs: FakeClient()),
+    )
+
+    update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_alpha_api", start_s),
+        market_data_1h={},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    health = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_source_health.csv")
+    assert health[0]["selected_source"] == "api"
+    reader = _read_csv(tmp_path / "reports" / "summaries" / "alpha_factory_advisory_reader.csv")
+    assert len(reader) == 1
+    assert reader[0]["strategy_candidate"] == "v5.expanded_relative_strength_top1_shadow"
+    assert reader[0]["advisory_source"] == "api"
+    assert reader[0]["alpha_factory_score"] == "0.77"
+    assert reader[0]["advisory_source"] != "stale_local"
+
+
 def test_strategy_advisory_source_health_records_api_lake_metadata(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

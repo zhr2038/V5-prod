@@ -111,3 +111,70 @@ def test_order_lifecycle_records_arrival_submit_and_fill(tmp_path: Path) -> None
         aggregate_rows = list(csv.DictReader(fh))
     assert len(aggregate_rows) == 1
     assert aggregate_rows[0]["trade_ids"] == "trade-1"
+
+
+def test_order_lifecycle_projects_close_swing_attribution_meta(tmp_path: Path) -> None:
+    run_id = "run_close_lifecycle"
+    run_dir = tmp_path / "reports" / "runs" / run_id
+    reports_dir = tmp_path / "reports"
+    order_store_path = tmp_path / "reports" / "orders.sqlite"
+    fill_store_path = tmp_path / "reports" / "fills.sqlite"
+    store = OrderStore(str(order_store_path))
+    req = {
+        "instId": "BNB-USDT",
+        "tdMode": "cash",
+        "side": "sell",
+        "ordType": "market",
+        "clOrdId": "clid-close",
+        "_v5_order_lifecycle_submit": {
+            "submit_ts": "2026-05-29T03:00:54Z",
+            "order_type": "market",
+            "cl_ord_id": "clid-close",
+        },
+        "_v5_order_meta": {
+            "swing_hold_position": True,
+            "swing_entry_ts": "2026-05-28T22:00:59Z",
+            "swing_min_hold_hours": 24,
+            "hold_hours": 4.9985,
+            "exit_reason": "atr_trailing",
+            "exit_priority": "soft",
+            "exit_allowed_before_min_hold": False,
+            "exit_blocked_by_min_hold": False,
+            "exited_before_min_hold": True,
+            "source_reason": "atr_trailing",
+            "max_unrealized_bps": 69.9,
+        },
+    }
+    store.upsert_new(
+        cl_ord_id="clid-close",
+        run_id=run_id,
+        inst_id="BNB-USDT",
+        side="sell",
+        intent="CLOSE_LONG",
+        decision_hash="dh",
+        td_mode="cash",
+        ord_type="market",
+        notional_usdt=12.0,
+        req=req,
+    )
+    store.update_state("clid-close", new_state="FILLED", ord_id="okx-close", avg_px="634.3", acc_fill_sz="0.02")
+
+    rows = write_order_lifecycle(
+        run_dir=run_dir,
+        reports_dir=reports_dir,
+        order_store_path=order_store_path,
+        fill_store_path=fill_store_path,
+        append_reports=True,
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["intent"] == "CLOSE_LONG"
+    assert row["swing_hold_position"] == "true"
+    assert row["swing_entry_ts"] == "2026-05-28T22:00:59Z"
+    assert str(row["swing_min_hold_hours"]) == "24"
+    assert str(row["hold_hours"]) == "4.9985"
+    assert row["exit_reason"] == "atr_trailing"
+    assert row["exit_priority"] == "soft"
+    assert row["exited_before_min_hold"] == "true"
+    assert str(row["max_unrealized_bps"]) == "69.9"

@@ -50,6 +50,17 @@ ORDER_LIFECYCLE_FIELDS = (
     "requested_notional_usdt",
     "trade_ids",
     "fill_count",
+    "swing_hold_position",
+    "swing_entry_ts",
+    "swing_min_hold_hours",
+    "hold_hours",
+    "exit_reason",
+    "exit_priority",
+    "exit_allowed_before_min_hold",
+    "exit_blocked_by_min_hold",
+    "exited_before_min_hold",
+    "source_reason",
+    "max_unrealized_bps",
 )
 
 
@@ -189,6 +200,7 @@ def _rows_from_orders(*, run_id: str, orders: Iterable[Any]) -> list[dict[str, A
                     "spread_bps_at_decision": lifecycle.get("spread_bps_at_decision"),
                     "requested_notional_usdt": getattr(order, "notional_usdt", None),
                     "notional_usdt": getattr(order, "notional_usdt", None),
+                    **_order_meta_projection(meta),
                 }
             )
         )
@@ -274,10 +286,33 @@ def _rows_from_order_store(
                     "requested_notional_usdt": row.get("notional_usdt"),
                     "trade_ids": agg.get("trade_ids"),
                     "fill_count": agg.get("fill_count") or 0,
+                    **_order_meta_projection(meta),
                 }
             )
         )
     return rows
+
+
+def _order_meta_projection(meta: Mapping[str, Any]) -> dict[str, Any]:
+    source_reason = meta.get("source_reason") or meta.get("reason") or meta.get("exit_reason")
+    exit_reason = meta.get("exit_reason") or meta.get("reason") or source_reason
+    return {
+        "swing_hold_position": meta.get("swing_hold_position"),
+        "swing_entry_ts": meta.get("swing_entry_ts"),
+        "swing_min_hold_hours": meta.get("swing_min_hold_hours") or meta.get("min_hold_hours"),
+        "hold_hours": meta.get("hold_hours") or meta.get("held_hours"),
+        "exit_reason": exit_reason,
+        "exit_priority": meta.get("exit_priority"),
+        "exit_allowed_before_min_hold": meta.get("exit_allowed_before_min_hold"),
+        "exit_blocked_by_min_hold": meta.get("exit_blocked_by_min_hold"),
+        "exited_before_min_hold": meta.get("exited_before_min_hold"),
+        "source_reason": source_reason,
+        "max_unrealized_bps": (
+            meta.get("max_unrealized_bps")
+            or meta.get("highest_net_bps")
+            or meta.get("highest_unrealized_net_bps")
+        ),
+    }
 
 
 def _order_rows_for_run(order_path: Path, run_id: str) -> list[dict[str, Any]]:

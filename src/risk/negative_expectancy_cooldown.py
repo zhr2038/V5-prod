@@ -62,6 +62,7 @@ def negative_expectancy_adjusted_block_audit(
         "min_hold_violation_cycles": _int_value("min_hold_violation_cycles"),
         "gave_back_profit_cycles": _int_value("gave_back_profit_cycles"),
         "trailing_too_early_cycles": _int_value("trailing_too_early_cycles"),
+        "exit_metadata_missing_cycles": _int_value("exit_metadata_missing_cycles"),
         "adjusted_entry_cycles": _int_value("adjusted_entry_cycles"),
         "adjusted_entry_expectancy_bps": float(adjusted_expectancy_bps),
         "raw_would_block": bool(raw_net_breach or fast_fail_breach),
@@ -285,6 +286,7 @@ class NegativeExpectancyCooldown:
             "gave_back_profit_cycles": int(stat.get("gave_back_profit_cycles") or 0),
             "trailing_too_early_cycles": int(stat.get("trailing_too_early_cycles") or 0),
             "unknown_attribution_cycles": int(stat.get("unknown_attribution_cycles") or 0),
+            "exit_metadata_missing_cycles": int(stat.get("exit_metadata_missing_cycles") or 0),
             "adjusted_entry_cycles": int(stat.get("adjusted_entry_cycles") or 0),
             "adjusted_entry_expectancy_bps": float(stat.get("adjusted_entry_expectancy_bps") or 0.0),
         }
@@ -417,6 +419,7 @@ class NegativeExpectancyCooldown:
             "gave_back_profit_cycles": 0.0,
             "trailing_too_early_cycles": 0.0,
             "unknown_attribution_cycles": 0.0,
+            "exit_metadata_missing_cycles": 0.0,
             "adjusted_entry_cycles": 0.0,
             "adjusted_entry_net_pnl_sum_usdt": 0.0,
             "adjusted_entry_closed_notional_usdt": 0.0,
@@ -543,6 +546,35 @@ class NegativeExpectancyCooldown:
         )
 
     @classmethod
+    def _exit_metadata_missing_for_attribution(cls, row: Dict[str, Any]) -> bool:
+        ctx = cls._expanded_exit_metadata(row)
+        reason = str(ctx.get("exit_reason") or ctx.get("reason") or ctx.get("source_reason") or "").strip().lower()
+        if not reason:
+            return True
+        soft_reasons = {"atr_trailing", "zero_target_close", "rank_exit", "regime_exit"}
+        is_soft_reason = reason in soft_reasons or reason.startswith(("rank_exit", "regime_exit"))
+        if not is_soft_reason:
+            return False
+        has_hold = any(
+            not cls._missing_value(ctx.get(key))
+            for key in ("hold_hours", "held_hours", "hold_minutes", "held_minutes")
+        )
+        has_min_hold = any(
+            not cls._missing_value(ctx.get(key))
+            for key in ("swing_min_hold_hours", "min_hold_hours", "required_hold_hours")
+        )
+        has_swing_context = any(
+            not cls._missing_value(ctx.get(key))
+            for key in ("swing_hold_position", "swing_entry_ts")
+        )
+        has_priority = not cls._missing_value(ctx.get("exit_priority"))
+        has_min_hold_decision = any(
+            not cls._missing_value(ctx.get(key))
+            for key in ("exited_before_min_hold", "exit_blocked_by_min_hold")
+        )
+        return not (has_hold and has_min_hold and has_swing_context and has_priority and has_min_hold_decision)
+
+    @classmethod
     def _record_premature_soft_exit(
         cls,
         st: Dict[str, float],
@@ -580,7 +612,10 @@ class NegativeExpectancyCooldown:
             if float(max_unrealized) >= 30.0 and float(max_unrealized) - float(net_bps) >= 50.0:
                 attrs.extend(["exit_bad", "gave_back_profit"])
         if net_bps is not None and float(net_bps) < 0.0 and "exit_bad" not in attrs:
-            attrs.append("entry_bad")
+            if cls._exit_metadata_missing_for_attribution(ctx):
+                attrs.extend(["unknown", "exit_metadata_missing"])
+            else:
+                attrs.append("entry_bad")
         if not attrs:
             attrs.append("unknown")
         return list(dict.fromkeys(attrs))
@@ -603,6 +638,7 @@ class NegativeExpectancyCooldown:
             ("gave_back_profit", "gave_back_profit_cycles"),
             ("trailing_too_early", "trailing_too_early_cycles"),
             ("unknown", "unknown_attribution_cycles"),
+            ("exit_metadata_missing", "exit_metadata_missing_cycles"),
         ):
             if attr in attrs:
                 st[key] = float(st.get(key) or 0.0) + 1.0
@@ -761,6 +797,7 @@ class NegativeExpectancyCooldown:
         gave_back_profit_cycles: float = 0.0,
         trailing_too_early_cycles: float = 0.0,
         unknown_attribution_cycles: float = 0.0,
+        exit_metadata_missing_cycles: float = 0.0,
         adjusted_entry_cycles: float = 0.0,
         adjusted_entry_net_pnl_sum_usdt: float = 0.0,
         adjusted_entry_closed_notional_usdt: float = 0.0,
@@ -848,6 +885,7 @@ class NegativeExpectancyCooldown:
             "gave_back_profit_cycles": int(gave_back_profit_cycles or 0),
             "trailing_too_early_cycles": int(trailing_too_early_cycles or 0),
             "unknown_attribution_cycles": int(unknown_attribution_cycles or 0),
+            "exit_metadata_missing_cycles": int(exit_metadata_missing_cycles or 0),
             "adjusted_entry_cycles": int(adjusted_entry_cycles or 0),
             "adjusted_entry_net_pnl_sum_usdt": float(adjusted_entry_net_pnl_sum_usdt or 0.0),
             "adjusted_entry_closed_notional_usdt": float(adjusted_entry_closed_notional_usdt or 0.0),
@@ -913,6 +951,7 @@ class NegativeExpectancyCooldown:
             "gave_back_profit_cycles",
             "trailing_too_early_cycles",
             "unknown_attribution_cycles",
+            "exit_metadata_missing_cycles",
             "adjusted_entry_cycles",
             "adjusted_entry_net_pnl_sum_usdt",
             "adjusted_entry_closed_notional_usdt",
@@ -1161,6 +1200,7 @@ class NegativeExpectancyCooldown:
                 gave_back_profit_cycles=float(st.get("gave_back_profit_cycles") or 0.0),
                 trailing_too_early_cycles=float(st.get("trailing_too_early_cycles") or 0.0),
                 unknown_attribution_cycles=float(st.get("unknown_attribution_cycles") or 0.0),
+                exit_metadata_missing_cycles=float(st.get("exit_metadata_missing_cycles") or 0.0),
                 adjusted_entry_cycles=float(st.get("adjusted_entry_cycles") or 0.0),
                 adjusted_entry_net_pnl_sum_usdt=float(st.get("adjusted_entry_net_pnl_sum_usdt") or 0.0),
                 adjusted_entry_closed_notional_usdt=float(st.get("adjusted_entry_closed_notional_usdt") or 0.0),
@@ -1371,6 +1411,7 @@ class NegativeExpectancyCooldown:
                 gave_back_profit_cycles=float(st.get("gave_back_profit_cycles") or 0.0),
                 trailing_too_early_cycles=float(st.get("trailing_too_early_cycles") or 0.0),
                 unknown_attribution_cycles=float(st.get("unknown_attribution_cycles") or 0.0),
+                exit_metadata_missing_cycles=float(st.get("exit_metadata_missing_cycles") or 0.0),
                 adjusted_entry_cycles=float(st.get("adjusted_entry_cycles") or 0.0),
                 adjusted_entry_net_pnl_sum_usdt=float(st.get("adjusted_entry_net_pnl_sum_usdt") or 0.0),
                 adjusted_entry_closed_notional_usdt=float(st.get("adjusted_entry_closed_notional_usdt") or 0.0),
@@ -1591,6 +1632,7 @@ class NegativeExpectancyCooldown:
                 gave_back_profit_cycles=float(st.get("gave_back_profit_cycles") or 0.0),
                 trailing_too_early_cycles=float(st.get("trailing_too_early_cycles") or 0.0),
                 unknown_attribution_cycles=float(st.get("unknown_attribution_cycles") or 0.0),
+                exit_metadata_missing_cycles=float(st.get("exit_metadata_missing_cycles") or 0.0),
                 adjusted_entry_cycles=float(st.get("adjusted_entry_cycles") or 0.0),
                 adjusted_entry_net_pnl_sum_usdt=float(st.get("adjusted_entry_net_pnl_sum_usdt") or 0.0),
                 adjusted_entry_closed_notional_usdt=float(st.get("adjusted_entry_closed_notional_usdt") or 0.0),
@@ -1716,6 +1758,7 @@ class NegativeExpectancyCooldown:
                 gave_back_profit_cycles=float(st.get("gave_back_profit_cycles") or 0.0),
                 trailing_too_early_cycles=float(st.get("trailing_too_early_cycles") or 0.0),
                 unknown_attribution_cycles=float(st.get("unknown_attribution_cycles") or 0.0),
+                exit_metadata_missing_cycles=float(st.get("exit_metadata_missing_cycles") or 0.0),
                 adjusted_entry_cycles=float(st.get("adjusted_entry_cycles") or 0.0),
                 adjusted_entry_net_pnl_sum_usdt=float(st.get("adjusted_entry_net_pnl_sum_usdt") or 0.0),
                 adjusted_entry_closed_notional_usdt=float(st.get("adjusted_entry_closed_notional_usdt") or 0.0),
@@ -2051,6 +2094,7 @@ class NegativeExpectancyCooldown:
                     "gave_back_profit_cycles": int(st.get("gave_back_profit_cycles") or 0),
                     "trailing_too_early_cycles": int(st.get("trailing_too_early_cycles") or 0),
                     "unknown_attribution_cycles": int(st.get("unknown_attribution_cycles") or 0),
+                    "exit_metadata_missing_cycles": int(st.get("exit_metadata_missing_cycles") or 0),
                     "adjusted_entry_cycles": int(st.get("adjusted_entry_cycles") or 0),
                     "adjusted_entry_net_pnl_sum_usdt": float(st.get("adjusted_entry_net_pnl_sum_usdt") or 0.0),
                     "adjusted_entry_closed_notional_usdt": float(st.get("adjusted_entry_closed_notional_usdt") or 0.0),

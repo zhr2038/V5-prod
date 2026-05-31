@@ -608,6 +608,67 @@ def test_negative_expectancy_excludes_premature_swing_soft_exit_from_fast_fail(
     assert state["symbols"] == {}
 
 
+def test_negative_expectancy_missing_soft_exit_metadata_is_not_entry_bad(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reports = tmp_path / "reports"
+    state_path = reports / "negative_expectancy_state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "config_fingerprint": "bnb-missing-exit-meta-fp",
+                "release_start_ts": _ts_ms("2026-05-28T00:00:00Z"),
+                "symbols": {},
+                "stats": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    summaries = reports / "summaries"
+    summaries.mkdir(parents=True, exist_ok=True)
+    summaries.joinpath("trades_roundtrips.csv").write_text(
+        "\n".join(
+            [
+                "open_time_utc,close_time_utc,symbol,qty,entry_px,exit_px,hold_minutes,net_pnl_usdt,net_bps,exit_reason",
+                "2026-05-28T22:00:59Z,2026-05-29T03:00:54Z,BNB/USDT,0.02,642.2,633.020,299.9167,-0.1836,-142.89,atr_trailing",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "src.risk.negative_expectancy_cooldown.time.time",
+        lambda: _ts_ms("2026-05-29T04:00:00Z") / 1000.0,
+    )
+
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=72,
+            min_closed_cycles=4,
+            expectancy_threshold_bps=0.0,
+            state_path=str(state_path),
+            orders_db_path=str(reports / "orders.sqlite"),
+            fills_db_path=str(reports / "fills.sqlite"),
+            prefer_net_from_fills=True,
+            fast_fail_max_hold_minutes=360,
+        )
+    )
+    cooldown.set_scope(whitelist_symbols=["BNB/USDT"], config_fingerprint="bnb-missing-exit-meta-fp")
+
+    state = cooldown.refresh(force=True)
+    stats = state["stats"]["BNB/USDT"]
+
+    assert stats["closed_cycles"] == 1
+    assert stats["entry_bad_cycles"] == 0
+    assert stats["exit_bad_cycles"] == 0
+    assert stats["unknown_attribution_cycles"] == 1
+    assert stats["exit_metadata_missing_cycles"] == 1
+    assert stats["adjusted_entry_cycles"] == 1
+    assert stats["cycle_attributions"][0]["attribution"] == ["unknown", "exit_metadata_missing"]
+
+
 def test_negative_expectancy_roundtrip_diagnostic_overlay_adjusts_fills_fast_fail(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

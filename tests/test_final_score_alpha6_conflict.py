@@ -55,5 +55,27 @@ def test_final_score_alpha6_conflict_rows_keep_negative_expectancy_stats() -> No
     assert row["negative_expectancy_net_bps"] == -151.83
     assert row["negative_expectancy_fast_fail_net_bps"] == -142.89
     assert row["future_24h_net_bps"] == 240.0
-    assert row["label_status"] == "shadow_pending"
+    assert row["label_4h_status"] == "complete"
+    assert row["label_8h_status"] == "complete"
+    assert row["label_12h_status"] == "complete"
+    assert row["label_24h_status"] == "complete"
+    assert row["any_label_complete"] == "true"
+    assert row["all_labels_complete"] == "true"
+    assert row["label_status"] == "complete"
     assert row["missed_profit_flag"] == "true"
+
+
+def test_final_score_alpha6_conflict_label_status_partial_complete() -> None:
+    rows = build_conflict_rows(
+        [_base_row()],
+        future_net_bps={4: 12.0},
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["future_4h_net_bps"] == 12.0
+    assert row["label_4h_status"] == "complete"
+    assert row["label_8h_status"] == "pending"
+    assert row["any_label_complete"] == "true"
+    assert row["all_labels_complete"] == "false"
+    assert row["label_status"] == "partial_complete"

@@ -382,6 +382,12 @@ FINAL_SCORE_ALPHA6_CONFLICT_FIELDS = (
     "future_8h_net_bps",
     "future_12h_net_bps",
     "future_24h_net_bps",
+    "label_4h_status",
+    "label_8h_status",
+    "label_12h_status",
+    "label_24h_status",
+    "any_label_complete",
+    "all_labels_complete",
     "label_status",
     "missed_profit_flag",
 )
@@ -444,6 +450,17 @@ ORDER_LIFECYCLE_FIELDS = (
     "requested_notional_usdt",
     "trade_ids",
     "fill_count",
+    "swing_hold_position",
+    "swing_entry_ts",
+    "swing_min_hold_hours",
+    "hold_hours",
+    "exit_reason",
+    "exit_priority",
+    "exit_allowed_before_min_hold",
+    "exit_blocked_by_min_hold",
+    "exited_before_min_hold",
+    "source_reason",
+    "max_unrealized_bps",
 )
 SOURCE_SNAPSHOT_PATHS = (
     "main.py",
@@ -7413,6 +7430,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 value for value in (as_float(future[horizon]) for horizon in (4, 8, 12, 24))
                 if value is not None
             ]
+            label_statuses = {
+                horizon: ("complete" if as_float(future[horizon]) is not None else "pending")
+                for horizon in (4, 8, 12, 24)
+            }
+            any_label_complete = any(status == "complete" for status in label_statuses.values())
+            all_labels_complete = all(status == "complete" for status in label_statuses.values())
+            if all_labels_complete:
+                aggregate_label_status = "complete"
+            elif any_label_complete:
+                aggregate_label_status = "partial_complete"
+            else:
+                aggregate_label_status = "pending"
             neg_stats = final_score_negative_expectancy_stats(symbol)
             out.append({
                 "run_id": first_observed(row.get("run_id"), not_obs),
@@ -7444,7 +7473,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "future_8h_net_bps": future[8],
                 "future_12h_net_bps": future[12],
                 "future_24h_net_bps": future[24],
-                "label_status": first_observed(row.get("label_status"), "shadow_pending"),
+                "label_4h_status": label_statuses[4],
+                "label_8h_status": label_statuses[8],
+                "label_12h_status": label_statuses[12],
+                "label_24h_status": label_statuses[24],
+                "any_label_complete": str(any_label_complete).lower(),
+                "all_labels_complete": str(all_labels_complete).lower(),
+                "label_status": aggregate_label_status,
                 "missed_profit_flag": str(bool(observed_future and max(observed_future) > 0)).lower(),
             })
         out.sort(key=lambda item: (flatten_value(item.get("ts_utc")), flatten_value(item.get("symbol"))))
@@ -8914,6 +8949,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         gave_back_profit_cycles = as_float(first_value(neg, ("gave_back_profit_cycles",), 0)) or 0.0
         trailing_too_early_cycles = as_float(first_value(neg, ("trailing_too_early_cycles",), 0)) or 0.0
         unknown_attribution_cycles = as_float(first_value(neg, ("unknown_attribution_cycles",), 0)) or 0.0
+        exit_metadata_missing_cycles = as_float(first_value(neg, ("exit_metadata_missing_cycles",), 0)) or 0.0
         premature_soft_exit_count = as_float(first_value(neg, ("premature_soft_exit_count",), 0)) or 0.0
         excluded_from_fast_fail_count = as_float(first_value(neg, ("excluded_from_fast_fail_count",), 0)) or 0.0
         pnl_mismatch = (rt_net_pnl - neg_net_pnl) if rt_net_pnl is not None and neg_net_pnl is not None else None
@@ -8985,6 +9021,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "gave_back_profit_cycles": fmt_num(gave_back_profit_cycles, 0),
             "trailing_too_early_cycles": fmt_num(trailing_too_early_cycles, 0),
             "unknown_attribution_cycles": fmt_num(unknown_attribution_cycles, 0),
+            "exit_metadata_missing_cycles": fmt_num(exit_metadata_missing_cycles, 0),
             "premature_soft_exit_count": fmt_num(premature_soft_exit_count, 0),
             "excluded_from_fast_fail_count": fmt_num(excluded_from_fast_fail_count, 0),
             "adjusted_fast_fail_net_expectancy_bps": fmt_num(neg_adjusted_fast_fail_net_bps, 4),
@@ -9027,6 +9064,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "gave_back_profit": str("gave_back_profit" in attrs).lower(),
             "trailing_too_early": str("trailing_too_early" in attrs).lower(),
             "unknown": str("unknown" in attrs).lower(),
+            "exit_metadata_missing": str("exit_metadata_missing" in attrs).lower(),
             "adjusted_entry_expectancy_bps": first_observed(first_value(entry, ("adjusted_entry_expectancy_bps",), not_obs)),
             "raw_would_block": attribution_bool_or_not_obs(first_value(entry, ("raw_would_block",), not_obs)),
             "adjusted_would_block": attribution_bool_or_not_obs(first_value(entry, ("adjusted_would_block",), not_obs)),
@@ -9062,6 +9100,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                             "gave_back_profit",
                             "trailing_too_early",
                             "unknown",
+                            "exit_metadata_missing",
                         )
                     })
     if not bnb_negative_expectancy_attribution_rows:
@@ -9089,6 +9128,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                         "gave_back_profit",
                         "trailing_too_early",
                         "unknown",
+                        "exit_metadata_missing",
                     )
                 })
 
@@ -9106,6 +9146,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "gave_back_profit_cycles": as_int(first_value(entry, ("gave_back_profit_cycles",), 0)),
             "trailing_too_early_cycles": as_int(first_value(entry, ("trailing_too_early_cycles",), 0)),
             "unknown_attribution_cycles": as_int(first_value(entry, ("unknown_attribution_cycles",), 0)),
+            "exit_metadata_missing_cycles": as_int(first_value(entry, ("exit_metadata_missing_cycles",), 0)),
             "cycle_attributions": list(cycles) if isinstance(cycles, list) else [],
         }
 
@@ -10430,17 +10471,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     write_csv(
         "summaries/negative_expectancy_consistency.csv",
         negative_consistency_rows,
-        ["symbol", "roundtrip_closed_count", "roundtrip_net_pnl_sum_usdt", "roundtrip_weighted_net_bps", "negexp_closed_cycles", "negexp_net_pnl_sum_usdt", "negexp_net_expectancy_bps", "negexp_fast_fail_net_expectancy_bps", "adjusted_entry_expectancy_bps", "entry_bad_cycles", "exit_bad_cycles", "min_hold_violation_cycles", "gave_back_profit_cycles", "trailing_too_early_cycles", "unknown_attribution_cycles", "premature_soft_exit_count", "excluded_from_fast_fail_count", "adjusted_fast_fail_net_expectancy_bps", "pnl_mismatch_usdt", "bps_mismatch", "mismatch_suspected", "diagnosis"],
+        ["symbol", "roundtrip_closed_count", "roundtrip_net_pnl_sum_usdt", "roundtrip_weighted_net_bps", "negexp_closed_cycles", "negexp_net_pnl_sum_usdt", "negexp_net_expectancy_bps", "negexp_fast_fail_net_expectancy_bps", "adjusted_entry_expectancy_bps", "entry_bad_cycles", "exit_bad_cycles", "min_hold_violation_cycles", "gave_back_profit_cycles", "trailing_too_early_cycles", "unknown_attribution_cycles", "exit_metadata_missing_cycles", "premature_soft_exit_count", "excluded_from_fast_fail_count", "adjusted_fast_fail_net_expectancy_bps", "pnl_mismatch_usdt", "bps_mismatch", "mismatch_suspected", "diagnosis"],
     )
     write_csv(
         "summaries/bnb_negative_expectancy_attribution.csv",
         bnb_negative_expectancy_attribution_rows,
-        ["symbol", "cycle_index", "entry_ts", "exit_ts", "exit_reason", "exit_priority", "net_bps", "attribution", "entry_bad", "exit_bad", "min_hold_violation", "gave_back_profit", "trailing_too_early", "unknown"],
+        ["symbol", "cycle_index", "entry_ts", "exit_ts", "exit_reason", "exit_priority", "net_bps", "attribution", "entry_bad", "exit_bad", "min_hold_violation", "gave_back_profit", "trailing_too_early", "unknown", "exit_metadata_missing"],
     )
     write_csv(
         "summaries/negative_expectancy_attribution.csv",
         negative_expectancy_attribution_rows,
-        ["symbol", "cycle_index", "entry_ts", "exit_ts", "exit_reason", "exit_priority", "net_bps", "attribution", "entry_bad", "exit_bad", "min_hold_violation", "gave_back_profit", "trailing_too_early", "unknown", "adjusted_entry_expectancy_bps", "raw_would_block", "adjusted_would_block", "would_unblock_if_adjusted", "block_attribution_conflict"],
+        ["symbol", "cycle_index", "entry_ts", "exit_ts", "exit_reason", "exit_priority", "net_bps", "attribution", "entry_bad", "exit_bad", "min_hold_violation", "gave_back_profit", "trailing_too_early", "unknown", "exit_metadata_missing", "adjusted_entry_expectancy_bps", "raw_would_block", "adjusted_would_block", "would_unblock_if_adjusted", "block_attribution_conflict"],
     )
     write_text(
         "summaries/negative_expectancy_attribution.json",

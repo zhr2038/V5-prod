@@ -29,6 +29,12 @@ CONFLICT_FIELDS = (
     "future_8h_net_bps",
     "future_12h_net_bps",
     "future_24h_net_bps",
+    "label_4h_status",
+    "label_8h_status",
+    "label_12h_status",
+    "label_24h_status",
+    "any_label_complete",
+    "all_labels_complete",
     "label_status",
     "missed_profit_flag",
 )
@@ -70,6 +76,20 @@ def first_observed(*values: Any, default: str = "not_observable") -> Any:
         if text and text.lower() not in {"none", "null", "nan", "not_observable"}:
             return value
     return default
+
+
+def label_status_for_future(value: Any) -> str:
+    return "complete" if as_float(value) is not None else "pending"
+
+
+def aggregate_label_status(statuses: Iterable[str]) -> str:
+    status_list = [str(status or "").strip() for status in statuses]
+    completed = [status for status in status_list if status == "complete"]
+    if completed and len(completed) == len(status_list):
+        return "complete"
+    if completed:
+        return "partial_complete"
+    return "pending"
 
 
 def is_final_score_alpha6_conflict_candidate(
@@ -215,6 +235,9 @@ def build_conflict_rows(
             continue
         symbol = normalize_symbol(row.get("symbol"))
         futures = {h: first_observed(future_net_bps.get(h), default="not_observable") for h in (4, 8, 12, 24)}
+        label_statuses = {h: label_status_for_future(futures[h]) for h in (4, 8, 12, 24)}
+        any_label_complete = any(status == "complete" for status in label_statuses.values())
+        all_labels_complete = all(status == "complete" for status in label_statuses.values())
         observed = [as_float(value) for value in futures.values()]
         observed = [value for value in observed if value is not None]
         neg = negative_expectancy_stats.get(symbol)
@@ -250,7 +273,13 @@ def build_conflict_rows(
                 "future_8h_net_bps": futures[8],
                 "future_12h_net_bps": futures[12],
                 "future_24h_net_bps": futures[24],
-                "label_status": first_observed(row.get("label_status"), default="shadow_pending"),
+                "label_4h_status": label_statuses[4],
+                "label_8h_status": label_statuses[8],
+                "label_12h_status": label_statuses[12],
+                "label_24h_status": label_statuses[24],
+                "any_label_complete": str(any_label_complete).lower(),
+                "all_labels_complete": str(all_labels_complete).lower(),
+                "label_status": aggregate_label_status(label_statuses.values()),
                 "missed_profit_flag": str(bool(observed and max(observed) > 0.0)).lower(),
             }
         )
