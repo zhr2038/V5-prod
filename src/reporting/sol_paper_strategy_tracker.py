@@ -455,6 +455,7 @@ RISK_ON_MULTI_BUY_SHADOW_FIELDS = [
     "actual_bought_symbols",
     "missed_symbols",
     "source_detail_available",
+    "source_detail_missing_paths",
     "response_action",
     "live_order_effect",
 ]
@@ -2781,6 +2782,9 @@ def _risk_on_multi_buy_shadow_rows(
                 "actual_bought_symbols": _json_symbol_list(actual_bought),
                 "missed_symbols": _json_symbol_list(missed),
                 "source_detail_available": bool(source_detail_available),
+                "source_detail_missing_paths": ""
+                if source_detail_available
+                else "reports/risk_on_multi_buy_shadow.csv;raw/reports/risk_on_multi_buy_shadow.csv",
                 "response_action": response_action or "display_only",
                 "live_order_effect": "read_only_no_live_order",
             }

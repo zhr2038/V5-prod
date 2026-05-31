@@ -578,6 +578,10 @@ def fixture_negative_expectancy_premature_soft_exit_root(root):
                 "unknown_attribution_cycles": 0,
                 "premature_soft_exit_count": 1,
                 "excluded_from_fast_fail_count": 1,
+                "raw_would_block": True,
+                "adjusted_would_block": False,
+                "would_unblock_if_adjusted": True,
+                "block_attribution_conflict": True,
                 "cycle_attributions": [
                     {
                         "entry_ts": iso(int((now - dt.timedelta(hours=6)).timestamp()) + 20),
@@ -5540,8 +5544,10 @@ def main():
             with tarfile.open(bundle, "r:gz") as tf:
                 negexp = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/negative_expectancy_consistency.csv")).read().decode().splitlines()))
                 attribution = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_negative_expectancy_attribution.csv")).read().decode().splitlines()))
+                all_attribution = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/negative_expectancy_attribution.csv")).read().decode().splitlines()))
                 attribution_json = json.loads(tf.extractfile(extract_member(tf, "summaries/negative_expectancy_attribution.json")).read().decode())
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
             assert len(negexp) == 1, negexp
             row = negexp[0]
@@ -5559,6 +5565,10 @@ def main():
             assert len(attribution) == 1, attribution
             assert attribution[0]["min_hold_violation"] == "true", attribution
             assert attribution[0]["entry_bad"] == "false", attribution
+            assert len(all_attribution) == 1, all_attribution
+            assert all_attribution[0]["symbol"] == "BNB/USDT", all_attribution
+            assert all_attribution[0]["min_hold_violation"] == "true", all_attribution
+            assert all_attribution[0]["would_unblock_if_adjusted"] == "true", all_attribution
             assert attribution_json["diagnostic_only"] is True, attribution_json
             assert attribution_json["live_order_effect"] == "none", attribution_json
             assert attribution_json["symbols"]["BNB/USDT"]["min_hold_violation_cycles"] == 1, attribution_json
@@ -5568,8 +5578,11 @@ def main():
             assert window["negative_expectancy_entry_bad_cycles"] == 0, window
             assert window["negative_expectancy_exit_bad_cycles"] == 1, window
             assert window["negative_expectancy_min_hold_violation_cycles"] == 1, window
+            assert window["negative_expectancy_attribution_rows"] == 1, window
+            assert manifest["negative_expectancy_attribution_rows"] == 1, manifest
             assert "Premature swing soft exits are excluded from fast-fail hard blocks" in readme, readme
             assert "exit_bad/min_hold_violation" in readme, readme
+            assert "summaries/negative_expectancy_attribution.csv" in readme, readme
             assert "summaries/negative_expectancy_attribution.json" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
@@ -5634,12 +5647,15 @@ def main():
             assert row["final_score"] == "-0.17", row
             assert row["final_decision"] == "no_order", row
             assert row["block_reason"] == "negative_expectancy_fast_fail_open_block", row
-            neg_stats = json.loads(row["negative_expectancy_stats"])
-            assert neg_stats["closed_cycles"] == 3, row
-            assert neg_stats["adjusted_entry_expectancy_bps"] == 0.0, row
-            assert neg_stats["min_hold_violation_cycles"] == 1, row
+            assert row["f3_vol_adj_ret"] == "0.91", row
+            assert row["f4_volume_expansion"] == "5.82", row
+            assert row["f5_rsi_trend_confirm"] == "0.832", row
+            assert row["cost_gate_verified"] == "true", row
+            assert float(row["negative_expectancy_net_bps"]) < -100.0, row
+            assert float(row["negative_expectancy_fast_fail_net_bps"]) < -100.0, row
             assert float(row["future_4h_net_bps"]) > 400.0, row
             assert float(row["future_24h_net_bps"]) > 1100.0, row
+            assert row["label_status"] == "shadow_pending", row
             assert row["missed_profit_flag"] == "true", row
             assert window["final_score_alpha6_conflict_count"] == 1, window
             assert window["final_score_alpha6_conflict_recommendation"] == "review_final_score_alpha6_conflict", window
@@ -5647,16 +5663,18 @@ def main():
             assert len(shadow_rows) == 1, shadow_rows
             shadow = shadow_rows[0]
             assert shadow["alpha6_score"] == "0.994", shadow
-            assert shadow["would_bypass_negative_expectancy"] == "true", shadow
+            assert shadow["would_bypass"] == "true", shadow
+            assert shadow["negative_expectancy_blocked"] == "true", shadow
             assert float(shadow["future_4h_net_bps"]) > 400.0, shadow
             assert float(shadow["future_24h_net_bps"]) > 1100.0, shadow
+            assert shadow["label_status"] == "shadow_pending", shadow
             assert shadow["outcome"] == "profitable_shadow", shadow
             assert shadow["live_order_effect"] == "read_only_no_live_order", shadow
             assert window["bnb_strong_alpha6_bypass_shadow_rows"] == 1, window
             assert window["bnb_strong_alpha6_bypass_negative_expectancy_count"] == 1, window
             assert manifest["bnb_strong_alpha6_bypass_shadow_rows"] == 1, manifest
             assert "Final score vs Alpha6 conflict audit" in readme, readme
-            assert "negative_expectancy_stats: included per row" in readme, readme
+            assert "negative_expectancy_net_bps / negative_expectancy_fast_fail_net_bps" in readme, readme
             assert "summaries/final_score_vs_alpha6_conflict.csv" in readme, readme
             assert "BNB strong Alpha6 bypass shadow" in readme, readme
             assert "summaries/bnb_strong_alpha6_bypass_shadow.csv" in readme, readme

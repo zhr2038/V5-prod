@@ -615,6 +615,7 @@ def test_protect_alt_short_cycle_decision_includes_attribution_unblock_audit(tmp
             "min_hold_violation_cycles": 1,
             "gave_back_profit_cycles": 1,
             "trailing_too_early_cycles": 1,
+            "adjusted_entry_cycles": 1,
         },
     )
 
@@ -627,6 +628,7 @@ def test_protect_alt_short_cycle_decision_includes_attribution_unblock_audit(tmp
     assert decision["min_hold_violation_cycles"] == 1
     assert decision["gave_back_profit_cycles"] == 1
     assert decision["trailing_too_early_cycles"] == 1
+    assert decision["adjusted_entry_cycles"] == 1
     assert decision["adjusted_entry_expectancy_bps"] == 0.0
     assert decision["raw_would_block"] is True
     assert decision["adjusted_would_block"] is True

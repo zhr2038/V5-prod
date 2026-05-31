@@ -37,15 +37,23 @@ def test_final_score_alpha6_conflict_rows_keep_negative_expectancy_stats() -> No
     rows = build_conflict_rows(
         [_base_row(f3_vol_adj_ret="12", f4_volume_expansion="5.82", f5_rsi_trend_confirm="0.832")],
         future_net_bps={4: 120.0, 8: 80.0, 12: -5.0, 24: 240.0},
-        negative_expectancy_stats={"BNB/USDT": '{"closed_cycles": 3}'},
+        negative_expectancy_stats={
+            "BNB/USDT": {
+                "net_expectancy_bps": -151.83,
+                "fast_fail_net_expectancy_bps": -142.89,
+            }
+        },
     )
 
     assert len(rows) == 1
     row = rows[0]
     assert row["symbol"] == "BNB/USDT"
-    assert row["f3"] == "12"
-    assert row["f4"] == "5.82"
-    assert row["f5"] == "0.832"
-    assert row["negative_expectancy_stats"] == '{"closed_cycles": 3}'
+    assert row["f3_vol_adj_ret"] == "12"
+    assert row["f4_volume_expansion"] == "5.82"
+    assert row["f5_rsi_trend_confirm"] == "0.832"
+    assert row["cost_gate_verified"] == "true"
+    assert row["negative_expectancy_net_bps"] == -151.83
+    assert row["negative_expectancy_fast_fail_net_bps"] == -142.89
     assert row["future_24h_net_bps"] == 240.0
+    assert row["label_status"] == "shadow_pending"
     assert row["missed_profit_flag"] == "true"

@@ -62,6 +62,7 @@ def negative_expectancy_adjusted_block_audit(
         "min_hold_violation_cycles": _int_value("min_hold_violation_cycles"),
         "gave_back_profit_cycles": _int_value("gave_back_profit_cycles"),
         "trailing_too_early_cycles": _int_value("trailing_too_early_cycles"),
+        "adjusted_entry_cycles": _int_value("adjusted_entry_cycles"),
         "adjusted_entry_expectancy_bps": float(adjusted_expectancy_bps),
         "raw_would_block": bool(raw_net_breach or fast_fail_breach),
         "adjusted_would_block": bool(adjusted_net_breach or fast_fail_breach),

@@ -191,6 +191,7 @@ RISK_ON_MULTI_BUY_SHADOW_FIELDS = (
     "actual_bought_symbols",
     "missed_symbols",
     "source_detail_available",
+    "source_detail_missing_paths",
     "response_action",
     "live_order_effect",
 )
@@ -366,21 +367,22 @@ FINAL_SCORE_ALPHA6_CONFLICT_FIELDS = (
     "final_score",
     "alpha6_score",
     "alpha6_side",
-    "f1",
-    "f2",
-    "f3",
-    "f4",
-    "f5",
+    "f3_vol_adj_ret",
+    "f4_volume_expansion",
+    "f5_rsi_trend_confirm",
     "expected_edge_bps",
     "required_edge_bps",
+    "cost_gate_verified",
     "final_decision",
     "block_reason",
     "no_signal_reason",
-    "negative_expectancy_stats",
+    "negative_expectancy_net_bps",
+    "negative_expectancy_fast_fail_net_bps",
     "future_4h_net_bps",
     "future_8h_net_bps",
     "future_12h_net_bps",
     "future_24h_net_bps",
+    "label_status",
     "missed_profit_flag",
 )
 BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS = (
@@ -388,7 +390,7 @@ BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS = (
     "ts_utc",
     "strategy_id",
     "symbol",
-    "final_score",
+    "would_bypass",
     "alpha6_score",
     "f3",
     "f4",
@@ -398,11 +400,12 @@ BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS = (
     "final_decision",
     "block_reason",
     "no_signal_reason",
-    "would_bypass_negative_expectancy",
+    "negative_expectancy_blocked",
     "future_4h_net_bps",
     "future_8h_net_bps",
     "future_12h_net_bps",
     "future_24h_net_bps",
+    "label_status",
     "outcome",
     "live_order_effect",
 )
@@ -7371,7 +7374,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     def final_score_negative_expectancy_stats(symbol):
         entry = multi_shadow_negative_expectancy_entry(symbol)
         if not isinstance(entry, dict) or not entry:
-            return not_obs
+            return {}
         fields = (
             "closed_cycles",
             "net_expectancy_bps",
@@ -7390,7 +7393,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             value = first_value(entry, (field,), not_obs)
             if value != not_obs:
                 payload[field] = value
-        return safe_json(payload) if payload else not_obs
+        return payload
 
     def build_final_score_alpha6_conflict_rows(rows):
         out = []
@@ -7410,6 +7413,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 value for value in (as_float(future[horizon]) for horizon in (4, 8, 12, 24))
                 if value is not None
             ]
+            neg_stats = final_score_negative_expectancy_stats(symbol)
             out.append({
                 "run_id": first_observed(row.get("run_id"), not_obs),
                 "ts_utc": ts_text,
@@ -7417,21 +7421,30 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "final_score": first_observed(row.get("final_score"), not_obs),
                 "alpha6_score": first_observed(row.get("alpha6_score"), not_obs),
                 "alpha6_side": first_observed(row.get("alpha6_side"), not_obs),
-                "f1": first_observed(row.get("f1"), row.get("f1_mom_5d"), not_obs),
-                "f2": first_observed(row.get("f2"), row.get("f2_mom_20d"), not_obs),
-                "f3": first_observed(row.get("f3"), row.get("f3_vol_adj_ret"), not_obs),
-                "f4": first_observed(row.get("f4"), row.get("f4_volume_expansion"), not_obs),
-                "f5": first_observed(row.get("f5"), row.get("f5_rsi_trend_confirm"), not_obs),
+                "f3_vol_adj_ret": first_observed(row.get("f3_vol_adj_ret"), row.get("f3"), not_obs),
+                "f4_volume_expansion": first_observed(row.get("f4_volume_expansion"), row.get("f4"), not_obs),
+                "f5_rsi_trend_confirm": first_observed(row.get("f5_rsi_trend_confirm"), row.get("f5"), not_obs),
                 "expected_edge_bps": first_observed(row.get("expected_edge_bps"), not_obs),
                 "required_edge_bps": first_observed(row.get("required_edge_bps"), not_obs),
+                "cost_gate_verified": first_observed(row.get("cost_gate_verified"), not_obs),
                 "final_decision": first_observed(row.get("final_decision"), not_obs),
                 "block_reason": first_observed(row.get("block_reason"), not_obs),
                 "no_signal_reason": first_observed(row.get("no_signal_reason"), not_obs),
-                "negative_expectancy_stats": final_score_negative_expectancy_stats(symbol),
+                "negative_expectancy_net_bps": first_observed(
+                    neg_stats.get("net_expectancy_bps"),
+                    neg_stats.get("negexp_net_expectancy_bps"),
+                    not_obs,
+                ),
+                "negative_expectancy_fast_fail_net_bps": first_observed(
+                    neg_stats.get("fast_fail_net_expectancy_bps"),
+                    neg_stats.get("negexp_fast_fail_net_expectancy_bps"),
+                    not_obs,
+                ),
                 "future_4h_net_bps": future[4],
                 "future_8h_net_bps": future[8],
                 "future_12h_net_bps": future[12],
                 "future_24h_net_bps": future[24],
+                "label_status": first_observed(row.get("label_status"), "shadow_pending"),
                 "missed_profit_flag": str(bool(observed_future and max(observed_future) > 0)).lower(),
             })
         out.sort(key=lambda item: (flatten_value(item.get("ts_utc")), flatten_value(item.get("symbol"))))
@@ -7535,21 +7548,23 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "ts_utc": ts_text,
                 "strategy_id": "BNB_STRONG_ALPHA6_BYPASS_SHADOW_V1",
                 "symbol": symbol,
-                "final_score": first_observed(row.get("final_score"), not_obs),
+                "would_bypass": "true",
                 "alpha6_score": first_observed(row.get("alpha6_score"), not_obs),
                 "f3": first_observed(row.get("f3"), row.get("f3_vol_adj_ret"), not_obs),
                 "f4": first_observed(row.get("f4"), row.get("f4_volume_expansion"), not_obs),
                 "f5": first_observed(row.get("f5"), row.get("f5_rsi_trend_confirm"), not_obs),
                 "expected_edge_bps": first_observed(row.get("expected_edge_bps"), not_obs),
                 "required_edge_bps": first_observed(row.get("required_edge_bps"), not_obs),
+                "final_score": first_observed(row.get("final_score"), not_obs),
                 "final_decision": first_observed(row.get("final_decision"), not_obs),
                 "block_reason": first_observed(row.get("block_reason"), not_obs),
                 "no_signal_reason": first_observed(row.get("no_signal_reason"), not_obs),
-                "would_bypass_negative_expectancy": str("negative_expectancy" in block_text).lower(),
+                "negative_expectancy_blocked": str("negative_expectancy" in block_text).lower(),
                 "future_4h_net_bps": future[4],
                 "future_8h_net_bps": future[8],
                 "future_12h_net_bps": future[12],
                 "future_24h_net_bps": future[24],
+                "label_status": first_observed(row.get("label_status"), "shadow_pending"),
                 "outcome": bnb_strong_alpha6_shadow_outcome([future[4], future[8], future[12], future[24]]),
                 "live_order_effect": "read_only_no_live_order",
             })
@@ -8979,32 +8994,103 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "diagnosis": diagnosis,
         })
 
+    negative_expectancy_attribution_rows = []
     bnb_negative_expectancy_attribution_rows = []
-    bnb_neg = negative_entries.get("BNB/USDT", {})
-    cycle_attributions = bnb_neg.get("cycle_attributions") if isinstance(bnb_neg, dict) else []
-    if isinstance(cycle_attributions, list):
-        for index, cycle in enumerate(cycle_attributions):
-            if not isinstance(cycle, dict):
-                continue
-            attrs = cycle.get("attribution")
-            if not isinstance(attrs, list):
-                attrs = [flatten_value(attrs)] if flatten_value(attrs) else []
-            bnb_negative_expectancy_attribution_rows.append({
-                "symbol": "BNB/USDT",
-                "cycle_index": index,
-                "entry_ts": flatten_value(cycle.get("entry_ts")) or not_obs,
-                "exit_ts": flatten_value(cycle.get("exit_ts")) or not_obs,
-                "exit_reason": flatten_value(cycle.get("exit_reason")) or not_obs,
-                "exit_priority": flatten_value(cycle.get("exit_priority")) or not_obs,
-                "net_bps": fmt_num(as_float(cycle.get("net_bps")), 4),
-                "attribution": json.dumps(attrs, ensure_ascii=False),
-                "entry_bad": str("entry_bad" in attrs).lower(),
-                "exit_bad": str("exit_bad" in attrs).lower(),
-                "min_hold_violation": str("min_hold_violation" in attrs).lower(),
-                "gave_back_profit": str("gave_back_profit" in attrs).lower(),
-                "trailing_too_early": str("trailing_too_early" in attrs).lower(),
-                "unknown": str("unknown" in attrs).lower(),
-            })
+
+    def attribution_bool_or_not_obs(value):
+        text = flatten_value(value).strip()
+        if not text:
+            return not_obs
+        lowered = text.lower()
+        if lowered in {"1", "true", "yes", "y", "on"}:
+            return "true"
+        if lowered in {"0", "false", "no", "n", "off"}:
+            return "false"
+        return text
+
+    def build_negative_expectancy_attribution_row(symbol, index, cycle, entry):
+        attrs = cycle.get("attribution")
+        if not isinstance(attrs, list):
+            attrs = [flatten_value(attrs)] if flatten_value(attrs) else []
+        return {
+            "symbol": normalize_symbol_text(symbol),
+            "cycle_index": index,
+            "entry_ts": flatten_value(cycle.get("entry_ts")) or not_obs,
+            "exit_ts": flatten_value(cycle.get("exit_ts")) or not_obs,
+            "exit_reason": flatten_value(cycle.get("exit_reason")) or not_obs,
+            "exit_priority": flatten_value(cycle.get("exit_priority")) or not_obs,
+            "net_bps": fmt_num(as_float(cycle.get("net_bps")), 4),
+            "attribution": json.dumps(attrs, ensure_ascii=False),
+            "entry_bad": str("entry_bad" in attrs).lower(),
+            "exit_bad": str("exit_bad" in attrs).lower(),
+            "min_hold_violation": str("min_hold_violation" in attrs).lower(),
+            "gave_back_profit": str("gave_back_profit" in attrs).lower(),
+            "trailing_too_early": str("trailing_too_early" in attrs).lower(),
+            "unknown": str("unknown" in attrs).lower(),
+            "adjusted_entry_expectancy_bps": first_observed(first_value(entry, ("adjusted_entry_expectancy_bps",), not_obs)),
+            "raw_would_block": attribution_bool_or_not_obs(first_value(entry, ("raw_would_block",), not_obs)),
+            "adjusted_would_block": attribution_bool_or_not_obs(first_value(entry, ("adjusted_would_block",), not_obs)),
+            "would_unblock_if_adjusted": attribution_bool_or_not_obs(first_value(entry, ("would_unblock_if_adjusted",), not_obs)),
+            "block_attribution_conflict": attribution_bool_or_not_obs(first_value(entry, ("block_attribution_conflict",), not_obs)),
+        }
+
+    for symbol, entry in sorted(negative_entries.items()):
+        if not isinstance(entry, dict):
+            continue
+        cycle_attributions = entry.get("cycle_attributions")
+        if isinstance(cycle_attributions, list):
+            for index, cycle in enumerate(cycle_attributions):
+                if not isinstance(cycle, dict):
+                    continue
+                row = build_negative_expectancy_attribution_row(symbol, index, cycle, entry)
+                negative_expectancy_attribution_rows.append(row)
+                if normalize_symbol_text(symbol) == "BNB/USDT":
+                    bnb_negative_expectancy_attribution_rows.append({
+                        key: row[key]
+                        for key in (
+                            "symbol",
+                            "cycle_index",
+                            "entry_ts",
+                            "exit_ts",
+                            "exit_reason",
+                            "exit_priority",
+                            "net_bps",
+                            "attribution",
+                            "entry_bad",
+                            "exit_bad",
+                            "min_hold_violation",
+                            "gave_back_profit",
+                            "trailing_too_early",
+                            "unknown",
+                        )
+                    })
+    if not bnb_negative_expectancy_attribution_rows:
+        bnb_neg = negative_entries.get("BNB/USDT", {})
+        cycle_attributions = bnb_neg.get("cycle_attributions") if isinstance(bnb_neg, dict) else []
+        if isinstance(cycle_attributions, list):
+            for index, cycle in enumerate(cycle_attributions):
+                if not isinstance(cycle, dict):
+                    continue
+                row = build_negative_expectancy_attribution_row("BNB/USDT", index, cycle, bnb_neg)
+                bnb_negative_expectancy_attribution_rows.append({
+                    key: row[key]
+                    for key in (
+                        "symbol",
+                        "cycle_index",
+                        "entry_ts",
+                        "exit_ts",
+                        "exit_reason",
+                        "exit_priority",
+                        "net_bps",
+                        "attribution",
+                        "entry_bad",
+                        "exit_bad",
+                        "min_hold_violation",
+                        "gave_back_profit",
+                        "trailing_too_early",
+                        "unknown",
+                    )
+                })
 
     def negative_expectancy_attribution_symbol_payload(symbol, entry):
         if not isinstance(entry, dict):
@@ -10350,6 +10436,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "summaries/bnb_negative_expectancy_attribution.csv",
         bnb_negative_expectancy_attribution_rows,
         ["symbol", "cycle_index", "entry_ts", "exit_ts", "exit_reason", "exit_priority", "net_bps", "attribution", "entry_bad", "exit_bad", "min_hold_violation", "gave_back_profit", "trailing_too_early", "unknown"],
+    )
+    write_csv(
+        "summaries/negative_expectancy_attribution.csv",
+        negative_expectancy_attribution_rows,
+        ["symbol", "cycle_index", "entry_ts", "exit_ts", "exit_reason", "exit_priority", "net_bps", "attribution", "entry_bad", "exit_bad", "min_hold_violation", "gave_back_profit", "trailing_too_early", "unknown", "adjusted_entry_expectancy_bps", "raw_would_block", "adjusted_would_block", "would_unblock_if_adjusted", "block_attribution_conflict"],
     )
     write_text(
         "summaries/negative_expectancy_attribution.json",
@@ -12128,6 +12219,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "actual_bought_symbols": json.dumps(actual_bought_symbols, ensure_ascii=False),
             "missed_symbols": json.dumps(missed_symbols, ensure_ascii=False),
             "source_detail_available": str(detail_row is not None).lower(),
+            "source_detail_missing_paths": ""
+            if detail_row is not None
+            else "reports/risk_on_multi_buy_shadow.csv;raw/reports/risk_on_multi_buy_shadow.csv",
             "response_action": response_action or advisory_response_action(advisory_row),
             "live_order_effect": "read_only_no_live_order",
         }
@@ -12160,6 +12254,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         risk_on_rows = existing_risk_on_rows
         for row in risk_on_rows:
             row.setdefault("source_detail_available", "false")
+            row.setdefault(
+                "source_detail_missing_paths",
+                "reports/risk_on_multi_buy_shadow.csv;raw/reports/risk_on_multi_buy_shadow.csv",
+            )
             selected_symbols = risk_on_symbol_list(row.get("selected_symbols"))
             if not selected_symbols and flatten_value(row.get("selected_symbols")) != not_obs:
                 row["selected_symbols"] = not_obs
@@ -12171,6 +12269,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
 
     risk_on_latest_selected_symbols = not_obs
     risk_on_source_detail_available = False
+    risk_on_detail_missing_paths = ""
     if risk_on_rows:
         latest_ts = max(flatten_value(row.get("ts_utc")) for row in risk_on_rows)
         latest_rows = [row for row in risk_on_rows if flatten_value(row.get("ts_utc")) == latest_ts]
@@ -12180,6 +12279,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         }
         risk_on_latest_selected_symbols = json.dumps(latest_payload, ensure_ascii=False, sort_keys=True)
         risk_on_source_detail_available = any(truthy_text(row.get("source_detail_available")) for row in latest_rows)
+        if not risk_on_source_detail_available:
+            missing = sorted({
+                flatten_value(row.get("source_detail_missing_paths"))
+                for row in latest_rows
+                if flatten_value(row.get("source_detail_missing_paths"))
+            })
+            risk_on_detail_missing_paths = ";".join(missing) if missing else "reports/risk_on_multi_buy_shadow.csv;raw/reports/risk_on_multi_buy_shadow.csv"
 
     bnb_paper_run_rows = load_csv_dicts(OUT / "summaries" / "bnb_paper_strategy_runs.csv")
     bnb_paper_daily_rows = load_csv_dicts(OUT / "summaries" / "bnb_paper_strategy_daily.csv")
@@ -12727,6 +12833,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "negative_expectancy_entry_bad_cycles": negative_expectancy_entry_bad_cycles,
         "negative_expectancy_exit_bad_cycles": negative_expectancy_exit_bad_cycles,
         "negative_expectancy_min_hold_violation_cycles": negative_expectancy_min_hold_violation_cycles,
+        "negative_expectancy_attribution_rows": max(
+            len(negative_expectancy_attribution_rows),
+            len(load_csv_dicts(OUT / "summaries" / "negative_expectancy_attribution.csv")),
+        ),
         "bnb_negative_expectancy_attribution_rows": len(bnb_negative_expectancy_attribution_rows),
         "bnb_risk_recommendation": bnb_risk_summary.get("recommendation", not_obs),
         "bnb_negative_expectancy_closed_cycles": bnb_risk_summary.get("closed_cycles", not_obs),
@@ -12843,6 +12953,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "risk_on_multi_buy_shadow_rows": len(risk_on_rows),
         "risk_on_multi_buy_latest_selected_symbols": risk_on_latest_selected_symbols,
         "risk_on_multi_buy_source_detail_available": bool(risk_on_source_detail_available),
+        "risk_on_multi_buy_detail_missing_paths": risk_on_detail_missing_paths,
         "bnb_paper_strategy_run_rows": len(bnb_paper_run_rows),
         "bnb_paper_strategy_daily_rows": len(bnb_paper_daily_rows),
         "bnb_paper_would_enter_count": bnb_paper_would_enter_count,
@@ -12850,7 +12961,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "bnb_strong_alpha6_bypass_shadow_rows": len(bnb_strong_alpha6_bypass_shadow_rows),
         "bnb_strong_alpha6_bypass_negative_expectancy_count": sum(
             1 for row in bnb_strong_alpha6_bypass_shadow_rows
-            if truthy_text(row.get("would_bypass_negative_expectancy"))
+            if truthy_text(row.get("negative_expectancy_blocked"))
         ),
         "bnb_strong_alpha6_bypass_outcome_mix": json.dumps(
             dict(sorted(Counter(row.get("outcome") or not_obs for row in bnb_strong_alpha6_bypass_shadow_rows).items())),
@@ -13636,6 +13747,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- rows: {window_summary.get('risk_on_multi_buy_shadow_rows', not_obs)}",
         f"- latest selected_symbols: {window_summary.get('risk_on_multi_buy_latest_selected_symbols', not_obs)}",
         f"- source_detail_available: {str(window_summary.get('risk_on_multi_buy_source_detail_available', False)).lower()}",
+        f"- source_detail_missing_paths: {window_summary.get('risk_on_multi_buy_detail_missing_paths', '') or 'none'}",
         "- live_order_effect: read_only_no_live_order",
         "- output: summaries/risk_on_multi_buy_shadow.csv",
         "",
@@ -13650,7 +13762,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "",
         "## BNB strong Alpha6 bypass shadow",
         f"- rows: {window_summary.get('bnb_strong_alpha6_bypass_shadow_rows', not_obs)}",
-        f"- would_bypass_negative_expectancy_count: {window_summary.get('bnb_strong_alpha6_bypass_negative_expectancy_count', not_obs)}",
+        f"- negative_expectancy_blocked_count: {window_summary.get('bnb_strong_alpha6_bypass_negative_expectancy_count', not_obs)}",
         f"- outcome_mix: {window_summary.get('bnb_strong_alpha6_bypass_outcome_mix', not_obs)}",
         "- strategy_id: BNB_STRONG_ALPHA6_BYPASS_SHADOW_V1",
         "- trigger: BNB alpha6 buy >= 0.9, expected_edge_bps > required_edge_bps, cost_gate_verified=true, and f4>=1.0 or f3>=10.",
@@ -13665,7 +13777,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- symbol_breakdown: {window_summary.get('final_score_alpha6_conflict_symbol_breakdown', not_obs)}",
         f"- recommendation: {window_summary.get('final_score_alpha6_conflict_recommendation', not_obs)}",
         "- rule: diagnostic only; this audit checks high Alpha6 buy candidates suppressed by negative final_score/no_order.",
-        "- negative_expectancy_stats: included per row when the local cooldown state has symbol stats.",
+        "- negative_expectancy_net_bps / negative_expectancy_fast_fail_net_bps: included per row when local cooldown state has symbol stats.",
         "- output: summaries/final_score_vs_alpha6_conflict.csv",
         "",
         "## Probe 生命周期检查",
@@ -13818,9 +13930,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- entry_bad_cycles: {negative_expectancy_entry_bad_cycles}",
         f"- exit_bad_cycles: {negative_expectancy_exit_bad_cycles}",
         f"- min_hold_violation_cycles: {negative_expectancy_min_hold_violation_cycles}",
+        f"- attribution_rows: {len(negative_expectancy_attribution_rows)}",
         "- note: Premature swing soft exits are excluded from fast-fail hard blocks.",
         "- attribution: BNB min-hold soft-exit losses are tagged as exit_bad/min_hold_violation, not pure entry_bad.",
-        "- output: summaries/bnb_negative_expectancy_attribution.csv and summaries/negative_expectancy_attribution.json",
+        "- output: summaries/negative_expectancy_attribution.csv, summaries/bnb_negative_expectancy_attribution.csv, and summaries/negative_expectancy_attribution.json",
         f"- high issue present: {'yes' if negative_expectancy_mismatch_count else 'no'}",
         "",
         "## BNB recovery missed opportunity audit",
@@ -14022,7 +14135,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "bnb_strong_alpha6_bypass_shadow_rows": len(bnb_strong_alpha6_bypass_shadow_rows),
         "bnb_strong_alpha6_bypass_negative_expectancy_count": sum(
             1 for row in bnb_strong_alpha6_bypass_shadow_rows
-            if truthy_text(row.get("would_bypass_negative_expectancy"))
+            if truthy_text(row.get("negative_expectancy_blocked"))
         ),
         "bnb_f3_dominant_swing_sample_count": bnb_f3_dominant_swing_summary.get("sample_count", 0),
         "bnb_f3_dominant_swing_missing_swing_flag_count": bnb_f3_dominant_swing_summary.get("bnb_f3_missing_swing_flag_count", 0),
@@ -14300,6 +14413,7 @@ sanity = {
     "contains summaries/swing_atr_soft_exit_readiness_by_symbol.csv": (OUT / "summaries/swing_atr_soft_exit_readiness_by_symbol.csv").is_file(),
     "contains summaries/swing_atr_soft_exit_shadow.csv": (OUT / "summaries/swing_atr_soft_exit_shadow.csv").is_file(),
     "contains summaries/bnb_risk_summary.json": (OUT / "summaries/bnb_risk_summary.json").is_file(),
+    "contains summaries/negative_expectancy_attribution.csv": (OUT / "summaries/negative_expectancy_attribution.csv").is_file(),
     "contains summaries/negative_expectancy_attribution.json": (OUT / "summaries/negative_expectancy_attribution.json").is_file(),
     "contains summaries/bnb_recovery_missed_opportunity.csv": (OUT / "summaries/bnb_recovery_missed_opportunity.csv").is_file(),
     "contains summaries/bnb_strong_alpha6_bypass_shadow.csv": (OUT / "summaries/bnb_strong_alpha6_bypass_shadow.csv").is_file(),
@@ -14424,6 +14538,11 @@ manifest = {
     "completion_attempts": int(summary_meta.get("completion_attempts", 0) or 0),
     "canonical_completion_count": int(summary_meta.get("canonical_completion_count", 0) or 0),
     "data_quality_warnings": summary_meta.get("data_quality_warnings", []),
+    "negative_expectancy_attribution_rows": int(
+        len(load_csv_dicts(OUT / "summaries" / "negative_expectancy_attribution.csv"))
+        or summary_meta.get("negative_expectancy_attribution_rows", 0)
+        or 0
+    ),
     "bnb_profit_lock_metadata_incomplete_count": int(
         summary_meta.get("bnb_profit_lock_metadata_incomplete_count", 0) or 0
     ),

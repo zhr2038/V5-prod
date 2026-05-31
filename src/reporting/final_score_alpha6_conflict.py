@@ -14,21 +14,22 @@ CONFLICT_FIELDS = (
     "final_score",
     "alpha6_score",
     "alpha6_side",
-    "f1",
-    "f2",
-    "f3",
-    "f4",
-    "f5",
+    "f3_vol_adj_ret",
+    "f4_volume_expansion",
+    "f5_rsi_trend_confirm",
     "expected_edge_bps",
     "required_edge_bps",
+    "cost_gate_verified",
     "final_decision",
     "block_reason",
     "no_signal_reason",
-    "negative_expectancy_stats",
+    "negative_expectancy_net_bps",
+    "negative_expectancy_fast_fail_net_bps",
     "future_4h_net_bps",
     "future_8h_net_bps",
     "future_12h_net_bps",
     "future_24h_net_bps",
+    "label_status",
     "missed_profit_flag",
 )
 
@@ -216,6 +217,16 @@ def build_conflict_rows(
         futures = {h: first_observed(future_net_bps.get(h), default="not_observable") for h in (4, 8, 12, 24)}
         observed = [as_float(value) for value in futures.values()]
         observed = [value for value in observed if value is not None]
+        neg = negative_expectancy_stats.get(symbol)
+        if isinstance(neg, Mapping):
+            neg_net = first_observed(neg.get("net_expectancy_bps"), neg.get("negexp_net_expectancy_bps"))
+            neg_fast = first_observed(
+                neg.get("fast_fail_net_expectancy_bps"),
+                neg.get("negexp_fast_fail_net_expectancy_bps"),
+            )
+        else:
+            neg_net = "not_observable"
+            neg_fast = "not_observable"
         out.append(
             {
                 "run_id": first_observed(row.get("run_id")),
@@ -224,21 +235,22 @@ def build_conflict_rows(
                 "final_score": first_observed(row.get("final_score")),
                 "alpha6_score": first_observed(row.get("alpha6_score")),
                 "alpha6_side": first_observed(row.get("alpha6_side")),
-                "f1": first_observed(row.get("f1"), row.get("f1_mom_5d")),
-                "f2": first_observed(row.get("f2"), row.get("f2_mom_20d")),
-                "f3": first_observed(row.get("f3"), row.get("f3_vol_adj_ret")),
-                "f4": first_observed(row.get("f4"), row.get("f4_volume_expansion")),
-                "f5": first_observed(row.get("f5"), row.get("f5_rsi_trend_confirm")),
+                "f3_vol_adj_ret": first_observed(row.get("f3_vol_adj_ret"), row.get("f3")),
+                "f4_volume_expansion": first_observed(row.get("f4_volume_expansion"), row.get("f4")),
+                "f5_rsi_trend_confirm": first_observed(row.get("f5_rsi_trend_confirm"), row.get("f5")),
                 "expected_edge_bps": first_observed(row.get("expected_edge_bps")),
                 "required_edge_bps": first_observed(row.get("required_edge_bps")),
+                "cost_gate_verified": first_observed(row.get("cost_gate_verified")),
                 "final_decision": first_observed(row.get("final_decision")),
                 "block_reason": first_observed(row.get("block_reason")),
                 "no_signal_reason": first_observed(row.get("no_signal_reason")),
-                "negative_expectancy_stats": first_observed(negative_expectancy_stats.get(symbol)),
+                "negative_expectancy_net_bps": neg_net,
+                "negative_expectancy_fast_fail_net_bps": neg_fast,
                 "future_4h_net_bps": futures[4],
                 "future_8h_net_bps": futures[8],
                 "future_12h_net_bps": futures[12],
                 "future_24h_net_bps": futures[24],
+                "label_status": first_observed(row.get("label_status"), default="shadow_pending"),
                 "missed_profit_flag": str(bool(observed and max(observed) > 0.0)).lower(),
             }
         )

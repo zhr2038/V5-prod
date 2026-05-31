@@ -25,6 +25,8 @@ from src.reporting.candidate_snapshot import (
     CANDIDATE_SNAPSHOT_FIELDS,
     CANDIDATE_SNAPSHOT_SCHEMA_VERSION,
 )
+from src.reporting.bnb_strong_alpha6_bypass_shadow import BYPASS_SHADOW_FIELDS
+from src.reporting.final_score_alpha6_conflict import CONFLICT_FIELDS
 from src.reporting.order_lifecycle import (
     ORDER_LIFECYCLE_FIELDS,
     ORDER_LIFECYCLE_SCHEMA_VERSION,
@@ -40,6 +42,28 @@ from src.reporting.sol_paper_strategy_tracker import (
     RISK_ON_MULTI_BUY_SHADOW_FIELDS,
     STRATEGY_ADVISORY_FIELDS,
     STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS,
+)
+
+NEGATIVE_EXPECTANCY_ATTRIBUTION_FIELDS = (
+    "symbol",
+    "cycle_index",
+    "entry_ts",
+    "exit_ts",
+    "exit_reason",
+    "exit_priority",
+    "net_bps",
+    "attribution",
+    "entry_bad",
+    "exit_bad",
+    "min_hold_violation",
+    "gave_back_profit",
+    "trailing_too_early",
+    "unknown",
+    "adjusted_entry_expectancy_bps",
+    "raw_would_block",
+    "adjusted_would_block",
+    "would_unblock_if_adjusted",
+    "block_attribution_conflict",
 )
 from src.reporting.quant_lab_audit import (
     CONTRACT_VERSION,
@@ -913,6 +937,9 @@ def _copy_sol_paper_strategy_files(staging: Path, reports: Path) -> None:
         ("alpha_factory_advisory_reader.csv", ALPHA_FACTORY_ADVISORY_FIELDS),
         ("alpha_factory_family_summary.csv", ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS),
         ("risk_on_multi_buy_shadow.csv", RISK_ON_MULTI_BUY_SHADOW_FIELDS),
+        ("final_score_vs_alpha6_conflict.csv", CONFLICT_FIELDS),
+        ("bnb_strong_alpha6_bypass_shadow.csv", BYPASS_SHADOW_FIELDS),
+        ("negative_expectancy_attribution.csv", NEGATIVE_EXPECTANCY_ATTRIBUTION_FIELDS),
     )
     for filename, fields in summary_specs:
         src = reports / "summaries" / filename
