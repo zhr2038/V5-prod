@@ -4330,7 +4330,7 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix="v5-post-min-hold-atr-exit-") as tmp:
         root = pathlib.Path(tmp) / "root"
-        fixture_post_min_hold_atr_exit_root(root)
+        run_id = fixture_post_min_hold_atr_exit_root(root)
         bundle = run_bundle(root)
         try:
             with tarfile.open(bundle, "r:gz") as tf:
@@ -4387,14 +4387,20 @@ def main():
             assert bnb_profit_row["profit_lock_50bps"] == "50", bnb_profit_row
             assert bnb_profit_row["profit_lock_30bps_exit"] == "30", bnb_profit_row
             assert bnb_profit_row["profit_lock_50bps_exit"] == "50", bnb_profit_row
+            assert bnb_profit_row["fixed_hold_6h_from_entry_net_bps"] == "not_observable", bnb_profit_row
+            assert bnb_profit_row["fixed_hold_12h_from_entry_net_bps"] == "80", bnb_profit_row
+            assert bnb_profit_row["fixed_hold_24h_from_entry_net_bps"] == "not_observable", bnb_profit_row
             assert bnb_profit_row["delayed_exit_6h"] == "100", bnb_profit_row
             assert bnb_profit_row["delayed_exit_12h"] == "200", bnb_profit_row
             assert bnb_profit_row["delayed_exit_24h"] == "300", bnb_profit_row
             assert bnb_profit_row["delayed_exit_6h_net_bps"] == "100", bnb_profit_row
             assert bnb_profit_row["delayed_exit_12h_net_bps"] == "200", bnb_profit_row
             assert bnb_profit_row["delayed_exit_24h_net_bps"] == "300", bnb_profit_row
+            assert bnb_profit_row["delayed_exit_6h_from_actual_exit_net_bps"] == "100", bnb_profit_row
+            assert bnb_profit_row["delayed_exit_12h_from_actual_exit_net_bps"] == "200", bnb_profit_row
+            assert bnb_profit_row["delayed_exit_24h_from_actual_exit_net_bps"] == "300", bnb_profit_row
             assert bnb_profit_row["actual_exit_net_bps"] == "-100", bnb_profit_row
-            assert bnb_profit_row["best_shadow_exit_policy"] == "delayed_exit_24h", bnb_profit_row
+            assert bnb_profit_row["best_shadow_exit_policy"] == "delayed_exit_24h_from_actual_exit", bnb_profit_row
             assert bnb_profit_row["best_shadow_improvement_bps"] == "400", bnb_profit_row
             assert bnb_profit_row["delta_vs_actual_bps"] == "400", bnb_profit_row
             assert bnb_profit_row["sample_count"] == "1", bnb_profit_row
@@ -4472,7 +4478,7 @@ def main():
             assert window["bnb_profit_lock_shadow_review_reason"] == "sample_count_lt_10", window
             assert window["bnb_profit_lock_shadow_help_rate"] == 1.0, window
             assert window["bnb_profit_lock_shadow_avg_best_improvement_bps"] == 400.0, window
-            assert window["bnb_profit_lock_shadow_latest_best_policy"] == "delayed_exit_24h", window
+            assert window["bnb_profit_lock_shadow_latest_best_policy"] == "delayed_exit_24h_from_actual_exit", window
             assert window["bnb_f3_dominant_swing_sample_count"] == 1, window
             assert window["bnb_f3_dominant_swing_entry_count"] == 1, window
             assert window["bnb_f3_dominant_swing_hold_count"] == 1, window
@@ -4510,7 +4516,9 @@ def main():
             assert "review_reason: sample_count_lt_10" in readme, readme
             assert "latest atr_trailing_exit: true" in readme, readme
             assert "latest profit_lock_30bps/50bps: 30 / 50" in readme, readme
-            assert "latest best_shadow_exit_policy: delayed_exit_24h" in readme, readme
+            assert "latest fixed_hold_6h/12h/24h_from_entry: not_observable / 80 / not_observable" in readme, readme
+            assert "latest delayed_exit_6h/12h/24h_from_actual_exit: 100 / 200 / 300" in readme, readme
+            assert "latest best_shadow_exit_policy: delayed_exit_24h_from_actual_exit" in readme, readme
             assert "latest delta_vs_actual_bps: 400" in readme, readme
             assert "summaries/bnb_profit_lock_shadow.csv and summaries/bnb_profit_lock_summary.json" in readme, readme
             assert "## BNB f3-dominant swing outcome audit" in readme, readme
@@ -4551,6 +4559,8 @@ def main():
             assert all(row["best_shadow_improvement_bps"] == "400" for row in bnb_profit), bnb_profit
             assert all(row["delta_vs_actual_bps"] == "400" for row in bnb_profit), bnb_profit
             assert all(row["delayed_exit_24h_net_bps"] == "300" for row in bnb_profit), bnb_profit
+            assert all(row["delayed_exit_24h_from_actual_exit_net_bps"] == "300" for row in bnb_profit), bnb_profit
+            assert all(row["fixed_hold_12h_from_entry_net_bps"] == "80" for row in bnb_profit), bnb_profit
             assert bnb_profit_summary["sample_count"] == 10, bnb_profit_summary
             assert bnb_profit_summary["sample_scope"] == "bnb_swing_or_f3_entries", bnb_profit_summary
             assert bnb_profit_summary["metadata_incomplete_count"] == 0, bnb_profit_summary
@@ -4630,7 +4640,9 @@ def main():
             assert row["actual_exit_net_bps"] == "-100", row
             assert row["max_unrealized_bps"] == "70", row
             assert row["delayed_exit_24h_net_bps"] == "200", row
-            assert row["best_shadow_exit_policy"] == "delayed_exit_24h", row
+            assert row["delayed_exit_24h_from_actual_exit_net_bps"] == "200", row
+            assert row["fixed_hold_12h_from_entry_net_bps"] == "70", row
+            assert row["best_shadow_exit_policy"] == "delayed_exit_24h_from_actual_exit", row
             assert row["delta_vs_actual_bps"] == "300", row
             assert row["diagnosis"] == "gave_back_unrealized_profit", row
             assert row["sample_count"] == "not_applicable_metadata_incomplete", row
