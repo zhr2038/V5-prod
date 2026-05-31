@@ -592,7 +592,7 @@ def test_protect_profit_lock_exit_writes_pending_reentry_memory_before_fill(tmp_
         volatilities={},
         notes="",
     )
-    exit_position = _swing_position("SOL/USDT")
+    exit_position = _swing_position("SOL/USDT", entry_ts="2026-05-07T07:00:00Z")
     exit_position.highest_px = 101.70
     exit_audit = DecisionAudit(run_id="same-symbol-pending-memory-exit")
 
@@ -947,7 +947,7 @@ def test_swing_guard_blocks_rank_exit_before_min_hold(tmp_path: Path) -> None:
     assert decision["blocked_policy_reason"] == "swing_min_hold_soft_exit_blocked"
 
 
-def test_stop_loss_and_profit_lock_exits_are_not_blocked_by_swing_guard(tmp_path: Path) -> None:
+def test_stop_loss_allowed_but_profit_lock_soft_exit_blocked_by_swing_guard(tmp_path: Path) -> None:
     cfg = _base_cfg(tmp_path)
     _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
 
@@ -989,8 +989,13 @@ def test_stop_loss_and_profit_lock_exits_are_not_blocked_by_swing_guard(tmp_path
         precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
         precomputed_regime=_regime(),
     )
-    assert any((order.meta or {}).get("reason") == "protect_profit_lock_trailing" for order in lock_out.orders)
-    assert lock_audit.counts["swing_min_hold_guard_count"] == 0
+    assert not any((order.meta or {}).get("reason") == "protect_profit_lock_trailing" for order in lock_out.orders)
+    assert lock_audit.counts["swing_min_hold_guard_count"] == 1
+    assert any(
+        decision.get("blocked_exit_reason") == "swing_min_hold_soft_exit_blocked"
+        and decision.get("source_reason") == "protect_profit_lock_trailing"
+        for decision in lock_audit.router_decisions
+    )
     assert not any(d.get("reason") == "swing_hold_current_replacement_blocked" for d in lock_audit.router_decisions)
 
 

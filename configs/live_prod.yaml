@@ -506,7 +506,7 @@ execution:
   swing_ignore_rank_exit_before_min_hold: true
   swing_allow_exit_on_risk_off: true
   swing_allow_exit_on_stop_loss: true
-  swing_allow_exit_on_profit_lock: true
+  swing_allow_exit_on_profit_lock: false
   swing_hold_current_when_replacement_blocked: true
   swing_hold_min_net_bps_after_min_hold: 0
   swing_hold_min_score_after_min_hold: 0.10

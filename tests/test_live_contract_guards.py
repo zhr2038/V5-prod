@@ -483,7 +483,7 @@ def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_k
     assert payload["execution"]["swing_ignore_rank_exit_before_min_hold"] is True
     assert payload["execution"]["swing_allow_exit_on_risk_off"] is True
     assert payload["execution"]["swing_allow_exit_on_stop_loss"] is True
-    assert payload["execution"]["swing_allow_exit_on_profit_lock"] is True
+    assert payload["execution"]["swing_allow_exit_on_profit_lock"] is False
     assert payload["execution"]["protect_recovery_multi_position_enabled"] is False
     assert payload["execution"]["protect_recovery_max_positions"] == 2
     assert payload["execution"]["protect_recovery_max_gross_exposure"] == pytest.approx(0.18)

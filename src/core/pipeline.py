@@ -1705,9 +1705,6 @@ class V5Pipeline:
         return ""
 
     def _exit_allowed_before_min_hold(self, reason: str) -> bool:
-        norm = str(reason or "").strip().lower()
-        if norm.startswith("protect_profit_lock"):
-            return bool(getattr(self.cfg.execution, "swing_allow_exit_on_profit_lock", True))
         return bool(self._swing_min_hold_hard_exit_exception_reason(reason))
 
     @staticmethod
@@ -2561,10 +2558,6 @@ class V5Pipeline:
             reason_l.startswith("stop_loss")
             or reason_l.startswith("fixed_stop_loss")
             or reason_l.startswith("dynamic_stop")
-        ):
-            return None
-        if bool(getattr(self.cfg.execution, "swing_allow_exit_on_profit_lock", True)) and reason_l.startswith(
-            "protect_profit_lock"
         ):
             return None
         if reason_l.startswith("manual") or reason_l.startswith("kill_switch"):

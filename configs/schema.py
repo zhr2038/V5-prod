@@ -922,7 +922,10 @@ class ExecutionConfig(BaseModel):
     swing_ignore_rank_exit_before_min_hold: bool = Field(default=True)
     swing_allow_exit_on_risk_off: bool = Field(default=True)
     swing_allow_exit_on_stop_loss: bool = Field(default=True)
-    swing_allow_exit_on_profit_lock: bool = Field(default=True)
+    swing_allow_exit_on_profit_lock: bool = Field(
+        default=False,
+        description="Deprecated compatibility flag; swing min-hold treats profit-lock exits as soft before min-hold",
+    )
     swing_hold_current_when_replacement_blocked: bool = Field(default=True)
     swing_hold_min_net_bps_after_min_hold: float = Field(default=0.0, ge=-10000.0, le=10000.0)
     swing_hold_min_score_after_min_hold: float = Field(default=0.10, ge=-10.0, le=10.0)
