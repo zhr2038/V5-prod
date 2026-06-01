@@ -40,6 +40,8 @@ from .permissions import normalize_permission
 
 
 STRICT_GATE_MODES = {"cost_only", "permission_only", "enforce"}
+_COST_CACHE_TRACE_KEYS = {"event_id", "request_id", "run_id", "ts_utc"}
+_COST_CACHE_NON_SEMANTIC_KEYS = _COST_CACHE_TRACE_KEYS | {"expected_edge_bps"}
 
 
 @dataclass
@@ -282,6 +284,7 @@ class QuantLabClient:
     timeout_seconds: float = 2.0
     max_retries: int = 1
     cache_ttl_seconds: int = 60
+    cost_cache_ttl_seconds: int = 300
     http_client: Optional[Any] = None
     request_log_path: str | Path = "reports/quant_lab_requests.jsonl"
     run_id: Optional[str] = None
@@ -290,6 +293,10 @@ class QuantLabClient:
     _cache_headers: Dict[Tuple[str, Tuple[Tuple[str, str], ...]], Dict[str, str]] = field(init=False, repr=False)
     _stale_cache: Dict[Tuple[str, Tuple[Tuple[str, str], ...]], Any] = field(init=False, repr=False)
     _permission_cache: Dict[Tuple[str, str], Tuple[float, RiskPermission]] = field(init=False, repr=False)
+    _cost_cache: Dict[
+        Tuple[str, Tuple[Tuple[str, str], ...]],
+        Tuple[float, Any, Dict[str, str]],
+    ] = field(init=False, repr=False)
     token_auth_disabled_reason: Optional[str] = field(default=None, init=False)
     api_env_path_present: bool = False
     api_env_secure_permissions: Optional[bool] = None
@@ -310,11 +317,13 @@ class QuantLabClient:
             raise QuantLabValidationError("quant-lab timeout_seconds must be > 0 and <= 10")
         self.max_retries = max(0, int(self.max_retries or 0))
         self.cache_ttl_seconds = max(0, int(self.cache_ttl_seconds or 0))
+        self.cost_cache_ttl_seconds = max(0, int(self.cost_cache_ttl_seconds or 0))
         self.http_client = self.http_client or requests.Session()
         self._cache = TTLCache(ttl_seconds=self.cache_ttl_seconds)
         self._cache_headers = {}
         self._stale_cache = {}
         self._permission_cache = {}
+        self._cost_cache = {}
 
     @classmethod
     def from_config(
@@ -353,6 +362,7 @@ class QuantLabClient:
             timeout_seconds=float(getattr(cfg, "timeout_seconds", 2.0) or 2.0),
             max_retries=int(getattr(cfg, "max_retries", 1) or 0),
             cache_ttl_seconds=int(getattr(cfg, "cache_ttl_seconds", 60) or 0),
+            cost_cache_ttl_seconds=int(getattr(cfg, "cost_cache_ttl_seconds", 300) or 0),
             http_client=http_client,
             request_log_path=str(getattr(cfg, "request_log_path", "reports/quant_lab_requests.jsonl") or "reports/quant_lab_requests.jsonl"),
             run_id=run_id,
@@ -412,6 +422,77 @@ class QuantLabClient:
     def _cache_key(endpoint_path: str, params: Mapping[str, Any]) -> Tuple[str, Tuple[Tuple[str, str], ...]]:
         clean = {str(k): str(v) for k, v in dict(params or {}).items() if v is not None}
         return endpoint_path, tuple(sorted(clean.items()))
+
+    @staticmethod
+    def _cost_semantic_cache_key(
+        params: Mapping[str, Any],
+    ) -> Tuple[str, Tuple[Tuple[str, str], ...]]:
+        clean = {
+            str(k): str(v)
+            for k, v in dict(params or {}).items()
+            if v is not None and str(k) not in _COST_CACHE_NON_SEMANTIC_KEYS
+        }
+        return "/v1/costs/estimate", tuple(sorted(clean.items()))
+
+    def _cached_cost_response(
+        self,
+        params: Mapping[str, Any],
+    ) -> Optional[QuantLabResponse]:
+        if self.cost_cache_ttl_seconds <= 0:
+            return None
+        key = self._cost_semantic_cache_key(params)
+        cached = self._cost_cache.get(key)
+        if cached is None:
+            return None
+        expires_at, data, headers = cached
+        if expires_at <= time.time():
+            self._cost_cache.pop(key, None)
+            return None
+        response_headers = dict(headers or {})
+        response_headers["x-quant-lab-client-cost-cache-hit"] = "true"
+        response = QuantLabResponse(
+            endpoint="/v1/costs/estimate",
+            ok=True,
+            status_code=200,
+            data=data,
+            latency_ms=0.0,
+            request_id=str(dict(params or {}).get("request_id") or "") or None,
+            cached=True,
+            headers=response_headers,
+        )
+        self._log_request(
+            endpoint_path="/v1/costs/estimate",
+            params=params,
+            status_code=200,
+            latency_ms=0.0,
+            success=True,
+            error_type=None,
+            cached=True,
+            response_summary=summarize_response(data),
+        )
+        return response
+
+    def _store_cost_response(
+        self,
+        params: Mapping[str, Any],
+        response: QuantLabResponse,
+    ) -> None:
+        if self.cost_cache_ttl_seconds <= 0 or not response.ok:
+            return
+        key = self._cost_semantic_cache_key(params)
+        self._cost_cache[key] = (
+            time.time() + self.cost_cache_ttl_seconds,
+            response.data,
+            dict(response.headers or {}),
+        )
+
+    def _get_cost_json(self, params: Mapping[str, Any]) -> QuantLabResponse:
+        cached_response = self._cached_cost_response(params)
+        if cached_response is not None:
+            return cached_response
+        response = self.get_json("/v1/costs/estimate", params=params)
+        self._store_cost_response(params, response)
+        return response
 
     def _log_request(
         self,
@@ -681,30 +762,28 @@ class QuantLabClient:
             },
             default_event_type=EVENT_TYPE_REQUEST,
         )
-        response = self.get_json(
-            "/v1/costs/estimate",
-            params={
-                "schema_version": request_event["schema_version"],
-                "contract_version": request_event["contract_version"],
-                "event_id": request_event["event_id"],
-                "request_id": cost_request_id,
-                "run_id": self.run_id or "",
-                "ts_utc": request_event["ts_utc"],
-                "symbol": request_symbol,
-                "request_symbol": request_symbol,
-                "normalized_symbol": normalized_symbol,
-                "venue": str(venue or "OKX").strip() or "OKX",
-                "instrument_type": str(instrument_type or "spot").strip() or "spot",
-                "side": str(side or "").strip().lower(),
-                "regime": requested_regime,
-                "requested_regime": requested_regime,
-                "notional_usdt": float(notional_usdt or 0.0),
-                "quantile": requested_quantile,
-                "requested_quantile": requested_quantile,
-                "strategy_id": strategy,
-                "expected_edge_bps": expected_edge_bps if expected_edge_bps is not None else "",
-            },
-        )
+        params = {
+            "schema_version": request_event["schema_version"],
+            "contract_version": request_event["contract_version"],
+            "event_id": request_event["event_id"],
+            "request_id": cost_request_id,
+            "run_id": self.run_id or "",
+            "ts_utc": request_event["ts_utc"],
+            "symbol": request_symbol,
+            "request_symbol": request_symbol,
+            "normalized_symbol": normalized_symbol,
+            "venue": str(venue or "OKX").strip() or "OKX",
+            "instrument_type": str(instrument_type or "spot").strip() or "spot",
+            "side": str(side or "").strip().lower(),
+            "regime": requested_regime,
+            "requested_regime": requested_regime,
+            "notional_usdt": float(notional_usdt or 0.0),
+            "quantile": requested_quantile,
+            "requested_quantile": requested_quantile,
+            "strategy_id": strategy,
+            "expected_edge_bps": expected_edge_bps if expected_edge_bps is not None else "",
+        }
+        response = self._get_cost_json(params)
         estimate = CostEstimate.from_payload(response.data)
         if not estimate.symbol:
             estimate.symbol = normalized_symbol
@@ -775,31 +854,29 @@ class QuantLabClient:
             },
             default_event_type=EVENT_TYPE_REQUEST,
         )
-        return self.get_json(
-            "/v1/costs/estimate",
-            params={
-                "schema_version": request_event["schema_version"],
-                "contract_version": request_event["contract_version"],
-                "event_id": request_event["event_id"],
-                "request_id": cost_request_id,
-                "run_id": self.run_id or "",
-                "ts_utc": request_event["ts_utc"],
-                "symbol": request_symbol,
-                "request_symbol": request_symbol,
-                "normalized_symbol": normalized_symbol,
-                "venue": str(venue or "OKX").strip() or "OKX",
-                "instrument_type": str(instrument_type or "spot").strip() or "spot",
-                "side": str(side or "").strip().lower(),
-                "regime": requested_regime,
-                "requested_regime": requested_regime,
-                "notional_usdt": float(notional_usdt or 0.0),
-                "quantile": requested_quantile,
-                "requested_quantile": requested_quantile,
-                "strategy_id": strategy,
-                "expected_edge_bps": expected_edge_bps if expected_edge_bps is not None else "",
-                "notional_bucket": notional_bucket,
-            },
-        )
+        params = {
+            "schema_version": request_event["schema_version"],
+            "contract_version": request_event["contract_version"],
+            "event_id": request_event["event_id"],
+            "request_id": cost_request_id,
+            "run_id": self.run_id or "",
+            "ts_utc": request_event["ts_utc"],
+            "symbol": request_symbol,
+            "request_symbol": request_symbol,
+            "normalized_symbol": normalized_symbol,
+            "venue": str(venue or "OKX").strip() or "OKX",
+            "instrument_type": str(instrument_type or "spot").strip() or "spot",
+            "side": str(side or "").strip().lower(),
+            "regime": requested_regime,
+            "requested_regime": requested_regime,
+            "notional_usdt": float(notional_usdt or 0.0),
+            "quantile": requested_quantile,
+            "requested_quantile": requested_quantile,
+            "strategy_id": strategy,
+            "expected_edge_bps": expected_edge_bps if expected_edge_bps is not None else "",
+            "notional_bucket": notional_bucket,
+        }
+        return self._get_cost_json(params)
 
     def gate_decision(self, alpha_id: str) -> QuantLabResponse:
         return self.get_json(f"/v1/gates/decision/{str(alpha_id).strip()}")

@@ -128,6 +128,56 @@ def test_cost_request_normalizes_concatenated_usdt_symbol(tmp_path: Path) -> Non
     assert cost.required_edge_bps == 1.8
 
 
+def test_cost_semantic_cache_ignores_trace_fields(tmp_path: Path) -> None:
+    http = _HTTP()
+    log_path = tmp_path / "requests.jsonl"
+    client = QuantLabClient(
+        base_url="https://quant-lab.local",
+        http_client=http,
+        request_log_path=log_path,
+        run_id="run-1",
+        cache_ttl_seconds=0,
+        cost_cache_ttl_seconds=300,
+    )
+
+    first = client.estimate_cost(
+        symbol="BNB/USDT",
+        regime="normal",
+        notional_usdt=200,
+        quantile="p75",
+        side="buy",
+        strategy_id="v5",
+        expected_edge_bps=8.0,
+        request_id="cost-1",
+        event_id="event-1",
+        ts_utc="2026-05-31T10:00:00Z",
+    )
+    client.run_id = "run-2"
+    second = client.estimate_cost(
+        symbol="BNB/USDT",
+        regime="normal",
+        notional_usdt=200,
+        quantile="p75",
+        side="buy",
+        strategy_id="v5",
+        expected_edge_bps=12.0,
+        request_id="cost-2",
+        event_id="event-2",
+        ts_utc="2026-05-31T10:01:00Z",
+    )
+
+    cost_calls = [call for call in http.calls if call["url"].endswith("/v1/costs/estimate")]
+    rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+
+    assert first.symbol == "BNB-USDT"
+    assert second.symbol == "BNB-USDT"
+    assert len(cost_calls) == 1
+    assert rows[0]["cached"] is False
+    assert rows[1]["cached"] is True
+    assert rows[1]["request_id"] == "cost-2"
+    assert rows[1]["event_id"] == "event-2"
+
+
 def test_get_json_uses_etag_after_ttl_expiry(tmp_path: Path) -> None:
     class ETagHTTP(_HTTP):
         def get(self, url, params=None, headers=None, timeout=None):
