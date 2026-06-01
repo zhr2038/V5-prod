@@ -7,6 +7,7 @@ python3 - "$ROOT" <<'PY'
 import csv
 import datetime as dt
 import fnmatch
+import gzip
 import hashlib
 import json
 import os
@@ -160,6 +161,8 @@ ALPHA_FACTORY_ADVISORY_FIELDS = (
     "promotion_state",
     "alpha_factory_score",
     "advisory_source",
+    "selected_source",
+    "source_health_freshness_status",
     "advisory_fresh",
     "advisory_age_sec",
     "stale_reason",
@@ -382,6 +385,9 @@ FINAL_SCORE_ALPHA6_CONFLICT_FIELDS = (
     "future_8h_net_bps",
     "future_12h_net_bps",
     "future_24h_net_bps",
+    "max_future_net_bps",
+    "best_future_horizon_hours",
+    "material_profit_flag",
     "label_4h_status",
     "label_8h_status",
     "label_12h_status",
@@ -403,6 +409,7 @@ BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS = (
     "f5",
     "expected_edge_bps",
     "required_edge_bps",
+    "final_score",
     "final_decision",
     "block_reason",
     "no_signal_reason",
@@ -411,6 +418,9 @@ BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS = (
     "future_8h_net_bps",
     "future_12h_net_bps",
     "future_24h_net_bps",
+    "max_future_net_bps",
+    "best_future_horizon_hours",
+    "material_profit_flag",
     "label_status",
     "outcome",
     "live_order_effect",
@@ -564,6 +574,8 @@ PROBE_EXIT_CONFIG_KEYS = [
 LOG_EXTS = (".log", ".out", ".err")
 MAX_COPY_BYTES = 20 * 1024 * 1024
 MAX_LOG_BYTES = 5 * 1024 * 1024
+LOG_TAIL_LINES = 2000
+RAW_LARGE_FILE_THRESHOLD_BYTES = 1_000_000
 RECENT_72H = NOW.timestamp() - 72 * 3600
 RECENT_24H = NOW.timestamp() - 24 * 3600
 WINDOW_72H_START = NOW - dt.timedelta(hours=72)
@@ -656,6 +668,56 @@ def read_text_limited(path, limit):
             data = fh.read()
             prefix = ""
     return prefix + data.decode("utf-8", "replace")
+
+
+def tail_lines(text, limit=LOG_TAIL_LINES):
+    lines = text.splitlines()
+    if len(lines) <= limit:
+        return text
+    return "\n".join(lines[-limit:]) + "\n"
+
+
+def filter_jsonl_recent_24h(text):
+    kept = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            row = json.loads(stripped)
+        except Exception:
+            kept.append(line)
+            continue
+        if not isinstance(row, dict):
+            kept.append(line)
+            continue
+        ts_text = ""
+        for key in ("ts_utc", "timestamp", "ts", "entry_ts"):
+            value = row.get(key)
+            if value not in (None, ""):
+                ts_text = str(value)
+                break
+        ts_dt = None
+        try:
+            if ts_text:
+                text_value = ts_text.strip()
+                if re.fullmatch(r"\d+(?:\.\d+)?", text_value):
+                    raw_ts = float(text_value)
+                    if raw_ts > 10_000_000_000:
+                        raw_ts /= 1000.0
+                    ts_dt = dt.datetime.fromtimestamp(raw_ts, tz=dt.timezone.utc)
+                else:
+                    if text_value.endswith("Z"):
+                        text_value = text_value[:-1] + "+00:00"
+                    ts_dt = dt.datetime.fromisoformat(text_value)
+                    if ts_dt.tzinfo is None:
+                        ts_dt = ts_dt.replace(tzinfo=dt.timezone.utc)
+                    ts_dt = ts_dt.astimezone(dt.timezone.utc)
+        except Exception:
+            ts_dt = None
+        if ts_dt is None or ts_dt.timestamp() >= RECENT_24H:
+            kept.append(json.dumps(sanitize_obj(row), ensure_ascii=False, sort_keys=True))
+    return "\n".join(kept) + ("\n" if kept else "")
 
 
 def write_text(dest_rel, text):
@@ -1170,6 +1232,17 @@ def copy_current_reports():
         record_missing("reports/skipped_candidate_outcomes*.csv")
 
 
+def filter_raw_jsonl_outputs_recent_24h():
+    for dest_rel in ("raw/reports/skipped_candidate_labels.jsonl", "raw/reports/sol_paper_strategy_labels.jsonl"):
+        path = OUT / dest_rel
+        if not path.is_file():
+            continue
+        try:
+            write_text(dest_rel, filter_jsonl_recent_24h(path.read_text(encoding="utf-8", errors="replace")))
+        except Exception as exc:
+            collection_errors.append({"source": str(path), "dest": dest_rel, "error": f"recent_jsonl_filter: {exc!r}"})
+
+
 def merge_candidate_snapshot_reports():
     paths = []
     aggregate = OUT / "raw" / "reports" / "candidate_snapshot.csv"
@@ -1263,7 +1336,7 @@ def copy_logs():
                         continue
                     rel = src.relative_to(ROOT).as_posix()
                     safe_rel = rel.replace("/", "__")
-                    text = sanitize_text(read_text_limited(src, MAX_LOG_BYTES))
+                    text = tail_lines(sanitize_text(read_text_limited(src, MAX_LOG_BYTES)))
                     write_text(f"raw/logs/{safe_rel}", text)
                     copied_sources[f"raw/logs/{safe_rel}"] = str(src)
                     copied.append(rel)
@@ -7473,6 +7546,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "future_8h_net_bps": future[8],
                 "future_12h_net_bps": future[12],
                 "future_24h_net_bps": future[24],
+                "max_future_net_bps": max(observed_future) if observed_future else not_obs,
+                "best_future_horizon_hours": max(
+                    [(horizon, as_float(future[horizon])) for horizon in (4, 8, 12, 24) if as_float(future[horizon]) is not None],
+                    key=lambda item: item[1],
+                    default=(not_obs, None),
+                )[0],
+                "material_profit_flag": str(bool(observed_future and max(observed_future) >= 50.0)).lower(),
                 "label_4h_status": label_statuses[4],
                 "label_8h_status": label_statuses[8],
                 "label_12h_status": label_statuses[12],
@@ -7480,7 +7560,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "any_label_complete": str(any_label_complete).lower(),
                 "all_labels_complete": str(all_labels_complete).lower(),
                 "label_status": aggregate_label_status,
-                "missed_profit_flag": str(bool(observed_future and max(observed_future) > 0)).lower(),
+                "missed_profit_flag": str(bool(observed_future and max(observed_future) >= 50.0)).lower(),
             })
         out.sort(key=lambda item: (flatten_value(item.get("ts_utc")), flatten_value(item.get("symbol"))))
         return out
@@ -7493,7 +7573,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
 
         symbol_counts = Counter(row.get("symbol") or not_obs for row in rows)
         conflict_count = len(rows)
-        profitable_count = sum(1 for row in rows if truthy(row.get("missed_profit_flag")))
+        profitable_count = sum(1 for row in rows if truthy(row.get("material_profit_flag")))
         if conflict_count == 0:
             recommendation = "no_conflict_observed"
         elif profitable_count > 0:
@@ -7505,6 +7585,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "avg_future_4h_net_bps": avg_for("future_4h_net_bps"),
             "avg_future_8h_net_bps": avg_for("future_8h_net_bps"),
             "avg_future_24h_net_bps": avg_for("future_24h_net_bps"),
+            "material_profit_count": profitable_count,
             "symbol_breakdown": json.dumps(dict(sorted(symbol_counts.items())), ensure_ascii=False, sort_keys=True),
             "recommendation": recommendation,
         }
@@ -7553,9 +7634,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         observed = [as_float(value) for value in future_values]
         observed = [value for value in observed if value is not None]
         if observed:
-            if max(observed) > 0:
-                return "profitable_shadow"
-            return "nonprofitable_shadow"
+            if max(observed) >= 50:
+                return "material_profit_shadow"
+            return "non_material_profit_shadow"
         if any(flatten_value(value) == "pending" for value in future_values):
             return "pending"
         return not_obs
@@ -7574,6 +7655,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 horizon: forward_net_bps(symbol, ts_dt, entry_price, horizon, cost_bps)
                 for horizon in (4, 8, 12, 24)
             }
+            observed_future_by_horizon = [
+                (horizon, as_float(future[horizon]))
+                for horizon in (4, 8, 12, 24)
+                if as_float(future[horizon]) is not None
+            ]
+            best_future = max(observed_future_by_horizon, key=lambda item: item[1], default=(not_obs, None))
             block_text = " ".join(
                 flatten_value(value).lower()
                 for value in (row.get("block_reason"), row.get("no_signal_reason"), row.get("final_decision"))
@@ -7599,6 +7686,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "future_8h_net_bps": future[8],
                 "future_12h_net_bps": future[12],
                 "future_24h_net_bps": future[24],
+                "max_future_net_bps": best_future[1] if best_future[1] is not None else not_obs,
+                "best_future_horizon_hours": best_future[0],
+                "material_profit_flag": str(bool(best_future[1] is not None and best_future[1] >= 50.0)).lower(),
                 "label_status": first_observed(row.get("label_status"), "shadow_pending"),
                 "outcome": bnb_strong_alpha6_shadow_outcome([future[4], future[8], future[12], future[24]]),
                 "live_order_effect": "read_only_no_live_order",
@@ -10445,6 +10535,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     )
     write_csv(
         "summaries/probe_diagnostics.csv",
+        [{key: value for key, value in row.items() if key != "raw_json"} for row in probe_rows],
+        ["source", "run_id", "ts_utc", "symbol", "probe_type", "event_type", "action", "reason", "status", "alpha6_score", "f4_volume_expansion", "f5_rsi_trend_confirm", "rolling_high", "breakout_met", "net_expectancy_bps"],
+    )
+    write_csv(
+        "raw/reports/probe_diagnostics_raw.csv",
         probe_rows,
         ["source", "run_id", "ts_utc", "symbol", "probe_type", "event_type", "action", "reason", "status", "alpha6_score", "f4_volume_expansion", "f5_rsi_trend_confirm", "rolling_high", "breakout_met", "net_expectancy_bps", "raw_json"],
     )
@@ -12766,6 +12861,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS,
         )
     advisory_source_health = advisory_source_health_rows[-1] if advisory_source_health_rows else {}
+    alpha_factory_advisory_rows = load_csv_dicts(OUT / "summaries" / "alpha_factory_advisory_reader.csv")
+    if alpha_factory_advisory_rows:
+        selected_source = flatten_value(advisory_source_health.get("selected_source") or not_obs)
+        freshness_status = flatten_value(advisory_source_health.get("freshness_status") or "")
+        if not freshness_status:
+            freshness_status = "stale" if truthy_text(advisory_source_health.get("selected_source_is_stale")) else "fresh"
+        for row in alpha_factory_advisory_rows:
+            row["selected_source"] = selected_source
+            row["source_health_freshness_status"] = freshness_status
+        write_csv(
+            "summaries/alpha_factory_advisory_reader.csv",
+            alpha_factory_advisory_rows,
+            ALPHA_FACTORY_ADVISORY_FIELDS,
+        )
 
     data_quality_warnings = []
     if provenance_meta.get("code_provenance") == "degraded":
@@ -14206,6 +14315,36 @@ def scan_unredacted_secrets():
     return matches
 
 
+def relocate_large_raw_files():
+    relocated = []
+    raw_root = OUT / "raw"
+    large_root = raw_root / "large"
+    if not raw_root.exists():
+        return relocated
+    for path in sorted(raw_root.rglob("*")):
+        if not path.is_file() or large_root in path.parents:
+            continue
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        if size <= RAW_LARGE_FILE_THRESHOLD_BYTES:
+            continue
+        rel = path.relative_to(raw_root).as_posix()
+        dest = large_root / f"{rel}.gz"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("rb") as src_fh, gzip.open(dest, "wb") as dest_fh:
+            shutil.copyfileobj(src_fh, dest_fh)
+        path.unlink()
+        relocated.append({
+            "source_path": f"raw/{rel}",
+            "relocated_path": f"raw/large/{rel}.gz",
+            "original_bytes": size,
+            "compressed_bytes": dest.stat().st_size,
+        })
+    return relocated
+
+
 def file_inventory():
     rows = []
     for path in sorted(OUT.rglob("*")):
@@ -14436,6 +14575,7 @@ copied_runs, recent_24_decisions = copy_recent_runs()
 merged_candidate_snapshot_rows = merge_candidate_snapshot_reports()
 copied_logs = copy_logs()
 summary_meta = build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_meta)
+filter_raw_jsonl_outputs_recent_24h()
 
 sanity = {
     "raw/state/kill_switch.json exists": (OUT / "raw/state/kill_switch.json").is_file(),
@@ -14485,6 +14625,10 @@ if secret_matches:
     sanity["no .env files"] = not any(match["reason"] == ".env file present" for match in secret_matches)
     sanity["no unredacted secret assignments"] = not any(match["reason"].startswith("unredacted") for match in secret_matches)
     collection_errors.append({"sanity_secret_scan": secret_matches[:20]})
+large_raw_files = relocate_large_raw_files()
+if large_raw_files:
+    write_text("raw/large/manifest.json", json.dumps(large_raw_files, ensure_ascii=False, indent=2) + "\n")
+    notes.append(f"relocated large raw files: {len(large_raw_files)}")
 
 failure_check_names = [
     "raw/state/kill_switch.json exists",

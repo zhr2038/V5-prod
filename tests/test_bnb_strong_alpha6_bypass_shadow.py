@@ -45,6 +45,9 @@ def test_bnb_strong_alpha6_rows_include_no_live_order_effect() -> None:
     assert row["symbol"] == "BNB/USDT"
     assert row["would_bypass"] == "true"
     assert row["negative_expectancy_blocked"] == "true"
-    assert row["outcome"] == "profitable_shadow"
+    assert row["max_future_net_bps"] == 240.0
+    assert row["best_future_horizon_hours"] == 24
+    assert row["material_profit_flag"] == "true"
+    assert row["outcome"] == "material_profit_shadow"
     assert row["label_status"] == "shadow_pending"
     assert row["live_order_effect"] == "read_only_no_live_order"

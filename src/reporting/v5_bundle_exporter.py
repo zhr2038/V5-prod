@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gzip
 import hashlib
 import io
 import json
@@ -43,6 +44,15 @@ from src.reporting.sol_paper_strategy_tracker import (
     STRATEGY_ADVISORY_FIELDS,
     STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS,
 )
+from src.reporting.quant_lab_audit import (
+    CONTRACT_VERSION,
+    EVENT_ID_GENERATION_VERSION,
+    SCHEMA_VERSION,
+    normalize_quant_lab_event,
+    read_quant_lab_usage,
+    sanitize_quant_lab_obj,
+)
+
 
 NEGATIVE_EXPECTANCY_ATTRIBUTION_FIELDS = (
     "symbol",
@@ -66,17 +76,11 @@ NEGATIVE_EXPECTANCY_ATTRIBUTION_FIELDS = (
     "would_unblock_if_adjusted",
     "block_attribution_conflict",
 )
-from src.reporting.quant_lab_audit import (
-    CONTRACT_VERSION,
-    EVENT_ID_GENERATION_VERSION,
-    SCHEMA_VERSION,
-    normalize_quant_lab_event,
-    read_quant_lab_usage,
-    sanitize_quant_lab_obj,
-)
 
 
 GIT_COMMAND_TIMEOUT_SEC = 10
+RAW_LARGE_FILE_THRESHOLD_BYTES = 1_000_000
+LOG_TAIL_LINES = 2000
 QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "BTC", "ETH", "OKB")
 
 
@@ -450,6 +454,47 @@ def _read_text_redacted(path: Path) -> str:
         return ""
 
 
+def _tail_lines(text: str, limit: int = LOG_TAIL_LINES) -> str:
+    lines = text.splitlines()
+    if len(lines) <= limit:
+        return text
+    return "\n".join(lines[-limit:]) + "\n"
+
+
+def _filter_jsonl_latest_hours(text: str, *, now: datetime, hours: int = 24) -> str:
+    cutoff = now - timedelta(hours=hours)
+    kept: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            row = json.loads(stripped)
+        except Exception:
+            kept.append(line)
+            continue
+        if not isinstance(row, Mapping):
+            kept.append(line)
+            continue
+        raw_ts = row.get("ts_utc") or row.get("timestamp") or row.get("ts") or row.get("entry_ts")
+        try:
+            parsed = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
+        except Exception:
+            kept.append(line)
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        if parsed >= cutoff:
+            kept.append(json.dumps(sanitize_quant_lab_obj(row), ensure_ascii=False, sort_keys=True))
+    return "\n".join(kept) + ("\n" if kept else "")
+
+
+def _write_maybe_filtered_raw_text(path: Path, text: str) -> None:
+    if path.as_posix().endswith("raw/reports/sol_paper_strategy_labels.jsonl"):
+        text = _filter_jsonl_latest_hours(text, now=datetime.now(timezone.utc), hours=24)
+    _write_text(path, text)
+
+
 def _write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -462,6 +507,38 @@ def _write_csv(path: Path, fields: Iterable[str], rows: Iterable[Mapping[str, An
         writer.writeheader()
         for row in rows:
             writer.writerow({field: sanitize_quant_lab_obj(row).get(field, "") for field in writer.fieldnames})
+
+
+def _relocate_large_raw_files(staging: Path, threshold_bytes: int = RAW_LARGE_FILE_THRESHOLD_BYTES) -> list[dict[str, Any]]:
+    relocated: list[dict[str, Any]] = []
+    raw_root = staging / "raw"
+    large_root = raw_root / "large"
+    if not raw_root.exists():
+        return relocated
+    for path in sorted(raw_root.rglob("*")):
+        if not path.is_file() or large_root in path.parents:
+            continue
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        if size <= threshold_bytes:
+            continue
+        rel = path.relative_to(raw_root).as_posix()
+        dest = large_root / f"{rel}.gz"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("rb") as src_fh, gzip.open(dest, "wb") as dest_fh:
+            shutil.copyfileobj(src_fh, dest_fh)
+        path.unlink()
+        relocated.append(
+            {
+                "source_path": f"raw/{rel}",
+                "relocated_path": f"raw/large/{rel}.gz",
+                "original_bytes": size,
+                "compressed_bytes": dest.stat().st_size,
+            }
+        )
+    return relocated
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -951,7 +1028,7 @@ def _copy_sol_paper_strategy_files(staging: Path, reports: Path) -> None:
             _write_csv(dest, fields, [])
     labels = reports / "sol_paper_strategy_labels.jsonl"
     if labels.is_file():
-        _write_text(
+        _write_maybe_filtered_raw_text(
             staging / "raw/reports/sol_paper_strategy_labels.jsonl",
             _redact_text(labels.read_text(encoding="utf-8", errors="replace")),
         )
@@ -2270,8 +2347,14 @@ def export_v5_bundle(
         if include_logs:
             log_path = root / "logs/v5_runtime.log"
             if log_path.exists():
-                _write_text(staging / "raw/logs/v5_runtime.log", _read_text_redacted(log_path))
+                _write_text(staging / "raw/logs/v5_runtime.log", _tail_lines(_read_text_redacted(log_path)))
         findings = _secret_scan_findings(staging)
+        large_raw_files = _relocate_large_raw_files(staging)
+        if large_raw_files:
+            _write_text(
+                staging / "raw/large/manifest.json",
+                json.dumps(large_raw_files, ensure_ascii=False, indent=2),
+            )
         manifest = {
             "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "reports_dir": str(reports),

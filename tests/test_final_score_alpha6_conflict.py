@@ -55,6 +55,9 @@ def test_final_score_alpha6_conflict_rows_keep_negative_expectancy_stats() -> No
     assert row["negative_expectancy_net_bps"] == -151.83
     assert row["negative_expectancy_fast_fail_net_bps"] == -142.89
     assert row["future_24h_net_bps"] == 240.0
+    assert row["max_future_net_bps"] == 240.0
+    assert row["best_future_horizon_hours"] == 24
+    assert row["material_profit_flag"] == "true"
     assert row["label_4h_status"] == "complete"
     assert row["label_8h_status"] == "complete"
     assert row["label_12h_status"] == "complete"
@@ -79,3 +82,7 @@ def test_final_score_alpha6_conflict_label_status_partial_complete() -> None:
     assert row["any_label_complete"] == "true"
     assert row["all_labels_complete"] == "false"
     assert row["label_status"] == "partial_complete"
+    assert row["max_future_net_bps"] == 12.0
+    assert row["best_future_horizon_hours"] == 4
+    assert row["material_profit_flag"] == "false"
+    assert row["missed_profit_flag"] == "false"

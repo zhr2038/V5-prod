@@ -4,7 +4,13 @@ import csv
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from src.reporting.final_score_alpha6_conflict import as_float, first_observed, normalize_symbol, truthy
+from src.reporting.final_score_alpha6_conflict import (
+    as_float,
+    best_future_net_bps,
+    first_observed,
+    normalize_symbol,
+    truthy,
+)
 
 
 STRATEGY_ID = "BNB_STRONG_ALPHA6_BYPASS_SHADOW_V1"
@@ -29,6 +35,9 @@ BYPASS_SHADOW_FIELDS = (
     "future_8h_net_bps",
     "future_12h_net_bps",
     "future_24h_net_bps",
+    "max_future_net_bps",
+    "best_future_horizon_hours",
+    "material_profit_flag",
     "label_status",
     "outcome",
     "live_order_effect",
@@ -55,10 +64,9 @@ def is_bnb_strong_alpha6_bypass_candidate(row: Mapping[str, Any]) -> bool:
 
 
 def shadow_outcome(values: Iterable[Any]) -> str:
-    observed = [as_float(value) for value in values]
-    observed = [value for value in observed if value is not None]
-    if observed:
-        return "profitable_shadow" if max(observed) > 0.0 else "nonprofitable_shadow"
+    max_future, _best_horizon, material_profit = best_future_net_bps({idx: value for idx, value in enumerate(values)})
+    if as_float(max_future) is not None:
+        return "material_profit_shadow" if material_profit else "non_material_profit_shadow"
     if any(str(value or "").strip().lower() == "pending" for value in values):
         return "pending"
     return "not_observable"
@@ -75,6 +83,7 @@ def build_bnb_strong_alpha6_bypass_rows(
         if not is_bnb_strong_alpha6_bypass_candidate(row):
             continue
         futures = {h: first_observed(future_net_bps.get(h)) for h in (4, 8, 12, 24)}
+        max_future, best_horizon, material_profit = best_future_net_bps(futures)
         block_text = " ".join(
             str(value or "").strip().lower()
             for value in (row.get("block_reason"), row.get("no_signal_reason"), row.get("final_decision"))
@@ -101,6 +110,9 @@ def build_bnb_strong_alpha6_bypass_rows(
                 "future_8h_net_bps": futures[8],
                 "future_12h_net_bps": futures[12],
                 "future_24h_net_bps": futures[24],
+                "max_future_net_bps": max_future,
+                "best_future_horizon_hours": best_horizon,
+                "material_profit_flag": str(material_profit).lower(),
                 "label_status": first_observed(row.get("label_status"), default="shadow_pending"),
                 "outcome": shadow_outcome([futures[4], futures[8], futures[12], futures[24]]),
                 "live_order_effect": "read_only_no_live_order",

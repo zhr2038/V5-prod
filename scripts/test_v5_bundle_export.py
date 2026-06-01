@@ -5665,6 +5665,9 @@ def main():
             assert row["any_label_complete"] == "true", row
             assert row["all_labels_complete"] == "true", row
             assert row["label_status"] == "complete", row
+            assert float(row["max_future_net_bps"]) > 1100.0, row
+            assert row["best_future_horizon_hours"] == "24", row
+            assert row["material_profit_flag"] == "true", row
             assert row["missed_profit_flag"] == "true", row
             assert window["final_score_alpha6_conflict_count"] == 1, window
             assert window["final_score_alpha6_conflict_recommendation"] == "review_final_score_alpha6_conflict", window
@@ -5676,8 +5679,11 @@ def main():
             assert shadow["negative_expectancy_blocked"] == "true", shadow
             assert float(shadow["future_4h_net_bps"]) > 400.0, shadow
             assert float(shadow["future_24h_net_bps"]) > 1100.0, shadow
+            assert float(shadow["max_future_net_bps"]) > 1100.0, shadow
+            assert shadow["best_future_horizon_hours"] == "24", shadow
+            assert shadow["material_profit_flag"] == "true", shadow
             assert shadow["label_status"] == "shadow_pending", shadow
-            assert shadow["outcome"] == "profitable_shadow", shadow
+            assert shadow["outcome"] == "material_profit_shadow", shadow
             assert shadow["live_order_effect"] == "read_only_no_live_order", shadow
             assert window["bnb_strong_alpha6_bypass_shadow_rows"] == 1, window
             assert window["bnb_strong_alpha6_bypass_negative_expectancy_count"] == 1, window

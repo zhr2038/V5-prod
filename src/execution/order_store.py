@@ -38,6 +38,14 @@ def _resolve_path(path: str | Path) -> Path:
     return resolved
 
 
+def _connect(path: Path) -> sqlite3.Connection:
+    con = sqlite3.connect(str(path), timeout=30.0)
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA synchronous=NORMAL")
+    con.execute("PRAGMA busy_timeout=30000")
+    return con
+
+
 def _rank(state: str) -> int:
     return int(_STATE_RANK.get(str(state).upper(), 6))
 
@@ -45,7 +53,7 @@ def _rank(state: str) -> int:
 @dataclass
 class OrderRow:
     """订单数据类
-    
+
     Attributes:
         cl_ord_id: 客户端订单ID
         run_id: 运行ID
@@ -110,13 +118,13 @@ class OrderRow:
 
 class OrderStore:
     """订单存储类
-    
+
     使用SQLite存储订单信息，支持订单状态跟踪和查询
     """
-    
+
     def __init__(self, path: str = "reports/orders.sqlite"):
         """初始化订单存储
-        
+
         Args:
             path: 数据库文件路径
         """
@@ -125,7 +133,7 @@ class OrderStore:
         self._init_db()
 
     def _init_db(self) -> None:
-        with closing(sqlite3.connect(str(self.path))) as con:
+        with closing(_connect(self.path)) as con:
             cur = con.cursor()
             cur.execute(
                 """
@@ -180,6 +188,10 @@ class OrderStore:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_order_events_clid ON order_events(cl_ord_id)")
             con.commit()
 
+    def wal_checkpoint(self, mode: str = "PASSIVE") -> None:
+        with closing(_connect(self.path)) as con:
+            con.execute(f"PRAGMA wal_checkpoint({str(mode).upper()})")
+
     def _event(self, con: sqlite3.Connection, cl_ord_id: str, event_type: str, payload: Dict[str, Any]) -> None:
         con.execute(
             "INSERT INTO order_events(cl_ord_id, ts, event_type, payload_json) VALUES (?,?,?,?)",
@@ -229,7 +241,7 @@ class OrderStore:
             submit_gate: 提交网关
         """
         now = _now_ms()
-        with closing(sqlite3.connect(str(self.path))) as con:
+        with closing(_connect(self.path)) as con:
             cur = con.cursor()
             cur.execute(
                 """
@@ -294,7 +306,7 @@ class OrderStore:
         Returns:
             订单对象，不存在返回None
         """
-        with closing(sqlite3.connect(str(self.path))) as con:
+        with closing(_connect(self.path)) as con:
             cur = con.cursor()
             cur.execute(
                 """
@@ -324,7 +336,7 @@ class OrderStore:
         Returns:
             订单对象，不存在返回None
         """
-        with closing(sqlite3.connect(str(self.path))) as con:
+        with closing(_connect(self.path)) as con:
             cur = con.cursor()
             cur.execute(
                 """
@@ -378,7 +390,7 @@ class OrderStore:
         new_state_u = str(new_state).upper()
         now = _now_ms()
 
-        with closing(sqlite3.connect(str(self.path))) as con:
+        with closing(_connect(self.path)) as con:
             cur = con.cursor()
             cur.execute("SELECT state FROM orders WHERE cl_ord_id=?", (str(cl_ord_id),))
             r = cur.fetchone()
@@ -479,7 +491,7 @@ class OrderStore:
 
         sql.append(f" ORDER BY {event_ts_expr} DESC LIMIT 1")
 
-        with closing(sqlite3.connect(str(self.path))) as con:
+        with closing(_connect(self.path)) as con:
             cur = con.cursor()
             cur.execute("".join(sql), params)
             row = cur.fetchone()
@@ -494,7 +506,7 @@ class OrderStore:
         Returns:
             未完成订单列表
         """
-        with closing(sqlite3.connect(str(self.path))) as con:
+        with closing(_connect(self.path)) as con:
             cur = con.cursor()
             cur.execute(
                 """

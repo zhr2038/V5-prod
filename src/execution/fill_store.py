@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
@@ -18,6 +19,14 @@ def _resolve_path(path: str | Path) -> Path:
     if not resolved.is_absolute():
         resolved = (PROJECT_ROOT / resolved).resolve()
     return resolved
+
+
+def _connect(path: Path) -> sqlite3.Connection:
+    con = sqlite3.connect(str(path), timeout=30.0)
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA synchronous=NORMAL")
+    con.execute("PRAGMA busy_timeout=30000")
+    return con
 
 
 def derive_fill_store_path(order_store_path: Union[str, Path]) -> Path:
@@ -176,7 +185,7 @@ class FillStore:
         self._init_db()
 
     def _init_db(self) -> None:
-        con = sqlite3.connect(str(self.path))
+        con = _connect(self.path)
         cur = con.cursor()
         cur.execute(
             """
@@ -234,9 +243,13 @@ class FillStore:
         con.commit()
         con.close()
 
+    def wal_checkpoint(self, mode: str = "PASSIVE") -> None:
+        with closing(_connect(self.path)) as con:
+            con.execute(f"PRAGMA wal_checkpoint({str(mode).upper()})")
+
     def get_state(self, key: str) -> Optional[str]:
         """Get state"""
-        con = sqlite3.connect(str(self.path))
+        con = _connect(self.path)
         cur = con.cursor()
         cur.execute("SELECT v FROM sync_state WHERE k=?", (str(key),))
         row = cur.fetchone()
@@ -245,7 +258,7 @@ class FillStore:
 
     def set_state(self, key: str, value: str) -> None:
         """Set state"""
-        con = sqlite3.connect(str(self.path))
+        con = _connect(self.path)
         cur = con.cursor()
         cur.execute(
             "INSERT INTO sync_state(k, v, updated_ts_ms) VALUES (?,?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v, updated_ts_ms=excluded.updated_ts_ms",
@@ -261,7 +274,7 @@ class FillStore:
             return 0, 0
 
         now = _now_ms()
-        con = sqlite3.connect(str(self.path))
+        con = _connect(self.path)
         cur = con.cursor()
 
         inserted = 0
@@ -305,7 +318,7 @@ class FillStore:
 
     def count(self) -> int:
         """Count"""
-        con = sqlite3.connect(str(self.path))
+        con = _connect(self.path)
         cur = con.cursor()
         cur.execute("SELECT COUNT(*) FROM fills")
         n = int(cur.fetchone()[0] or 0)
@@ -314,7 +327,7 @@ class FillStore:
 
     def mark_processed(self, inst_id: str, trade_id: str) -> None:
         """Mark processed"""
-        con = sqlite3.connect(str(self.path))
+        con = _connect(self.path)
         cur = con.cursor()
         cur.execute(
             "INSERT OR IGNORE INTO fill_processed(inst_id, trade_id, processed_ts_ms) VALUES (?,?,?)",
@@ -325,7 +338,7 @@ class FillStore:
 
     def list_unprocessed(self, limit: int = 2000) -> List[Dict[str, Any]]:
         """Return unprocessed fill records (joined with fill_processed)."""
-        con = sqlite3.connect(str(self.path))
+        con = _connect(self.path)
         cur = con.cursor()
         cur.execute(
             """
@@ -404,7 +417,7 @@ class FillStore:
             """
             params = [inst_id_u, oid]
 
-        con = sqlite3.connect(str(self.path))
+        con = _connect(self.path)
         cur = con.cursor()
         cur.execute(sql, tuple(params))
         rows = cur.fetchall()
@@ -432,7 +445,7 @@ class FillStore:
 
     def list_recent(self, limit: int = 50) -> List[FillRow]:
         """List recent"""
-        con = sqlite3.connect(str(self.path))
+        con = _connect(self.path)
         cur = con.cursor()
         cur.execute(
             """

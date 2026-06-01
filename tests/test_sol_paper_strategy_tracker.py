@@ -1500,8 +1500,12 @@ def test_sol_paper_strategy_tracker_reads_api_advisory(monkeypatch: pytest.Monke
     run_dir = tmp_path / "reports" / "runs" / "r_advisory_api"
     run_dir.mkdir(parents=True)
 
+    api_call_count = 0
+
     class FakeClient:
         def get_json(self, endpoint: str, params: dict | None = None) -> SimpleNamespace:
+            nonlocal api_call_count
+            api_call_count += 1
             return SimpleNamespace(
                 ok=True,
                 data={
@@ -2221,9 +2225,12 @@ def test_strategy_advisory_stale_local_uses_api_and_updates_cache(monkeypatch: p
             }
         ],
     )
+    api_call_count = 0
 
     class FakeClient:
         def get_json(self, endpoint: str, params: dict | None = None) -> SimpleNamespace:
+            nonlocal api_call_count
+            api_call_count += 1
             return SimpleNamespace(
                 ok=True,
                 data={
@@ -2297,8 +2304,12 @@ def test_alpha_factory_reader_uses_selected_api_advisory_rows(
         ],
     )
 
+    api_call_count = 0
+
     class FakeClient:
         def get_json(self, endpoint: str, params: dict | None = None) -> SimpleNamespace:
+            nonlocal api_call_count
+            api_call_count += 1
             return SimpleNamespace(
                 ok=True,
                 data={
@@ -2335,10 +2346,13 @@ def test_alpha_factory_reader_uses_selected_api_advisory_rows(
 
     health = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_source_health.csv")
     assert health[0]["selected_source"] == "api"
+    assert api_call_count == 1
     reader = _read_csv(tmp_path / "reports" / "summaries" / "alpha_factory_advisory_reader.csv")
     assert len(reader) == 1
     assert reader[0]["strategy_candidate"] == "v5.expanded_relative_strength_top1_shadow"
     assert reader[0]["advisory_source"] == "api"
+    assert reader[0]["selected_source"] == "api"
+    assert reader[0]["source_health_freshness_status"] == "fresh"
     assert reader[0]["alpha_factory_score"] == "0.77"
     assert reader[0]["advisory_source"] != "stale_local"
 

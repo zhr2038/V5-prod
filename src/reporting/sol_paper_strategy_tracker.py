@@ -327,6 +327,8 @@ STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = [
     "expires_before_generated_at",
     "expiry_corrected",
     "freshness_basis",
+    "freshness_status",
+    "freshness_reason",
     "advisory_source_lag_sec",
     "selected_source",
     "selected_source_is_stale",
@@ -422,6 +424,8 @@ ALPHA_FACTORY_ADVISORY_FIELDS = [
     "promotion_state",
     "alpha_factory_score",
     "advisory_source",
+    "selected_source",
+    "source_health_freshness_status",
     "advisory_fresh",
     "advisory_age_sec",
     "stale_reason",
@@ -1463,6 +1467,9 @@ def _advisory_source_health_row(
     ):
         freshness_inconsistency_warning = "freshness_inconsistency_warning"
     selected_is_stale = not bool(_normalize_bool(selected_meta.get("advisory_fresh")))
+    freshness_status = "stale" if selected_is_stale else "fresh"
+    if bool(selected_meta.get("expires_before_generated_at")):
+        freshness_status = "invalid_timestamp"
     suggested_fix = _selected_source_suggested_fix(
         selected_meta=selected_meta,
         local_meta=local_meta,
@@ -1488,6 +1495,8 @@ def _advisory_source_health_row(
         "expires_before_generated_at": bool(selected_meta.get("expires_before_generated_at")),
         "expiry_corrected": bool(selected_meta.get("expiry_corrected")),
         "freshness_basis": selected_meta.get("freshness_basis") or "",
+        "freshness_status": freshness_status,
+        "freshness_reason": selected_meta.get("stale_reason") or ("fresh" if freshness_status == "fresh" else freshness_status),
         "advisory_source_lag_sec": round(lag_sec, 3) if lag_sec is not None else "",
         "selected_source": selected_source,
         "selected_source_is_stale": selected_is_stale,
@@ -2336,8 +2345,16 @@ def _alpha_factory_advisory_rows(
     *,
     run_id: str,
     asof_ts_ms: int,
+    source_health_rows: Iterable[Mapping[str, Any]] = (),
 ) -> list[dict[str, Any]]:
     ts_utc = _iso_from_ms(asof_ts_ms)
+    source_health = next(iter(source_health_rows), {})
+    selected_source = str(source_health.get("selected_source") or "")
+    source_health_freshness_status = str(source_health.get("freshness_status") or "")
+    if not source_health_freshness_status and source_health:
+        source_health_freshness_status = (
+            "stale" if _normalize_bool(source_health.get("selected_source_is_stale")) else "fresh"
+        )
     out: list[dict[str, Any]] = []
     for row in advisory_rows:
         if not _is_alpha_factory_advisory(row):
@@ -2353,6 +2370,8 @@ def _alpha_factory_advisory_rows(
                 "promotion_state": row.get("promotion_state"),
                 "alpha_factory_score": row.get("alpha_factory_score"),
                 "advisory_source": row.get("advisory_source"),
+                "selected_source": selected_source or row.get("advisory_source"),
+                "source_health_freshness_status": source_health_freshness_status,
                 "advisory_fresh": row.get("advisory_fresh"),
                 "advisory_age_sec": row.get("advisory_age_sec"),
                 "stale_reason": row.get("stale_reason"),
@@ -3974,6 +3993,7 @@ def update_sol_paper_strategy_tracker(
         advisory_rows,
         run_id=str(getattr(audit, "run_id", "") or ""),
         asof_ts_ms=asof_ts_ms,
+        source_health_rows=advisory_result.source_health_rows,
     )
     alpha_factory_family_rows = _alpha_factory_family_summary_rows(
         alpha_factory_rows,

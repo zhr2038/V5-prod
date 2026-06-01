@@ -29,6 +29,9 @@ CONFLICT_FIELDS = (
     "future_8h_net_bps",
     "future_12h_net_bps",
     "future_24h_net_bps",
+    "max_future_net_bps",
+    "best_future_horizon_hours",
+    "material_profit_flag",
     "label_4h_status",
     "label_8h_status",
     "label_12h_status",
@@ -90,6 +93,18 @@ def aggregate_label_status(statuses: Iterable[str]) -> str:
     if completed:
         return "partial_complete"
     return "pending"
+
+
+def best_future_net_bps(futures: Mapping[int, Any]) -> tuple[Any, Any, bool]:
+    observed: list[tuple[int, float]] = []
+    for horizon, value in futures.items():
+        parsed = as_float(value)
+        if parsed is not None:
+            observed.append((int(horizon), parsed))
+    if not observed:
+        return "not_observable", "not_observable", False
+    best_horizon, best_value = max(observed, key=lambda item: item[1])
+    return best_value, best_horizon, best_value >= 50.0
 
 
 def is_final_score_alpha6_conflict_candidate(
@@ -238,8 +253,7 @@ def build_conflict_rows(
         label_statuses = {h: label_status_for_future(futures[h]) for h in (4, 8, 12, 24)}
         any_label_complete = any(status == "complete" for status in label_statuses.values())
         all_labels_complete = all(status == "complete" for status in label_statuses.values())
-        observed = [as_float(value) for value in futures.values()]
-        observed = [value for value in observed if value is not None]
+        max_future, best_horizon, material_profit = best_future_net_bps(futures)
         neg = negative_expectancy_stats.get(symbol)
         if isinstance(neg, Mapping):
             neg_net = first_observed(neg.get("net_expectancy_bps"), neg.get("negexp_net_expectancy_bps"))
@@ -273,6 +287,9 @@ def build_conflict_rows(
                 "future_8h_net_bps": futures[8],
                 "future_12h_net_bps": futures[12],
                 "future_24h_net_bps": futures[24],
+                "max_future_net_bps": max_future,
+                "best_future_horizon_hours": best_horizon,
+                "material_profit_flag": str(material_profit).lower(),
                 "label_4h_status": label_statuses[4],
                 "label_8h_status": label_statuses[8],
                 "label_12h_status": label_statuses[12],
@@ -280,7 +297,7 @@ def build_conflict_rows(
                 "any_label_complete": str(any_label_complete).lower(),
                 "all_labels_complete": str(all_labels_complete).lower(),
                 "label_status": aggregate_label_status(label_statuses.values()),
-                "missed_profit_flag": str(bool(observed and max(observed) > 0.0)).lower(),
+                "missed_profit_flag": str(material_profit).lower(),
             }
         )
     out.sort(key=lambda item: (str(item.get("ts_utc") or ""), str(item.get("symbol") or "")))
