@@ -40,8 +40,6 @@ from .permissions import normalize_permission
 
 
 STRICT_GATE_MODES = {"cost_only", "permission_only", "enforce"}
-_COST_CACHE_TRACE_KEYS = {"event_id", "request_id", "run_id", "ts_utc"}
-_COST_CACHE_NON_SEMANTIC_KEYS = _COST_CACHE_TRACE_KEYS | {"expected_edge_bps"}
 
 
 @dataclass
@@ -427,12 +425,29 @@ class QuantLabClient:
     def _cost_semantic_cache_key(
         params: Mapping[str, Any],
     ) -> Tuple[str, Tuple[Tuple[str, str], ...]]:
-        clean = {
-            str(k): str(v)
-            for k, v in dict(params or {}).items()
-            if v is not None and str(k) not in _COST_CACHE_NON_SEMANTIC_KEYS
-        }
-        return "/v1/costs/estimate", tuple(sorted(clean.items()))
+        raw = dict(params or {})
+        symbol = symbol_to_quant_lab_symbol(
+            raw.get("normalized_symbol")
+            or raw.get("symbol")
+            or raw.get("request_symbol")
+            or ""
+        )
+        try:
+            notional = round(float(raw.get("notional_usdt") or 0.0), 2)
+        except (TypeError, ValueError):
+            notional = 0.0
+        semantic = (
+            ("symbol", symbol),
+            ("regime", str(raw.get("regime") or raw.get("requested_regime") or "normal").strip()),
+            ("notional_bucket", str(raw.get("notional_bucket") or "").strip()),
+            ("notional_usdt_rounded", f"{notional:.2f}"),
+            ("quantile", str(raw.get("quantile") or raw.get("requested_quantile") or "p75").strip()),
+            ("side", str(raw.get("side") or "").strip().lower()),
+            ("instrument_type", str(raw.get("instrument_type") or "spot").strip().lower()),
+            ("venue", str(raw.get("venue") or "OKX").strip().upper()),
+            ("strategy_id", str(raw.get("strategy_id") or "v5").strip()),
+        )
+        return "/v1/costs/estimate", semantic
 
     def _cached_cost_response(
         self,

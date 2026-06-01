@@ -154,7 +154,7 @@ def test_cost_semantic_cache_ignores_trace_fields(tmp_path: Path) -> None:
     )
     client.run_id = "run-2"
     second = client.estimate_cost(
-        symbol="BNB/USDT",
+        symbol="BNB-USDT",
         regime="normal",
         notional_usdt=200,
         quantile="p75",
@@ -176,6 +176,50 @@ def test_cost_semantic_cache_ignores_trace_fields(tmp_path: Path) -> None:
     assert rows[1]["cached"] is True
     assert rows[1]["request_id"] == "cost-2"
     assert rows[1]["event_id"] == "event-2"
+
+
+def test_cost_semantic_cache_normalizes_symbol_field_variants() -> None:
+    first = QuantLabClient._cost_semantic_cache_key(
+        {
+            "symbol": "BNB/USDT",
+            "regime": "normal",
+            "notional_usdt": "200.004",
+            "quantile": "p75",
+            "side": "BUY",
+            "venue": "okx",
+            "instrument_type": "SPOT",
+            "strategy_id": "v5",
+            "request_id": "cost-1",
+        }
+    )
+    second = QuantLabClient._cost_semantic_cache_key(
+        {
+            "request_symbol": "BNB-USDT",
+            "requested_regime": "normal",
+            "notional_usdt": "200.004",
+            "requested_quantile": "p75",
+            "side": "buy",
+            "venue": "OKX",
+            "instrument_type": "spot",
+            "strategy_id": "v5",
+            "event_id": "event-2",
+        }
+    )
+    third = QuantLabClient._cost_semantic_cache_key(
+        {
+            "normalized_symbol": "BNB-USDT",
+            "regime": "normal",
+            "notional_usdt": "200.004",
+            "quantile": "p75",
+            "side": "buy",
+            "venue": "OKX",
+            "instrument_type": "spot",
+            "strategy_id": "v5",
+            "ts_utc": "2026-05-31T10:00:00Z",
+        }
+    )
+
+    assert first == second == third
 
 
 def test_get_json_uses_etag_after_ttl_expiry(tmp_path: Path) -> None:
