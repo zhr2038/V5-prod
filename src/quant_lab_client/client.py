@@ -6,6 +6,7 @@ import warnings
 from ipaddress import ip_address
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
 from urllib.parse import urljoin, urlparse
@@ -231,6 +232,21 @@ def summarize_response(payload: Any) -> Dict[str, Any]:
     return sanitize_quant_lab_obj(summary)
 
 
+def _permission_expires_epoch(value: Any) -> Optional[float]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
 @dataclass
 class QuantLabResponse:
     endpoint: str
@@ -271,6 +287,9 @@ class QuantLabClient:
     run_id: Optional[str] = None
     phase: str = "live"
     _cache: TTLCache = field(init=False, repr=False)
+    _cache_headers: Dict[Tuple[str, Tuple[Tuple[str, str], ...]], Dict[str, str]] = field(init=False, repr=False)
+    _stale_cache: Dict[Tuple[str, Tuple[Tuple[str, str], ...]], Any] = field(init=False, repr=False)
+    _permission_cache: Dict[Tuple[str, str], Tuple[float, RiskPermission]] = field(init=False, repr=False)
     token_auth_disabled_reason: Optional[str] = field(default=None, init=False)
     api_env_path_present: bool = False
     api_env_secure_permissions: Optional[bool] = None
@@ -293,6 +312,9 @@ class QuantLabClient:
         self.cache_ttl_seconds = max(0, int(self.cache_ttl_seconds or 0))
         self.http_client = self.http_client or requests.Session()
         self._cache = TTLCache(ttl_seconds=self.cache_ttl_seconds)
+        self._cache_headers = {}
+        self._stale_cache = {}
+        self._permission_cache = {}
 
     @classmethod
     def from_config(
@@ -378,10 +400,12 @@ class QuantLabClient:
         self.token_auth_disabled_reason = "public_http_token_stripped"  # noqa: S105 - status reason, not a secret
         warnings.warn(message, RuntimeWarning, stacklevel=2)
 
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self, *, etag: Optional[str] = None) -> Dict[str, str]:
         headers = {"Accept": "application/json"}
         if self.api_token:
             headers["Authorization"] = f"Bearer {self.api_token}"
+        if etag:
+            headers["If-None-Match"] = str(etag)
         return headers
 
     @staticmethod
@@ -430,6 +454,8 @@ class QuantLabClient:
         key = self._cache_key(endpoint, clean_params)
         cached_value = self._cache.get(key)
         if cached_value is not None:
+            cached_headers = dict(self._cache_headers.get(key) or {})
+            cached_headers["x-quant-lab-client-cache-hit"] = "true"
             response = QuantLabResponse(
                 endpoint=endpoint,
                 ok=True,
@@ -437,7 +463,7 @@ class QuantLabClient:
                 data=cached_value,
                 latency_ms=0.0,
                 cached=True,
-                headers={"x-quant-lab-client-cache-hit": "true"},
+                headers=cached_headers,
             )
             self._log_request(
                 endpoint_path=endpoint,
@@ -460,30 +486,59 @@ class QuantLabClient:
         for attempt in range(attempts):
             started = time.perf_counter()
             try:
+                cached_headers = self._cache_headers.get(key) or {}
+                request_etag = cached_headers.get("etag")
                 resp = self.http_client.get(
                     url,
                     params=clean_params,
-                    headers=self._headers(),
+                    headers=self._headers(etag=request_etag),
                     timeout=self.timeout_seconds,
                 )
                 status_code = int(getattr(resp, "status_code", 0) or 0)
-                try:
-                    data = resp.json()
-                except ValueError:
-                    data = {"text": str(getattr(resp, "text", ""))[:500]}
+                response_headers = {
+                    str(header_key).lower(): str(value)
+                    for header_key, value in dict(getattr(resp, "headers", {}) or {}).items()
+                }
                 latency_ms = round((time.perf_counter() - started) * 1000.0, 3)
-                if 200 <= status_code < 300:
+                if status_code == 304 and key in self._stale_cache:
+                    data = self._stale_cache[key]
                     self._cache.set(key, data)
+                    self._cache_headers[key] = {**cached_headers, **response_headers}
                     response = QuantLabResponse(
                         endpoint=endpoint,
                         ok=True,
                         status_code=status_code,
                         data=data,
                         latency_ms=latency_ms,
-                        headers={
-                            str(key).lower(): str(value)
-                            for key, value in dict(getattr(resp, "headers", {}) or {}).items()
-                        },
+                        cached=True,
+                        headers={**self._cache_headers.get(key, {}), "x-quant-lab-client-cache-hit": "true"},
+                    )
+                    self._log_request(
+                        endpoint_path=endpoint,
+                        params=clean_params,
+                        status_code=status_code,
+                        latency_ms=latency_ms,
+                        success=True,
+                        error_type=None,
+                        cached=True,
+                        response_summary=summarize_response(data),
+                    )
+                    return response
+                try:
+                    data = resp.json()
+                except ValueError:
+                    data = {"text": str(getattr(resp, "text", ""))[:500]}
+                if 200 <= status_code < 300:
+                    self._cache.set(key, data)
+                    self._stale_cache[key] = data
+                    self._cache_headers[key] = response_headers
+                    response = QuantLabResponse(
+                        endpoint=endpoint,
+                        ok=True,
+                        status_code=status_code,
+                        data=data,
+                        latency_ms=latency_ms,
+                        headers=response_headers,
                     )
                     self._log_request(
                         endpoint_path=endpoint,
@@ -549,6 +604,10 @@ class QuantLabClient:
     ) -> RiskPermission:
         strategy_text = str(strategy or "").strip()
         version_text = str(version or "").strip()
+        permission_cache_key = (strategy_text, version_text)
+        cached_permission = self._permission_cache.get(permission_cache_key)
+        if cached_permission is not None and cached_permission[0] > time.time():
+            return cached_permission[1]
         permission_request_id = str(request_id or "").strip() or f"{self.run_id or 'v5'}:permission:{strategy_text}:{version_text}"
         request_event = normalize_quant_lab_event(
             {
@@ -578,6 +637,9 @@ class QuantLabClient:
         )
         permission = RiskPermission.from_payload(response.data)
         permission.permission = normalize_permission(permission.permission)
+        expires_epoch = _permission_expires_epoch(permission.expires_at)
+        if expires_epoch is not None and expires_epoch > time.time():
+            self._permission_cache[permission_cache_key] = (expires_epoch, permission)
         return permission
 
     def estimate_cost(

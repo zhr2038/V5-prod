@@ -684,6 +684,7 @@ def _default_advisory_paths() -> list[str]:
 
 def _default_advisory_api_paths() -> list[str]:
     return [
+        "/v1/strategy-opportunity-advisory/v5-compact",
         "/v1/strategy-opportunity-advisory",
         "/v1/strategy_opportunity_advisory",
         "/v1/reports/strategy-opportunity-advisory",
@@ -1038,7 +1039,10 @@ def _read_strategy_opportunity_advisory_api(
     }
     for endpoint in endpoints:
         try:
-            response = client.get_json(str(endpoint), params={"format": "json"})
+            response = client.get_json(
+                str(endpoint),
+                params={"format": "json", "fields": "minimal", "latest_only": "true"},
+            )
         except Exception:
             continue
         if not bool(getattr(response, "ok", False)):

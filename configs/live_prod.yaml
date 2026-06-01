@@ -274,6 +274,7 @@ diagnostics:
     - reports/quant_lab/latest_bundle.tar.gz
   quant_lab_strategy_opportunity_advisory_api_enabled: true
   quant_lab_strategy_opportunity_advisory_api_paths:
+    - /v1/strategy-opportunity-advisory/v5-compact
     - /v1/strategy-opportunity-advisory
     - /v1/strategy_opportunity_advisory
     - /v1/reports/strategy-opportunity-advisory

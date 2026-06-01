@@ -22,10 +22,11 @@ def _resolve_path(path: str | Path) -> Path:
 
 
 def _connect(path: Path) -> sqlite3.Connection:
-    con = sqlite3.connect(str(path), timeout=30.0)
+    con = sqlite3.connect(str(path), timeout=5.0)
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA synchronous=NORMAL")
-    con.execute("PRAGMA busy_timeout=30000")
+    con.execute("PRAGMA wal_autocheckpoint=1000")
+    con.execute("PRAGMA busy_timeout=5000")
     return con
 
 

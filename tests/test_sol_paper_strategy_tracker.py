@@ -1540,7 +1540,7 @@ def test_sol_paper_strategy_tracker_reads_api_advisory(monkeypatch: pytest.Monke
 
     assert result["advisory_rows"] == 1
     advisory = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_reader.csv")
-    assert advisory[0]["source_path"] == "api:/v1/strategy-opportunity-advisory"
+    assert advisory[0]["source_path"] == "api:/v1/strategy-opportunity-advisory/v5-compact"
     assert advisory[0]["strategy_candidate"] == "f4_volume_swing"
     assert advisory[0]["response_action"] == "paper_tracking"
 

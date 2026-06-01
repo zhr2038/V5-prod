@@ -21,7 +21,8 @@ def test_order_store_uses_wal_and_busy_timeout(tmp_path):
 
     assert str(_pragma(db, "journal_mode")).lower() == "wal"
     with closing(connect_order_store(db)) as con:
-        assert int(_connection_pragma(con, "busy_timeout")) == 30000
+        assert int(_connection_pragma(con, "busy_timeout")) == 5000
+        assert int(_connection_pragma(con, "wal_autocheckpoint")) == 1000
 
 
 def test_fill_store_uses_wal_and_busy_timeout(tmp_path):
@@ -31,4 +32,5 @@ def test_fill_store_uses_wal_and_busy_timeout(tmp_path):
 
     assert str(_pragma(db, "journal_mode")).lower() == "wal"
     with closing(connect_fill_store(db)) as con:
-        assert int(_connection_pragma(con, "busy_timeout")) == 30000
+        assert int(_connection_pragma(con, "busy_timeout")) == 5000
+        assert int(_connection_pragma(con, "wal_autocheckpoint")) == 1000

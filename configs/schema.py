@@ -1543,6 +1543,7 @@ class DiagnosticsConfig(BaseModel):
     )
     quant_lab_strategy_opportunity_advisory_api_paths: List[str] = Field(
         default_factory=lambda: [
+            "/v1/strategy-opportunity-advisory/v5-compact",
             "/v1/strategy-opportunity-advisory",
             "/v1/strategy_opportunity_advisory",
             "/v1/reports/strategy-opportunity-advisory",

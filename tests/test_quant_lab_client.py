@@ -11,10 +11,11 @@ from src.quant_lab_client.exceptions import QuantLabValidationError
 
 
 class _Response:
-    def __init__(self, payload: dict, status_code: int = 200) -> None:
+    def __init__(self, payload: dict, status_code: int = 200, headers: dict | None = None) -> None:
         self._payload = payload
         self.status_code = status_code
         self.text = json.dumps(payload)
+        self.headers = headers or {}
 
     def json(self):
         return self._payload
@@ -125,6 +126,61 @@ def test_cost_request_normalizes_concatenated_usdt_symbol(tmp_path: Path) -> Non
     assert cost.symbol == "BNB-USDT"
     assert cost.total_cost_bps_p75 == 1.2
     assert cost.required_edge_bps == 1.8
+
+
+def test_get_json_uses_etag_after_ttl_expiry(tmp_path: Path) -> None:
+    class ETagHTTP(_HTTP):
+        def get(self, url, params=None, headers=None, timeout=None):
+            self.calls.append({"method": "GET", "url": url, "params": params, "headers": headers, "timeout": timeout})
+            if headers and headers.get("If-None-Match") == '"abc"':
+                return _Response({}, status_code=304, headers={"ETag": '"abc"'})
+            return _Response([{"strategy_candidate": "v5.f4_volume_expansion_entry"}], headers={"ETag": '"abc"'})
+
+    http = ETagHTTP()
+    client = QuantLabClient(
+        base_url="https://quant-lab.local",
+        http_client=http,
+        cache_ttl_seconds=0,
+        request_log_path=tmp_path / "requests.jsonl",
+    )
+
+    first = client.get_json("/v1/strategy-opportunity-advisory/v5-compact")
+    second = client.get_json("/v1/strategy-opportunity-advisory/v5-compact")
+
+    assert first.data == [{"strategy_candidate": "v5.f4_volume_expansion_entry"}]
+    assert second.data == first.data
+    assert second.cached is True
+    assert second.status_code == 304
+    assert http.calls[1]["headers"]["If-None-Match"] == '"abc"'
+
+
+def test_live_permission_cache_uses_expires_at(tmp_path: Path) -> None:
+    class PermissionHTTP(_HTTP):
+        def get(self, url, params=None, headers=None, timeout=None):
+            self.calls.append({"method": "GET", "url": url, "params": params, "headers": headers, "timeout": timeout})
+            return _Response(
+                {
+                    "strategy": "v5",
+                    "version": "5.0.0",
+                    "permission": "ALLOW",
+                    "reasons": [],
+                    "expires_at": "2999-01-01T00:00:00Z",
+                }
+            )
+
+    http = PermissionHTTP()
+    client = QuantLabClient(
+        base_url="https://quant-lab.local",
+        http_client=http,
+        request_log_path=tmp_path / "requests.jsonl",
+    )
+
+    first = client.get_live_permission(strategy="v5", version="5.0.0", request_id="one")
+    second = client.get_live_permission(strategy="v5", version="5.0.0", request_id="two")
+
+    assert first.permission == "ALLOW"
+    assert second.permission == "ALLOW"
+    assert len(http.calls) == 1
 
 
 @pytest.mark.parametrize("symbol", ["OKX:BNB-USDT", "okx:bnb-usdt", "BNB/USDT", "BNB-USDT", "BNBUSDT"])
