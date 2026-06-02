@@ -39,6 +39,8 @@ BNB_SYMBOL = "BNB/USDT"
 ETH_F3_DOMINANT_STRATEGY_ID = "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1"
 BNB_F3_DOMINANT_STRATEGY_ID = "BNB_F3_DOMINANT_ENTRY_PAPER_V1"
 BNB_RISK_ON_BUY_STRATEGY_ID = "BNB_RISK_ON_BUY_PAPER_V1"
+HYPE_EXPANDED_UNIVERSE_STRATEGY_ID = "HYPE_EXPANDED_UNIVERSE_PAPER_V1"
+OKB_EXPANDED_UNIVERSE_STRATEGY_ID = "OKB_EXPANDED_UNIVERSE_PAPER_V1"
 ETH_F3_DOMINANT_MIN_48H_COMPLETE_COUNT = 30
 ETH_F3_ALPHA6_NOT_BUY_REASON = "eth_f3_alpha6_side_not_buy_no_new_entry"
 ETH_F3_DOMINANT_LIVE_BLOCK_REASONS = [
@@ -49,6 +51,10 @@ ETH_F3_DOMINANT_LIVE_BLOCK_REASONS = [
 BNB_PAPER_LIVE_BLOCK_REASONS = [
     "bnb_paper_only_no_live",
     "bnb_negative_expectancy_recovery_research_only",
+]
+EXPANDED_UNIVERSE_PAPER_LIVE_BLOCK_REASONS = [
+    "expanded_universe_paper_only_no_live",
+    "not_in_v5_live_universe",
 ]
 BNB_ALLOWED_PAPER_REGIMES = {"TREND_UP", "ALT_IMPULSE", "TRENDING"}
 DEFAULT_HORIZONS = [4, 8, 12, 24, 48, 72]
@@ -132,6 +138,38 @@ DEFAULT_PAPER_STRATEGY_CONFIGS = [
         "allowed_current_regimes": sorted(BNB_ALLOWED_PAPER_REGIMES),
         "extra_live_block_reasons": list(BNB_PAPER_LIVE_BLOCK_REASONS),
     },
+    {
+        "strategy_id": HYPE_EXPANDED_UNIVERSE_STRATEGY_ID,
+        "experiment_name": "v5.hype_expanded_universe_paper",
+        "source_strategy_candidates": [],
+        "allowed_block_reasons": [],
+        "symbol": "HYPE/USDT",
+        "primary_horizon_hours": 24,
+        "require_protect_level": False,
+        "require_no_cooldown": False,
+        "require_alpha6_buy": False,
+        "expanded_universe_paper_only": True,
+        "required_expanded_universe_maturity_state": "PAPER_READY",
+        "require_cost_source_not_global_default": True,
+        "require_zero_live_notional": True,
+        "extra_live_block_reasons": list(EXPANDED_UNIVERSE_PAPER_LIVE_BLOCK_REASONS),
+    },
+    {
+        "strategy_id": OKB_EXPANDED_UNIVERSE_STRATEGY_ID,
+        "experiment_name": "v5.okb_expanded_universe_paper",
+        "source_strategy_candidates": [],
+        "allowed_block_reasons": [],
+        "symbol": "OKB/USDT",
+        "primary_horizon_hours": 24,
+        "require_protect_level": False,
+        "require_no_cooldown": False,
+        "require_alpha6_buy": False,
+        "expanded_universe_paper_only": True,
+        "required_expanded_universe_maturity_state": "PAPER_READY",
+        "require_cost_source_not_global_default": True,
+        "require_zero_live_notional": True,
+        "extra_live_block_reasons": list(EXPANDED_UNIVERSE_PAPER_LIVE_BLOCK_REASONS),
+    },
 ]
 
 PAPER_RUN_FIELDS = [
@@ -139,6 +177,7 @@ PAPER_RUN_FIELDS = [
     "experiment_name",
     "enabled_shadow_only",
     "enable_live_experiment",
+    "live_symbols_unchanged",
     "run_id",
     "ts_utc",
     "paper_date",
@@ -210,6 +249,7 @@ PAPER_RUN_FIELDS = [
     "advisory_max_live_notional_usdt_ignored",
     "advisory_live_block_reasons",
     "enable_live_small_from_quant_lab",
+    "live_order_effect",
     "proposal_present",
     "proposal_source",
     "label_status",
@@ -273,6 +313,8 @@ STRATEGY_ADVISORY_FIELDS = [
     "source_path",
     "advisory_source",
     "advisory_fresh",
+    "freshness_status",
+    "stale_reason",
     "advisory_age_sec",
     "advisory_contract_match",
     "stale_advisory_used",
@@ -294,6 +336,11 @@ STRATEGY_ADVISORY_FIELDS = [
     "horizon_hours",
     "sample_count",
     "complete_sample_count",
+    "expanded_universe_maturity_state",
+    "cost_source",
+    "cost_source_quality",
+    "cost_bps",
+    "cost_model_version",
     "advisory_status",
     "advisory_reason",
     "max_paper_notional_usdt",
@@ -374,6 +421,11 @@ EXPANDED_UNIVERSE_ADVISORY_FIELDS = [
     "horizon_hours",
     "sample_count",
     "complete_sample_count",
+    "expanded_universe_maturity_state",
+    "cost_source",
+    "cost_source_quality",
+    "cost_bps",
+    "cost_model_version",
     "response_action",
     "negative_advisory",
     "paper_tracking_allowed",
@@ -801,6 +853,18 @@ def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict
         "complete_sample_count": _normalize_float(row.get("complete_sample_count")),
         "advisory_status": str(_advisory_first(row, ("status", "readiness_status", "decision")) or "").strip(),
         "advisory_reason": str(_advisory_first(row, ("reason", "block_reason", "live_block_reason", "live_block_reasons", "notes")) or "").strip(),
+        "expanded_universe_maturity_state": str(
+            _advisory_first(row, ("expanded_universe_maturity_state", "maturity_state", "readiness_state"))
+            or ""
+        ).strip(),
+        "cost_source": str(_advisory_first(row, ("cost_source", "latest_cost_source", "cost_model_source")) or "").strip(),
+        "cost_source_quality": str(_advisory_first(row, ("cost_source_quality", "cost_quality")) or "").strip(),
+        "cost_quality": str(_advisory_first(row, ("cost_quality", "cost_source_quality")) or "").strip(),
+        "cost_bps": _normalize_float(
+            _advisory_first(row, ("cost_bps", "selected_total_cost_bps", "roundtrip_all_in_cost_bps"))
+        ),
+        "selected_total_cost_bps": _normalize_float(row.get("selected_total_cost_bps")),
+        "cost_model_version": str(_advisory_first(row, ("cost_model_version", "cost_contract_version")) or "").strip(),
         "max_paper_notional_usdt": _normalize_float(row.get("max_paper_notional_usdt")),
         "max_live_notional_usdt": _normalize_float(row.get("max_live_notional_usdt")),
         "live_block_reasons": str(_advisory_first(row, ("live_block_reasons", "live_block_reason")) or "").strip(),
@@ -1417,6 +1481,58 @@ def _annotate_advisory_rows(rows: list[dict[str, Any]], meta: Mapping[str, Any])
     for row in rows:
         payload = dict(row)
         payload.update(meta)
+        out.append(payload)
+    return out
+
+
+def _selected_advisory_freshness_meta(source_health_rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    source_health = next(iter(source_health_rows), {})
+    if not source_health:
+        return {}
+    selected_source = str(source_health.get("selected_source") or source_health.get("advisory_source") or "")
+    freshness_status = str(source_health.get("freshness_status") or "").strip().lower()
+    selected_is_stale = _normalize_bool(source_health.get("selected_source_is_stale"))
+    if not freshness_status and selected_is_stale is not None:
+        freshness_status = "stale" if selected_is_stale else "fresh"
+    advisory_fresh: Optional[bool]
+    if freshness_status == "fresh":
+        advisory_fresh = True
+    elif freshness_status in {"stale", "invalid_timestamp"}:
+        advisory_fresh = False
+    elif selected_is_stale is not None:
+        advisory_fresh = not bool(selected_is_stale)
+    else:
+        advisory_fresh = None
+    stale_reason = str(source_health.get("stale_reason") or source_health.get("freshness_reason") or "").strip()
+    if advisory_fresh is True:
+        stale_reason = ""
+    return {
+        "advisory_source": selected_source,
+        "selected_source": selected_source,
+        "freshness_status": freshness_status,
+        "advisory_fresh": advisory_fresh,
+        "stale_reason": stale_reason,
+    }
+
+
+def _normalize_selected_advisory_rows(
+    rows: Iterable[Mapping[str, Any]],
+    source_health_rows: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    meta = _selected_advisory_freshness_meta(source_health_rows)
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        payload = dict(row)
+        if meta.get("advisory_source"):
+            payload["advisory_source"] = meta["advisory_source"]
+        if meta.get("selected_source"):
+            payload["selected_source"] = meta["selected_source"]
+        if meta.get("freshness_status"):
+            payload["freshness_status"] = meta["freshness_status"]
+        if meta.get("advisory_fresh") is not None:
+            payload["advisory_fresh"] = bool(meta["advisory_fresh"])
+        if meta.get("stale_reason") is not None:
+            payload["stale_reason"] = meta.get("stale_reason") or ""
         out.append(payload)
     return out
 
@@ -2188,6 +2304,8 @@ def _advisory_summary_rows(
                 "source_path": row.get("source_path"),
                 "advisory_source": fields["advisory_source"],
                 "advisory_fresh": fields["advisory_fresh"],
+                "freshness_status": row.get("freshness_status"),
+                "stale_reason": row.get("stale_reason"),
                 "advisory_age_sec": fields["advisory_age_sec"],
                 "advisory_contract_match": fields["advisory_contract_match"],
                 "stale_advisory_used": fields["stale_advisory_used"],
@@ -2209,6 +2327,11 @@ def _advisory_summary_rows(
                 "horizon_hours": row.get("horizon_hours"),
                 "sample_count": row.get("sample_count"),
                 "complete_sample_count": row.get("complete_sample_count"),
+                "expanded_universe_maturity_state": row.get("expanded_universe_maturity_state"),
+                "cost_source": row.get("cost_source"),
+                "cost_source_quality": row.get("cost_source_quality"),
+                "cost_bps": row.get("cost_bps"),
+                "cost_model_version": row.get("cost_model_version"),
                 "advisory_status": row.get("advisory_status"),
                 "advisory_reason": row.get("advisory_reason"),
                 "max_paper_notional_usdt": row.get("max_paper_notional_usdt"),
@@ -2311,6 +2434,11 @@ def _expanded_universe_advisory_rows(
                 "horizon_hours": row.get("horizon_hours"),
                 "sample_count": row.get("sample_count"),
                 "complete_sample_count": row.get("complete_sample_count"),
+                "expanded_universe_maturity_state": row.get("expanded_universe_maturity_state"),
+                "cost_source": row.get("cost_source"),
+                "cost_source_quality": row.get("cost_source_quality"),
+                "cost_bps": row.get("cost_bps"),
+                "cost_model_version": row.get("cost_model_version"),
                 "response_action": response_action,
                 "negative_advisory": fields["advisory_negative"],
                 "paper_tracking_allowed": paper_allowed,
@@ -3314,6 +3442,138 @@ def _matches_strategy(
     return bool(qualifies), reason, diagnostics
 
 
+def _expanded_paper_advisory_record(
+    *,
+    spec: Mapping[str, Any],
+    advisory: Mapping[str, Any],
+    advisory_fields: Mapping[str, Any],
+    audit: DecisionAudit,
+    ts_utc: str,
+    asof_ts_ms: int,
+    rt_cost_bps: float,
+    required_days: int,
+    required_entry_days: int,
+    required_coverage: float,
+    allowed_cost_sources: set[str],
+    market_data_1h: Dict[str, MarketSeries],
+    cache_dir: Path,
+    cached: dict[str, list[dict[str, float | int]]],
+    top_of_book: Mapping[str, Any] | None,
+) -> Optional[dict[str, Any]]:
+    if not _spec_bool(spec, "expanded_universe_paper_only", False):
+        return None
+    if not advisory:
+        return None
+    if _expanded_universe_type(advisory) != "expanded_paper":
+        return None
+    if str(advisory_fields.get("advisory_response_action") or "") != "paper_tracking":
+        return None
+    symbol = _strategy_symbol(spec)
+    if _symbol_text(advisory.get("symbol")) != symbol:
+        return None
+    required_maturity = str(spec.get("required_expanded_universe_maturity_state") or "").strip().upper()
+    maturity = str(
+        advisory.get("expanded_universe_maturity_state")
+        or advisory.get("maturity_state")
+        or advisory.get("decision")
+        or ""
+    ).strip().upper()
+    if required_maturity and maturity != required_maturity:
+        return None
+    if _spec_bool(spec, "require_zero_live_notional", False):
+        live_notional = _normalize_float(advisory.get("max_live_notional_usdt"))
+        if live_notional is not None and live_notional > 0.0:
+            return None
+    cost_source = str(advisory.get("cost_source") or advisory.get("latest_cost_source") or "local_estimate").strip()
+    if _spec_bool(spec, "require_cost_source_not_global_default", False):
+        if "global_default" in cost_source.lower():
+            return None
+    estimated_cost = _normalize_float(
+        advisory.get("estimated_cost_bps")
+        or advisory.get("cost_bps")
+        or advisory.get("selected_total_cost_bps")
+    )
+    if estimated_cost is None:
+        estimated_cost = float(rt_cost_bps)
+    entry_px = _entry_px(
+        symbol=symbol,
+        entry_ts_ms=asof_ts_ms,
+        market_data_1h=market_data_1h,
+        cache_dir=cache_dir,
+        cached=cached,
+    )
+    quote_context = _quote_context(
+        symbol=symbol,
+        row=advisory,
+        top_of_book=top_of_book,
+        entry_px=entry_px,
+    )
+    primary_horizon = _primary_horizon_for_spec(spec, DEFAULT_HORIZONS)
+    would_size = _normalize_float(advisory.get("max_paper_notional_usdt"))
+    return {
+        "strategy_id": str(spec.get("strategy_id") or ""),
+        "experiment_name": str(spec.get("experiment_name") or ""),
+        "enabled_shadow_only": True,
+        "enable_live_experiment": False,
+        "live_symbols_unchanged": True,
+        "run_id": str(getattr(audit, "run_id", "") or advisory.get("run_id") or ""),
+        "ts_utc": ts_utc,
+        "entry_ts_ms": asof_ts_ms,
+        "paper_date": ts_utc[:10],
+        "symbol": symbol,
+        "source_strategy_candidate": str(advisory.get("strategy_candidate") or ""),
+        "candidate_id": str(advisory.get("candidate_id") or f"expanded_paper_{spec.get('strategy_id')}_{getattr(audit, 'run_id', '')}"),
+        "final_decision": "paper_advisory",
+        "no_sample_reason": "",
+        "sol_candidate_present": True,
+        "risk_level": str(advisory.get("risk_level") or ""),
+        "original_block_reason": str(advisory.get("live_block_reasons") or advisory.get("advisory_reason") or ""),
+        "cooldown_active": False,
+        "risk_off": False,
+        "skip_reason": "",
+        "entry_reason": str(spec.get("experiment_name") or "expanded_universe_paper"),
+        "experiment_reason": "expanded_universe_paper_tracking",
+        "would_enter": True,
+        "would_exit": False,
+        "would_exit_time": _iso_from_ms(asof_ts_ms + primary_horizon * 3600 * 1000) if asof_ts_ms > 0 else "",
+        "would_exit_rule": f"paper_time_horizon_{primary_horizon}h",
+        "expected_exit_horizon": f"{primary_horizon}h",
+        "would_size_notional": would_size,
+        "would_size_usdt": would_size,
+        "entry_px": entry_px,
+        "arrival_bid": quote_context.get("arrival_bid"),
+        "arrival_ask": quote_context.get("arrival_ask"),
+        "arrival_mid": quote_context.get("arrival_mid"),
+        "estimated_spread_bps": quote_context.get("estimated_spread_bps"),
+        "expected_order_type": quote_context.get("expected_order_type"),
+        "estimated_fill_px": quote_context.get("estimated_fill_px"),
+        "final_score": None,
+        "alpha6_score": _normalize_float(advisory.get("alpha6_score")),
+        "alpha6_side": str(advisory.get("alpha6_side") or ""),
+        "f4_volume_expansion": _normalize_float(advisory.get("f4_volume_expansion")),
+        "f4_threshold": None,
+        "f5_rsi_trend_confirm": _normalize_float(advisory.get("f5_rsi_trend_confirm")),
+        "cost_source": cost_source,
+        "cost_source_quality": str(advisory.get("cost_source_quality") or advisory.get("cost_quality") or cost_source),
+        "estimated_cost_bps": float(estimated_cost),
+        "cost_model_version": str(advisory.get("cost_model_version") or ""),
+        "cost_source_live_ready": _cost_source_live_ready({"cost_source": cost_source}, allowed_cost_sources),
+        "slippage_covered": _slippage_observed(quote_context),
+        "required_paper_days": required_days,
+        "required_entry_days": required_entry_days,
+        "required_slippage_coverage": required_coverage,
+        "rt_cost_bps": rt_cost_bps,
+        "primary_horizon_hours": primary_horizon,
+        "extra_live_block_reasons": list(spec.get("extra_live_block_reasons") or []),
+        "live_order_effect": "read_only_no_live_order",
+        "proposal_present": False,
+        "proposal_source": "",
+        **advisory_fields,
+        "label_status": "pending",
+        "label_not_observable_reason": "",
+    }
+
+
 def _best_candidate_for_strategy(
     *,
     candidate_rows: Iterable[Mapping[str, Any]],
@@ -3377,6 +3637,7 @@ def _heartbeat_record(
         "experiment_name": str(spec.get("experiment_name") or ""),
         "enabled_shadow_only": True,
         "enable_live_experiment": False,
+        "live_symbols_unchanged": True,
         "run_id": str(getattr(audit, "run_id", "") or ""),
         "ts_utc": ts_utc,
         "entry_ts_ms": asof_ts_ms,
@@ -3434,6 +3695,7 @@ def _heartbeat_record(
         "rt_cost_bps": rt_cost_bps,
         "primary_horizon_hours": _parse_horizon_hours(spec.get("primary_horizon_hours")),
         "extra_live_block_reasons": list(spec.get("extra_live_block_reasons") or []),
+        "live_order_effect": "read_only_no_live_order",
         "proposal_present": bool(spec.get("proposal_present", False)),
         "proposal_source": str(spec.get("proposal_source") or ""),
         **advisory_fields,
@@ -3520,6 +3782,7 @@ def _collect_candidates(
                     "experiment_name": str(spec.get("experiment_name") or ""),
                     "enabled_shadow_only": enabled_shadow_only,
                     "enable_live_experiment": enable_live_experiment,
+                    "live_symbols_unchanged": True,
                     "run_id": str(row.get("run_id") or getattr(audit, "run_id", "") or ""),
                     "ts_utc": ts_utc,
                     "entry_ts_ms": asof_ts_ms,
@@ -3569,6 +3832,7 @@ def _collect_candidates(
                     "rt_cost_bps": rt_cost_bps,
                     "primary_horizon_hours": primary_horizon,
                     "extra_live_block_reasons": list(spec.get("extra_live_block_reasons") or []),
+                    "live_order_effect": "read_only_no_live_order",
                     "proposal_present": bool(spec.get("proposal_present", False)),
                     "proposal_source": str(spec.get("proposal_source") or ""),
                     **advisory_fields,
@@ -3588,6 +3852,28 @@ def _collect_candidates(
         )
         advisory = _advisory_for_spec(spec, advisory_by_strategy)
         advisory_fields = _advisory_response_fields(advisory, diagnostics)
+        expanded_record = _expanded_paper_advisory_record(
+            spec=spec,
+            advisory=advisory,
+            advisory_fields=advisory_fields,
+            audit=audit,
+            ts_utc=ts_utc,
+            asof_ts_ms=asof_ts_ms,
+            rt_cost_bps=rt_cost_bps,
+            required_days=required_days,
+            required_entry_days=required_entry_days,
+            required_coverage=required_coverage,
+            allowed_cost_sources=allowed_cost_sources,
+            market_data_1h=market_data_1h,
+            cache_dir=cache_dir,
+            cached=cached,
+            top_of_book=top_of_book,
+        )
+        if expanded_record is not None:
+            expanded_record["enabled_shadow_only"] = enabled_shadow_only
+            expanded_record["enable_live_experiment"] = enable_live_experiment
+            records.append(expanded_record)
+            continue
         best_row, condition_diagnostics, no_sample_reason = _best_candidate_for_strategy(
             candidate_rows=candidate_rows,
             spec=spec,
@@ -4061,7 +4347,10 @@ def update_sol_paper_strategy_tracker(
         run_id=str(getattr(audit, "run_id", "") or ""),
         now_ms=asof_ts_ms,
     )
-    advisory_rows = advisory_result.rows
+    advisory_rows = _normalize_selected_advisory_rows(
+        advisory_result.rows,
+        advisory_result.source_health_rows,
+    )
     proposal_rows = _read_paper_strategy_proposals(
         run_path=run_path,
         reports_dir=reports_dir,

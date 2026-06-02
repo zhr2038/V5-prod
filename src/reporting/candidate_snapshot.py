@@ -65,6 +65,9 @@ CANDIDATE_SNAPSHOT_FIELDS = (
     "would_block_by_cost",
     "cost_reason",
     "eligible_before_filters",
+    "final_score_missing_reason",
+    "eligibility_block_reason",
+    "rank_exclusion_reason",
     "final_decision",
     "block_reason",
     "no_signal_reason",
@@ -547,6 +550,13 @@ def build_candidate_snapshot_rows(
             degraded_cost_model=degraded_cost_model,
             absence_reason=cost_absence_reason,
         )
+        eligible_before_filters = (
+            symbol in top_scores
+            or abs(float(target_raw or 0.0)) > 0.0
+            or abs(float(target_after or 0.0)) > 0.0
+            or bool(router_decisions.get(symbol))
+            or order is not None
+        )
         no_signal_reason = _no_signal_reason(
             symbol=symbol,
             final_decision=final_decision,
@@ -557,6 +567,25 @@ def build_candidate_snapshot_rows(
             target_raw=target_raw,
             target_after=target_after,
             no_signal_reasons=no_signal_reasons,
+        )
+        final_score_missing_reason = _final_score_missing_reason(
+            final_score=final_score,
+            eligible_before_filters=eligible_before_filters,
+            top=top,
+            explain=explain,
+        )
+        eligibility_block_reason = _eligibility_block_reason(
+            eligible_before_filters=eligible_before_filters,
+            block_reason=block_reason,
+            no_signal_reason=no_signal_reason,
+            top=top,
+            explain=explain,
+        )
+        rank_exclusion_reason = _rank_exclusion_reason(
+            eligible_before_filters=eligible_before_filters,
+            final_score_missing_reason=final_score_missing_reason,
+            top=top,
+            explain=explain,
         )
 
         row = {
@@ -607,13 +636,10 @@ def build_candidate_snapshot_rows(
             "cost_gate_verified": bool(cost_gate_verified),
             "would_block_by_cost": bool(would_block_by_cost),
             "cost_reason": cost_reason,
-            "eligible_before_filters": _bool_str(
-                symbol in top_scores
-                or abs(float(target_raw or 0.0)) > 0.0
-                or abs(float(target_after or 0.0)) > 0.0
-                or bool(router_decisions.get(symbol))
-                or order is not None
-            ),
+            "eligible_before_filters": _bool_str(eligible_before_filters),
+            "final_score_missing_reason": final_score_missing_reason,
+            "eligibility_block_reason": eligibility_block_reason,
+            "rank_exclusion_reason": rank_exclusion_reason,
             "final_decision": final_decision,
             "block_reason": block_reason,
             "no_signal_reason": no_signal_reason,
@@ -1287,6 +1313,69 @@ def _no_signal_reason(
     if decision == "held_no_order":
         return "held_position_no_new_order"
     return None
+
+
+def _final_score_missing_reason(
+    *,
+    final_score: Any,
+    eligible_before_filters: bool,
+    top: Mapping[str, Any],
+    explain: Mapping[str, Any],
+) -> Optional[str]:
+    if not _missing_value(final_score):
+        return None
+    explicit = _first(
+        top.get("final_score_missing_reason"),
+        top.get("score_missing_reason"),
+        explain.get("final_score_missing_reason"),
+        explain.get("score_missing_reason"),
+    )
+    if explicit:
+        return str(explicit)
+    if not eligible_before_filters:
+        return "not_eligible_before_filters"
+    return "final_score_not_observable"
+
+
+def _eligibility_block_reason(
+    *,
+    eligible_before_filters: bool,
+    block_reason: Any,
+    no_signal_reason: Any,
+    top: Mapping[str, Any],
+    explain: Mapping[str, Any],
+) -> Optional[str]:
+    explicit = _first(
+        top.get("eligibility_block_reason"),
+        top.get("eligibility_reason"),
+        explain.get("eligibility_block_reason"),
+        explain.get("eligibility_reason"),
+    )
+    if explicit:
+        return str(explicit)
+    if eligible_before_filters:
+        return None
+    return str(_first(no_signal_reason, block_reason, "not_eligible_before_filters"))
+
+
+def _rank_exclusion_reason(
+    *,
+    eligible_before_filters: bool,
+    final_score_missing_reason: Any,
+    top: Mapping[str, Any],
+    explain: Mapping[str, Any],
+) -> Optional[str]:
+    explicit = _first(
+        top.get("rank_exclusion_reason"),
+        top.get("rank_skip_reason"),
+        explain.get("rank_exclusion_reason"),
+        explain.get("rank_skip_reason"),
+    )
+    if explicit:
+        return str(explicit)
+    if eligible_before_filters:
+        return None
+    return str(_first(final_score_missing_reason, "not_ranked_not_eligible_before_filters"))
 
 
 def _lookup_symbol_value(rows: Mapping[str, Any], symbol: Any) -> Any:

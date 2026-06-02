@@ -1678,6 +1678,75 @@ def test_expanded_paper_universe_advisory_is_read_only(tmp_path: Path) -> None:
     assert run_by_symbol["TRX/USDT"]["would_size_usdt"] == "7.0"
     assert run_by_symbol["HYPE/USDT"]["tracking_mode"] == "shadow"
     assert run_by_symbol["SUI/USDT"]["tracking_mode"] == "negative"
+
+
+def test_hype_okb_expanded_paper_ready_advisory_generates_paper_strategy_rows(tmp_path: Path) -> None:
+    cfg = AppConfig(symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT"])
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    reports_dir = tmp_path / "reports"
+    run_dir = reports_dir / "runs" / "r_hype_okb_expanded"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        reports_dir,
+        [
+            {
+                "strategy_id": "HYPE_EXPANDED_UNIVERSE_PAPER_V1",
+                "strategy_candidate": "v5.expanded_universe_hype_paper",
+                "symbol": "HYPE-USDT",
+                "universe_type": "expanded_paper",
+                "expanded_universe_maturity_state": "PAPER_READY",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "max_paper_notional_usdt": "8",
+                "max_live_notional_usdt": "0",
+                "cost_source": "public_spread_proxy",
+                "cost_bps": "18",
+                **_fresh_meta(start_s),
+            },
+            {
+                "strategy_id": "OKB_EXPANDED_UNIVERSE_PAPER_V1",
+                "strategy_candidate": "v5.expanded_universe_okb_paper",
+                "symbol": "OKB-USDT",
+                "universe_type": "expanded_paper",
+                "expanded_universe_maturity_state": "PAPER_READY",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "max_paper_notional_usdt": "6",
+                "max_live_notional_usdt": "0",
+                "cost_source": "mixed_actual_proxy",
+                "cost_bps": "15",
+                **_fresh_meta(start_s),
+            },
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_hype_okb_expanded", start_s),
+        market_data_1h={
+            "HYPE/USDT": _series("HYPE/USDT", start_s, {0: 30.0}),
+            "OKB/USDT": _series("OKB/USDT", start_s, {0: 45.0}),
+        },
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert cfg.symbols == ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+    assert result["expanded_universe_paper_rows"] == 2
+    runs = _read_csv(reports_dir / "summaries" / "paper_strategy_runs.csv")
+    by_strategy = {row["strategy_id"]: row for row in runs}
+    hype = by_strategy["HYPE_EXPANDED_UNIVERSE_PAPER_V1"]
+    okb = by_strategy["OKB_EXPANDED_UNIVERSE_PAPER_V1"]
+    assert hype["would_enter"] == "True"
+    assert hype["would_size_usdt"] == "8.0"
+    assert hype["advisory_response_action"] == "paper_tracking"
+    assert hype["cost_source"] == "public_spread_proxy"
+    assert hype["live_order_effect"] == "read_only_no_live_order"
+    assert okb["would_enter"] == "True"
+    assert okb["would_size_usdt"] == "6.0"
+    assert okb["cost_source"] == "mixed_actual_proxy"
+    assert okb["live_order_effect"] == "read_only_no_live_order"
     assert all(row["live_symbols_unchanged"] == "True" for row in runs)
 
 
@@ -2203,6 +2272,8 @@ def test_strategy_advisory_uses_fresh_local_without_api(monkeypatch: pytest.Monk
     advisory = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_reader.csv")
     assert advisory[0]["advisory_source"] == "local"
     assert advisory[0]["advisory_fresh"] == "True"
+    assert advisory[0]["freshness_status"] == "fresh"
+    assert advisory[0]["stale_reason"] == ""
     assert advisory[0]["api_fallback_attempted"] == "False"
 
 
@@ -2353,6 +2424,9 @@ def test_alpha_factory_reader_uses_selected_api_advisory_rows(
     assert reader[0]["advisory_source"] == "api"
     assert reader[0]["selected_source"] == "api"
     assert reader[0]["source_health_freshness_status"] == "fresh"
+    assert reader[0]["advisory_fresh"] == "True"
+    assert reader[0]["response_action"] == "shadow_tracking"
+    assert reader[0]["stale_response_downgraded"] == "False"
     assert reader[0]["alpha_factory_score"] == "0.77"
     assert reader[0]["advisory_source"] != "stale_local"
 
@@ -2432,6 +2506,8 @@ def test_strategy_advisory_fresh_api_beats_newer_stale_local(
     reader = _read_csv(tmp_path / "reports" / "summaries" / "alpha_factory_advisory_reader.csv")
     assert reader[0]["selected_source"] == "api"
     assert reader[0]["source_health_freshness_status"] == "fresh"
+    assert reader[0]["advisory_fresh"] == "True"
+    assert reader[0]["response_action"] == "shadow_tracking"
     assert reader[0]["alpha_factory_score"] == "0.88"
 
 

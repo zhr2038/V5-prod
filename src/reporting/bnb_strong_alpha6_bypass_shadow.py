@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from src.reporting.final_score_alpha6_conflict import (
+    aggregate_label_status,
     as_float,
     best_future_net_bps,
     first_observed,
+    label_status_for_future,
     normalize_symbol,
     truthy,
 )
@@ -38,6 +40,12 @@ BYPASS_SHADOW_FIELDS = (
     "max_future_net_bps",
     "best_future_horizon_hours",
     "material_profit_flag",
+    "label_4h_status",
+    "label_8h_status",
+    "label_12h_status",
+    "label_24h_status",
+    "any_label_complete",
+    "all_labels_complete",
     "label_status",
     "outcome",
     "live_order_effect",
@@ -83,6 +91,9 @@ def build_bnb_strong_alpha6_bypass_rows(
         if not is_bnb_strong_alpha6_bypass_candidate(row):
             continue
         futures = {h: first_observed(future_net_bps.get(h)) for h in (4, 8, 12, 24)}
+        label_statuses = {h: label_status_for_future(futures[h]) for h in (4, 8, 12, 24)}
+        any_label_complete = any(status == "complete" for status in label_statuses.values())
+        all_labels_complete = all(status == "complete" for status in label_statuses.values())
         max_future, best_horizon, material_profit = best_future_net_bps(futures)
         block_text = " ".join(
             str(value or "").strip().lower()
@@ -113,7 +124,13 @@ def build_bnb_strong_alpha6_bypass_rows(
                 "max_future_net_bps": max_future,
                 "best_future_horizon_hours": best_horizon,
                 "material_profit_flag": str(material_profit).lower(),
-                "label_status": first_observed(row.get("label_status"), default="shadow_pending"),
+                "label_4h_status": label_statuses[4],
+                "label_8h_status": label_statuses[8],
+                "label_12h_status": label_statuses[12],
+                "label_24h_status": label_statuses[24],
+                "any_label_complete": str(any_label_complete).lower(),
+                "all_labels_complete": str(all_labels_complete).lower(),
+                "label_status": aggregate_label_status(label_statuses.values()),
                 "outcome": shadow_outcome([futures[4], futures[8], futures[12], futures[24]]),
                 "live_order_effect": "read_only_no_live_order",
             }

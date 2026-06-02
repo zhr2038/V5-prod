@@ -950,6 +950,10 @@ def test_candidate_snapshot_covers_full_universe_with_no_order_and_blocked_rows(
     assert len(rows) == 4
     assert by_symbol["ETH/USDT"]["final_decision"] == "no_order"
     assert by_symbol["ETH/USDT"]["no_signal_reason"] == "no_signal"
+    assert by_symbol["ETH/USDT"]["eligible_before_filters"] == "false"
+    assert by_symbol["ETH/USDT"]["final_score_missing_reason"] == "not_eligible_before_filters"
+    assert by_symbol["ETH/USDT"]["eligibility_block_reason"] == "no_signal"
+    assert by_symbol["ETH/USDT"]["rank_exclusion_reason"] == "not_eligible_before_filters"
     assert by_symbol["ETH/USDT"]["expected_edge_bps"] == 0.0
     assert by_symbol["ETH/USDT"]["expected_edge_source"] == "not_available"
     assert by_symbol["BNB/USDT"]["final_decision"] == "no_order"

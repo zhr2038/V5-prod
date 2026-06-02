@@ -49,5 +49,25 @@ def test_bnb_strong_alpha6_rows_include_no_live_order_effect() -> None:
     assert row["best_future_horizon_hours"] == 24
     assert row["material_profit_flag"] == "true"
     assert row["outcome"] == "material_profit_shadow"
-    assert row["label_status"] == "shadow_pending"
+    assert row["label_4h_status"] == "complete"
+    assert row["label_8h_status"] == "complete"
+    assert row["label_12h_status"] == "complete"
+    assert row["label_24h_status"] == "complete"
+    assert row["any_label_complete"] == "true"
+    assert row["all_labels_complete"] == "true"
+    assert row["label_status"] == "complete"
     assert row["live_order_effect"] == "read_only_no_live_order"
+
+
+def test_bnb_strong_alpha6_label_status_partial_when_some_horizons_observed() -> None:
+    rows = build_bnb_strong_alpha6_bypass_rows(
+        [_base_row()],
+        future_net_bps={4: 42.0},
+    )
+
+    row = rows[0]
+    assert row["label_4h_status"] == "complete"
+    assert row["label_8h_status"] == "pending"
+    assert row["any_label_complete"] == "true"
+    assert row["all_labels_complete"] == "false"
+    assert row["label_status"] == "partial_complete"
