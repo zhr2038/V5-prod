@@ -10,6 +10,16 @@ def test_v5_bundle_export_script_avoids_shell_subprocess() -> None:
     assert "shell=True" not in script
 
 
+def test_v5_bundle_export_script_writes_lightweight_report_index() -> None:
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "scripts" / "generate_v5_bundle_remote.sh").read_text(encoding="utf-8")
+
+    assert "def write_static_report_index(" in script
+    assert 'write_text("reports/index.json"' in script
+    assert 'write_text("reports/index.html"' in script
+    assert 'write_text("raw/large/.noindex"' in script
+
+
 def test_v5_bundle_export_script_regression() -> None:
     root = Path(__file__).resolve().parents[1]
     proc = subprocess.run(

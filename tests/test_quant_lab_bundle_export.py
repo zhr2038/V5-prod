@@ -286,6 +286,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "raw/recent_runs/r1/order_lifecycle.csv" in names
         assert "reports/summary_trade_count_mismatch.csv" in names
         assert "summaries/window_summary.json" in names
+        assert "reports/index.html" in names
+        assert "reports/index.json" in names
+        assert "raw/large/.noindex" in names
         assert "raw/state/quant_lab_mode.json" in names
         assert not any(Path(name).name == ".env" for name in names)
         compliance = tf.extractfile("summaries/quant_lab_compliance.csv").read().decode("utf-8")
@@ -304,6 +307,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         mismatch_rows = list(csv.DictReader(tf.extractfile("reports/summary_trade_count_mismatch.csv").read().decode("utf-8").splitlines()))
         manifest = json.loads(tf.extractfile("manifest.json").read().decode("utf-8"))
         window = json.loads(tf.extractfile("summaries/window_summary.json").read().decode("utf-8"))
+        report_index = json.loads(tf.extractfile("reports/index.json").read().decode("utf-8"))
+        report_index_html = tf.extractfile("reports/index.html").read().decode("utf-8")
         assert "mode" in compliance.splitlines()[0]
         assert "called_api" in compliance.splitlines()[0]
         assert "permission_gate_enforced" in compliance.splitlines()[0]
@@ -328,6 +333,11 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "enforce" in mode_audit
         assert "BLOCKED" in mode_audit
         assert "global_default_cost_count_high" in mode_audit
+        assert report_index["schema_version"] == "v5.static_report_index.v1"
+        assert report_index["latest_trade_count"] == len(trade_metrics)
+        assert report_index["candidate_snapshot_rows"] == len(candidate_snapshot)
+        assert "V5 Follow-up Report" in report_index_html
+        assert "raw_large_file_count" in report_index_html
         assert "hypothetical_violation" in compliance
         assert "actual_violation" in compliance
         assert "true,false,false" in compliance

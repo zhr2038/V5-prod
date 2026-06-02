@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import gzip
+import html
 import hashlib
 import io
 import json
@@ -539,6 +540,113 @@ def _relocate_large_raw_files(staging: Path, threshold_bytes: int = RAW_LARGE_FI
             }
         )
     return relocated
+
+
+def _write_static_report_index(
+    staging: Path,
+    *,
+    window_summary: Mapping[str, Any],
+    trade_metrics_rows: list[Mapping[str, Any]],
+    candidate_rows: list[Mapping[str, Any]],
+    request_rows: list[Mapping[str, Any]],
+    large_raw_files: list[Mapping[str, Any]],
+) -> None:
+    paper_summary = {
+        "paper_strategy_daily": _small_csv_preview(staging / "summaries/paper_strategy_daily.csv"),
+        "bnb_paper_strategy_daily": _small_csv_preview(staging / "summaries/bnb_paper_strategy_daily.csv"),
+    }
+    api_latency = _api_latency_summary(request_rows)
+    payload = {
+        "schema_version": "v5.static_report_index.v1",
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "account_state": window_summary.get("account_state", "not_observable"),
+        "open_position_count": window_summary.get("open_position_count", "not_observable"),
+        "effective_open_position_count": window_summary.get("effective_open_position_count", "not_observable"),
+        "latest_trade_count": len(trade_metrics_rows),
+        "candidate_snapshot_rows": len(candidate_rows),
+        "paper_summary": paper_summary,
+        "quant_lab_api_latency_summary": api_latency,
+        "raw_large_file_count": len(large_raw_files),
+        "raw_large_manifest": "raw/large/manifest.json" if large_raw_files else "",
+        "links": {
+            "window_summary": "../summaries/window_summary.json",
+            "issues_to_fix": "../summaries/issues_to_fix.json",
+            "raw_large": "../raw/large/",
+        },
+    }
+    _write_text(staging / "reports/index.json", json.dumps(payload, ensure_ascii=False, indent=2))
+    _write_text(staging / "reports/index.html", _static_report_index_html(payload))
+
+
+def _small_csv_preview(path: Path, *, limit: int = 20) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    try:
+        with path.open("r", encoding="utf-8", newline="") as fh:
+            return [dict(row) for _, row in zip(range(limit), csv.DictReader(fh))]
+    except OSError:
+        return []
+
+
+def _api_latency_summary(request_rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+    latencies = sorted(
+        value
+        for value in (_to_float(row.get("latency_ms")) for row in request_rows)
+        if value is not None
+    )
+    if not latencies:
+        return {"count": 0, "p50_ms": None, "p95_ms": None, "max_ms": None}
+    return {
+        "count": len(latencies),
+        "p50_ms": _percentile(latencies, 0.50),
+        "p95_ms": _percentile(latencies, 0.95),
+        "max_ms": latencies[-1],
+    }
+
+
+def _percentile(values: list[float], q: float) -> float:
+    if not values:
+        return 0.0
+    index = min(max(int(round((len(values) - 1) * q)), 0), len(values) - 1)
+    return round(float(values[index]), 6)
+
+
+def _static_report_index_html(payload: Mapping[str, Any]) -> str:
+    def value(key: str) -> str:
+        return html.escape(str(payload.get(key, "not_observable")))
+
+    latency = payload.get("quant_lab_api_latency_summary")
+    latency_text = "not_observable"
+    if isinstance(latency, Mapping) and latency.get("count"):
+        latency_text = (
+            f"count={latency.get('count')}, p50={latency.get('p50_ms')}ms, "
+            f"p95={latency.get('p95_ms')}ms, max={latency.get('max_ms')}ms"
+        )
+    return "\n".join(
+        [
+            "<!doctype html>",
+            "<html lang=\"zh-CN\">",
+            "<head><meta charset=\"utf-8\"><title>V5 Follow-up Report</title>",
+            "<style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:32px;line-height:1.5;}"
+            "table{border-collapse:collapse;min-width:680px}td,th{border:1px solid #ddd;padding:8px 10px}"
+            "th{text-align:left;background:#f6f7f9}code{background:#f2f2f2;padding:2px 4px}</style></head>",
+            "<body>",
+            "<h1>V5 Follow-up Report</h1>",
+            "<p>Lightweight landing page. Raw large files are kept out of the first-screen payload.</p>",
+            "<table><tbody>",
+            f"<tr><th>account_state</th><td>{value('account_state')}</td></tr>",
+            f"<tr><th>open_position_count</th><td>{value('open_position_count')}</td></tr>",
+            f"<tr><th>latest_trade_count</th><td>{value('latest_trade_count')}</td></tr>",
+            f"<tr><th>candidate_snapshot_rows</th><td>{value('candidate_snapshot_rows')}</td></tr>",
+            f"<tr><th>quant_lab_api_latency</th><td>{html.escape(latency_text)}</td></tr>",
+            f"<tr><th>raw_large_file_count</th><td>{value('raw_large_file_count')}</td></tr>",
+            "</tbody></table>",
+            "<p><a href=\"index.json\">index.json</a> · "
+            "<a href=\"../summaries/window_summary.json\">window_summary</a> · "
+            "<a href=\"../summaries/issues_to_fix.json\">issues_to_fix</a></p>",
+            "</body></html>",
+        ]
+    ) + "\n"
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -2350,6 +2458,7 @@ def export_v5_bundle(
                 _write_text(staging / "raw/logs/v5_runtime.log", _tail_lines(_read_text_redacted(log_path)))
         findings = _secret_scan_findings(staging)
         large_raw_files = _relocate_large_raw_files(staging)
+        _write_text(staging / "raw/large/.noindex", "raw_large_not_indexed\n")
         if large_raw_files:
             _write_text(
                 staging / "raw/large/manifest.json",
@@ -2380,6 +2489,14 @@ def export_v5_bundle(
             },
         }
         _write_text(staging / "manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        _write_static_report_index(
+            staging,
+            window_summary=window_summary,
+            trade_metrics_rows=trade_metrics_rows,
+            candidate_rows=candidate_rows,
+            request_rows=request_rows,
+            large_raw_files=large_raw_files,
+        )
         with tarfile.open(tmp_path, "w:gz") as tf:
             for path in sorted(staging.rglob("*")):
                 if path.is_file():

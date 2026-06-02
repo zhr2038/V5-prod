@@ -9,6 +9,7 @@ import datetime as dt
 import fnmatch
 import gzip
 import hashlib
+import html
 import json
 import os
 import re
@@ -14357,6 +14358,112 @@ def relocate_large_raw_files():
     return relocated
 
 
+def _small_csv_preview(path, limit=20):
+    return load_csv_dicts(path)[:limit]
+
+
+def _to_float_or_none(value):
+    if value in (None, "", "null", "not_observable"):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _percentile(values, q):
+    if not values:
+        return None
+    index = min(max(int(round((len(values) - 1) * q)), 0), len(values) - 1)
+    return round(float(values[index]), 6)
+
+
+def _api_latency_summary(request_rows):
+    latencies = sorted(
+        value
+        for value in (_to_float_or_none(row.get("latency_ms")) for row in request_rows)
+        if value is not None
+    )
+    if not latencies:
+        return {"count": 0, "p50_ms": None, "p95_ms": None, "max_ms": None}
+    return {
+        "count": len(latencies),
+        "p50_ms": _percentile(latencies, 0.50),
+        "p95_ms": _percentile(latencies, 0.95),
+        "max_ms": round(float(latencies[-1]), 6),
+    }
+
+
+def _static_report_index_html(payload):
+    def value(key):
+        return html.escape(str(payload.get(key, "not_observable")))
+
+    latency = payload.get("quant_lab_api_latency_summary")
+    latency_text = "not_observable"
+    if isinstance(latency, dict) and latency.get("count"):
+        latency_text = (
+            f"count={latency.get('count')}, p50={latency.get('p50_ms')}ms, "
+            f"p95={latency.get('p95_ms')}ms, max={latency.get('max_ms')}ms"
+        )
+    return "\n".join(
+        [
+            "<!doctype html>",
+            '<html lang="zh-CN">',
+            '<head><meta charset="utf-8"><title>V5 Follow-up Report</title>',
+            "<style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:32px;line-height:1.5;}"
+            "table{border-collapse:collapse;min-width:680px}td,th{border:1px solid #ddd;padding:8px 10px}"
+            "th{text-align:left;background:#f6f7f9}code{background:#f2f2f2;padding:2px 4px}</style></head>",
+            "<body>",
+            "<h1>V5 Follow-up Report</h1>",
+            "<p>Lightweight landing page. Raw large files are kept out of the first-screen payload.</p>",
+            "<table><tbody>",
+            f"<tr><th>account_state</th><td>{value('account_state')}</td></tr>",
+            f"<tr><th>open_position_count</th><td>{value('open_position_count')}</td></tr>",
+            f"<tr><th>latest_trade_count</th><td>{value('latest_trade_count')}</td></tr>",
+            f"<tr><th>candidate_snapshot_rows</th><td>{value('candidate_snapshot_rows')}</td></tr>",
+            f"<tr><th>quant_lab_api_latency</th><td>{html.escape(latency_text)}</td></tr>",
+            f"<tr><th>raw_large_file_count</th><td>{value('raw_large_file_count')}</td></tr>",
+            "</tbody></table>",
+            '<p><a href="index.json">index.json</a> · '
+            '<a href="../summaries/window_summary.json">window_summary</a> · '
+            '<a href="../summaries/issues_to_fix.json">issues_to_fix</a></p>',
+            "</body></html>",
+        ]
+    ) + "\n"
+
+
+def write_static_report_index(summary_meta, large_raw_files):
+    trade_metrics_rows = load_csv_dicts(OUT / "summaries" / "trade_metrics.csv")
+    candidate_rows = load_csv_dicts(OUT / "summaries" / "candidate_snapshot.csv")
+    request_rows = load_jsonl(OUT / "raw" / "reports" / "quant_lab_requests.jsonl")
+    window_summary = load_json(OUT / "summaries" / "window_summary.json")
+    if not isinstance(window_summary, dict):
+        window_summary = {}
+    payload = {
+        "schema_version": "v5.static_report_index.v1",
+        "generated_at": NOW.isoformat().replace("+00:00", "Z"),
+        "account_state": window_summary.get("account_state", "not_observable"),
+        "open_position_count": window_summary.get("open_position_count", "not_observable"),
+        "effective_open_position_count": window_summary.get("effective_open_position_count", "not_observable"),
+        "latest_trade_count": len(trade_metrics_rows),
+        "candidate_snapshot_rows": len(candidate_rows) or int(summary_meta.get("candidate_snapshot_rows", 0) or 0),
+        "paper_summary": {
+            "paper_strategy_daily": _small_csv_preview(OUT / "summaries" / "paper_strategy_daily.csv"),
+            "bnb_paper_strategy_daily": _small_csv_preview(OUT / "summaries" / "bnb_paper_strategy_daily.csv"),
+        },
+        "quant_lab_api_latency_summary": _api_latency_summary(request_rows),
+        "raw_large_file_count": len(large_raw_files),
+        "raw_large_manifest": "raw/large/manifest.json" if large_raw_files else "",
+        "links": {
+            "window_summary": "../summaries/window_summary.json",
+            "issues_to_fix": "../summaries/issues_to_fix.json",
+            "raw_large": "../raw/large/",
+        },
+    }
+    write_text("reports/index.json", json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    write_text("reports/index.html", _static_report_index_html(payload))
+
+
 def file_inventory():
     rows = []
     for path in sorted(OUT.rglob("*")):
@@ -14641,6 +14748,8 @@ large_raw_files = relocate_large_raw_files()
 if large_raw_files:
     write_text("raw/large/manifest.json", json.dumps(large_raw_files, ensure_ascii=False, indent=2) + "\n")
     notes.append(f"relocated large raw files: {len(large_raw_files)}")
+write_text("raw/large/.noindex", "raw_large_not_indexed\n")
+write_static_report_index(summary_meta, large_raw_files)
 
 failure_check_names = [
     "raw/state/kill_switch.json exists",
