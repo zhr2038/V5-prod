@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import socket
 import stat
 import warnings
 from ipaddress import ip_address
@@ -40,6 +42,65 @@ from .permissions import normalize_permission
 
 
 STRICT_GATE_MODES = {"cost_only", "permission_only", "enforce"}
+
+
+def _header_lookup(headers: Mapping[str, Any] | None, name: str) -> str:
+    target = str(name or "").strip().lower()
+    for key, value in dict(headers or {}).items():
+        if str(key).strip().lower() == target:
+            return str(value or "").strip()
+    return ""
+
+
+def _header_float(headers: Mapping[str, Any] | None, *names: str) -> Optional[float]:
+    for name in names:
+        value = _header_lookup(headers, name)
+        if not value:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _header_bool(headers: Mapping[str, Any] | None, *names: str) -> Optional[bool]:
+    for name in names:
+        value = _header_lookup(headers, name)
+        if not value:
+            continue
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return None
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _response_elapsed_ms(resp: Any) -> Optional[float]:
+    elapsed = getattr(resp, "elapsed", None)
+    total_seconds = getattr(elapsed, "total_seconds", None)
+    if callable(total_seconds):
+        try:
+            return round(float(total_seconds()) * 1000.0, 3)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _response_byte_count(resp: Any, data: Any = None) -> Optional[int]:
+    content = getattr(resp, "content", None)
+    if isinstance(content, (bytes, bytearray)):
+        return len(content)
+    text = getattr(resp, "text", None)
+    if isinstance(text, str):
+        return len(text.encode("utf-8", errors="replace"))
+    if data is not None:
+        try:
+            return len(json.dumps(sanitize_quant_lab_obj(data), ensure_ascii=False).encode("utf-8"))
+        except Exception:
+            return None
+    return None
 
 
 @dataclass
@@ -285,6 +346,7 @@ class QuantLabClient:
     cost_cache_ttl_seconds: int = 300
     http_client: Optional[Any] = None
     request_log_path: str | Path = "reports/quant_lab_requests.jsonl"
+    http_cache_path: str | Path = "reports/quant_lab_http_cache.json"
     run_id: Optional[str] = None
     phase: str = "live"
     _cache: TTLCache = field(init=False, repr=False)
@@ -295,6 +357,7 @@ class QuantLabClient:
         Tuple[str, Tuple[Tuple[str, str], ...]],
         Tuple[float, Any, Dict[str, str]],
     ] = field(init=False, repr=False)
+    _resolved_host_cache: Dict[str, str] = field(init=False, repr=False)
     token_auth_disabled_reason: Optional[str] = field(default=None, init=False)
     api_env_path_present: bool = False
     api_env_secure_permissions: Optional[bool] = None
@@ -322,6 +385,8 @@ class QuantLabClient:
         self._stale_cache = {}
         self._permission_cache = {}
         self._cost_cache = {}
+        self._resolved_host_cache = {}
+        self._load_persistent_http_cache()
 
     @classmethod
     def from_config(
@@ -363,6 +428,7 @@ class QuantLabClient:
             cost_cache_ttl_seconds=int(getattr(cfg, "cost_cache_ttl_seconds", 300) or 0),
             http_client=http_client,
             request_log_path=str(getattr(cfg, "request_log_path", "reports/quant_lab_requests.jsonl") or "reports/quant_lab_requests.jsonl"),
+            http_cache_path=str(getattr(cfg, "http_cache_path", "reports/quant_lab_http_cache.json") or "reports/quant_lab_http_cache.json"),
             run_id=run_id,
             phase=phase,
         )
@@ -420,6 +486,138 @@ class QuantLabClient:
     def _cache_key(endpoint_path: str, params: Mapping[str, Any]) -> Tuple[str, Tuple[Tuple[str, str], ...]]:
         clean = {str(k): str(v) for k, v in dict(params or {}).items() if v is not None}
         return endpoint_path, tuple(sorted(clean.items()))
+
+    @staticmethod
+    def _persistent_cache_enabled_for_endpoint(endpoint_path: str) -> bool:
+        endpoint = "/" + str(endpoint_path or "").lstrip("/")
+        return endpoint.startswith("/v1/strategy-opportunity-advisory")
+
+    @staticmethod
+    def _persistent_key_payload(
+        key: Tuple[str, Tuple[Tuple[str, str], ...]]
+    ) -> dict[str, Any]:
+        return {"endpoint": key[0], "params": dict(key[1])}
+
+    @classmethod
+    def _persistent_key_text(
+        cls,
+        key: Tuple[str, Tuple[Tuple[str, str], ...]],
+    ) -> str:
+        return json.dumps(cls._persistent_key_payload(key), sort_keys=True, separators=(",", ":"))
+
+    @classmethod
+    def _persistent_key_from_text(
+        cls,
+        text: str,
+    ) -> Optional[Tuple[str, Tuple[Tuple[str, str], ...]]]:
+        try:
+            payload = json.loads(str(text or ""))
+        except Exception:
+            return None
+        if not isinstance(payload, Mapping):
+            return None
+        endpoint = str(payload.get("endpoint") or "").strip()
+        params = payload.get("params") or {}
+        if not endpoint or not isinstance(params, Mapping):
+            return None
+        return cls._cache_key(endpoint, params)
+
+    def _load_persistent_http_cache(self) -> None:
+        path = Path(str(self.http_cache_path or "")).expanduser()
+        if not str(path):
+            return
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        if not isinstance(payload, Mapping):
+            return
+        if str(payload.get("base_url") or "") != self.base_url:
+            return
+        now = time.time()
+        entries = payload.get("entries") or {}
+        if not isinstance(entries, Mapping):
+            return
+        for key_text, entry in entries.items():
+            key = self._persistent_key_from_text(str(key_text))
+            if key is None or not isinstance(entry, Mapping):
+                continue
+            if not self._persistent_cache_enabled_for_endpoint(key[0]):
+                continue
+            data = entry.get("data")
+            headers = entry.get("headers") if isinstance(entry.get("headers"), Mapping) else {}
+            self._stale_cache[key] = data
+            self._cache_headers[key] = {str(k).lower(): str(v) for k, v in dict(headers or {}).items()}
+            try:
+                expires_at = float(entry.get("expires_at") or 0.0)
+            except (TypeError, ValueError):
+                expires_at = 0.0
+            if expires_at > now and self.cache_ttl_seconds > 0:
+                self._cache._items[key] = (expires_at, data)
+
+    def _save_persistent_http_cache(self) -> None:
+        path = Path(str(self.http_cache_path or "")).expanduser()
+        if not str(path):
+            return
+        entries: dict[str, Any] = {}
+        now = time.time()
+        max_entries = 200
+        persistent_items = [
+            (key, data)
+            for key, data in self._stale_cache.items()
+            if self._persistent_cache_enabled_for_endpoint(key[0])
+        ]
+        for key, data in persistent_items[-max_entries:]:
+            headers = dict(self._cache_headers.get(key) or {})
+            expires_at = now + float(max(0, self.cache_ttl_seconds))
+            cached_item = self._cache._items.get(key)
+            if cached_item is not None:
+                try:
+                    expires_at = float(cached_item[0])
+                except (TypeError, ValueError):
+                    pass
+            entries[self._persistent_key_text(key)] = {
+                "endpoint": key[0],
+                "params": dict(key[1]),
+                "headers": headers,
+                "data": data,
+                "expires_at": expires_at,
+                "updated_at": _utc_now_iso(),
+            }
+        payload = {
+            "schema_version": "v5.quant_lab_http_cache.v1",
+            "base_url": self.base_url,
+            "updated_at": _utc_now_iso(),
+            "entries": entries,
+        }
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_name(f".{path.name}.tmp")
+            tmp_path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+            tmp_path.replace(path)
+        except Exception:
+            return
+
+    def _resolved_host_for_url(self, url: str) -> str:
+        parsed = urlparse(url)
+        host = str(parsed.hostname or "").strip()
+        if not host:
+            return ""
+        cached = self._resolved_host_cache.get(host)
+        if cached is not None:
+            return cached
+        try:
+            infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+            addresses = []
+            for info in infos:
+                sockaddr = info[-1]
+                if sockaddr:
+                    addresses.append(str(sockaddr[0]))
+            value = ",".join(sorted(set(addresses))[:4])
+        except Exception:
+            value = ""
+        self._resolved_host_cache[host] = value
+        return value
 
     @staticmethod
     def _cost_semantic_cache_key(
@@ -484,6 +682,8 @@ class QuantLabClient:
             error_type=None,
             cached=True,
             response_summary=summarize_response(data),
+            response_headers=response_headers,
+            network_meta={"response_bytes": _response_byte_count(None, data), "download_ms": 0.0},
         )
         return response
 
@@ -520,7 +720,11 @@ class QuantLabClient:
         error_type: Optional[str],
         cached: bool,
         response_summary: Mapping[str, Any],
+        response_headers: Optional[Mapping[str, Any]] = None,
+        network_meta: Optional[Mapping[str, Any]] = None,
     ) -> None:
+        headers = dict(response_headers or {})
+        net = dict(network_meta or {})
         append_quant_lab_request(
             self.request_log_path,
             {
@@ -540,6 +744,37 @@ class QuantLabClient:
                 "error_type": error_type,
                 "error_message_short": error_type or "",
                 "cached": bool(cached),
+                "resolved_host": net.get("resolved_host") or "",
+                "connect_ms": net.get("connect_ms"),
+                "ttfb_ms": net.get("ttfb_ms"),
+                "download_ms": net.get("download_ms"),
+                "response_bytes": net.get("response_bytes"),
+                "server_header_lake_scan_ms": _header_float(
+                    headers,
+                    "x-quant-lab-lake-scan-ms",
+                    "x-advisory-lake-scan-ms",
+                ),
+                "server_header_serialize_ms": _header_float(
+                    headers,
+                    "x-quant-lab-serialize-ms",
+                    "x-advisory-serialize-ms",
+                ),
+                "server_header_source_signature_ms": _header_float(
+                    headers,
+                    "x-quant-lab-source-signature-ms",
+                    "x-advisory-source-signature-ms",
+                ),
+                "server_cache_hit": _header_bool(
+                    headers,
+                    "x-quant-lab-api-cache-hit",
+                    "x-advisory-cache-hit",
+                ),
+                "response_cache_hit": _header_bool(
+                    headers,
+                    "x-quant-lab-response-cache-hit",
+                    "x-advisory-response-cache-hit",
+                ),
+                "client_cache_hit": bool(cached),
                 "response_summary": dict(response_summary or {}),
             },
         )
@@ -570,6 +805,8 @@ class QuantLabClient:
                 error_type=None,
                 cached=True,
                 response_summary=summarize_response(cached_value),
+                response_headers=cached_headers,
+                network_meta={"response_bytes": _response_byte_count(None, cached_value), "download_ms": 0.0},
             )
             return response
 
@@ -579,6 +816,7 @@ class QuantLabClient:
         started_all = time.perf_counter()
         status_code: Optional[int] = None
         data: Any = None
+        resolved_host = self._resolved_host_for_url(url)
         for attempt in range(attempts):
             started = time.perf_counter()
             try:
@@ -596,10 +834,18 @@ class QuantLabClient:
                     for header_key, value in dict(getattr(resp, "headers", {}) or {}).items()
                 }
                 latency_ms = round((time.perf_counter() - started) * 1000.0, 3)
+                ttfb_ms = _response_elapsed_ms(resp)
                 if status_code == 304 and key in self._stale_cache:
                     data = self._stale_cache[key]
                     self._cache.set(key, data)
                     self._cache_headers[key] = {**cached_headers, **response_headers}
+                    self._save_persistent_http_cache()
+                    response_bytes = _response_byte_count(resp, data)
+                    download_ms = (
+                        max(0.0, round(latency_ms - ttfb_ms, 3))
+                        if ttfb_ms is not None
+                        else None
+                    )
                     response = QuantLabResponse(
                         endpoint=endpoint,
                         ok=True,
@@ -618,16 +864,31 @@ class QuantLabClient:
                         error_type=None,
                         cached=True,
                         response_summary=summarize_response(data),
+                        response_headers=response.headers,
+                        network_meta={
+                            "resolved_host": resolved_host,
+                            "connect_ms": None,
+                            "ttfb_ms": ttfb_ms,
+                            "download_ms": download_ms,
+                            "response_bytes": response_bytes,
+                        },
                     )
                     return response
                 try:
                     data = resp.json()
                 except ValueError:
                     data = {"text": str(getattr(resp, "text", ""))[:500]}
+                response_bytes = _response_byte_count(resp, data)
+                download_ms = (
+                    max(0.0, round(latency_ms - ttfb_ms, 3))
+                    if ttfb_ms is not None
+                    else None
+                )
                 if 200 <= status_code < 300:
                     self._cache.set(key, data)
                     self._stale_cache[key] = data
                     self._cache_headers[key] = response_headers
+                    self._save_persistent_http_cache()
                     response = QuantLabResponse(
                         endpoint=endpoint,
                         ok=True,
@@ -645,6 +906,14 @@ class QuantLabClient:
                         error_type=None,
                         cached=False,
                         response_summary=summarize_response(data),
+                        response_headers=response_headers,
+                        network_meta={
+                            "resolved_host": resolved_host,
+                            "connect_ms": None,
+                            "ttfb_ms": ttfb_ms,
+                            "download_ms": download_ms,
+                            "response_bytes": response_bytes,
+                        },
                     )
                     return response
                 last_error = QuantLabHTTPError(f"quant-lab HTTP {status_code}")
@@ -666,6 +935,7 @@ class QuantLabClient:
             error_type=error_type,
             cached=False,
             response_summary=summarize_response(data),
+            network_meta={"resolved_host": resolved_host},
         )
         response = QuantLabResponse(
             endpoint=endpoint,

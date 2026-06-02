@@ -314,6 +314,10 @@ STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = [
     "local_row_count",
     "api_row_count",
     "selected_row_count",
+    "local_fresh",
+    "api_fresh",
+    "selection_reason",
+    "stale_local_overrode_api",
     "latest_local_generated_at",
     "latest_api_generated_at",
     "local_latest_file_mtime",
@@ -1431,6 +1435,22 @@ def _advisory_source_health_row(
     local_latest_ms = _latest_advisory_generated_ms(local_rows)
     api_latest_ms = _latest_advisory_generated_ms(api_rows)
     selected_latest_ms = _latest_advisory_generated_ms(selected_rows)
+    local_fresh = bool(_normalize_bool(local_meta.get("advisory_fresh")))
+    api_fresh = bool(_normalize_bool((api_meta or {}).get("advisory_fresh")))
+    selection_reason = str(selected_meta.get("selection_reason") or "").strip()
+    if not selection_reason:
+        if selected_meta.get("advisory_source") == "api":
+            selection_reason = "api_selected"
+        elif selected_meta.get("advisory_source") == "local":
+            selection_reason = "fresh_local"
+        elif selected_meta.get("advisory_source") == "stale_local":
+            selection_reason = "stale_local_fallback"
+        else:
+            selection_reason = "missing"
+    stale_local_overrode_api = bool(
+        selected_meta.get("advisory_source") == "stale_local"
+        and api_fresh
+    )
     lag_sec = None
     if local_latest_ms is not None and selected_latest_ms is not None:
         lag_sec = max(0.0, (float(local_latest_ms) - float(selected_latest_ms)) / 1000.0)
@@ -1486,6 +1506,10 @@ def _advisory_source_health_row(
         "local_row_count": len(local_rows),
         "api_row_count": len(api_rows),
         "selected_row_count": len(selected_rows),
+        "local_fresh": local_fresh,
+        "api_fresh": api_fresh,
+        "selection_reason": selection_reason,
+        "stale_local_overrode_api": stale_local_overrode_api,
         "latest_local_generated_at": _iso_from_ms(local_latest_ms) if local_latest_ms is not None else "",
         "latest_api_generated_at": _iso_from_ms(api_latest_ms) if api_latest_ms is not None else "",
         "local_latest_file_mtime": local_latest_file_mtime,
@@ -1563,6 +1587,7 @@ def _read_strategy_opportunity_advisory_result(
         _iso_from_ms(local_bundle_seen_ms) if local_bundle_seen_ms is not None else ""
     )
     if rows and bool(local_meta.get("advisory_fresh")):
+        local_meta["selection_reason"] = "fresh_local"
         selected_rows = _annotate_advisory_rows(rows, local_meta)
         return AdvisoryReadResult(
             rows=selected_rows,
@@ -1599,18 +1624,13 @@ def _read_strategy_opportunity_advisory_result(
             api_meta["api_lake_generated_at"] = (
                 _iso_from_ms(latest_api_ms) if latest_api_ms is not None else ""
             )
-        if rows and _local_newer_than_api(
-            local_meta=local_meta,
-            local_rows=rows,
-            api_meta=api_meta,
-            api_rows=api_rows,
-        ):
+        api_is_fresh = bool(_normalize_bool(api_meta.get("advisory_fresh")))
+        local_is_fresh = bool(_normalize_bool(local_meta.get("advisory_fresh")))
+        if rows and local_is_fresh and not api_is_fresh:
             selected_meta = dict(local_meta)
             selected_meta["api_fallback_attempted"] = True
             selected_meta["api_fallback_success"] = True
-            if not bool(selected_meta.get("advisory_fresh")):
-                selected_meta["advisory_source"] = "stale_local"
-                selected_meta["stale_advisory_used"] = True
+            selected_meta["selection_reason"] = "fresh_local_over_stale_api"
             selected_rows = _annotate_advisory_rows(rows, selected_meta)
             return AdvisoryReadResult(
                 rows=selected_rows,
@@ -1627,6 +1647,66 @@ def _read_strategy_opportunity_advisory_result(
                     )
                 ],
             )
+        if rows and local_is_fresh and api_is_fresh and _local_newer_than_api(
+            local_meta=local_meta,
+            local_rows=rows,
+            api_meta=api_meta,
+            api_rows=api_rows,
+        ):
+            selected_meta = dict(local_meta)
+            selected_meta["api_fallback_attempted"] = True
+            selected_meta["api_fallback_success"] = True
+            selected_meta["selection_reason"] = "fresh_local_newer_than_fresh_api"
+            selected_rows = _annotate_advisory_rows(rows, selected_meta)
+            return AdvisoryReadResult(
+                rows=selected_rows,
+                source_health_rows=[
+                    _advisory_source_health_row(
+                        run_id=run_id,
+                        now_ms=now_ms,
+                        local_rows=rows,
+                        api_rows=api_rows,
+                        selected_rows=selected_rows,
+                        selected_meta=selected_meta,
+                        local_meta=local_meta,
+                        api_meta=api_meta,
+                    )
+                ],
+            )
+        if rows and not local_is_fresh and not api_is_fresh and _local_newer_than_api(
+            local_meta=local_meta,
+            local_rows=rows,
+            api_meta=api_meta,
+            api_rows=api_rows,
+        ):
+            selected_meta = dict(local_meta)
+            selected_meta["api_fallback_attempted"] = True
+            selected_meta["api_fallback_success"] = True
+            selected_meta["advisory_source"] = "stale_local"
+            selected_meta["stale_advisory_used"] = True
+            selected_meta["selection_reason"] = "both_stale_local_newer_than_api"
+            selected_rows = _annotate_advisory_rows(rows, selected_meta)
+            return AdvisoryReadResult(
+                rows=selected_rows,
+                source_health_rows=[
+                    _advisory_source_health_row(
+                        run_id=run_id,
+                        now_ms=now_ms,
+                        local_rows=rows,
+                        api_rows=api_rows,
+                        selected_rows=selected_rows,
+                        selected_meta=selected_meta,
+                        local_meta=local_meta,
+                        api_meta=api_meta,
+                    )
+                ],
+            )
+        if rows and not local_is_fresh and api_is_fresh:
+            api_meta["selection_reason"] = "fresh_api_over_stale_local"
+        elif rows and local_is_fresh and api_is_fresh:
+            api_meta["selection_reason"] = "fresh_api_newer_or_equal"
+        else:
+            api_meta["selection_reason"] = "api_fallback_success"
         selected_rows = _annotate_advisory_rows(api_rows, api_meta)
         cache_path = _advisory_source_cache_path(rows) or _advisory_cache_write_path(
             configured,
@@ -1660,6 +1740,7 @@ def _read_strategy_opportunity_advisory_result(
         stale_meta["api_fallback_success"] = False
         stale_meta["advisory_source"] = "stale_local"
         stale_meta["stale_advisory_used"] = True
+        stale_meta["selection_reason"] = "api_unavailable_stale_local_fallback"
         selected_rows = _annotate_advisory_rows(rows, stale_meta)
         return AdvisoryReadResult(
             rows=selected_rows,
@@ -1684,6 +1765,7 @@ def _read_strategy_opportunity_advisory_result(
         api_fallback_attempted=True,
         api_fallback_success=False,
     )
+    missing_meta["selection_reason"] = "missing_local_and_api"
     return AdvisoryReadResult(
         rows=[],
         source_health_rows=[

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from datetime import timedelta
 
 import pytest
 
@@ -11,11 +12,18 @@ from src.quant_lab_client.exceptions import QuantLabValidationError
 
 
 class _Response:
-    def __init__(self, payload: dict, status_code: int = 200, headers: dict | None = None) -> None:
+    def __init__(
+        self,
+        payload: dict,
+        status_code: int = 200,
+        headers: dict | None = None,
+        elapsed=None,
+    ) -> None:
         self._payload = payload
         self.status_code = status_code
         self.text = json.dumps(payload)
         self.headers = headers or {}
+        self.elapsed = elapsed
 
     def json(self):
         return self._payload
@@ -246,6 +254,88 @@ def test_get_json_uses_etag_after_ttl_expiry(tmp_path: Path) -> None:
     assert second.cached is True
     assert second.status_code == 304
     assert http.calls[1]["headers"]["If-None-Match"] == '"abc"'
+
+
+def test_get_json_persists_etag_cache_across_clients(tmp_path: Path) -> None:
+    cache_path = tmp_path / "quant_lab_http_cache.json"
+
+    class FirstHTTP(_HTTP):
+        def get(self, url, params=None, headers=None, timeout=None):
+            self.calls.append({"method": "GET", "url": url, "params": params, "headers": headers, "timeout": timeout})
+            return _Response(
+                {"rows": [{"strategy_candidate": "v5.f4_volume_expansion_entry"}]},
+                headers={"ETag": '"persisted"'},
+            )
+
+    first_http = FirstHTTP()
+    first_client = QuantLabClient(
+        base_url="https://quant-lab.local",
+        http_client=first_http,
+        cache_ttl_seconds=0,
+        request_log_path=tmp_path / "first_requests.jsonl",
+        http_cache_path=cache_path,
+    )
+    first = first_client.get_json("/v1/strategy-opportunity-advisory/v5-compact")
+    assert first.ok is True
+    assert cache_path.is_file()
+
+    class SecondHTTP(_HTTP):
+        def get(self, url, params=None, headers=None, timeout=None):
+            self.calls.append({"method": "GET", "url": url, "params": params, "headers": headers, "timeout": timeout})
+            assert headers and headers.get("If-None-Match") == '"persisted"'
+            return _Response({}, status_code=304, headers={"ETag": '"persisted"'})
+
+    second_http = SecondHTTP()
+    second_client = QuantLabClient(
+        base_url="https://quant-lab.local",
+        http_client=second_http,
+        cache_ttl_seconds=0,
+        request_log_path=tmp_path / "second_requests.jsonl",
+        http_cache_path=cache_path,
+    )
+    second = second_client.get_json("/v1/strategy-opportunity-advisory/v5-compact")
+
+    assert second.cached is True
+    assert second.status_code == 304
+    assert second.data == first.data
+    assert second_http.calls[0]["headers"]["If-None-Match"] == '"persisted"'
+
+
+def test_get_json_logs_segmented_latency_and_server_headers(tmp_path: Path) -> None:
+    class HeaderHTTP(_HTTP):
+        def get(self, url, params=None, headers=None, timeout=None):
+            self.calls.append({"method": "GET", "url": url, "params": params, "headers": headers, "timeout": timeout})
+            return _Response(
+                {"rows": [{"strategy_candidate": "v5.f4_volume_expansion_entry"}]},
+                headers={
+                    "X-Quant-Lab-Api-Cache-Hit": "true",
+                    "X-Advisory-Response-Cache-Hit": "true",
+                    "X-Quant-Lab-Lake-Scan-Ms": "1.25",
+                    "X-Quant-Lab-Serialize-Ms": "2.5",
+                    "X-Quant-Lab-Source-Signature-Ms": "0.75",
+                },
+                elapsed=timedelta(milliseconds=15),
+            )
+
+    log_path = tmp_path / "requests.jsonl"
+    client = QuantLabClient(
+        base_url="https://quant-lab.local",
+        http_client=HeaderHTTP(),
+        request_log_path=log_path,
+        http_cache_path=tmp_path / "cache.json",
+    )
+
+    client.get_json("/v1/strategy-opportunity-advisory/v5-compact")
+
+    row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+    assert row["ttfb_ms"] == 15.0
+    assert row["response_bytes"] > 0
+    assert row["server_header_lake_scan_ms"] == 1.25
+    assert row["server_header_serialize_ms"] == 2.5
+    assert row["server_header_source_signature_ms"] == 0.75
+    assert row["server_cache_hit"] is True
+    assert row["response_cache_hit"] is True
+    assert "resolved_host" in row
 
 
 def test_live_permission_cache_uses_expires_at(tmp_path: Path) -> None:

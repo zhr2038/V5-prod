@@ -2357,6 +2357,84 @@ def test_alpha_factory_reader_uses_selected_api_advisory_rows(
     assert reader[0]["advisory_source"] != "stale_local"
 
 
+def test_strategy_advisory_fresh_api_beats_newer_stale_local(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_fresh_api_beats_stale_local"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "source_module": "alpha_factory",
+                "strategy_candidate": "v5.expanded_relative_strength_top1_shadow",
+                "symbol": "TRX/USDT",
+                "decision": "KILL",
+                "recommended_mode": "shadow",
+                "alpha_factory_score": "0.1",
+                "as_of_ts": str(start_s - 100),
+                "generated_at": str(start_s - 100),
+                "expires_at": str(start_s - 10),
+                "contract_version": CONTRACT_VERSION,
+            }
+        ],
+    )
+
+    class FakeClient:
+        def get_json(self, endpoint: str, params: dict | None = None) -> SimpleNamespace:
+            return SimpleNamespace(
+                ok=True,
+                data={
+                    "rows": [
+                        {
+                            "source_module": "alpha_factory",
+                            "strategy_candidate": "v5.expanded_relative_strength_top1_shadow",
+                            "symbol": "TRX/USDT",
+                            "decision": "KEEP_SHADOW",
+                            "recommended_mode": "shadow",
+                            "promotion_state": "stage2_shadow",
+                            "alpha_factory_score": "0.88",
+                            "as_of_ts": str(start_s - 200),
+                            "generated_at": str(start_s - 200),
+                            "expires_at": str(start_s + 3600),
+                            "contract_version": CONTRACT_VERSION,
+                        }
+                    ]
+                },
+            )
+
+    from src.quant_lab_client import client as client_mod
+
+    monkeypatch.setattr(
+        client_mod.QuantLabClient,
+        "from_config",
+        classmethod(lambda cls, *args, **kwargs: FakeClient()),
+    )
+
+    update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_fresh_api_beats_stale_local", start_s),
+        market_data_1h={},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    health = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_source_health.csv")
+    assert health[0]["local_fresh"] == "False"
+    assert health[0]["api_fresh"] == "True"
+    assert health[0]["selected_source"] == "api"
+    assert health[0]["selection_reason"] == "fresh_api_over_stale_local"
+    assert health[0]["stale_local_overrode_api"] == "False"
+    reader = _read_csv(tmp_path / "reports" / "summaries" / "alpha_factory_advisory_reader.csv")
+    assert reader[0]["selected_source"] == "api"
+    assert reader[0]["source_health_freshness_status"] == "fresh"
+    assert reader[0]["alpha_factory_score"] == "0.88"
+
+
 def test_strategy_advisory_source_health_records_api_lake_metadata(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -104,6 +104,7 @@ quant_lab:
   audit_enabled: true
   audit_path: reports/quant_lab_usage.jsonl
   request_log_path: reports/quant_lab_requests.jsonl
+  http_cache_path: reports/quant_lab_http_cache.json
 
   export_bundle_enabled: true
   export_bundle_dir: /var/lib/v5/exports/bundles

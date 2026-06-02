@@ -1797,6 +1797,7 @@ class QuantLabConfig(BaseModel):
     audit_enabled: bool = True
     audit_path: str = "reports/quant_lab_usage.jsonl"
     request_log_path: str = "reports/quant_lab_requests.jsonl"
+    http_cache_path: str = "reports/quant_lab_http_cache.json"
 
     export_bundle_enabled: bool = True
     export_bundle_dir: str = "/var/lib/v5/exports/bundles"
