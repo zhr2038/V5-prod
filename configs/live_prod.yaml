@@ -373,11 +373,11 @@ diagnostics:
       extra_live_block_reasons:
         - expanded_universe_paper_only_no_live
         - not_in_v5_live_universe
-    - strategy_id: OKB_EXPANDED_UNIVERSE_PAPER_V1
-      experiment_name: v5.okb_expanded_universe_paper
+    - strategy_id: WLD_EXPANDED_UNIVERSE_PAPER_V1
+      experiment_name: v5.wld_expanded_universe_paper
       source_strategy_candidates: []
       allowed_block_reasons: []
-      symbol: OKB/USDT
+      symbol: WLD/USDT
       primary_horizon_hours: 24
       require_protect_level: false
       require_no_cooldown: false

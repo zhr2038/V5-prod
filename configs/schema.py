@@ -1675,11 +1675,11 @@ class DiagnosticsConfig(BaseModel):
                 ],
             },
             {
-                "strategy_id": "OKB_EXPANDED_UNIVERSE_PAPER_V1",
-                "experiment_name": "v5.okb_expanded_universe_paper",
+                "strategy_id": "WLD_EXPANDED_UNIVERSE_PAPER_V1",
+                "experiment_name": "v5.wld_expanded_universe_paper",
                 "source_strategy_candidates": [],
                 "allowed_block_reasons": [],
-                "symbol": "OKB/USDT",
+                "symbol": "WLD/USDT",
                 "primary_horizon_hours": 24,
                 "require_protect_level": False,
                 "require_no_cooldown": False,
@@ -1694,7 +1694,7 @@ class DiagnosticsConfig(BaseModel):
                 ],
             },
         ],
-        description="Read-only paper strategy definitions for SOL/ETH/BNB diagnostics",
+        description="Read-only paper strategy definitions for SOL/ETH/BNB and expanded-universe diagnostics",
     )
 
     @field_validator(

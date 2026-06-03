@@ -40,7 +40,7 @@ ETH_F3_DOMINANT_STRATEGY_ID = "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1"
 BNB_F3_DOMINANT_STRATEGY_ID = "BNB_F3_DOMINANT_ENTRY_PAPER_V1"
 BNB_RISK_ON_BUY_STRATEGY_ID = "BNB_RISK_ON_BUY_PAPER_V1"
 HYPE_EXPANDED_UNIVERSE_STRATEGY_ID = "HYPE_EXPANDED_UNIVERSE_PAPER_V1"
-OKB_EXPANDED_UNIVERSE_STRATEGY_ID = "OKB_EXPANDED_UNIVERSE_PAPER_V1"
+WLD_EXPANDED_UNIVERSE_STRATEGY_ID = "WLD_EXPANDED_UNIVERSE_PAPER_V1"
 ETH_F3_DOMINANT_MIN_48H_COMPLETE_COUNT = 30
 ETH_F3_ALPHA6_NOT_BUY_REASON = "eth_f3_alpha6_side_not_buy_no_new_entry"
 ETH_F3_DOMINANT_LIVE_BLOCK_REASONS = [
@@ -155,11 +155,11 @@ DEFAULT_PAPER_STRATEGY_CONFIGS = [
         "extra_live_block_reasons": list(EXPANDED_UNIVERSE_PAPER_LIVE_BLOCK_REASONS),
     },
     {
-        "strategy_id": OKB_EXPANDED_UNIVERSE_STRATEGY_ID,
-        "experiment_name": "v5.okb_expanded_universe_paper",
+        "strategy_id": WLD_EXPANDED_UNIVERSE_STRATEGY_ID,
+        "experiment_name": "v5.wld_expanded_universe_paper",
         "source_strategy_candidates": [],
         "allowed_block_reasons": [],
-        "symbol": "OKB/USDT",
+        "symbol": "WLD/USDT",
         "primary_horizon_hours": 24,
         "require_protect_level": False,
         "require_no_cooldown": False,
