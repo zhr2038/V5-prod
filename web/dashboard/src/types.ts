@@ -244,6 +244,14 @@ export interface DecisionAuditData {
   execution_summary?: MetricRecord;
   rejected_summary?: MetricRecord;
   orders?: UnknownRecord[];
+  run_orders?: UnknownRecord[];
+  selected_orders?: UnknownRecord[];
+  blocked_routes?: UnknownRecord[];
+  actionable_signals?: {
+    held_symbols?: string[];
+    buy_candidates?: UnknownRecord[];
+    sell_candidates?: UnknownRecord[];
+  };
 }
 
 export interface HealthCheckItem {

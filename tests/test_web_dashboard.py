@@ -17,6 +17,7 @@ MONITOR_V2_JS_PATH = REPO_ROOT / "web" / "static" / "js" / "monitor_v2.js"
 ML_STATUS_PANEL_JS_PATH = REPO_ROOT / "web" / "static" / "js" / "ml_status_panel.js"
 ML_BAND_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "MLBand.tsx"
 MARKET_RADAR_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "MarketRadar.tsx"
+MAIN_TRADING_GRID_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "MainTradingGrid.tsx"
 DASHBOARD_CSS_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "index.css"
 
 
@@ -37,6 +38,16 @@ def test_market_radar_rss_summary_is_rendered_below_panel_not_inside_rss_card():
     assert '<VoteCard title="RSS" vote={votes.rss} showBars showSummary={false} />' in source
     assert 'className="market-radar-rss-summary"' in source
     assert '.market-radar-rss-summary' in css
+
+
+def test_execution_path_panel_uses_strategy_and_route_counts_not_selected_only():
+    source = MAIN_TRADING_GRID_TSX_PATH.read_text(encoding="utf-8")
+
+    assert "function countStrategySignals" in source
+    assert "function countActionableSignals" in source
+    assert "<span>信号生成</span><strong>{fmtNum(strategySignalCount, 0)}</strong>" in source
+    assert "<span>风控检查</span><strong>{fmtNum(routeChecked, 0)}</strong>" in source
+    assert "firstNumber(rejectedSummary.total, blockedRoutes.length)" in source
 
 
 def _utc_epoch_from_text(value: str, fmt: str) -> float:

@@ -77,6 +77,21 @@ function fmtLatencyMs(value: unknown) {
   return `${Number(num) >= 100 ? Number(num).toFixed(0) : Number(num).toFixed(1)}ms`;
 }
 
+function countStrategySignals(decisionAudit?: DecisionAuditData | null) {
+  return (decisionAudit?.strategy_signals || []).reduce((total, strategy) => {
+    const explicitTotal = firstNumber(strategy.total_signals);
+    if (Number.isFinite(explicitTotal)) return total + Number(explicitTotal);
+    return total + (Array.isArray(strategy.signals) ? strategy.signals.length : 0);
+  }, 0);
+}
+
+function countActionableSignals(decisionAudit?: DecisionAuditData | null) {
+  const actionable = asRecord(decisionAudit?.actionable_signals);
+  const buys = Array.isArray(actionable.buy_candidates) ? actionable.buy_candidates.length : 0;
+  const sells = Array.isArray(actionable.sell_candidates) ? actionable.sell_candidates.length : 0;
+  return buys + sells;
+}
+
 function timerProgress(timer: TimerData) {
   if (!timer.active) return 0;
   const countdown = firstNumber(timer.countdown_seconds);
@@ -323,23 +338,32 @@ function TimersPanel({ timers }: { timers?: { timers: TimerData[] } | null }) {
 
 function ExecutionPathPanel({ decisionAudit }: { decisionAudit?: DecisionAuditData | null }) {
   const exec = decisionAudit?.execution_summary || {};
-  const rejected = decisionAudit?.rejected_summary || {};
-  const orders = decisionAudit?.orders || [];
+  const rejectedSummary = asRecord(decisionAudit?.rejected_summary);
+  const orders = decisionAudit?.orders || decisionAudit?.run_orders || [];
   const selected = firstNumber(decisionAudit?.counts?.selected) || 0;
-  const submitted = firstNumber(exec.submitted, orders.length);
+  const strategySignalCount = countStrategySignals(decisionAudit);
+  const actionableSignalCount = countActionableSignals(decisionAudit);
+  const selectedOrders = Array.isArray(decisionAudit?.selected_orders) ? decisionAudit.selected_orders : [];
+  const blockedRoutes = Array.isArray(decisionAudit?.blocked_routes) ? decisionAudit.blocked_routes : [];
+  const rejectedTotal = firstNumber(rejectedSummary.total, blockedRoutes.length) || 0;
+  const routeChecked = Math.max(actionableSignalCount, selected + rejectedTotal, selectedOrders.length + rejectedTotal);
+  const orderCount = (firstNumber(decisionAudit?.counts?.orders_rebalance) || 0) + (firstNumber(decisionAudit?.counts?.orders_exit) || 0);
+  const ordersFiltered = Math.max(selectedOrders.length, orders.length, orderCount);
+  const submitted = firstNumber(exec.submitted, exec.total, orders.length) || 0;
   const filled = firstNumber(exec.filled) || 0;
-  const rejectedCount = firstNumber(exec.rejected, rejected.total) || 0;
+  const partialFilled = firstNumber(exec.partially_filled, exec.open_or_partial) || 0;
+  const rejectedCount = firstNumber(exec.rejected) || 0;
   const previousFilled = usePreviousValue(filled);
   const previousRejected = usePreviousValue(rejectedCount);
   const flowTone = rejectedCount > Number(previousRejected || 0)
     ? 'rejected'
     : filled > Number(previousFilled || 0)
       ? 'filled'
-      : Number(rejected.total || 0) > 0
+      : rejectedTotal > 0
         ? 'blocked'
         : 'selected';
   const flowPulse = useDataPulse(
-    `${selected}:${submitted}:${filled}:${rejectedCount}:${Number(rejected.total || 0)}`,
+    `${strategySignalCount}:${routeChecked}:${ordersFiltered}:${submitted}:${filled}:${rejectedCount}:${rejectedTotal}`,
     { durationMs: 900 }
   );
 
@@ -351,18 +375,18 @@ function ExecutionPathPanel({ decisionAudit }: { decisionAudit?: DecisionAuditDa
         data-pulse={flowPulse.active ? 'true' : 'false'}
         data-flow={flowTone}
       >
-        <div><span>信号生成</span><strong>{fmtNum(selected, 0)}</strong></div>
+        <div><span>信号生成</span><strong>{fmtNum(strategySignalCount, 0)}</strong></div>
         <i />
-        <div><span>风控检查</span><strong>{fmtNum(Math.max(0, selected - Number(rejected.total || 0)), 0)}</strong></div>
+        <div><span>风控检查</span><strong>{fmtNum(routeChecked, 0)}</strong></div>
         <i />
-        <div><span>订单筛选</span><strong>{fmtNum(orders.length, 0)}</strong></div>
+        <div><span>订单筛选</span><strong>{fmtNum(ordersFiltered, 0)}</strong></div>
         <i />
         <div><span>交易所提交</span><strong>{fmtNum(submitted, 0)}</strong></div>
       </div>
       <div className="execution-status-row">
         <span className="ok">成交 {fmtNum(filled, 0)}</span>
-        <span className="info">部分成交 {fmtNum(exec.partially_filled, 0)}</span>
-        <span className="warn">压单 {fmtNum(rejected.total, 0)}</span>
+        <span className="info">部分成交 {fmtNum(partialFilled, 0)}</span>
+        <span className="warn">压单 {fmtNum(rejectedTotal, 0)}</span>
         <span className="danger">拒单 {fmtNum(rejectedCount, 0)}</span>
       </div>
     </section>
