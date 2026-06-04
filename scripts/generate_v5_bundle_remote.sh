@@ -124,6 +124,12 @@ EXPANDED_UNIVERSE_ADVISORY_FIELDS = (
     "advisory_reason",
     "live_order_effect",
 )
+for _expanded_horizon in (4, 8, 12, 24, 48, 72):
+    EXPANDED_UNIVERSE_ADVISORY_FIELDS += (
+        f"future_{_expanded_horizon}h_net_bps",
+        f"label_{_expanded_horizon}h_net_bps",
+        f"label_{_expanded_horizon}h_after_cost_bps",
+    )
 EXPANDED_UNIVERSE_PAPER_RUN_FIELDS = (
     "run_id",
     "ts_utc",
@@ -152,6 +158,27 @@ EXPANDED_UNIVERSE_PAPER_RUN_FIELDS = (
     "live_block_reasons",
     "live_order_effect",
 )
+for _expanded_horizon in (4, 8, 12, 24, 48, 72):
+    EXPANDED_UNIVERSE_PAPER_RUN_FIELDS += (
+        f"paper_pnl_bps_{_expanded_horizon}h",
+        f"label_{_expanded_horizon}h_status",
+    )
+EXPANDED_UNIVERSE_PAPER_DAILY_FIELDS = (
+    "paper_date",
+    "strategy_id",
+    "experiment_name",
+    "symbol",
+    "row_count",
+    "entry_count",
+    "shadow_count",
+    "negative_count",
+    "avg_paper_pnl_bps_by_horizon",
+    "paper_pnl_observed_count_by_horizon",
+    "win_rate_by_horizon",
+    "live_order_effect",
+)
+for _expanded_horizon in (4, 8, 12, 24, 48, 72):
+    EXPANDED_UNIVERSE_PAPER_DAILY_FIELDS += (f"avg_paper_pnl_bps_{_expanded_horizon}h",)
 ALPHA_FACTORY_ADVISORY_FIELDS = (
     "run_id",
     "ts_utc",
@@ -1236,6 +1263,11 @@ def copy_current_reports():
             "reports/summaries/expanded_universe_paper_runs.csv",
             "summaries/expanded_universe_paper_runs.csv",
             EXPANDED_UNIVERSE_PAPER_RUN_FIELDS,
+        ),
+        (
+            "reports/summaries/expanded_universe_paper_daily.csv",
+            "summaries/expanded_universe_paper_daily.csv",
+            EXPANDED_UNIVERSE_PAPER_DAILY_FIELDS,
         ),
         (
             "reports/summaries/alpha_factory_advisory_reader.csv",

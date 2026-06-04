@@ -86,3 +86,29 @@ def test_final_score_alpha6_conflict_label_status_partial_complete() -> None:
     assert row["best_future_horizon_hours"] == 4
     assert row["material_profit_flag"] == "false"
     assert row["missed_profit_flag"] == "false"
+
+
+def test_final_score_alpha6_conflict_joins_skipped_candidate_label_row() -> None:
+    candidate = _base_row(strategy_candidate="f3_dominant_entry")
+    label = {
+        "run_id": "r1",
+        "ts_utc": "2026-05-30T03:00:00Z",
+        "symbol": "BNB-USDT",
+        "label_4h_net_bps": "70.5",
+        "label_8h_after_cost_bps": "-2.0",
+    }
+
+    rows = build_conflict_rows([candidate, label])
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["future_4h_net_bps"] == "70.5"
+    assert row["future_8h_net_bps"] == "-2.0"
+    assert row["label_4h_status"] == "complete"
+    assert row["label_8h_status"] == "complete"
+    assert row["label_12h_status"] == "pending"
+    assert row["label_status"] == "partial_complete"
+    assert row["max_future_net_bps"] == 70.5
+    assert row["best_future_horizon_hours"] == 4
+    assert row["material_profit_flag"] == "true"
+    assert row["missed_profit_flag"] == "true"

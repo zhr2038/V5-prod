@@ -8,8 +8,12 @@ from src.reporting.final_score_alpha6_conflict import (
     aggregate_label_status,
     as_float,
     best_future_net_bps,
+    build_label_index,
     first_observed,
     label_status_for_future,
+    future_value_for_horizon,
+    label_join_key,
+    LABEL_HORIZONS,
     normalize_symbol,
     truthy,
 )
@@ -85,13 +89,19 @@ def build_bnb_strong_alpha6_bypass_rows(
     *,
     future_net_bps: Mapping[int, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    row_list = [dict(row) for row in rows]
+    label_index = build_label_index(row_list)
     out: list[dict[str, Any]] = []
     future_net_bps = future_net_bps or {}
-    for row in rows:
+    for row in row_list:
         if not is_bnb_strong_alpha6_bypass_candidate(row):
             continue
-        futures = {h: first_observed(future_net_bps.get(h)) for h in (4, 8, 12, 24)}
-        label_statuses = {h: label_status_for_future(futures[h]) for h in (4, 8, 12, 24)}
+        label_row = label_index.get(label_join_key(row), {})
+        futures = {
+            h: future_value_for_horizon(row, label_row, h, future_net_bps)
+            for h in LABEL_HORIZONS
+        }
+        label_statuses = {h: label_status_for_future(futures[h]) for h in LABEL_HORIZONS}
         any_label_complete = any(status == "complete" for status in label_statuses.values())
         all_labels_complete = all(status == "complete" for status in label_statuses.values())
         max_future, best_horizon, material_profit = best_future_net_bps(futures)

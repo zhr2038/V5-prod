@@ -451,6 +451,14 @@ EXPANDED_UNIVERSE_ADVISORY_FIELDS = [
     "advisory_reason",
     "live_order_effect",
 ]
+for _horizon in DEFAULT_HORIZONS:
+    EXPANDED_UNIVERSE_ADVISORY_FIELDS.extend(
+        [
+            f"future_{_horizon}h_net_bps",
+            f"label_{_horizon}h_net_bps",
+            f"label_{_horizon}h_after_cost_bps",
+        ]
+    )
 
 EXPANDED_UNIVERSE_PAPER_RUN_FIELDS = [
     "run_id",
@@ -480,6 +488,30 @@ EXPANDED_UNIVERSE_PAPER_RUN_FIELDS = [
     "live_block_reasons",
     "live_order_effect",
 ]
+for _horizon in DEFAULT_HORIZONS:
+    EXPANDED_UNIVERSE_PAPER_RUN_FIELDS.extend(
+        [
+            f"paper_pnl_bps_{_horizon}h",
+            f"{HORIZON_PREFIX}{_horizon}h_status",
+        ]
+    )
+
+EXPANDED_UNIVERSE_PAPER_DAILY_FIELDS = [
+    "paper_date",
+    "strategy_id",
+    "experiment_name",
+    "symbol",
+    "row_count",
+    "entry_count",
+    "shadow_count",
+    "negative_count",
+    "avg_paper_pnl_bps_by_horizon",
+    "paper_pnl_observed_count_by_horizon",
+    "win_rate_by_horizon",
+    "live_order_effect",
+]
+for _horizon in DEFAULT_HORIZONS:
+    EXPANDED_UNIVERSE_PAPER_DAILY_FIELDS.append(f"avg_paper_pnl_bps_{_horizon}h")
 
 ALPHA_FACTORY_ADVISORY_FIELDS = [
     "run_id",
@@ -867,7 +899,7 @@ def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict
         _advisory_first(row, ("recommended_mode", "mode", "target_mode"))
         or ""
     ).strip().lower().replace("-", "_")
-    return {
+    normalized = {
         "source_path": source_path,
         "strategy_id": strategy_id,
         "strategy_candidate": strategy_candidate,
@@ -952,6 +984,15 @@ def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict
         "quant_lab_git_commit": str(_advisory_first(row, ("quant_lab_git_commit", "git_commit", "source_git_commit")) or "").strip(),
         "source_version": str(_advisory_first(row, ("source_version", "version")) or "").strip(),
     }
+    for horizon in DEFAULT_HORIZONS:
+        for field in (
+            f"future_{horizon}h_net_bps",
+            f"label_{horizon}h_net_bps",
+            f"label_{horizon}h_after_cost_bps",
+            f"paper_pnl_bps_{horizon}h",
+        ):
+            normalized[field] = row.get(field)
+    return normalized
 
 
 def _normalize_advisory_csv_rows(handle: Any, *, source_path: str) -> list[dict[str, Any]]:
@@ -2437,56 +2478,62 @@ def _expanded_universe_advisory_rows(
         response_action = str(fields.get("advisory_response_action") or "")
         paper_allowed = response_action == "paper_tracking"
         shadow_allowed = response_action == "shadow_tracking"
-        out.append(
-            {
-                "run_id": run_id,
-                "ts_utc": ts_utc,
-                "source_path": row.get("source_path"),
-                "advisory_source": fields["advisory_source"],
-                "advisory_fresh": fields["advisory_fresh"],
-                "advisory_age_sec": fields["advisory_age_sec"],
-                "advisory_contract_match": fields["advisory_contract_match"],
-                "stale_advisory_used": fields["stale_advisory_used"],
-                "api_fallback_attempted": fields["api_fallback_attempted"],
-                "api_fallback_success": fields["api_fallback_success"],
-                "as_of_ts": row.get("as_of_ts"),
-                "generated_at": row.get("generated_at"),
-                "expires_at": row.get("expires_at"),
-                "contract_version": row.get("contract_version"),
-                "quant_lab_git_commit": row.get("quant_lab_git_commit"),
-                "source_version": row.get("source_version"),
-                "universe_type": "expanded_paper",
-                "symbol": symbol,
-                "symbol_in_live_universe": symbol in live_symbols,
-                "live_symbols_unchanged": True,
-                "strategy_id": row.get("strategy_id"),
-                "strategy_candidate": row.get("strategy_candidate"),
-                "experiment_name": row.get("experiment_name"),
-                "decision": row.get("decision"),
-                "recommended_mode": row.get("recommended_mode"),
-                "horizon_hours": row.get("horizon_hours"),
-                "sample_count": row.get("sample_count"),
-                "complete_sample_count": row.get("complete_sample_count"),
-                "expanded_universe_maturity_state": row.get("expanded_universe_maturity_state"),
-                "cost_source": row.get("cost_source"),
-                "cost_source_quality": row.get("cost_source_quality"),
-                "cost_bps": row.get("cost_bps"),
-                "cost_model_version": row.get("cost_model_version"),
-                "response_action": response_action,
-                "negative_advisory": fields["advisory_negative"],
-                "paper_tracking_allowed": paper_allowed,
-                "shadow_tracking_allowed": shadow_allowed,
-                "max_paper_notional_usdt": row.get("max_paper_notional_usdt"),
-                "max_live_notional_usdt": 0.0,
-                "max_live_notional_usdt_ignored": True,
-                "live_block_reasons": row.get("live_block_reasons"),
-                "would_block_if_enabled": row.get("would_block_if_enabled"),
-                "would_enter": row.get("would_enter"),
-                "no_sample_reason": _expanded_no_sample_reason(row, fields),
-                "advisory_reason": row.get("advisory_reason"),
-                "live_order_effect": "read_only_no_live_order",
-            }
-        )
+        item = {
+            "run_id": run_id,
+            "ts_utc": ts_utc,
+            "source_path": row.get("source_path"),
+            "advisory_source": fields["advisory_source"],
+            "advisory_fresh": fields["advisory_fresh"],
+            "advisory_age_sec": fields["advisory_age_sec"],
+            "advisory_contract_match": fields["advisory_contract_match"],
+            "stale_advisory_used": fields["stale_advisory_used"],
+            "api_fallback_attempted": fields["api_fallback_attempted"],
+            "api_fallback_success": fields["api_fallback_success"],
+            "as_of_ts": row.get("as_of_ts"),
+            "generated_at": row.get("generated_at"),
+            "expires_at": row.get("expires_at"),
+            "contract_version": row.get("contract_version"),
+            "quant_lab_git_commit": row.get("quant_lab_git_commit"),
+            "source_version": row.get("source_version"),
+            "universe_type": "expanded_paper",
+            "symbol": symbol,
+            "symbol_in_live_universe": symbol in live_symbols,
+            "live_symbols_unchanged": True,
+            "strategy_id": row.get("strategy_id"),
+            "strategy_candidate": row.get("strategy_candidate"),
+            "experiment_name": row.get("experiment_name"),
+            "decision": row.get("decision"),
+            "recommended_mode": row.get("recommended_mode"),
+            "horizon_hours": row.get("horizon_hours"),
+            "sample_count": row.get("sample_count"),
+            "complete_sample_count": row.get("complete_sample_count"),
+            "expanded_universe_maturity_state": row.get("expanded_universe_maturity_state"),
+            "cost_source": row.get("cost_source"),
+            "cost_source_quality": row.get("cost_source_quality"),
+            "cost_bps": row.get("cost_bps"),
+            "cost_model_version": row.get("cost_model_version"),
+            "response_action": response_action,
+            "negative_advisory": fields["advisory_negative"],
+            "paper_tracking_allowed": paper_allowed,
+            "shadow_tracking_allowed": shadow_allowed,
+            "max_paper_notional_usdt": row.get("max_paper_notional_usdt"),
+            "max_live_notional_usdt": 0.0,
+            "max_live_notional_usdt_ignored": True,
+            "live_block_reasons": row.get("live_block_reasons"),
+            "would_block_if_enabled": row.get("would_block_if_enabled"),
+            "would_enter": row.get("would_enter"),
+            "no_sample_reason": _expanded_no_sample_reason(row, fields),
+            "advisory_reason": row.get("advisory_reason"),
+            "live_order_effect": "read_only_no_live_order",
+        }
+        for horizon in DEFAULT_HORIZONS:
+            for field in (
+                f"future_{horizon}h_net_bps",
+                f"label_{horizon}h_net_bps",
+                f"label_{horizon}h_after_cost_bps",
+            ):
+                item[field] = row.get(field)
+        out.append(item)
     return out
 
 
@@ -2499,36 +2546,101 @@ def _expanded_universe_paper_rows(expanded_rows: Iterable[Mapping[str, Any]]) ->
         tracking_mode = "negative" if response_action == "negative_advisory" else str(row.get("recommended_mode") or "")
         would_enter = _expanded_would_enter(row)
         max_paper = _normalize_float(row.get("max_paper_notional_usdt"))
-        out.append(
-            {
-                "run_id": row.get("run_id"),
-                "ts_utc": row.get("ts_utc"),
-                "paper_date": str(row.get("ts_utc") or "")[:10],
-                "universe_type": "expanded_paper",
-                "symbol": row.get("symbol"),
-                "symbol_in_live_universe": row.get("symbol_in_live_universe"),
-                "live_symbols_unchanged": True,
-                "strategy_id": row.get("strategy_id"),
-                "strategy_candidate": row.get("strategy_candidate"),
-                "experiment_name": row.get("experiment_name"),
-                "tracking_mode": tracking_mode,
-                "decision": row.get("decision"),
-                "recommended_mode": row.get("recommended_mode"),
-                "response_action": response_action,
-                "negative_advisory": row.get("negative_advisory"),
-                "would_enter": would_enter,
-                "would_size_usdt": max_paper if would_enter and max_paper is not None else 0.0,
-                "max_paper_notional_usdt": max_paper,
-                "max_live_notional_usdt_ignored": True,
-                "no_sample_reason": row.get("no_sample_reason"),
-                "advisory_source": row.get("advisory_source"),
-                "advisory_source_path": row.get("source_path"),
-                "advisory_fresh": row.get("advisory_fresh"),
-                "advisory_contract_match": row.get("advisory_contract_match"),
-                "live_block_reasons": row.get("live_block_reasons"),
-                "live_order_effect": "read_only_no_live_order",
-            }
-        )
+        item = {
+            "run_id": row.get("run_id"),
+            "ts_utc": row.get("ts_utc"),
+            "paper_date": str(row.get("ts_utc") or "")[:10],
+            "universe_type": "expanded_paper",
+            "symbol": row.get("symbol"),
+            "symbol_in_live_universe": row.get("symbol_in_live_universe"),
+            "live_symbols_unchanged": True,
+            "strategy_id": row.get("strategy_id"),
+            "strategy_candidate": row.get("strategy_candidate"),
+            "experiment_name": row.get("experiment_name"),
+            "tracking_mode": tracking_mode,
+            "decision": row.get("decision"),
+            "recommended_mode": row.get("recommended_mode"),
+            "response_action": response_action,
+            "negative_advisory": row.get("negative_advisory"),
+            "would_enter": would_enter,
+            "would_size_usdt": max_paper if would_enter and max_paper is not None else 0.0,
+            "max_paper_notional_usdt": max_paper,
+            "max_live_notional_usdt_ignored": True,
+            "no_sample_reason": row.get("no_sample_reason"),
+            "advisory_source": row.get("advisory_source"),
+            "advisory_source_path": row.get("source_path"),
+            "advisory_fresh": row.get("advisory_fresh"),
+            "advisory_contract_match": row.get("advisory_contract_match"),
+            "live_block_reasons": row.get("live_block_reasons"),
+            "live_order_effect": "read_only_no_live_order",
+        }
+        for horizon in DEFAULT_HORIZONS:
+            value = _expanded_horizon_value(row, horizon)
+            item[f"paper_pnl_bps_{horizon}h"] = value
+            item[f"{HORIZON_PREFIX}{horizon}h_status"] = "complete" if _normalize_float(value) is not None else "pending"
+        out.append(item)
+    return out
+
+
+def _expanded_horizon_value(row: Mapping[str, Any], horizon: int) -> Any:
+    for field in (
+        f"paper_pnl_bps_{horizon}h",
+        f"future_{horizon}h_net_bps",
+        f"label_{horizon}h_net_bps",
+        f"label_{horizon}h_after_cost_bps",
+    ):
+        value = row.get(field)
+        if value not in (None, "", "not_observable", "pending"):
+            return value
+    return ""
+
+
+def _expanded_universe_paper_daily_rows(expanded_paper_rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    buckets: dict[tuple[str, str, str], list[Mapping[str, Any]]] = defaultdict(list)
+    for row in expanded_paper_rows:
+        buckets[
+            (
+                str(row.get("paper_date") or ""),
+                str(row.get("strategy_id") or ""),
+                str(row.get("symbol") or ""),
+            )
+        ].append(row)
+    out: list[dict[str, Any]] = []
+    for (paper_date, strategy_id, symbol), rows in sorted(buckets.items()):
+        entry_rows = [row for row in rows if _normalize_bool(row.get("would_enter"))]
+        horizon_avgs: dict[str, float] = {}
+        observed_counts: dict[str, int] = {}
+        win_rates: dict[str, float] = {}
+        daily_row: dict[str, Any] = {
+            "paper_date": paper_date,
+            "strategy_id": strategy_id,
+            "experiment_name": rows[0].get("experiment_name") if rows else "",
+            "symbol": symbol,
+            "row_count": len(rows),
+            "entry_count": len(entry_rows),
+            "shadow_count": sum(1 for row in rows if str(row.get("response_action") or "") == "shadow_tracking"),
+            "negative_count": sum(1 for row in rows if str(row.get("response_action") or "") == "negative_advisory"),
+            "live_order_effect": "read_only_no_live_order",
+        }
+        for horizon in DEFAULT_HORIZONS:
+            values = [
+                value
+                for value in (_normalize_float(row.get(f"paper_pnl_bps_{horizon}h")) for row in entry_rows)
+                if value is not None
+            ]
+            key = f"{horizon}h"
+            observed_counts[key] = len(values)
+            if values:
+                avg = round(sum(values) / len(values), 6)
+                horizon_avgs[key] = avg
+                win_rates[key] = round(sum(1 for value in values if value > 0.0) / len(values), 6)
+                daily_row[f"avg_paper_pnl_bps_{horizon}h"] = avg
+            else:
+                daily_row[f"avg_paper_pnl_bps_{horizon}h"] = None
+        daily_row["avg_paper_pnl_bps_by_horizon"] = json.dumps(horizon_avgs, sort_keys=True)
+        daily_row["paper_pnl_observed_count_by_horizon"] = json.dumps(observed_counts, sort_keys=True)
+        daily_row["win_rate_by_horizon"] = json.dumps(win_rates, sort_keys=True)
+        out.append(daily_row)
     return out
 
 
@@ -4849,6 +4961,12 @@ def update_sol_paper_strategy_tracker(
         expanded_paper_rows,
         EXPANDED_UNIVERSE_PAPER_RUN_FIELDS,
     )
+    expanded_paper_daily_rows = _expanded_universe_paper_daily_rows(expanded_paper_rows)
+    _write_csv(
+        summaries_dir / "expanded_universe_paper_daily.csv",
+        expanded_paper_daily_rows,
+        EXPANDED_UNIVERSE_PAPER_DAILY_FIELDS,
+    )
     _write_csv(
         summaries_dir / "alpha_factory_advisory_reader.csv",
         alpha_factory_rows,
@@ -4878,6 +4996,7 @@ def update_sol_paper_strategy_tracker(
         "strategy_opportunity_advisory_source_health_rows": int(len(advisory_result.source_health_rows)),
         "expanded_universe_advisory_rows": int(len(expanded_advisory_rows)),
         "expanded_universe_paper_rows": int(len(expanded_paper_rows)),
+        "expanded_universe_paper_daily_rows": int(len(expanded_paper_daily_rows)),
         "alpha_factory_advisory_rows": int(len(alpha_factory_rows)),
         "alpha_factory_family_rows": int(len(alpha_factory_family_rows)),
         "risk_on_multi_buy_shadow_rows": int(len(risk_on_multi_buy_rows)),

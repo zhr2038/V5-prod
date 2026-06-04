@@ -1702,6 +1702,7 @@ def test_hype_wld_expanded_paper_ready_advisory_generates_paper_strategy_rows(tm
                 "max_live_notional_usdt": "0",
                 "cost_source": "public_spread_proxy",
                 "cost_bps": "18",
+                "label_4h_net_bps": "42",
                 **_fresh_meta(start_s),
             },
             {
@@ -1716,6 +1717,7 @@ def test_hype_wld_expanded_paper_ready_advisory_generates_paper_strategy_rows(tm
                 "max_live_notional_usdt": "0",
                 "cost_source": "mixed_actual_proxy",
                 "cost_bps": "15",
+                "label_4h_after_cost_bps": "55",
                 **_fresh_meta(start_s),
             },
         ],
@@ -1748,6 +1750,19 @@ def test_hype_wld_expanded_paper_ready_advisory_generates_paper_strategy_rows(tm
     assert wld["cost_source"] == "mixed_actual_proxy"
     assert wld["live_order_effect"] == "read_only_no_live_order"
     assert all(row["live_symbols_unchanged"] == "True" for row in runs)
+
+    expanded_runs = _read_csv(reports_dir / "summaries" / "expanded_universe_paper_runs.csv")
+    expanded_by_strategy = {row["strategy_id"]: row for row in expanded_runs}
+    assert expanded_by_strategy["HYPE_EXPANDED_UNIVERSE_PAPER_V1"]["paper_pnl_bps_4h"] == "42"
+    assert expanded_by_strategy["WLD_EXPANDED_UNIVERSE_PAPER_V1"]["paper_pnl_bps_4h"] == "55"
+    assert all(row["live_order_effect"] == "read_only_no_live_order" for row in expanded_runs)
+
+    expanded_daily = _read_csv(reports_dir / "summaries" / "expanded_universe_paper_daily.csv")
+    daily_by_strategy = {row["strategy_id"]: row for row in expanded_daily}
+    assert daily_by_strategy["HYPE_EXPANDED_UNIVERSE_PAPER_V1"]["entry_count"] == "1"
+    assert daily_by_strategy["HYPE_EXPANDED_UNIVERSE_PAPER_V1"]["avg_paper_pnl_bps_4h"] == "42.0"
+    assert daily_by_strategy["WLD_EXPANDED_UNIVERSE_PAPER_V1"]["avg_paper_pnl_bps_4h"] == "55.0"
+    assert all(row["live_order_effect"] == "read_only_no_live_order" for row in expanded_daily)
 
 
 def test_bottom_zone_probe_paper_advisory_generates_read_only_paper_row(tmp_path: Path) -> None:

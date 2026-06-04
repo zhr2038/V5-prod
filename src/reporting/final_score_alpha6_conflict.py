@@ -7,6 +7,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 
 SUPPORTED_SYMBOLS = {"BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"}
+LABEL_HORIZONS = (4, 8, 12, 24)
 CONFLICT_FIELDS = (
     "run_id",
     "ts_utc",
@@ -105,6 +106,68 @@ def best_future_net_bps(futures: Mapping[int, Any]) -> tuple[Any, Any, bool]:
         return "not_observable", "not_observable", False
     best_horizon, best_value = max(observed, key=lambda item: item[1])
     return best_value, best_horizon, best_value >= 50.0
+
+
+def label_join_key(row: Mapping[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(row.get("run_id") or "").strip(),
+        normalize_symbol(row.get("symbol")),
+        str(
+            first_observed(
+                row.get("ts_utc"),
+                row.get("timestamp"),
+                row.get("ts"),
+                row.get("decision_ts"),
+                default="",
+            )
+        ).strip(),
+    )
+
+
+def label_future_value(row: Mapping[str, Any], horizon: int) -> Any:
+    return first_observed(
+        row.get(f"future_{horizon}h_net_bps"),
+        row.get(f"label_{horizon}h_net_bps"),
+        row.get(f"label_{horizon}h_after_cost_bps"),
+        row.get(f"paper_pnl_bps_{horizon}h"),
+        default="not_observable",
+    )
+
+
+def build_label_index(rows: Iterable[Mapping[str, Any]]) -> dict[tuple[str, str, str], dict[str, Any]]:
+    index: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for row in rows:
+        key = label_join_key(row)
+        if not key[0] or not key[1] or not key[2]:
+            continue
+        observed_count = sum(1 for horizon in LABEL_HORIZONS if as_float(label_future_value(row, horizon)) is not None)
+        if observed_count <= 0:
+            continue
+        existing = index.get(key)
+        if existing is None:
+            index[key] = dict(row)
+            continue
+        existing_count = sum(1 for horizon in LABEL_HORIZONS if as_float(label_future_value(existing, horizon)) is not None)
+        if observed_count > existing_count:
+            merged = dict(existing)
+            merged.update({field: value for field, value in row.items() if value not in (None, "")})
+            index[key] = merged
+    return index
+
+
+def future_value_for_horizon(
+    row: Mapping[str, Any],
+    label_row: Mapping[str, Any],
+    horizon: int,
+    future_net_bps: Mapping[int, Any] | Mapping[str, Any],
+) -> Any:
+    return first_observed(
+        future_net_bps.get(horizon),
+        future_net_bps.get(str(horizon)),
+        label_future_value(row, horizon),
+        label_future_value(label_row, horizon),
+        default="not_observable",
+    )
 
 
 def is_final_score_alpha6_conflict_candidate(
@@ -221,6 +284,7 @@ def load_report_input_rows(root: Path) -> list[dict[str, Any]]:
 
 def _dedupe_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     seen: set[tuple[str, str, str, str]] = set()
+    by_key: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     out: list[dict[str, Any]] = []
     for row in rows:
         key = (
@@ -230,9 +294,18 @@ def _dedupe_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
             str(first_observed(row.get("strategy_candidate"), row.get("entry_reason"), default="")),
         )
         if key in seen:
+            existing = by_key.get(key)
+            if existing is not None:
+                for field, value in row.items():
+                    if value in (None, ""):
+                        continue
+                    if existing.get(field) in (None, "", "not_observable"):
+                        existing[field] = value
             continue
         seen.add(key)
-        out.append(dict(row))
+        item = dict(row)
+        by_key[key] = item
+        out.append(item)
     return out
 
 
@@ -242,15 +315,21 @@ def build_conflict_rows(
     future_net_bps: Mapping[int, Any] | None = None,
     negative_expectancy_stats: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    row_list = [dict(row) for row in rows]
+    label_index = build_label_index(row_list)
     out: list[dict[str, Any]] = []
     future_net_bps = future_net_bps or {}
     negative_expectancy_stats = negative_expectancy_stats or {}
-    for row in rows:
+    for row in row_list:
         if not is_final_score_alpha6_conflict_candidate(row):
             continue
         symbol = normalize_symbol(row.get("symbol"))
-        futures = {h: first_observed(future_net_bps.get(h), default="not_observable") for h in (4, 8, 12, 24)}
-        label_statuses = {h: label_status_for_future(futures[h]) for h in (4, 8, 12, 24)}
+        label_row = label_index.get(label_join_key(row), {})
+        futures = {
+            h: future_value_for_horizon(row, label_row, h, future_net_bps)
+            for h in LABEL_HORIZONS
+        }
+        label_statuses = {h: label_status_for_future(futures[h]) for h in LABEL_HORIZONS}
         any_label_complete = any(status == "complete" for status in label_statuses.values())
         all_labels_complete = all(status == "complete" for status in label_statuses.values())
         max_future, best_horizon, material_profit = best_future_net_bps(futures)
