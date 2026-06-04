@@ -147,7 +147,7 @@ export function BundleExportPanel() {
       </div>
 
       <div className="bundle-progress" data-active={generating || loading}>
-        <span style={{ width: generating ? '82%' : loading ? '36%' : '100%' }} />
+        <span style={{ width: generating || loading ? '28%' : '100%' }} />
       </div>
 
       <div className="bundle-table">

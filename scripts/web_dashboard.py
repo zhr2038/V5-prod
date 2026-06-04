@@ -2491,6 +2491,107 @@ def _load_api_telemetry_summary(
     return summary
 
 
+def _load_api_telemetry_series(
+    runtime_paths: Optional[DashboardRuntimePaths] = None,
+    *,
+    lookback_hours: int = 24,
+    bucket_minutes: int = 5,
+) -> Dict[str, Any]:
+    paths = runtime_paths or _resolve_dashboard_runtime_paths(load_config())
+    telemetry_db = Path(
+        getattr(
+            paths,
+            'telemetry_db',
+            derive_runtime_named_artifact_path(paths.orders_db, 'api_telemetry', '.sqlite'),
+        )
+    ).resolve()
+    safe_lookback = max(1, min(int(lookback_hours or 24), 168))
+    safe_bucket = max(1, min(int(bucket_minutes or 5), 60))
+    payload: Dict[str, Any] = {
+        'status': 'missing',
+        'lookbackHours': safe_lookback,
+        'bucketMinutes': safe_bucket,
+        'samples': [],
+        'note': '需启用 telemetry series',
+    }
+    if not telemetry_db.exists():
+        return payload
+
+    since_ts_ms = int((time.time() - safe_lookback * 3600) * 1000)
+    bucket_ms = safe_bucket * 60 * 1000
+    conn = None
+    try:
+        conn = sqlite3.connect(str(telemetry_db))
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT ts_ms, status_class, rate_limited, duration_ms
+            FROM api_request_log
+            WHERE ts_ms >= ?
+            ORDER BY ts_ms ASC
+            """,
+            (since_ts_ms,),
+        ).fetchall()
+    except sqlite3.Error as exc:
+        payload['status'] = 'error'
+        payload['note'] = 'API telemetry series 读取失败'
+        payload['latestError'] = {'message': _sanitize_public_error_text(str(exc), default='internal error')}
+        return payload
+    finally:
+        if conn is not None:
+            conn.close()
+
+    buckets: Dict[int, Dict[str, Any]] = {}
+    for row in rows or []:
+        try:
+            ts_ms = int(row['ts_ms'])
+            bucket_ts = (ts_ms // bucket_ms) * bucket_ms
+        except Exception:
+            continue
+        item = buckets.setdefault(
+            bucket_ts,
+            {
+                'durations': [],
+                'request_count': 0,
+                'error_count': 0,
+                'rate_limited_count': 0,
+            },
+        )
+        item['request_count'] += 1
+        if str(row['status_class'] or '') != '2xx':
+            item['error_count'] += 1
+        if _dashboard_to_bool(row['rate_limited']):
+            item['rate_limited_count'] += 1
+        try:
+            duration = float(row['duration_ms'])
+        except Exception:
+            duration = math.nan
+        if math.isfinite(duration):
+            item['durations'].append(duration)
+
+    samples: List[Dict[str, Any]] = []
+    for bucket_ts in sorted(buckets):
+        item = buckets[bucket_ts]
+        durations = item.pop('durations', [])
+        samples.append(
+            {
+                'timestamp': _format_dashboard_ts_ms(bucket_ts),
+                'ts_ms': int(bucket_ts),
+                'request_count': int(item['request_count']),
+                'error_count': int(item['error_count']),
+                'rate_limited_count': int(item['rate_limited_count']),
+                'p50_latency_ms': _percentile_value(durations, 0.50),
+                'p95_latency_ms': _percentile_value(durations, 0.95),
+            }
+        )
+
+    payload['samples'] = samples
+    if samples:
+        payload['status'] = 'ok'
+        payload['note'] = f'近{safe_lookback}h API telemetry series'
+    return payload
+
+
 def _read_recent_jsonl_tail(path: Path, *, max_bytes: int = 1024 * 1024) -> List[Dict[str, Any]]:
     if not path.exists() or not path.is_file():
         return []
@@ -4183,6 +4284,36 @@ def api_position_kline():
         })
     except Exception as exc:
         return _json_internal_error_response(exc, candles=[])
+
+
+@app.route('/api/api_telemetry_series')
+@_cache_json_response(15.0)
+def api_api_telemetry_series():
+    """API 遥测时间序列，用于动态驾驶舱折线图。"""
+    try:
+        try:
+            lookback_hours = int(request.args.get('lookback_hours', 24))
+        except (TypeError, ValueError):
+            lookback_hours = 24
+        try:
+            bucket_minutes = int(request.args.get('bucket_minutes', 5))
+        except (TypeError, ValueError):
+            bucket_minutes = 5
+        return jsonify(
+            _load_api_telemetry_series(
+                lookback_hours=lookback_hours,
+                bucket_minutes=bucket_minutes,
+            )
+        )
+    except Exception as exc:
+        return _json_internal_error_response(
+            exc,
+            status='error',
+            lookbackHours=24,
+            bucketMinutes=5,
+            samples=[],
+            note='API telemetry series 读取失败',
+        )
 
 
 @app.route('/api/scores')

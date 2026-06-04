@@ -1,5 +1,6 @@
 import type {
   DashboardData,
+  ApiTelemetrySeriesData,
   RiskGuardData,
   MarketStateData,
   DecisionAuditData,
@@ -139,6 +140,12 @@ export const api = {
   riskGuard: () => fetchJson<RiskGuardData>('/api/auto_risk_guard'),
   marketState: () => fetchJson<MarketStateData>('/api/market_state'),
   decisionAudit: () => fetchJson<DecisionAuditData>('/api/decision_audit'),
+  apiTelemetrySeries: (lookbackHours = 24, bucketMinutes = 5) =>
+    fetchJson<ApiTelemetrySeriesData>(
+      `/api/api_telemetry_series?lookback_hours=${encodeURIComponent(String(lookbackHours))}&bucket_minutes=${encodeURIComponent(
+        String(bucketMinutes)
+      )}`
+    ),
   health: () => fetchJson<HealthData>('/api/health'),
   mlTraining: () => fetchJson<MLTrainingData>('/api/ml_training'),
   liveFollowupBundles: () => fetchJson<LiveFollowupBundlesData>('/api/live_followup_bundles?limit=5'),

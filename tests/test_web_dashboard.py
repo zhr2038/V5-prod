@@ -1291,6 +1291,82 @@ def test_load_api_telemetry_summary_reads_runtime_db(monkeypatch, tmp_path):
     assert summary["latestError"]["okxCode"] == "50011"
 
 
+def test_api_telemetry_series_reads_bucketed_runtime_db(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    telemetry_db = tmp_path / "reports" / "api_telemetry.sqlite"
+    telemetry_db.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = sqlite3.connect(str(telemetry_db))
+    try:
+        conn.execute(
+            """
+            CREATE TABLE api_request_log (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              ts_ms INTEGER NOT NULL,
+              exchange TEXT NOT NULL,
+              method TEXT NOT NULL,
+              endpoint TEXT NOT NULL,
+              status_class TEXT NOT NULL,
+              http_status INTEGER,
+              okx_code TEXT,
+              okx_msg TEXT,
+              duration_ms REAL NOT NULL,
+              rate_limited INTEGER NOT NULL DEFAULT 0,
+              attempt INTEGER NOT NULL DEFAULT 1,
+              error_type TEXT
+            )
+            """
+        )
+        rows = [
+            (1760000000000, "okx", "GET", "/api/v5/market/ticker", "2xx", 200, "0", "", 80.0, 0, 1, None),
+            (1760000001000, "okx", "GET", "/api/v5/market/ticker", "2xx", 200, "0", "", 120.0, 0, 1, None),
+            (1760000300000, "okx", "GET", "/api/v5/trade/order", "429", 200, "50011", "rate limit", 900.0, 1, 2, None),
+        ]
+        conn.executemany(
+            """
+            INSERT INTO api_request_log(
+              ts_ms, exchange, method, endpoint, status_class, http_status,
+              okx_code, okx_msg, duration_ms, rate_limited, attempt, error_type
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    class FakeRuntimePaths:
+        def __init__(self, telemetry_db_path: Path):
+            self.telemetry_db = telemetry_db_path
+            self.orders_db = telemetry_db_path.with_name("orders.sqlite")
+
+    monkeypatch.setattr(module.time, "time", lambda: 1760000600.0)
+    monkeypatch.setattr(module, "_resolve_dashboard_runtime_paths", lambda _cfg: FakeRuntimePaths(telemetry_db))
+    monkeypatch.setattr(module, "load_config", lambda: {})
+
+    series = module._load_api_telemetry_series(
+        runtime_paths=FakeRuntimePaths(telemetry_db),
+        lookback_hours=24,
+        bucket_minutes=5,
+    )
+
+    assert series["status"] == "ok"
+    assert series["bucketMinutes"] == 5
+    assert len(series["samples"]) == 2
+    assert series["samples"][0]["request_count"] == 2
+    assert series["samples"][0]["p50_latency_ms"] == pytest.approx(100.0)
+    assert series["samples"][1]["error_count"] == 1
+    assert series["samples"][1]["rate_limited_count"] == 1
+    assert series["samples"][1]["p95_latency_ms"] == pytest.approx(900.0)
+
+    with module.app.test_client() as client:
+        response = client.get("/api/api_telemetry_series?lookback_hours=24&bucket_minutes=5")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["samples"][1]["request_count"] == 1
+
+
 def test_load_slippage_insights_reads_cost_events_and_calibrated_baseline(tmp_path):
     module = load_web_dashboard_module()
     orders_db = tmp_path / "reports" / "orders.sqlite"

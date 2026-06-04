@@ -3,10 +3,13 @@ import type { ComponentType, ReactNode } from 'react';
 import { Activity, Clock, Route } from 'lucide-react';
 import { PositionsPanel } from './PositionsPanel';
 import { MarketRadar } from './MarketRadar';
+import { useDataPulse, usePreviousValue } from '../hooks/useDataPulse';
 import { fmtNum, fmtPct, fmtUsd, sideLabels } from '../lib/format';
 import type {
   AccountData,
   ApiTelemetryData,
+  ApiTelemetrySeriesData,
+  ApiTelemetrySeriesSample,
   DecisionAuditData,
   MarketStateData,
   Position,
@@ -27,6 +30,7 @@ interface MainTradingGridProps {
   timers?: { timers: TimerData[] } | null;
   decisionAudit?: DecisionAuditData | null;
   apiTelemetry?: ApiTelemetryData | null;
+  apiTelemetrySeries?: ApiTelemetrySeriesData | null;
   quantLabCost?: QuantLabCostEstimateData | null;
   showDeferredPanels: boolean;
   secondaryReady: boolean;
@@ -72,6 +76,39 @@ function fmtLatencyMs(value: unknown) {
   const num = firstNumber(value);
   if (!Number.isFinite(num)) return '--';
   return `${Number(num) >= 100 ? Number(num).toFixed(0) : Number(num).toFixed(1)}ms`;
+}
+
+function timerProgress(timer: TimerData) {
+  if (!timer.active) return 0;
+  const countdown = firstNumber(timer.countdown_seconds);
+  const intervalMinutes = firstNumber(timer.interval_minutes);
+  if (!Number.isFinite(countdown) || !Number.isFinite(intervalMinutes) || Number(intervalMinutes) <= 0) {
+    return null;
+  }
+  const totalSeconds = Number(intervalMinutes) * 60;
+  return Math.max(0, Math.min(100, (1 - Number(countdown) / totalSeconds) * 100));
+}
+
+function buildTelemetryPath(samples: ApiTelemetrySeriesSample[], field: 'p50_latency_ms' | 'p95_latency_ms') {
+  const values = samples
+    .map((sample) => Number(sample[field]))
+    .filter((value) => Number.isFinite(value));
+  if (samples.length < 2 || !values.length) return '';
+  const w = 250;
+  const h = 82;
+  const min = Math.min(0, ...values);
+  const max = Math.max(...values, 1);
+  const range = Math.max(max - min, 1);
+  return samples
+    .map((sample, index) => {
+      const raw = Number(sample[field]);
+      if (!Number.isFinite(raw)) return '';
+      const x = (index / Math.max(samples.length - 1, 1)) * w;
+      const y = h - ((raw - min) / range) * h;
+      return `${index ? 'L' : 'M'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+    })
+    .filter(Boolean)
+    .join(' ');
 }
 
 function focusTrades(trades: Trade[]) {
@@ -196,18 +233,30 @@ function QuantLabCostPanel({ cost }: { cost?: QuantLabCostEstimateData | null })
   );
 }
 
+function TimerProgressRow({ timer }: { timer: TimerData }) {
+  const progress = timerProgress(timer);
+  const pulse = useDataPulse(
+    `${timer.active ? '1' : '0'}:${timer.next_run || timer.next_trigger || ''}:${timer.countdown_seconds ?? ''}`,
+    { durationMs: 500 }
+  );
+  return (
+    <div className={`timer-progress-row ${pulse.className}`} data-pulse={pulse.dataPulse} key={timer.name}>
+      <span>{timer.name}</span>
+      <strong className={timer.active ? 'text-buy' : 'text-muted'}>{timer.active ? '运行中' : '停止'}</strong>
+      <div className="timer-progress-track" title={timer.time_left || shortTime(timer.next_run || timer.next_trigger)}>
+        <i style={{ width: `${progress ?? 0}%` }} />
+      </div>
+      <em>{timer.time_left || shortTime(timer.next_run || timer.next_trigger)}</em>
+    </div>
+  );
+}
+
 function TimersPanel({ timers }: { timers?: { timers: TimerData[] } | null }) {
   return (
     <section className="design-panel compact-ops-panel">
       <div className="design-panel-heading"><span>服务与定时器</span><Clock className="h-4 w-4" /></div>
       <div className="timer-progress-list">
-        {(timers?.timers || []).slice(0, 5).map((timer) => (
-          <div className="timer-progress-row" key={timer.name}>
-            <span>{timer.name}</span>
-            <strong className={timer.active ? 'text-buy' : 'text-muted'}>{timer.active ? '运行中' : '停止'}</strong>
-            <em>{shortTime(timer.next_trigger)}</em>
-          </div>
-        ))}
+        {(timers?.timers || []).slice(0, 5).map((timer) => <TimerProgressRow timer={timer} key={timer.name} />)}
         {!timers?.timers?.length ? <div className="table-empty">暂无定时器数据</div> : null}
       </div>
     </section>
@@ -220,11 +269,30 @@ function ExecutionPathPanel({ decisionAudit }: { decisionAudit?: DecisionAuditDa
   const orders = decisionAudit?.orders || [];
   const selected = firstNumber(decisionAudit?.counts?.selected) || 0;
   const submitted = firstNumber(exec.submitted, orders.length);
+  const filled = firstNumber(exec.filled) || 0;
+  const rejectedCount = firstNumber(exec.rejected, rejected.total) || 0;
+  const previousFilled = usePreviousValue(filled);
+  const previousRejected = usePreviousValue(rejectedCount);
+  const flowTone = rejectedCount > Number(previousRejected || 0)
+    ? 'rejected'
+    : filled > Number(previousFilled || 0)
+      ? 'filled'
+      : Number(rejected.total || 0) > 0
+        ? 'blocked'
+        : 'selected';
+  const flowPulse = useDataPulse(
+    `${selected}:${submitted}:${filled}:${rejectedCount}:${Number(rejected.total || 0)}`,
+    { durationMs: 900 }
+  );
 
   return (
     <section className="design-panel compact-ops-panel execution-path-panel">
       <div className="design-panel-heading"><span>执行路径 (今日)</span><Route className="h-4 w-4" /></div>
-      <div className="execution-chain">
+      <div
+        className={`execution-chain ${flowPulse.className}`}
+        data-pulse={flowPulse.active ? 'true' : 'false'}
+        data-flow={flowTone}
+      >
         <div><span>信号生成</span><strong>{fmtNum(selected, 0)}</strong></div>
         <i />
         <div><span>风控检查</span><strong>{fmtNum(Math.max(0, selected - Number(rejected.total || 0)), 0)}</strong></div>
@@ -234,18 +302,33 @@ function ExecutionPathPanel({ decisionAudit }: { decisionAudit?: DecisionAuditDa
         <div><span>交易所提交</span><strong>{fmtNum(submitted, 0)}</strong></div>
       </div>
       <div className="execution-status-row">
-        <span className="ok">成交 {fmtNum(exec.filled, 0)}</span>
+        <span className="ok">成交 {fmtNum(filled, 0)}</span>
         <span className="info">部分成交 {fmtNum(exec.partially_filled, 0)}</span>
         <span className="warn">压单 {fmtNum(rejected.total, 0)}</span>
-        <span className="danger">拒单 {fmtNum(exec.rejected, 0)}</span>
+        <span className="danger">拒单 {fmtNum(rejectedCount, 0)}</span>
       </div>
     </section>
   );
 }
 
-function ApiTelemetryPanel({ apiTelemetry }: { apiTelemetry?: ApiTelemetryData | null }) {
+function ApiTelemetryPanel({
+  apiTelemetry,
+  apiTelemetrySeries,
+}: {
+  apiTelemetry?: ApiTelemetryData | null;
+  apiTelemetrySeries?: ApiTelemetrySeriesData | null;
+}) {
+  const samples = Array.isArray(apiTelemetrySeries?.samples) ? apiTelemetrySeries.samples : [];
+  const p50Path = buildTelemetryPath(samples, 'p50_latency_ms');
+  const p95Path = buildTelemetryPath(samples, 'p95_latency_ms');
+  const pulse = useDataPulse(
+    `${apiTelemetry?.totalRequests ?? ''}:${apiTelemetry?.p50LatencyMs ?? ''}:${apiTelemetry?.p95LatencyMs ?? ''}:${
+      samples.at(-1)?.ts_ms ?? ''
+    }`,
+    { durationMs: 700 }
+  );
   return (
-    <section className="design-panel compact-ops-panel api-telemetry-panel">
+    <section className={`design-panel compact-ops-panel api-telemetry-panel ${pulse.className}`} data-pulse={pulse.dataPulse}>
       <div className="design-panel-heading"><span>API 遥测 (OKX)</span><Activity className="h-4 w-4" /></div>
       <div className="api-telemetry-grid">
         <div><span>请求数</span><strong>{fmtNum(apiTelemetry?.totalRequests, 0)}</strong></div>
@@ -253,7 +336,25 @@ function ApiTelemetryPanel({ apiTelemetry }: { apiTelemetry?: ApiTelemetryData |
         <div><span>P50</span><strong>{fmtLatencyMs(apiTelemetry?.p50LatencyMs)}</strong></div>
         <div><span>P95</span><strong>{fmtLatencyMs(apiTelemetry?.p95LatencyMs)}</strong></div>
       </div>
-      <div className="api-note">{apiTelemetry?.note || '暂无 API 遥测数据'}</div>
+      {samples.length >= 2 && p50Path && p95Path ? (
+        <svg className="api-telemetry-wave" viewBox="0 0 250 92" role="img" aria-label="API telemetry latency series">
+          <defs>
+            <linearGradient id="apiWaveFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="rgba(37, 231, 255, 0.22)" />
+              <stop offset="100%" stopColor="rgba(37, 231, 255, 0)" />
+            </linearGradient>
+          </defs>
+          <path d={`${p95Path} L 250 92 L 0 92 Z`} fill="url(#apiWaveFill)" />
+          <path d={p50Path} className="api-wave-line api-wave-line-p50" />
+          <path d={p95Path} className="api-wave-line api-wave-line-p95" />
+          {samples.some((sample) => Number(sample.error_count || 0) > 0 || Number(sample.rate_limited_count || 0) > 0) ? (
+            <circle cx="238" cy="16" r="4" className="api-wave-error-dot" />
+          ) : null}
+        </svg>
+      ) : (
+        <div className="api-series-empty">需启用 telemetry series</div>
+      )}
+      <div className="api-note">{apiTelemetrySeries?.note || apiTelemetry?.note || '暂无 API 遥测数据'}</div>
     </section>
   );
 }
@@ -268,6 +369,7 @@ export function MainTradingGrid({
   timers,
   decisionAudit,
   apiTelemetry,
+  apiTelemetrySeries,
   quantLabCost,
   showDeferredPanels,
   secondaryReady,
@@ -294,7 +396,7 @@ export function MainTradingGrid({
         ) : (
           fallback
         )}
-        <ApiTelemetryPanel apiTelemetry={apiTelemetry || null} />
+        <ApiTelemetryPanel apiTelemetry={apiTelemetry || null} apiTelemetrySeries={apiTelemetrySeries || null} />
         <TimersPanel timers={timers || null} />
         <ExecutionPathPanel decisionAudit={decisionAudit || null} />
       </div>

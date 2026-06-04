@@ -1,5 +1,7 @@
 import { Activity, Gauge, ShieldCheck, TrendingUp, WalletCards } from 'lucide-react';
 import { motion, useReducedMotion } from 'framer-motion';
+import type { CSSProperties } from 'react';
+import { useDataPulse } from '../hooks/useDataPulse';
 import { fmtNum, fmtPct, fmtUnsignedPct, riskLabels, stateLabels } from '../lib/format';
 import type {
   AccountData,
@@ -79,8 +81,9 @@ function RibbonCard({
   sub: string;
   tone?: string;
 }) {
+  const pulse = useDataPulse(`${tone}:${value}:${sub}`, { durationMs: 620 });
   return (
-    <div className="status-ribbon-card" data-tone={tone}>
+    <div className={`status-ribbon-card ${pulse.className}`} data-tone={tone} data-pulse={pulse.dataPulse}>
       <div className="ribbon-icon">
         <Icon className="h-4 w-4" />
       </div>
@@ -126,7 +129,33 @@ export function StatusRibbon({
   const qlStatusData = nestedRecord(quantLabStatus?.data);
   const qlFreshness = firstText(quantLabStatus?.status, qlStatusData.status, quantLabStatus?.available ? 'ok' : 'degraded');
   const ttl = ttlRemaining(quantLabPermission);
-  const permissionSub = permission === 'ALLOW' ? '允许开新仓' : permission === 'SELL_ONLY' ? '仅允许减仓' : permission === 'ABORT' ? '禁止新风险' : '权限不可观测';
+  const allowedModesRaw = (
+    Array.isArray(quantLabPermission?.allowed_modes)
+      ? quantLabPermission?.allowed_modes
+      : Array.isArray(permissionData.allowed_modes)
+        ? permissionData.allowed_modes
+        : Array.isArray(permissionData.allowed_live_modes)
+          ? permissionData.allowed_live_modes
+          : []
+  ) as unknown[];
+  const allowedModesText = allowedModesRaw.map((item) => String(item || '').toLowerCase()).filter(Boolean);
+  const liveOpenAllowed = allowedModesText.some((item) => item.includes('live') || item.includes('spot') || item.includes('open'));
+  const permissionSub = permission === 'ALLOW'
+    ? (liveOpenAllowed ? '允许开新仓' : 'ALLOW · live modes 未列明')
+    : permission === 'SELL_ONLY'
+      ? '仅允许减仓'
+      : permission === 'ABORT'
+        ? '禁止新风险'
+        : '权限不可观测';
+  const asOf = Date.parse(firstText(quantLabPermission?.as_of_ts, permissionData.as_of_ts));
+  const expiresAt = Date.parse(firstText(quantLabPermission?.expires_at, permissionData.expires_at));
+  const ttlWindow = Number.isFinite(asOf) && Number.isFinite(expiresAt) && expiresAt > asOf
+    ? Math.max(1, (expiresAt - asOf) / 1000)
+    : 5400;
+  const ttlProgress = ttl === null ? 0 : Math.max(0, Math.min(1, ttl / ttlWindow));
+  const permissionPulse = useDataPulse(`${permission}:${ttl === null ? '' : Math.floor(ttl / 5)}:${allowedModesText.join(',')}`, {
+    durationMs: 680,
+  });
 
   return (
     <motion.section
@@ -163,8 +192,16 @@ export function StatusRibbon({
         sub={`最大回撤 ${fmtUnsignedPct(account?.maxDrawdown, 2)}`}
         tone={Number(account?.todayPnlPercent || 0) < 0 ? 'danger' : 'good'}
       />
-      <div className="status-ribbon-card quant-lab-ribbon" data-tone={permissionTone(permission)}>
-        <div className="ql-orbit" data-permission={permissionTone(permission)}>
+      <div
+        className={`status-ribbon-card quant-lab-ribbon ${permissionPulse.className}`}
+        data-tone={permissionTone(permission)}
+        data-pulse={permissionPulse.dataPulse}
+      >
+        <div
+          className="ql-orbit"
+          data-permission={permissionTone(permission)}
+          style={{ '--ql-ttl-progress': `${ttlProgress * 100}%` } as CSSProperties}
+        >
           <ShieldCheck className="h-5 w-5" />
         </div>
         <div className="min-w-0">

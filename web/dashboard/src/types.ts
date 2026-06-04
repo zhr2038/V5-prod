@@ -61,10 +61,18 @@ export interface SystemStatus {
 
 export interface TimerData {
   name: string;
+  desc?: string;
+  icon?: string;
+  enabled?: boolean;
   active?: boolean;
   status?: string;
+  active_state?: string;
+  unit_file_state?: string;
   last_trigger?: string;
   next_trigger?: string;
+  next_run?: string;
+  time_left?: string;
+  countdown_seconds?: number;
   interval_minutes?: number;
   error?: string;
 }
@@ -90,6 +98,24 @@ export interface ApiTelemetryData {
   lastRequestAt?: string;
   lastErrorAt?: string;
   latestError?: ApiTelemetryErrorData | null;
+  note?: string;
+}
+
+export interface ApiTelemetrySeriesSample {
+  timestamp: string;
+  ts_ms?: number;
+  request_count: number;
+  error_count: number;
+  rate_limited_count: number;
+  p50_latency_ms?: number | null;
+  p95_latency_ms?: number | null;
+}
+
+export interface ApiTelemetrySeriesData {
+  status: string;
+  lookbackHours: number;
+  bucketMinutes: number;
+  samples: ApiTelemetrySeriesSample[];
   note?: string;
 }
 

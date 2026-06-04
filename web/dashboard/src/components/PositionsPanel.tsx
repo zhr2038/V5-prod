@@ -3,6 +3,7 @@ import { CandlestickChart, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fmtUsd, fmtNum, fmtPct, sideLabels } from '../lib/format';
 import { api } from '../api';
 import { useInterval } from '../hooks/useInterval';
+import { useDataPulse } from '../hooks/useDataPulse';
 import type { Position, KlineData, PositionKlinePayload, Trade } from '../types';
 
 interface PositionsPanelProps {
@@ -106,6 +107,14 @@ function CandlestickSvg({
   referenceLabel?: string;
 }) {
   const [hover, setHover] = useState<ChartHover | null>(null);
+  const latestInput = data[data.length - 1] || null;
+  const latestTs = latestInput ? candleTimestamp(latestInput) : null;
+  const latestPricePulse = useDataPulse(latestInput?.close ?? null, { durationMs: 680 });
+  const latestCandlePulse = useDataPulse(
+    latestInput ? `${latestTs || data.length}:${latestInput.open}:${latestInput.high}:${latestInput.low}:${latestInput.close}:${latestInput.volume || 0}` : '',
+    { durationMs: 680 }
+  );
+  const candleEnterPulse = useDataPulse(latestInput ? `${data.length}:${latestTs || ''}` : '', { durationMs: 680 });
 
   if (!data.length) {
     return (
@@ -287,8 +296,18 @@ function CandlestickSvg({
         const color = up ? '#34d399' : '#fb7185';
         const bodyH = Math.max(1, Math.abs(yC - yO));
         const bodyY = Math.min(yO, yC);
+        const isLatest = i === data.length - 1;
         return (
-          <g key={i}>
+          <g
+            key={candleTimestamp(d) || i}
+            className={[
+              'kline-candle',
+              isLatest ? 'kline-candle-latest' : '',
+              isLatest && latestCandlePulse.active ? 'kline-candle-update' : '',
+              isLatest && candleEnterPulse.active ? 'kline-candle-enter' : '',
+            ].filter(Boolean).join(' ')}
+            data-pulse={isLatest ? latestPricePulse.dataPulse : undefined}
+          >
             <line x1={cx} x2={cx} y1={yH} y2={yL} stroke={color} strokeWidth={1} />
             <rect
               x={cx - bodyWidth / 2}
@@ -401,25 +420,27 @@ function CandlestickSvg({
           {formatChartTime(candleTimestamp(data[index]), timeframe)}
         </text>
       ))}
-      <rect
-        className="kline-live-price-label"
-        x={w - pad.r + 4}
-        y={lastPriceLabelY - 10}
-        width="52"
-        height="18"
-        rx="9"
-        fill="rgba(25, 35, 49, 0.9)"
-        stroke="rgba(141, 196, 255, 0.44)"
-      />
-      <text
-        x={w - pad.r + 30}
-        y={lastPriceLabelY + 3}
-        fill="#9ad2ff"
-        fontSize="11"
-        textAnchor="middle"
-      >
-        {formatAxisPrice(lastClose)}
-      </text>
+      <g className={`kline-live-price-label-group ${latestPricePulse.className}`} data-pulse={latestPricePulse.dataPulse}>
+        <rect
+          className="kline-live-price-label"
+          x={w - pad.r + 4}
+          y={lastPriceLabelY - 10}
+          width="52"
+          height="18"
+          rx="9"
+          fill="rgba(25, 35, 49, 0.9)"
+          stroke="rgba(141, 196, 255, 0.44)"
+        />
+        <text
+          x={w - pad.r + 30}
+          y={lastPriceLabelY + 3}
+          fill="#9ad2ff"
+          fontSize="11"
+          textAnchor="middle"
+        >
+          {formatAxisPrice(lastClose)}
+        </text>
+      </g>
       {referencePriceVisible ? (
         <>
           <rect
@@ -656,6 +677,7 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
     spotlightPosition && Number(spotlightPosition.currentPrice) > 0
       ? spotlightPosition.currentPrice
       : (Number(chartSummary?.close || latestCandle?.close || 0) || 0);
+  const livePricePulse = useDataPulse(displayCurrentPrice, { durationMs: 680 });
 
   useEffect(() => {
     if (!activeSymbol) {
@@ -738,6 +760,22 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
 
       {activeSymbol ? (
         <>
+          <div className="chart-live-head">
+            <div className="chart-live-symbol">
+              <strong>{activeDisplaySymbol}</strong>
+              <span className={livePricePulse.className} data-pulse={livePricePulse.dataPulse}>
+                {fmtUsd(displayCurrentPrice || undefined)}
+              </span>
+              <em className={periodChange >= 0 ? 'text-buy' : 'text-sell'}>
+                {periodChange >= 0 ? '+' : ''}{fmtUsd(periodChange)} {fmtPct(periodChangePct, 2)}
+              </em>
+            </div>
+            <div className="chart-live-meta">
+              <span>24H 成交量 <strong>{formatCompactVolume(Number(chartSummary?.volume || 0))}</strong></span>
+              <span>振幅 <strong>{fmtPct(sessionRangePct, 2)}</strong></span>
+              <span>/api/position_kline · 10s 更新</span>
+            </div>
+          </div>
           {spotlightPosition ? (
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-4 items-start">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 focus-summary-strip">

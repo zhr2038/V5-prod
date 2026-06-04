@@ -1,4 +1,5 @@
 import { Activity } from 'lucide-react';
+import { useDataPulse } from '../hooks/useDataPulse';
 import { fmtNum } from '../lib/format';
 import type { SlippageInsightsData } from '../types';
 
@@ -39,12 +40,24 @@ export function ExecutionInsightsPanel({ slippageInsights }: ExecutionInsightsPa
   const bins = slippageInsights?.bins || [];
   const maxCount = Math.max(1, ...bins.map((bin) => Number(bin.count || 0)));
   const markerPercent = baselineMarkerPercent(slippageInsights);
+  const p95ExceedsBaseline =
+    Number.isFinite(Number(slippageInsights?.actualP95Bps)) &&
+    Number.isFinite(Number(slippageInsights?.baselineBps)) &&
+    Number(slippageInsights?.actualP95Bps) > Number(slippageInsights?.baselineBps);
+  const pulse = useDataPulse(
+    `${slippageInsights?.sampleCount ?? ''}:${slippageInsights?.actualP95Bps ?? ''}:${bins.map((bin) => bin.count).join(',')}`,
+    { durationMs: 700 }
+  );
   const baselineLabel = slippageInsights?.baselineSourceDay
     ? `${slippageInsights?.baselineLabel || '回测基线'} · ${slippageInsights.baselineSourceDay}`
     : slippageInsights?.baselineLabel || '回测基线';
 
   return (
-    <div className={`liquid-glass-thick reading-frame p-5 flex flex-col gap-4 ${toneClass(slippageInsights?.status)}`}>
+    <div
+      className={`liquid-glass-thick reading-frame p-5 flex flex-col gap-4 ${toneClass(slippageInsights?.status)} ${pulse.className}`}
+      data-warning={p95ExceedsBaseline ? 'true' : 'false'}
+      data-pulse={pulse.dataPulse}
+    >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
           <Activity className="w-4 h-4" />

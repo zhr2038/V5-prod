@@ -1,4 +1,6 @@
 import { Radar } from 'lucide-react';
+import type { CSSProperties } from 'react';
+import { useDataPulse } from '../hooks/useDataPulse';
 import { stateLabels } from '../lib/format';
 import type { MarketStateData } from '../types';
 
@@ -88,19 +90,89 @@ function VoteCard({
   );
 }
 
+function confidenceOf(vote?: import('../types').MarketVote) {
+  const value = Number(vote?.confidence ?? 0);
+  return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+}
+
+function voteRadarPoints(votes: NonNullable<MarketStateData['votes']>) {
+  const items = [
+    confidenceOf(votes.hmm),
+    confidenceOf(votes.funding),
+    confidenceOf(votes.rss),
+    Number(votes.hmm?.probs?.TrendingUp || 0),
+    Number(votes.rss?.probs?.TrendingDown || 0),
+  ].map((value) => Math.max(0.08, Math.min(1, Number(value) || 0)));
+  const cx = 58;
+  const cy = 58;
+  const maxR = 46;
+  return items
+    .map((value, index) => {
+      const angle = -Math.PI / 2 + (index / items.length) * Math.PI * 2;
+      const radius = value * maxR;
+      return `${(cx + Math.cos(angle) * radius).toFixed(1)},${(cy + Math.sin(angle) * radius).toFixed(1)}`;
+    })
+    .join(' ');
+}
+
 export function MarketRadar({ marketState }: MarketRadarProps) {
   const votes = marketState?.votes || {};
   const history = marketState?.history_24h || [];
   const alerts = marketState?.alerts || [];
+  const hasVotes = Boolean(votes.hmm || votes.funding || votes.rss);
+  const averageConfidence = hasVotes
+    ? [votes.hmm, votes.funding, votes.rss].map(confidenceOf).reduce((sum, value) => sum + value, 0) /
+      [votes.hmm, votes.funding, votes.rss].filter(Boolean).length
+    : 0;
+  const scanDuration = Math.max(2.6, 7.2 - averageConfidence * 4.4);
+  const radarPulse = useDataPulse(
+    `${marketState?.state || ''}:${averageConfidence.toFixed(3)}:${history.at(-1)?.ts_ms || ''}`,
+    { durationMs: 700 }
+  );
 
   return (
-    <div className="liquid-glass-thick tone-smoke reading-frame p-5 flex flex-col gap-4">
+    <div className="liquid-glass-thick tone-smoke reading-frame p-5 flex flex-col gap-4 market-radar-panel">
       <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
         <Radar className="w-4 h-4" />
         <span>市场雷达</span>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div
+        className={`market-radar-dial ${radarPulse.className}`}
+        data-ready={hasVotes ? 'true' : 'false'}
+        data-pulse={radarPulse.dataPulse}
+        style={{ '--radar-duration': `${scanDuration}s` } as CSSProperties}
+      >
+        {hasVotes ? (
+          <svg viewBox="0 0 116 116" role="img" aria-label="Market vote radar">
+            {[18, 32, 46].map((radius) => (
+              <circle key={radius} cx="58" cy="58" r={radius} />
+            ))}
+            {[0, 1, 2, 3, 4].map((index) => {
+              const angle = -Math.PI / 2 + (index / 5) * Math.PI * 2;
+              return (
+                <line
+                  key={index}
+                  x1="58"
+                  y1="58"
+                  x2={(58 + Math.cos(angle) * 48).toFixed(1)}
+                  y2={(58 + Math.sin(angle) * 48).toFixed(1)}
+                />
+              );
+            })}
+            <polygon points={voteRadarPoints(votes)} />
+            <path className="market-radar-scan" d="M58 58 L58 12" />
+          </svg>
+        ) : (
+          <span>数据不足</span>
+        )}
+        <div>
+          <strong>{stateLabels[String(marketState?.state || '').toUpperCase()] || marketState?.state || '--'}</strong>
+          <em>confidence {Math.round(averageConfidence * 100)}%</em>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 market-radar-votes">
         <VoteCard title="HMM" vote={votes.hmm} showProbs />
         <VoteCard title="资金费率" vote={votes.funding} showBars />
         <VoteCard title="RSS" vote={votes.rss} showBars showFullSummary />
@@ -116,7 +188,7 @@ export function MarketRadar({ marketState }: MarketRadarProps) {
         </div>
       )}
 
-      <div className="liquid-glass-inset tone-neutral px-3 py-3">
+      <div className="liquid-glass-inset tone-neutral px-3 py-3 market-radar-history">
         <div className="text-xs text-[var(--text-dim)] mb-2">24h 投票轨迹</div>
         <div className="flex items-center gap-1 flex-wrap">
           {history.map((h, i) => {

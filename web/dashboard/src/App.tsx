@@ -12,6 +12,7 @@ import type {
   MarketStateData,
   DecisionAuditData,
   HealthData,
+  ApiTelemetrySeriesData,
   Trade,
   QuantLabStatusData,
   QuantLabPermissionData,
@@ -142,6 +143,7 @@ function App() {
   const [quantLabStatus, setQuantLabStatus] = useState<QuantLabStatusData | null>(null);
   const [quantLabPermission, setQuantLabPermission] = useState<QuantLabPermissionData | null>(null);
   const [quantLabCost, setQuantLabCost] = useState<QuantLabCostEstimateData | null>(null);
+  const [apiTelemetrySeries, setApiTelemetrySeries] = useState<ApiTelemetrySeriesData | null>(null);
   const [updateTime, setUpdateTime] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [showDeferredPanels, setShowDeferredPanels] = useState(false);
@@ -196,10 +198,11 @@ function App() {
   }, [dashboard, loadQuantLab]);
 
   const loadSecondary = useCallback(async () => {
-    const [deferred, dec, h] = await Promise.all([
+    const [deferred, dec, h, telemetrySeries] = await Promise.all([
       api.dashboardDeferred(),
       api.decisionAudit(),
       api.health(),
+      api.apiTelemetrySeries(24, 5),
     ]);
     startTransition(() => {
       if (deferred) {
@@ -212,6 +215,7 @@ function App() {
       }
       if (dec) setDecisionAudit(dec);
       if (h) setHealth(h);
+      if (telemetrySeries) setApiTelemetrySeries(telemetrySeries);
     });
   }, [loadQuantLab]);
 
@@ -298,6 +302,7 @@ function App() {
             timers={dashboard?.timers || null}
             decisionAudit={decisionAudit}
             apiTelemetry={dashboard?.apiTelemetry || null}
+            apiTelemetrySeries={apiTelemetrySeries}
             quantLabCost={quantLabCost}
             showDeferredPanels={showDeferredPanels}
             secondaryReady={secondaryReady}
