@@ -172,6 +172,15 @@ function App() {
     });
   }, []);
 
+  const loadApiTelemetrySeries = useCallback(async () => {
+    const telemetrySeries = await api.apiTelemetrySeries(24, 5);
+    if (telemetrySeries) {
+      startTransition(() => {
+        setApiTelemetrySeries(telemetrySeries);
+      });
+    }
+  }, []);
+
   const loadPrimary = useCallback(async () => {
     if (document.hidden) return;
     setLoading(true);
@@ -198,11 +207,11 @@ function App() {
   }, [dashboard, loadQuantLab]);
 
   const loadSecondary = useCallback(async () => {
-    const [deferred, dec, h, telemetrySeries] = await Promise.all([
+    void loadApiTelemetrySeries();
+    const [deferred, dec, h] = await Promise.all([
       api.dashboardDeferred(),
       api.decisionAudit(),
       api.health(),
-      api.apiTelemetrySeries(24, 5),
     ]);
     startTransition(() => {
       if (deferred) {
@@ -215,9 +224,8 @@ function App() {
       }
       if (dec) setDecisionAudit(dec);
       if (h) setHealth(h);
-      if (telemetrySeries) setApiTelemetrySeries(telemetrySeries);
     });
-  }, [loadQuantLab]);
+  }, [loadApiTelemetrySeries, loadQuantLab]);
 
   useEffect(() => {
     let timeoutId: number | null = null;
@@ -261,6 +269,10 @@ function App() {
   }, 60000);
 
   useInterval(() => {
+    loadApiTelemetrySeries();
+  }, 30000);
+
+  useInterval(() => {
     loadQuantLab(dashboardFocusForQuantLab(dashboard));
   }, 30000);
 
@@ -278,6 +290,7 @@ function App() {
             void loadPrimary();
             void loadSecondary();
             void loadQuantLab(dashboardFocusForQuantLab(dashboard));
+            void loadApiTelemetrySeries();
           }}
           onSymbolSearch={setFocusSymbol}
         />
