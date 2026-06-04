@@ -8,6 +8,7 @@ import type { Position, KlineData, PositionKlinePayload, Trade } from '../types'
 interface PositionsPanelProps {
   positions?: Position[];
   trades?: Trade[];
+  focusSymbol?: string;
   account?: import('../types').AccountData | null;
 }
 
@@ -313,6 +314,7 @@ function CandlestickSvg({
         />
       ) : null}
       <line
+        className="kline-last-price-line"
         x1={pad.l}
         x2={w - pad.r}
         y1={lastPriceLabelY}
@@ -323,6 +325,7 @@ function CandlestickSvg({
       />
       {referencePriceVisible ? (
         <line
+          className="kline-reference-line"
           x1={pad.l}
           x2={w - pad.r}
           y1={y(Number(referencePrice))}
@@ -399,6 +402,7 @@ function CandlestickSvg({
         </text>
       ))}
       <rect
+        className="kline-live-price-label"
         x={w - pad.r + 4}
         y={lastPriceLabelY - 10}
         width="52"
@@ -564,7 +568,7 @@ function tradeTimeValue(trade: Trade) {
   return Number.isFinite(ts) ? ts : 0;
 }
 
-export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelProps) {
+export function PositionsPanel({ positions = [], trades = [], focusSymbol = defaultFocusSymbol }: PositionsPanelProps) {
   const [livePositions, setLivePositions] = useState<Position[]>(positions);
   const [liveTrades, setLiveTrades] = useState<Trade[]>(trades);
   const [selectedSymbol, setSelectedSymbol] = useState<string>('');
@@ -606,7 +610,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
   const fallbackSymbol = fallbackTrade
     ? String(fallbackTrade.symbol || '').replace('/USDT', '').replace('-USDT', '')
     : '';
-  const activeSymbol = spotlightPosition?.symbol || fallbackTrade?.symbol || defaultFocusSymbol;
+  const activeSymbol = spotlightPosition?.symbol || focusSymbol || fallbackTrade?.symbol || defaultFocusSymbol;
   const activeDisplaySymbol = String(activeSymbol || defaultFocusSymbol)
     .replace('/USDT', '-USDT')
     .replace('_USDT', '-USDT');

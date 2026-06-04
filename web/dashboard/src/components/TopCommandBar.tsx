@@ -1,4 +1,4 @@
-import { Bell, Maximize2, RefreshCw, Search, Settings, ShieldCheck } from 'lucide-react';
+import { Maximize2, RefreshCw, Search, ShieldCheck } from 'lucide-react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { statusLabels } from '../lib/format';
 import type { HealthData, SystemStatus } from '../types';
@@ -8,6 +8,8 @@ interface TopCommandBarProps {
   health?: HealthData | null;
   updateTime?: string;
   loading?: boolean;
+  onRefresh?: () => void;
+  onSymbolSearch?: (symbol: string) => void;
 }
 
 function modeLabel(mode?: string) {
@@ -18,13 +20,39 @@ function modeLabel(mode?: string) {
   return mode;
 }
 
-export function TopCommandBar({ systemStatus, health, updateTime, loading = false }: TopCommandBarProps) {
+function normalizeSearchSymbol(value: string) {
+  const text = value.trim().toUpperCase().replace(/\s+/g, '');
+  if (!text) return '';
+  if (text.includes('/USDT') || text.includes('-USDT')) return text.replace('/USDT', '-USDT');
+  return `${text.replace(/USDT$/, '')}-USDT`;
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) {
+    void document.exitFullscreen();
+    return;
+  }
+  void document.documentElement.requestFullscreen?.();
+}
+
+export function TopCommandBar({
+  systemStatus,
+  health,
+  updateTime,
+  loading = false,
+  onRefresh,
+  onSymbolSearch,
+}: TopCommandBarProps) {
   const reduceMotion = useReducedMotion();
   const isRunning = Boolean(systemStatus?.isRunning);
-  const issueCount = Number(health?.critical_count || 0) + Number(health?.warning_count || 0);
 
   return (
     <header className="top-command-bar">
+      <div className="window-dots" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
       <div className="top-command-brand">
         <div className="v5-mark" aria-hidden="true">V5</div>
         <div>
@@ -48,22 +76,23 @@ export function TopCommandBar({ systemStatus, health, updateTime, loading = fals
       </div>
 
       <div className="top-command-actions">
-        <label className="command-search">
+        <form
+          className="command-search"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const data = new FormData(event.currentTarget);
+            const symbol = normalizeSearchSymbol(String(data.get('symbol') || ''));
+            if (symbol) onSymbolSearch?.(symbol);
+          }}
+        >
           <Search className="h-4 w-4" />
-          <input aria-label="搜索币种、策略或订单" placeholder="搜索币种 / 策略 / 订单..." />
-        </label>
-        <button className="icon-command" type="button" aria-label="全屏">
+          <input name="symbol" aria-label="搜索币种" placeholder="输入币种切换K线，如 BNB" />
+        </form>
+        <button className="icon-command" type="button" aria-label="全屏" onClick={toggleFullscreen} title="切换全屏">
           <Maximize2 className="h-4 w-4" />
         </button>
-        <button className="icon-command" type="button" aria-label="刷新">
+        <button className="icon-command" type="button" aria-label="刷新" onClick={onRefresh} title="立即刷新数据">
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
-        <button className="icon-command" type="button" aria-label="告警">
-          <Bell className="h-4 w-4" />
-          {issueCount > 0 ? <span className="notification-dot">{Math.min(issueCount, 9)}</span> : null}
-        </button>
-        <button className="icon-command" type="button" aria-label="设置">
-          <Settings className="h-4 w-4" />
         </button>
         <div className="operator-chip">
           <span className="operator-avatar">tr</span>

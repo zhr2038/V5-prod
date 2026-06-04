@@ -20,6 +20,7 @@ import type {
 interface MainTradingGridProps {
   positions: Position[];
   trades: Trade[];
+  focusSymbol?: string;
   account?: AccountData | null;
   marketState?: MarketStateData | null;
   slippageInsights?: SlippageInsightsData | null;
@@ -79,42 +80,64 @@ function focusTrades(trades: Trade[]) {
 
 function HoldingsFocusPanel({ positions, trades, account }: { positions: Position[]; trades: Trade[]; account?: AccountData | null }) {
   const sortedPositions = [...positions].sort((a, b) => Number(b.value || 0) - Number(a.value || 0));
-  const latestTrade = focusTrades(trades)[0] || null;
+  const sortedTrades = focusTrades(trades);
+  const latestTrade = sortedTrades[0] || null;
   const floatingPnl = sortedPositions.reduce((sum, pos) => sum + Number(pos.pnl || 0), 0);
   const floatingPct = account?.positionsValue ? floatingPnl / Number(account.positionsValue || 1) : null;
+  const hasPositions = sortedPositions.length > 0;
 
   return (
     <section className="design-panel holdings-focus-panel">
       <div className="design-panel-heading">
-        <span>持仓聚焦</span>
-        <small>{sortedPositions.length}</small>
+        <span>{hasPositions ? '持仓聚焦' : '最近成交'}</span>
+        <small>{hasPositions ? sortedPositions.length : '更多 >'}</small>
       </div>
       <table className="design-table">
         <thead>
-          <tr>
-            <th>币种</th>
-            <th>方向</th>
-            <th>数量</th>
-            <th>均价</th>
-            <th>浮动盈亏(USDT)</th>
-            <th>盈亏%</th>
-          </tr>
+          {hasPositions ? (
+            <tr>
+              <th>币种</th>
+              <th>方向</th>
+              <th>数量</th>
+              <th>均价</th>
+              <th>浮动盈亏(USDT)</th>
+              <th>盈亏%</th>
+            </tr>
+          ) : (
+            <tr>
+              <th>时间</th>
+              <th>币种</th>
+              <th>方向</th>
+              <th>价格</th>
+              <th>数量</th>
+            </tr>
+          )}
         </thead>
         <tbody>
-          {sortedPositions.map((position) => (
-            <tr key={position.symbol}>
-              <td>{position.symbol.replace('/USDT', '').replace('-USDT', '')}</td>
-              <td className="text-buy">多</td>
-              <td>{fmtNum(position.qty, 4)}</td>
-              <td>{fmtUsd(position.avgPrice)}</td>
-              <td className={Number(position.pnl || 0) >= 0 ? 'text-buy' : 'text-sell'}>{fmtUsd(position.pnl)}</td>
-              <td className={Number(position.pnlPercent || 0) >= 0 ? 'text-buy' : 'text-sell'}>{fmtPct(position.pnlPercent)}</td>
-            </tr>
-          ))}
-          {!sortedPositions.length ? (
+          {hasPositions
+            ? sortedPositions.map((position) => (
+                <tr key={position.symbol}>
+                  <td>{position.symbol.replace('/USDT', '').replace('-USDT', '')}</td>
+                  <td className="text-buy">多</td>
+                  <td>{fmtNum(position.qty, 4)}</td>
+                  <td>{fmtUsd(position.avgPrice)}</td>
+                  <td className={Number(position.pnl || 0) >= 0 ? 'text-buy' : 'text-sell'}>{fmtUsd(position.pnl)}</td>
+                  <td className={Number(position.pnlPercent || 0) >= 0 ? 'text-buy' : 'text-sell'}>{fmtPct(position.pnlPercent)}</td>
+                </tr>
+              ))
+            : sortedTrades.slice(0, 9).map((trade) => (
+                <tr key={trade.id}>
+                  <td>{shortTime(trade.timestamp)}</td>
+                  <td>{trade.symbol.replace('/USDT', '').replace('-USDT', '')}</td>
+                  <td className={trade.side === 'buy' ? 'text-buy' : 'text-sell'}>{sideLabels[trade.side] || trade.side}</td>
+                  <td className={trade.side === 'buy' ? 'text-buy' : 'text-sell'}>{fmtUsd(trade.price)}</td>
+                  <td>{fmtNum(trade.qty, 4)}</td>
+                </tr>
+              ))}
+          {!hasPositions && !sortedTrades.length ? (
             <tr>
-              <td colSpan={6} className="table-empty">
-                当前无持仓
+              <td colSpan={5} className="table-empty">
+                暂无成交
               </td>
             </tr>
           ) : null}
@@ -125,7 +148,7 @@ function HoldingsFocusPanel({ positions, trades, account }: { positions: Positio
         <span>浮动盈亏(USDT) <strong className={floatingPnl >= 0 ? 'text-buy' : 'text-sell'}>{fmtUsd(floatingPnl)}</strong></span>
         <span>浮动盈亏% <strong className={floatingPnl >= 0 ? 'text-buy' : 'text-sell'}>{fmtPct(floatingPct)}</strong></span>
       </div>
-      {latestTrade ? (
+      {latestTrade && hasPositions ? (
         <div className="latest-trade-strip">
           <span>最近成交</span>
           <strong>{latestTrade.symbol.replace('/USDT', '').replace('-USDT', '')}</strong>
@@ -238,6 +261,7 @@ function ApiTelemetryPanel({ apiTelemetry }: { apiTelemetry?: ApiTelemetryData |
 export function MainTradingGrid({
   positions,
   trades,
+  focusSymbol,
   account,
   marketState,
   slippageInsights,
@@ -253,7 +277,7 @@ export function MainTradingGrid({
   return (
     <main className="main-trading-grid strict-design-grid">
       <div className="design-top-row">
-        <PositionsPanel positions={positions} trades={trades} account={account || null} />
+        <PositionsPanel positions={positions} trades={trades} focusSymbol={focusSymbol} account={account || null} />
         <HoldingsFocusPanel positions={positions} trades={trades} account={account || null} />
       </div>
 
@@ -270,13 +294,13 @@ export function MainTradingGrid({
         ) : (
           fallback
         )}
-        <QuantLabCostPanel cost={quantLabCost || null} />
+        <ApiTelemetryPanel apiTelemetry={apiTelemetry || null} />
+        <TimersPanel timers={timers || null} />
+        <ExecutionPathPanel decisionAudit={decisionAudit || null} />
       </div>
 
       <div className="design-ops-row">
-        <TimersPanel timers={timers || null} />
-        <ExecutionPathPanel decisionAudit={decisionAudit || null} />
-        <ApiTelemetryPanel apiTelemetry={apiTelemetry || null} />
+        <QuantLabCostPanel cost={quantLabCost || null} />
       </div>
     </main>
   );

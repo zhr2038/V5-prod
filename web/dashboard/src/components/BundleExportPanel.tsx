@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Download, FileArchive, PackageCheck, RefreshCw } from 'lucide-react';
+import { Copy, Download, FileArchive, Info, PackageCheck, RefreshCw } from 'lucide-react';
 import { api } from '../api';
 import type { LiveFollowupBundle, LiveFollowupBundleGenerateResult } from '../types';
 
@@ -40,6 +40,8 @@ export function BundleExportPanel() {
   const [generating, setGenerating] = useState(false);
   const [lastResult, setLastResult] = useState<LiveFollowupBundleGenerateResult | null>(null);
   const [error, setError] = useState('');
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [copiedName, setCopiedName] = useState('');
 
   const latest = bundles[0];
   const statusText = useMemo(() => {
@@ -89,23 +91,45 @@ export function BundleExportPanel() {
     return () => window.clearTimeout(timer);
   }, [refreshBundles]);
 
+  useEffect(() => {
+    if (!autoRefresh) return undefined;
+    const timer = window.setInterval(() => {
+      void refreshBundles();
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [autoRefresh, refreshBundles]);
+
+  const copyBundleName = useCallback((bundle: LiveFollowupBundle) => {
+    void navigator.clipboard?.writeText(bundle.name);
+    setCopiedName(bundle.name);
+    window.setTimeout(() => setCopiedName(''), 1400);
+  }, []);
+
   return (
-    <div className="liquid-glass-thick reading-frame tone-sky p-5 flex flex-col gap-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 flex-col gap-1">
+    <section className="bundle-export-panel">
+      <div className="bundle-export-head">
+        <div className="bundle-export-title">
           <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
             <FileArchive className="h-4 w-4" />
-            <span>Follow-up bundle</span>
+            <span>Follow-up bundle / 今日包导出</span>
           </div>
-          <div className="text-xl font-semibold tracking-tight">今日包导出</div>
-          <div className={`text-xs ${resultTone(lastResult)}`}>{error || statusText}</div>
+          <div className={`bundle-export-status ${resultTone(lastResult)}`}>{error || statusText}</div>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="bundle-export-actions">
+          <label className="bundle-auto-refresh">
+            <span>自动刷新</span>
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(event) => setAutoRefresh(event.currentTarget.checked)}
+            />
+            <i />
+          </label>
           <button
             type="button"
             onClick={() => void refreshBundles()}
             disabled={loading || generating}
-            className="liquid-glass-thin tone-pearl inline-flex h-10 items-center justify-center rounded-lg px-3 text-xs font-medium text-[var(--text-soft)] transition hover:border-white/25 disabled:opacity-50"
+            className="bundle-icon-button"
             title="刷新列表"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -114,7 +138,7 @@ export function BundleExportPanel() {
             type="button"
             onClick={() => void generateBundle()}
             disabled={generating}
-            className="liquid-glass-thin tone-sage inline-flex h-10 items-center justify-center gap-2 rounded-lg px-4 text-xs font-semibold text-emerald-100 transition hover:border-emerald-200/30 disabled:opacity-50"
+            className="bundle-generate-button"
           >
             <PackageCheck className={`h-4 w-4 ${generating ? 'animate-pulse' : ''}`} />
             <span>{generating ? '生成中' : '生成今日包'}</span>
@@ -122,50 +146,54 @@ export function BundleExportPanel() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-2">
+      <div className="bundle-progress" data-active={generating || loading}>
+        <span style={{ width: generating ? '82%' : loading ? '36%' : '100%' }} />
+      </div>
+
+      <div className="bundle-table">
+        <div className="bundle-table-header">
+          <span>文件名</span>
+          <span>SHA256</span>
+          <span>大小</span>
+          <span>生成时间</span>
+          <span>操作</span>
+        </div>
         {bundles.slice(0, 5).map((bundle) => (
           <div
             key={bundle.name}
-            className="liquid-glass-thin list-row tone-pearl flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+            className="bundle-table-row"
           >
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-sm text-[var(--text-soft)]">{shortBundleName(bundle.name)}</span>
-                {bundle.sha256_available ? (
-                  <span className="rounded-full border border-emerald-300/20 px-2 py-0.5 text-[10px] text-emerald-300">
-                    sha256
-                  </span>
-                ) : null}
-              </div>
-              <div className="mt-1 text-xs text-[var(--text-dim)]">
-                {fmtBundleTime(bundle.mtime_utc)} · {fmtBundleSize(bundle.size_bytes)}
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {bundle.sha256_download_url ? (
-                <a
-                  href={bundle.sha256_download_url}
-                  className="rounded-lg border border-white/10 px-2.5 py-2 text-xs text-[var(--text-dim)] transition hover:border-white/25 hover:text-[var(--text-soft)]"
-                >
-                  sha
-                </a>
-              ) : null}
+            <span className="bundle-file-name">{shortBundleName(bundle.name)}</span>
+            <span>
+              {bundle.sha256_available ? <em className="bundle-sha-pill">sha256</em> : <em className="bundle-empty">--</em>}
+            </span>
+            <span>{fmtBundleSize(bundle.size_bytes)}</span>
+            <span>{fmtBundleTime(bundle.mtime_utc)}</span>
+            <span className="bundle-row-actions">
               <a
                 href={bundle.download_url}
-                className="inline-flex items-center gap-2 rounded-lg border border-white/12 px-3 py-2 text-xs font-medium text-[var(--text-soft)] transition hover:border-[var(--accent)]/45 hover:text-white"
+                className="bundle-row-button"
               >
                 <Download className="h-3.5 w-3.5" />
                 <span>下载</span>
               </a>
-            </div>
+              <button type="button" className="bundle-row-button" onClick={() => copyBundleName(bundle)}>
+                <Copy className="h-3.5 w-3.5" />
+                <span>{copiedName === bundle.name ? '已复制' : '复制'}</span>
+              </button>
+              <a href={bundle.sha256_download_url || bundle.download_url} className="bundle-row-button">
+                <Info className="h-3.5 w-3.5" />
+                <span>详情</span>
+              </a>
+            </span>
           </div>
         ))}
         {!bundles.length ? (
-          <div className="liquid-glass-thin tone-pearl px-3 py-4 text-sm text-[var(--text-dim)]">
+          <div className="bundle-empty-state">
             {loading ? '正在读取服务器包列表...' : '服务器上还没有可下载的 follow-up bundle。'}
           </div>
         ) : null}
       </div>
-    </div>
+    </section>
   );
 }

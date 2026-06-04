@@ -3,7 +3,6 @@ import { LiquidBg } from './components/LiquidBg';
 import { TopCommandBar } from './components/TopCommandBar';
 import { StatusRibbon } from './components/StatusRibbon';
 import { MainTradingGrid } from './components/MainTradingGrid';
-import { OpsRail } from './components/OpsRail';
 import { BundleExportPanel } from './components/BundleExportPanel';
 import { api } from './api';
 import { useInterval } from './hooks/useInterval';
@@ -17,7 +16,6 @@ import type {
   QuantLabStatusData,
   QuantLabPermissionData,
   QuantLabCostEstimateData,
-  QuantLabGateDecisionData,
 } from './types';
 
 const ExecutionInsightsPanel = lazy(() =>
@@ -143,22 +141,19 @@ function App() {
   const [health, setHealth] = useState<HealthData | null>(null);
   const [quantLabStatus, setQuantLabStatus] = useState<QuantLabStatusData | null>(null);
   const [quantLabPermission, setQuantLabPermission] = useState<QuantLabPermissionData | null>(null);
-  const [quantLabPermissionDetail, setQuantLabPermissionDetail] = useState<QuantLabPermissionData | null>(null);
   const [quantLabCost, setQuantLabCost] = useState<QuantLabCostEstimateData | null>(null);
-  const [quantLabGate, setQuantLabGate] = useState<QuantLabGateDecisionData | null>(null);
   const [updateTime, setUpdateTime] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [showDeferredPanels, setShowDeferredPanels] = useState(false);
   const [secondaryReady, setSecondaryReady] = useState(false);
+  const [focusSymbol, setFocusSymbol] = useState('BNB-USDT');
 
   const loadQuantLab = useCallback(async (focus?: { symbol?: string; notional_usdt?: number } | null) => {
     const symbol = quantLabSymbol(focus?.symbol);
     const notional = Number(focus?.notional_usdt || 0) || 0;
-    const [status, permission, permissionDetail, gate, cost] = await Promise.all([
+    const [status, permission, cost] = await Promise.all([
       api.quantLabStatus(),
       api.quantLabLivePermission('v5', 'v1'),
-      api.quantLabLivePermissionDetail('v5', 'v1'),
-      api.quantLabGateDecision('v5.core.momentum'),
       symbol
         ? api.quantLabCostEstimate({
             symbol,
@@ -171,8 +166,6 @@ function App() {
     startTransition(() => {
       if (status) setQuantLabStatus(status);
       if (permission) setQuantLabPermission(permission);
-      if (permissionDetail) setQuantLabPermissionDetail(permissionDetail);
-      if (gate) setQuantLabGate(gate);
       if (cost) setQuantLabCost(cost);
     });
   }, []);
@@ -277,6 +270,12 @@ function App() {
           health={health}
           updateTime={updateTime}
           loading={loading}
+          onRefresh={() => {
+            void loadPrimary();
+            void loadSecondary();
+            void loadQuantLab(dashboardFocusForQuantLab(dashboard));
+          }}
+          onSymbolSearch={setFocusSymbol}
         />
 
         <StatusRibbon
@@ -292,6 +291,7 @@ function App() {
           <MainTradingGrid
             positions={dashboard?.positions || []}
             trades={dashboard?.trades || []}
+            focusSymbol={focusSymbol}
             account={dashboard?.account || null}
             marketState={marketState}
             slippageInsights={dashboard?.slippageInsights || null}
@@ -303,15 +303,6 @@ function App() {
             secondaryReady={secondaryReady}
             fallback={<DeferredPanelFallback />}
             ExecutionInsightsPanel={ExecutionInsightsPanel}
-          />
-          <OpsRail
-            alphaScores={dashboard?.alphaScores || []}
-            trades={dashboard?.trades || []}
-            decisionAudit={decisionAudit}
-            quantLabPermission={quantLabPermission}
-            quantLabPermissionDetail={quantLabPermissionDetail}
-            quantLabGate={quantLabGate}
-            deferredReady={secondaryReady}
           />
         </div>
 
