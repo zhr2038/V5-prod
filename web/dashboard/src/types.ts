@@ -270,12 +270,35 @@ export interface QuantLabProxyMeta {
   sampled_at?: string;
 }
 
+export interface QuantLabRequestMetricsData extends UnknownRecord {
+  available?: boolean;
+  reason?: string;
+  lookback_minutes?: number | null;
+  mode?: string;
+  total?: number | null;
+  success_count?: number | null;
+  error_count?: number | null;
+  fallback_count?: number | null;
+  success_rate?: number | null;
+  p50_latency_ms?: number | null;
+  p95_latency_ms?: number | null;
+  max_latency_ms?: number | null;
+  avg_latency_ms?: number | null;
+  latest_endpoint?: string;
+  latest_status_code?: number | null;
+  latest_latency_ms?: number | null;
+  latest_ts_utc?: string;
+}
+
 export interface QuantLabStatusData extends UnknownRecord {
   available?: boolean;
   status?: string;
   service?: string;
   mode?: string;
   proxy?: QuantLabProxyMeta;
+  request_metrics?: QuantLabRequestMetricsData | null;
+  request_status?: string;
+  request_detail?: string;
   data?: UnknownRecord;
 }
 

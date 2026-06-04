@@ -6000,6 +6000,93 @@ def test_health_api_includes_quant_lab_api_status(monkeypatch, tmp_path):
     assert "2/2成功" in quant_lab["detail"]
     assert "/v1/risk/live-permission" in quant_lab["detail"]
     assert "mode shadow" in quant_lab["detail"]
+    assert quant_lab["request_metrics"]["total"] == 2
+    assert quant_lab["request_metrics"]["success_count"] == 2
+    assert quant_lab["request_metrics"]["p95_latency_ms"] == pytest.approx(118.0)
+    assert quant_lab["request_metrics"]["latest_latency_ms"] == pytest.approx(80.0)
+
+
+def test_quant_lab_status_api_exposes_local_request_latency_metrics(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    orders_db = reports_dir / "orders.sqlite"
+    now = datetime.now(timezone.utc)
+    (reports_dir / "quant_lab_requests.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "endpoint_path": "/v1/strategy-opportunity-advisory/v5-compact",
+                        "success": True,
+                        "status_code": 200,
+                        "latency_ms": 310.0,
+                        "ts_utc": now.isoformat().replace("+00:00", "Z"),
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "endpoint_path": "/v1/health",
+                        "success": True,
+                        "status_code": 200,
+                        "latency_ms": 90.0,
+                        "response_summary": {"status": "ok"},
+                        "ts_utc": (now + timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    runtime_paths = module.DashboardRuntimePaths(
+        reports_dir=reports_dir,
+        orders_db=orders_db,
+        fills_db=reports_dir / "fills.sqlite",
+        positions_db=reports_dir / "positions.sqlite",
+        kill_switch_path=reports_dir / "kill_switch.json",
+        reconcile_status_path=reports_dir / "reconcile_status.json",
+        runs_dir=reports_dir / "runs",
+        auto_risk_guard_path=reports_dir / "auto_risk_guard.json",
+        auto_risk_eval_path=reports_dir / "auto_risk_eval.json",
+        telemetry_db=reports_dir / "api_telemetry.sqlite",
+    )
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "quant_lab": {
+                "enabled": True,
+                "mode": "shadow",
+                "request_log_path": "reports/quant_lab_requests.jsonl",
+            }
+        },
+    )
+    monkeypatch.setattr(module, "_resolve_dashboard_runtime_paths", lambda _config: runtime_paths)
+    monkeypatch.setattr(
+        module,
+        "_quant_lab_proxy_fetch",
+        lambda *_args, **_kwargs: {"available": True, "status": "ok", "service": "quant-lab"},
+    )
+
+    response = client.get("/api/quant_lab/status")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["request_status"] == "healthy"
+    assert payload["request_metrics"]["total"] == 2
+    assert payload["request_metrics"]["success_count"] == 2
+    assert payload["request_metrics"]["latest_endpoint"] == "/v1/health"
+    assert payload["request_metrics"]["latest_latency_ms"] == pytest.approx(90.0)
+    assert payload["request_metrics"]["p95_latency_ms"] == pytest.approx(299.0)
 
 
 def test_health_api_error_response_hides_internal_paths(monkeypatch):

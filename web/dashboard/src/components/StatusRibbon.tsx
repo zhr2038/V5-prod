@@ -51,6 +51,31 @@ function secondsToClock(seconds: number | null) {
   return `${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`;
 }
 
+function fmtLatencyMs(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return '--';
+  return `${value >= 100 ? value.toFixed(0) : value.toFixed(1)}ms`;
+}
+
+function compactEndpoint(value: string) {
+  const endpoint = value.trim();
+  if (!endpoint || endpoint === '--') return '--';
+  return endpoint
+    .replace('/v1/strategy-opportunity-advisory/v5-compact', '/v1/advisory/v5')
+    .replace('/v1/strategy-opportunity-advisory', '/v1/advisory')
+    .replace('/v1/risk/live-permission', '/v1/live-permission')
+    .replace('/v1/costs/estimate', '/v1/costs');
+}
+
+function quantLabRequestReasonLabel(reason: string) {
+  if (reason === 'no_recent_quant_lab_requests') return '近窗口无请求';
+  if (reason === 'quant_lab_request_log_missing_or_empty') return '无请求日志';
+  if (reason === 'quant_lab_disabled') return '中台未启用';
+  if (reason === 'local_only_no_upstream_requests') return 'local only';
+  if (reason === 'quant_lab_not_configured') return '中台未配置';
+  if (reason === 'quant_lab_request_metrics_unavailable') return '延迟不可用';
+  return reason || '';
+}
+
 function permissionTone(permission: string) {
   if (permission === 'ALLOW') return 'allow';
   if (permission === 'SELL_ONLY') return 'sell';
@@ -128,6 +153,17 @@ export function StatusRibbon({
   ).toUpperCase();
   const qlStatusData = nestedRecord(quantLabStatus?.data);
   const qlFreshness = firstText(quantLabStatus?.status, qlStatusData.status, quantLabStatus?.available ? 'ok' : 'degraded');
+  const qlRequestMetrics = nestedRecord(quantLabStatus?.request_metrics || qlStatusData.request_metrics);
+  const qlRequestTotal = firstNumber(qlRequestMetrics.total);
+  const qlRequestSuccess = firstNumber(qlRequestMetrics.success_count);
+  const qlLookback = firstNumber(qlRequestMetrics.lookback_minutes);
+  const qlP95Latency = firstNumber(qlRequestMetrics.p95_latency_ms);
+  const qlLatestLatency = firstNumber(qlRequestMetrics.latest_latency_ms);
+  const qlLatestEndpoint = compactEndpoint(firstText(qlRequestMetrics.latest_endpoint));
+  const qlRequestReason = quantLabRequestReasonLabel(firstText(qlRequestMetrics.reason));
+  const qlApiLatencySummary = qlRequestTotal !== null && qlRequestTotal > 0
+    ? `API 近${fmtNum(qlLookback, 0)}m ${fmtNum(qlRequestSuccess, 0)}/${fmtNum(qlRequestTotal, 0)}成功 · P95 ${fmtLatencyMs(qlP95Latency)}`
+    : `API 延迟 --${qlRequestReason ? ` · ${qlRequestReason}` : ''}`;
   const ttl = ttlRemaining(quantLabPermission);
   const allowedModesRaw = (
     Array.isArray(quantLabPermission?.allowed_modes)
@@ -208,11 +244,16 @@ export function StatusRibbon({
           <div className="ribbon-label">中台权限</div>
           <div className="ribbon-value">{permission}</div>
           <div className="ribbon-sub">{permissionSub} · {qlFreshness}</div>
+          <div className="ql-api-latency-line">{qlApiLatencySummary}</div>
         </div>
         <div className="ql-ttl">
           <span>中台新鲜度</span>
           <strong>{secondsToClock(ttl)}</strong>
           <small>TTL 剩余时间</small>
+          <div className="ql-api-latest">
+            <span>{qlLatestEndpoint}</span>
+            <b>{fmtLatencyMs(qlLatestLatency)}</b>
+          </div>
         </div>
       </div>
     </motion.section>

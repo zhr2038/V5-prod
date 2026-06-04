@@ -1976,6 +1976,18 @@ body {
   overflow-wrap: anywhere;
 }
 
+.ql-api-latency-line {
+  margin-top: 5px;
+  color: #56f1d2;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.1;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .quant-lab-ribbon {
   grid-column: span 2;
   justify-content: space-between;
@@ -2034,6 +2046,29 @@ body {
   font-family: var(--mono);
   font-size: 26px;
   line-height: 1;
+}
+
+.ql-api-latest {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(137, 183, 225, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ql-api-latest span {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ql-api-latest b {
+  color: #56f1d2;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 850;
 }
 
 .dashboard-workspace {

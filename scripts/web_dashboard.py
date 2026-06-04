@@ -2629,7 +2629,34 @@ def _resolve_quant_lab_request_log_path(config: Dict[str, Any], runtime_paths: D
     )
 
 
-def _load_quant_lab_api_status(
+def _empty_quant_lab_api_request_metrics(
+    *,
+    lookback_minutes: int,
+    mode: str = 'unknown',
+    reason: str = '',
+) -> Dict[str, Any]:
+    return {
+        'available': False,
+        'reason': reason,
+        'lookback_minutes': int(lookback_minutes or 120),
+        'mode': mode,
+        'total': 0,
+        'success_count': 0,
+        'error_count': 0,
+        'fallback_count': 0,
+        'success_rate': None,
+        'p50_latency_ms': None,
+        'p95_latency_ms': None,
+        'max_latency_ms': None,
+        'avg_latency_ms': None,
+        'latest_endpoint': '',
+        'latest_status_code': None,
+        'latest_latency_ms': None,
+        'latest_ts_utc': '',
+    }
+
+
+def _summarize_quant_lab_api_requests(
     config: Dict[str, Any],
     runtime_paths: DashboardRuntimePaths,
     *,
@@ -2648,14 +2675,25 @@ def _load_quant_lab_api_status(
         return code is not None and 200 <= code < 300 and not row.get('error_type')
 
     quant_lab_cfg = config.get('quant_lab', {}) if isinstance(config, dict) else {}
+    mode = str(quant_lab_cfg.get('mode') or 'unknown').strip() or 'unknown' if isinstance(quant_lab_cfg, dict) else 'unknown'
     if not isinstance(quant_lab_cfg, dict) or 'enabled' not in quant_lab_cfg:
-        return {'name': '中台 API', 'status': 'warning', 'detail': 'quant-lab 未配置'}
-
-    mode = str(quant_lab_cfg.get('mode') or 'unknown').strip() or 'unknown'
+        return _empty_quant_lab_api_request_metrics(
+            lookback_minutes=lookback_minutes,
+            mode=mode,
+            reason='quant_lab_not_configured',
+        )
     if not _dashboard_to_bool(quant_lab_cfg.get('enabled')):
-        return {'name': '中台 API', 'status': 'warning', 'detail': f'quant-lab 未启用 · mode {mode}'}
+        return _empty_quant_lab_api_request_metrics(
+            lookback_minutes=lookback_minutes,
+            mode=mode,
+            reason='quant_lab_disabled',
+        )
     if mode == 'local_only':
-        return {'name': '中台 API', 'status': 'healthy', 'detail': 'local_only，本轮不调用中台'}
+        return _empty_quant_lab_api_request_metrics(
+            lookback_minutes=lookback_minutes,
+            mode=mode,
+            reason='local_only_no_upstream_requests',
+        )
 
     log_path = _resolve_quant_lab_request_log_path(config, runtime_paths)
     rows = _read_recent_jsonl_tail(log_path)
@@ -2664,7 +2702,11 @@ def _load_quant_lab_api_status(
         if isinstance(row, dict) and str(row.get('endpoint_path') or '').startswith('/v1/')
     ]
     if not request_rows:
-        return {'name': '中台 API', 'status': 'warning', 'detail': '无中台请求日志'}
+        return _empty_quant_lab_api_request_metrics(
+            lookback_minutes=lookback_minutes,
+            mode=mode,
+            reason='quant_lab_request_log_missing_or_empty',
+        )
 
     now_epoch = time.time()
     window_seconds = max(1, int(lookback_minutes or 120)) * 60
@@ -2680,11 +2722,14 @@ def _load_quant_lab_api_status(
             recent_rows.append(row)
 
     if not recent_rows:
-        latest_label = ''
+        metrics = _empty_quant_lab_api_request_metrics(
+            lookback_minutes=lookback_minutes,
+            mode=mode,
+            reason='no_recent_quant_lab_requests',
+        )
         if latest_any_epoch != float('-inf'):
-            age_minutes = max(0.0, (now_epoch - latest_any_epoch) / 60.0)
-            latest_label = f' · 最近{age_minutes:.0f}分钟前'
-        return {'name': '中台 API', 'status': 'warning', 'detail': f'近{int(lookback_minutes)}m无请求{latest_label}'}
+            metrics['latest_age_sec'] = max(0.0, round(now_epoch - latest_any_epoch, 3))
+        return metrics
 
     total = len(recent_rows)
     success_count = sum(1 for row in recent_rows if _request_succeeded(row))
@@ -2695,14 +2740,69 @@ def _load_quant_lab_api_status(
         for row in recent_rows
         if row.get('latency_ms') not in (None, '')
     ]
-    p95_latency_ms = _percentile_value(latencies, 0.95)
     latest = max(
         recent_rows,
         key=lambda row: float(_coerce_timestamp_epoch(row.get('ts_utc') or row.get('ts') or row.get('timestamp')) or float('-inf')),
     )
-    latest_endpoint = str(latest.get('endpoint_path') or '--')
-    latest_code = _status_code(latest)
     latest_summary = latest.get('response_summary') if isinstance(latest.get('response_summary'), dict) else {}
+    latest_latency = None
+    try:
+        latest_latency = float(latest.get('latency_ms')) if latest.get('latency_ms') not in (None, '') else None
+    except (TypeError, ValueError):
+        latest_latency = None
+    return {
+        'available': True,
+        'reason': '',
+        'lookback_minutes': int(lookback_minutes or 120),
+        'mode': mode,
+        'total': total,
+        'success_count': success_count,
+        'error_count': error_count,
+        'fallback_count': fallback_count,
+        'success_rate': (float(success_count) / float(total)) if total else None,
+        'p50_latency_ms': _percentile_value(latencies, 0.50),
+        'p95_latency_ms': _percentile_value(latencies, 0.95),
+        'max_latency_ms': max(latencies) if latencies else None,
+        'avg_latency_ms': (sum(latencies) / len(latencies)) if latencies else None,
+        'latest_endpoint': str(latest.get('endpoint_path') or '--'),
+        'latest_status_code': _status_code(latest),
+        'latest_service_status': str(latest_summary.get('status') or ''),
+        'latest_latency_ms': latest_latency,
+        'latest_ts_utc': str(latest.get('ts_utc') or latest.get('ts') or latest.get('timestamp') or ''),
+    }
+
+
+def _load_quant_lab_api_status(
+    config: Dict[str, Any],
+    runtime_paths: DashboardRuntimePaths,
+    *,
+    lookback_minutes: int = 120,
+) -> Dict[str, Any]:
+    quant_lab_cfg = config.get('quant_lab', {}) if isinstance(config, dict) else {}
+    metrics = _summarize_quant_lab_api_requests(config, runtime_paths, lookback_minutes=lookback_minutes)
+    if not isinstance(quant_lab_cfg, dict) or 'enabled' not in quant_lab_cfg:
+        return {'name': '中台 API', 'status': 'warning', 'detail': 'quant-lab 未配置', 'request_metrics': metrics}
+
+    mode = str(quant_lab_cfg.get('mode') or 'unknown').strip() or 'unknown'
+    if not _dashboard_to_bool(quant_lab_cfg.get('enabled')):
+        return {'name': '中台 API', 'status': 'warning', 'detail': f'quant-lab 未启用 · mode {mode}', 'request_metrics': metrics}
+    if mode == 'local_only':
+        return {'name': '中台 API', 'status': 'healthy', 'detail': 'local_only，本轮不调用中台', 'request_metrics': metrics}
+    if not metrics.get('available'):
+        detail = '无中台请求日志'
+        if metrics.get('reason') == 'no_recent_quant_lab_requests':
+            age_sec = metrics.get('latest_age_sec')
+            latest_label = f' · 最近{float(age_sec) / 60.0:.0f}分钟前' if isinstance(age_sec, (int, float)) else ''
+            detail = f'近{int(lookback_minutes)}m无请求{latest_label}'
+        return {'name': '中台 API', 'status': 'warning', 'detail': detail, 'request_metrics': metrics}
+
+    total = int(metrics.get('total') or 0)
+    success_count = int(metrics.get('success_count') or 0)
+    error_count = int(metrics.get('error_count') or 0)
+    fallback_count = int(metrics.get('fallback_count') or 0)
+    p95_latency_ms = metrics.get('p95_latency_ms')
+    latest_endpoint = str(metrics.get('latest_endpoint') or '--')
+    latest_code = metrics.get('latest_status_code')
 
     error_rate = float(error_count) / float(total) if total else 0.0
     status = 'healthy'
@@ -2711,7 +2811,7 @@ def _load_quant_lab_api_status(
     elif error_count > 0 or fallback_count > 0 or error_rate >= 0.05 or (p95_latency_ms or 0.0) >= 2500.0:
         status = 'warning'
 
-    service_status = str(latest_summary.get('status') or '').strip().lower()
+    service_status = str(metrics.get('latest_service_status') or '').strip().lower()
     if latest_endpoint == '/v1/health' and service_status and service_status not in {'ok', 'healthy', 'ready'}:
         status = 'critical'
 
@@ -2722,7 +2822,7 @@ def _load_quant_lab_api_status(
     detail_parts.append(f'mode {mode}')
     if fallback_count:
         detail_parts.append(f'fallback {fallback_count}')
-    return {'name': '中台 API', 'status': status, 'detail': ' · '.join(detail_parts)}
+    return {'name': '中台 API', 'status': status, 'detail': ' · '.join(detail_parts), 'request_metrics': metrics}
 
 
 def _quant_lab_proxy_cache_key(path: str, params: Dict[str, Any]) -> tuple[str, tuple[tuple[str, str], ...]]:
@@ -7535,7 +7635,24 @@ def api_shadow_ml_overlay():
 @_cache_json_response(10.0)
 def api_quant_lab_status():
     try:
-        return jsonify(_quant_lab_proxy_fetch('/v1/health', ttl_seconds=10.0))
+        payload = _quant_lab_proxy_fetch('/v1/health', ttl_seconds=10.0)
+        try:
+            config = load_config()
+            runtime_paths = _resolve_dashboard_runtime_paths(config)
+            local_status = _load_quant_lab_api_status(config, runtime_paths)
+            payload['request_metrics'] = local_status.get('request_metrics')
+            payload['request_status'] = local_status.get('status')
+            payload['request_detail'] = local_status.get('detail')
+        except Exception as metrics_exc:
+            payload['request_metrics'] = _empty_quant_lab_api_request_metrics(
+                lookback_minutes=120,
+                reason='quant_lab_request_metrics_unavailable',
+            )
+            payload['request_metrics_error'] = _sanitize_public_error_text(
+                metrics_exc,
+                default='request metrics unavailable',
+            )
+        return jsonify(payload)
     except Exception as exc:
         return jsonify(_quant_lab_proxy_degraded('quant_lab_proxy_internal_error', path='/v1/health', detail=str(exc)))
 
