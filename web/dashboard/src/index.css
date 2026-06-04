@@ -1311,7 +1311,8 @@ body {
   outline: none;
 }
 
-@media (prefers-color-scheme: light) {
+/* The production command-center design is fixed dark mode; keep the legacy light palette disabled. */
+@media (prefers-color-scheme: light) and (max-width: 0px) {
   :root {
     --bg-deep: #eef2f7;
     --bg-floor: #e7ebf2;
@@ -1996,7 +1997,7 @@ body {
 
 .dashboard-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(330px, 390px);
+  grid-template-columns: minmax(0, 1fr) minmax(296px, 306px);
   gap: 14px;
   margin-top: 14px;
 }
@@ -2012,6 +2013,312 @@ body {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.strict-design-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.design-top-row {
+  display: grid;
+  grid-template-columns: minmax(520px, 1.5fr) minmax(380px, 0.92fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.design-diagnostics-row,
+.design-ops-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+
+.design-panel {
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  background:
+    linear-gradient(180deg, rgba(9, 25, 46, 0.74), rgba(5, 14, 28, 0.68)),
+    var(--panel-bg);
+  box-shadow: var(--panel-shadow), inset 0 1px 0 rgba(255,255,255,0.05);
+  padding: 14px;
+  min-width: 0;
+}
+
+.design-panel-heading {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  color: rgba(224, 238, 252, 0.92);
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.design-panel-heading small {
+  color: rgba(139, 209, 238, 0.75);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.holdings-focus-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.design-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.design-table th,
+.design-table td {
+  padding: 9px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.design-table th:first-child,
+.design-table td:first-child {
+  text-align: left;
+}
+
+.design-table th {
+  color: rgba(181, 203, 226, 0.62);
+  font-weight: 700;
+}
+
+.design-table td {
+  color: rgba(235, 244, 255, 0.88);
+  font-family: var(--mono);
+  font-weight: 700;
+}
+
+.strict-design-grid .material-surface,
+.strict-design-grid .liquid-glass-thick {
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(13, 27, 46, 0.78), rgba(5, 13, 26, 0.74)),
+    rgba(6, 18, 34, 0.72);
+  border-color: rgba(67, 162, 221, 0.18);
+  box-shadow: var(--panel-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.strict-design-grid .liquid-glass-thin,
+.strict-design-grid .liquid-glass-inset {
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(16, 31, 51, 0.64), rgba(7, 16, 30, 0.58)),
+    rgba(4, 17, 32, 0.58);
+  border-color: rgba(255, 255, 255, 0.09);
+}
+
+.strict-design-grid .reading-frame {
+  border-radius: 8px;
+}
+
+.design-top-row > .material-surface {
+  padding: 12px !important;
+  gap: 10px !important;
+}
+
+.focus-summary-strip .metric-pill {
+  min-height: 50px;
+  border-radius: 7px;
+  padding: 8px 10px !important;
+}
+
+.focus-summary-strip .metric-pill .text-lg {
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.focus-summary-strip {
+  display: none !important;
+}
+
+.kline-stat-grid {
+  display: none !important;
+}
+
+.kline-chart-area {
+  height: 9.75rem !important;
+  margin-top: 8px !important;
+}
+
+.strict-design-grid .liquid-glass-inset.w-full.p-3 {
+  padding: 10px !important;
+}
+
+.table-empty {
+  color: rgba(181, 203, 226, 0.62) !important;
+  text-align: center !important;
+  font-family: var(--sans) !important;
+  font-weight: 600 !important;
+}
+
+.holdings-footer,
+.latest-trade-strip,
+.ql-cost-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(188, 208, 229, 0.68);
+  font-size: 12px;
+}
+
+.holdings-footer strong,
+.latest-trade-strip strong,
+.latest-trade-strip b,
+.ql-cost-footer strong {
+  color: rgba(244, 250, 255, 0.94);
+  font-family: var(--mono);
+}
+
+.latest-trade-strip {
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.latest-trade-strip em {
+  font-style: normal;
+  font-weight: 850;
+}
+
+.text-buy { color: #5ff0a4 !important; }
+.text-sell { color: #ff7188 !important; }
+.text-muted { color: rgba(180, 199, 220, 0.62) !important; }
+
+.cost-metric-row,
+.api-telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cost-metric-row div,
+.api-telemetry-grid div {
+  min-height: 74px;
+  border-radius: 7px;
+  border: 1px solid rgba(69, 155, 220, 0.16);
+  background: rgba(3, 18, 35, 0.60);
+  padding: 10px 8px;
+}
+
+.cost-metric-row span,
+.api-telemetry-grid span,
+.ql-cost-footer span {
+  color: rgba(182, 204, 226, 0.62);
+  font-size: 12px;
+}
+
+.cost-metric-row strong,
+.api-telemetry-grid strong {
+  display: block;
+  margin-top: 7px;
+  color: rgba(244, 250, 255, 0.94);
+  font-family: var(--mono);
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+.timer-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.timer-progress-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 58px 54px;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.timer-progress-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(230, 240, 252, 0.82);
+}
+
+.timer-progress-row strong,
+.timer-progress-row em {
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.execution-chain {
+  display: grid;
+  grid-template-columns: 1fr 16px 1fr 16px 1fr 16px 1fr;
+  gap: 6px;
+  align-items: center;
+}
+
+.execution-chain div {
+  min-height: 58px;
+  border-radius: 7px;
+  border: 1px solid rgba(89, 176, 229, 0.17);
+  background: rgba(3, 18, 35, 0.56);
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
+.execution-chain span {
+  color: rgba(183, 204, 226, 0.62);
+  font-size: 11px;
+}
+
+.execution-chain strong {
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.execution-chain i {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(51, 232, 255, 0.70), transparent);
+}
+
+.execution-status-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.execution-status-row span {
+  min-height: 40px;
+  border-radius: 7px;
+  border: 1px solid rgba(255,255,255,0.10);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.execution-status-row .ok { color: #5ff0a4; border-color: rgba(95, 240, 164, 0.24); }
+.execution-status-row .info { color: #6bb7ff; border-color: rgba(107, 183, 255, 0.24); }
+.execution-status-row .warn { color: #ffc365; border-color: rgba(255, 195, 101, 0.24); }
+.execution-status-row .danger { color: #ff7188; border-color: rgba(255, 113, 136, 0.24); }
+
+.api-note {
+  margin-top: 10px;
+  color: rgba(184, 205, 228, 0.64);
+  font-size: 12px;
 }
 
 .analytics-row {
@@ -2281,7 +2588,10 @@ body {
 
 @media (max-width: 1180px) {
   .dashboard-workspace,
-  .analytics-row {
+  .analytics-row,
+  .design-top-row,
+  .design-diagnostics-row,
+  .design-ops-row {
     grid-template-columns: 1fr;
   }
 
@@ -2309,8 +2619,19 @@ body {
   .ops-rail,
   .flow-rail,
   .cost-kpi-grid,
-  .api-kpis {
+  .api-kpis,
+  .cost-metric-row,
+  .api-telemetry-grid,
+  .execution-status-row {
     grid-template-columns: 1fr;
+  }
+
+  .execution-chain {
+    grid-template-columns: 1fr;
+  }
+
+  .execution-chain i {
+    display: none;
   }
 
   .quant-lab-ribbon {
@@ -2325,6 +2646,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .top-command-bar *,
   .status-ribbon *,
+  .main-trading-grid *,
   .ops-rail * {
     transition-duration: 0.01ms !important;
     animation: none !important;

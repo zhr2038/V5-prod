@@ -13,7 +13,7 @@ import type {
   MarketStateData,
   DecisionAuditData,
   HealthData,
-  Position,
+  Trade,
   QuantLabStatusData,
   QuantLabPermissionData,
   QuantLabCostEstimateData,
@@ -115,6 +115,26 @@ function quantLabSymbol(symbol?: string) {
   return text.replace('/', '-').replace('_', '-');
 }
 
+function tradeTimeValue(trade: Trade) {
+  const raw = String(trade.timestamp || '').trim();
+  if (!raw) return 0;
+  const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function dashboardFocusForQuantLab(dashboard?: DashboardData | null) {
+  const firstPosition = dashboard?.positions?.[0];
+  if (firstPosition?.symbol) {
+    return { symbol: firstPosition.symbol, notional_usdt: Number(firstPosition.value || 0) || 0 };
+  }
+  const latestTrade = [...(dashboard?.trades || [])].sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a))[0];
+  if (latestTrade?.symbol) {
+    return { symbol: latestTrade.symbol, notional_usdt: Number(latestTrade.value || 0) || 0 };
+  }
+  return null;
+}
+
 function App() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [riskGuard, setRiskGuard] = useState<RiskGuardData | null>(null);
@@ -131,9 +151,9 @@ function App() {
   const [showDeferredPanels, setShowDeferredPanels] = useState(false);
   const [secondaryReady, setSecondaryReady] = useState(false);
 
-  const loadQuantLab = useCallback(async (focusPosition?: Position | null) => {
-    const symbol = quantLabSymbol(focusPosition?.symbol);
-    const notional = Number(focusPosition?.value || 0) || 0;
+  const loadQuantLab = useCallback(async (focus?: { symbol?: string; notional_usdt?: number } | null) => {
+    const symbol = quantLabSymbol(focus?.symbol);
+    const notional = Number(focus?.notional_usdt || 0) || 0;
     const [status, permission, permissionDetail, gate, cost] = await Promise.all([
       api.quantLabStatus(),
       api.quantLabLivePermission('v5', 'v1'),
@@ -160,21 +180,27 @@ function App() {
   const loadPrimary = useCallback(async () => {
     if (document.hidden) return;
     setLoading(true);
-    const [d, r] = await Promise.all([
+    const [d, r, liveTrades] = await Promise.all([
       api.dashboard(),
       api.riskGuard(),
+      api.trades(),
     ]);
     if (d) {
-      setDashboard((prev) => (prev ? { ...prev, ...d } : d));
+      const nextDashboard = {
+        ...(dashboard || {}),
+        ...d,
+        trades: Array.isArray(liveTrades?.trades) && liveTrades.trades.length > 0 ? liveTrades.trades : d.trades,
+      } as DashboardData;
+      setDashboard((prev) => (prev ? { ...prev, ...nextDashboard } : nextDashboard));
       setMarketState(d.marketState || null);
-      void loadQuantLab(d.positions?.[0] || null);
+      void loadQuantLab(dashboardFocusForQuantLab(nextDashboard));
     }
     if (r) {
       setRiskGuard(r);
     }
     setUpdateTime(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
     setLoading(false);
-  }, [loadQuantLab]);
+  }, [dashboard, loadQuantLab]);
 
   const loadSecondary = useCallback(async () => {
     const [deferred, dec, h] = await Promise.all([
@@ -184,13 +210,17 @@ function App() {
     ]);
     startTransition(() => {
       if (deferred) {
-        setDashboard((prev) => mergeDeferredDashboard(prev, deferred));
+        setDashboard((prev) => {
+          const nextDashboard = mergeDeferredDashboard(prev, deferred);
+          void loadQuantLab(dashboardFocusForQuantLab(nextDashboard));
+          return nextDashboard;
+        });
         setSecondaryReady(true);
       }
       if (dec) setDecisionAudit(dec);
       if (h) setHealth(h);
     });
-  }, []);
+  }, [loadQuantLab]);
 
   useEffect(() => {
     let timeoutId: number | null = null;
@@ -234,7 +264,7 @@ function App() {
   }, 60000);
 
   useInterval(() => {
-    loadQuantLab(dashboard?.positions?.[0] || null);
+    loadQuantLab(dashboardFocusForQuantLab(dashboard));
   }, 30000);
 
   return (
@@ -265,21 +295,21 @@ function App() {
             account={dashboard?.account || null}
             marketState={marketState}
             slippageInsights={dashboard?.slippageInsights || null}
+            timers={dashboard?.timers || null}
+            decisionAudit={decisionAudit}
+            apiTelemetry={dashboard?.apiTelemetry || null}
+            quantLabCost={quantLabCost}
             showDeferredPanels={showDeferredPanels}
             secondaryReady={secondaryReady}
             fallback={<DeferredPanelFallback />}
             ExecutionInsightsPanel={ExecutionInsightsPanel}
           />
           <OpsRail
-            timers={dashboard?.timers || null}
             alphaScores={dashboard?.alphaScores || []}
             trades={dashboard?.trades || []}
-            health={health}
             decisionAudit={decisionAudit}
-            apiTelemetry={dashboard?.apiTelemetry || null}
             quantLabPermission={quantLabPermission}
             quantLabPermissionDetail={quantLabPermissionDetail}
-            quantLabCost={quantLabCost}
             quantLabGate={quantLabGate}
             deferredReady={secondaryReady}
           />

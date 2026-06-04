@@ -1,15 +1,27 @@
-export const fmtNum = (value: unknown, digits = 2) =>
-  Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '--';
+const numberOrNull = (value: unknown) => {
+  if (value === null || value === undefined || value === '') return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
 
-export const fmtUsd = (value: unknown) =>
-  Number.isFinite(Number(value)) ? `$${Number(value).toFixed(2)}` : '--';
+export const fmtNum = (value: unknown, digits = 2) => {
+  const num = numberOrNull(value);
+  return num === null ? '--' : num.toFixed(digits);
+};
 
-export const fmtUsdt = (value: unknown) =>
-  Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)} USDT` : '--';
+export const fmtUsd = (value: unknown) => {
+  const num = numberOrNull(value);
+  return num === null ? '--' : `$${num.toFixed(2)}`;
+};
+
+export const fmtUsdt = (value: unknown) => {
+  const num = numberOrNull(value);
+  return num === null ? '--' : `${num.toFixed(2)} USDT`;
+};
 
 export const pctVal = (value: unknown) => {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return null;
+  const num = numberOrNull(value);
+  if (num === null) return null;
   return Math.abs(num) <= 1 ? num * 100 : num;
 };
 
@@ -18,6 +30,12 @@ export const fmtPct = (value: unknown, digits = 2) => {
   if (pct === null) return '--';
   const sign = pct > 0 ? '+' : '';
   return `${sign}${pct.toFixed(digits)}%`;
+};
+
+export const fmtUnsignedPct = (value: unknown, digits = 2) => {
+  const pct = pctVal(value);
+  if (pct === null) return '--';
+  return `${Math.abs(pct).toFixed(digits)}%`;
 };
 
 export const stateLabels: Record<string, string> = {

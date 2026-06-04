@@ -17,6 +17,8 @@ const timeframes = [
   { key: '1d', label: '1D' },
 ];
 
+const defaultFocusSymbol = 'BNB-USDT';
+
 function candleTimestamp(candle: KlineData) {
   const rawNumeric = Number(candle.timestamp ?? candle.ts ?? 0);
   if (Number.isFinite(rawNumeric) && rawNumeric > 0) {
@@ -604,7 +606,10 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
   const fallbackSymbol = fallbackTrade
     ? String(fallbackTrade.symbol || '').replace('/USDT', '').replace('-USDT', '')
     : '';
-  const activeSymbol = spotlightPosition?.symbol || fallbackSymbol;
+  const activeSymbol = spotlightPosition?.symbol || fallbackTrade?.symbol || defaultFocusSymbol;
+  const activeDisplaySymbol = String(activeSymbol || defaultFocusSymbol)
+    .replace('/USDT', '-USDT')
+    .replace('_USDT', '-USDT');
   const activeReferencePrice =
     spotlightPosition && Number(spotlightPosition.avgPrice) > 0
       ? spotlightPosition.avgPrice
@@ -614,7 +619,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
     : (fallbackTrade && Number(fallbackTrade.price) > 0 ? '成交价' : undefined);
   const spotlightLabel = spotlightPosition
     ? spotlightPosition.symbol.replace('-USDT', '')
-    : fallbackSymbol || '—';
+    : fallbackSymbol || activeDisplaySymbol;
   const chartCandles = Array.isArray(kline?.candles) ? kline.candles : [];
   const chartSummary = kline?.summary || null;
   const latestCandle = chartCandles[chartCandles.length - 1] || null;
@@ -696,7 +701,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
           <CandlestickChart className="w-4 h-4" />
-          <span>持仓聚焦</span>
+          <span>{spotlightPosition ? '持仓聚焦' : `市场聚焦 · ${spotlightLabel}`}</span>
         </div>
         {(spotlightPosition || fallbackTrade) && (
           <div className="flex items-center gap-2">
@@ -727,11 +732,11 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
         )}
       </div>
 
-      {spotlightPosition || fallbackTrade ? (
+      {activeSymbol ? (
         <>
           {spotlightPosition ? (
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-4 items-start">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 focus-summary-strip">
                 <div className="material-surface material-clear clear-control metric-pill tone-sky px-4 py-3">
                   <div className="text-xs text-[var(--text-dim)]">市值</div>
                   <div className="text-lg font-semibold">{fmtUsd(spotlightPosition.value)}</div>
@@ -755,7 +760,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
               </div>
             </div>
           ) : fallbackTrade ? (
-            <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 focus-summary-strip">
               <div className="material-surface material-clear clear-control metric-pill tone-sky px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">状态</div>
                 <div className="text-lg font-semibold">最近成交</div>
@@ -778,7 +783,31 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
                 <div className="text-[11px] text-[var(--text-dim)] mt-1">额 {fmtUsd(fallbackTrade.value)}</div>
               </div>
             </div>
-          ) : null}
+          ) : (
+            <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 focus-summary-strip">
+              <div className="material-surface material-clear clear-control metric-pill tone-sky px-4 py-3">
+                <div className="text-xs text-[var(--text-dim)]">聚焦币种</div>
+                <div className="text-lg font-semibold">{activeDisplaySymbol}</div>
+              </div>
+              <div className="liquid-glass-thin metric-pill tone-sage px-4 py-3">
+                <div className="text-xs text-[var(--text-dim)]">最新价</div>
+                <div className="text-lg font-mono">{fmtUsd(displayCurrentPrice || undefined)}</div>
+              </div>
+              <div className="liquid-glass-thin metric-pill tone-amber px-4 py-3">
+                <div className="text-xs text-[var(--text-dim)]">24h 高</div>
+                <div className="text-lg font-mono">{fmtUsd(chartSummary?.high)}</div>
+              </div>
+              <div className="liquid-glass-thin metric-pill tone-coral px-4 py-3">
+                <div className="text-xs text-[var(--text-dim)]">24h 低</div>
+                <div className="text-lg font-mono">{fmtUsd(chartSummary?.low)}</div>
+              </div>
+              <div className="material-surface material-clear clear-control metric-pill tone-plum col-span-2 xl:col-span-1 px-4 py-3">
+                <div className="text-xs text-[var(--text-dim)]">24h 量</div>
+                <div className="text-lg font-mono">{formatCompactVolume(Number(chartSummary?.volume || 0))}</div>
+                <div className="text-[11px] text-[var(--text-dim)] mt-1">真实行情聚焦</div>
+              </div>
+            </div>
+          )}
 
           {activeSymbol ? (
             <>
@@ -805,7 +834,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2">
+              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2 kline-stat-grid">
                 <div className="liquid-glass-inset tone-neutral px-3 py-2">
                   <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--text-dim)]">Open</div>
                   <div className="mt-1 text-sm font-mono text-white">
@@ -862,7 +891,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
                     最近收盘 <span className="ml-1 font-mono text-white">{fmtUsd(Number(chartSummary?.close || latestCandle?.close || 0))}</span>
                   </div>
                 </div>
-                <div className="mt-3 h-[16rem] sm:h-[19rem]">
+                <div className="mt-3 h-[12rem] sm:h-[13.5rem] kline-chart-area">
                   <CandlestickSvg
                     data={chartCandles}
                     timeframe={tf}
@@ -879,51 +908,6 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
           当前无持仓
         </div>
       )}
-
-      <div className="mt-2">
-        <div className="text-sm text-[var(--text-dim)] mb-3">持仓清单</div>
-        <div className="liquid-glass-inset tone-neutral overflow-x-auto px-3 py-2">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-[var(--text-dim)] text-xs border-b border-white/10">
-                <th className="text-left py-2 font-medium">币种</th>
-                <th className="text-right py-2 font-medium">市值</th>
-                <th className="text-right py-2 font-medium">盈亏</th>
-                <th className="text-right py-2 font-medium hidden sm:table-cell">数量</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((pos) => (
-                <tr
-                  key={pos.symbol}
-                  className="border-b border-white/5 hover:bg-white/5 transition cursor-pointer"
-                  onClick={() => {
-                    setSelectedSymbol(pos.symbol);
-                  }}
-                >
-                  <td className="py-2.5 font-medium">{pos.symbol.replace('-USDT', '')}</td>
-                  <td className="py-2.5 text-right font-mono">{fmtUsd(pos.value)}</td>
-                  <td
-                    className={`py-2.5 text-right font-mono ${
-                      pos.pnlPercent >= 0 ? 'text-emerald-300' : 'text-rose-300'
-                    }`}
-                  >
-                    {fmtPct(pos.pnlPercent)}
-                  </td>
-                  <td className="py-2.5 text-right font-mono hidden sm:table-cell">{fmtNum(pos.qty, 4)}</td>
-                </tr>
-              ))}
-              {!sorted.length && (
-                <tr>
-                  <td colSpan={4} className="py-6 text-center text-[var(--text-dim)]">
-                    暂无持仓
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
   );
 }

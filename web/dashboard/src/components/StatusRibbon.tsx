@@ -1,6 +1,6 @@
 import { Activity, Gauge, ShieldCheck, TrendingUp, WalletCards } from 'lucide-react';
 import { motion, useReducedMotion } from 'framer-motion';
-import { fmtNum, fmtPct, riskLabels, stateLabels } from '../lib/format';
+import { fmtNum, fmtPct, fmtUnsignedPct, riskLabels, stateLabels } from '../lib/format';
 import type {
   AccountData,
   MarketStateData,
@@ -34,6 +34,7 @@ function firstText(...values: unknown[]) {
 
 function firstNumber(...values: unknown[]) {
   for (const value of values) {
+    if (value === null || value === undefined || value === '') continue;
     const num = Number(value);
     if (Number.isFinite(num)) return num;
   }
@@ -104,6 +105,16 @@ export function StatusRibbon({
   const state = firstText(marketState?.state, 'UNKNOWN').toUpperCase();
   const risk = firstText(riskGuard?.current_level, 'UNKNOWN').toUpperCase();
   const positionMultiplier = firstNumber(riskGuard?.config?.position_multiplier, marketState?.position_multiplier);
+  const riskConfig = nestedRecord(riskGuard?.config);
+  const marketRecord = nestedRecord(marketState);
+  const marketMetrics = nestedRecord(marketRecord.metrics);
+  const targetMultiplier = firstNumber(
+    riskConfig.target_position_multiplier,
+    riskConfig.position_multiplier_target,
+    riskConfig.pos_mult_trending,
+    riskConfig.pos_mult_sideways
+  );
+  const volatilityPct = firstNumber(marketRecord.volatility_pct, marketMetrics.volatility_pct, marketRecord.volatility);
   const permissionData = nestedRecord(quantLabPermission?.data);
   const permission = firstText(
     quantLabPermission?.permission,
@@ -128,7 +139,7 @@ export function StatusRibbon({
         icon={TrendingUp}
         label="市场状态"
         value={stateLabels[state] || state}
-        sub={`波动率 ${fmtPct(nestedRecord(marketState?.votes?.hmm?.probs).TRENDING, 2)}`}
+        sub={`波动率 ${fmtUnsignedPct(volatilityPct, 2)}`}
         tone={state === 'RISK_OFF' ? 'danger' : 'good'}
       />
       <RibbonCard
@@ -142,14 +153,14 @@ export function StatusRibbon({
         icon={Gauge}
         label="仓位倍数"
         value={`${fmtNum(positionMultiplier, 2)}x`}
-        sub={`目标 ${fmtNum(riskGuard?.config?.target_position_multiplier, 2)}x`}
+        sub={`目标 ${fmtNum(targetMultiplier, 2)}x`}
         tone="warn"
       />
       <RibbonCard
         icon={WalletCards}
         label="今日回撤"
         value={fmtPct(account?.todayPnlPercent, 2)}
-        sub={`最大回撤 ${fmtPct(account?.maxDrawdown, 2)}`}
+        sub={`最大回撤 ${fmtUnsignedPct(account?.maxDrawdown, 2)}`}
         tone={Number(account?.todayPnlPercent || 0) < 0 ? 'danger' : 'good'}
       />
       <div className="status-ribbon-card quant-lab-ribbon" data-tone={permissionTone(permission)}>
