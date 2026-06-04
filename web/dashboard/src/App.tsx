@@ -147,7 +147,6 @@ function App() {
   const [updateTime, setUpdateTime] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [showDeferredPanels, setShowDeferredPanels] = useState(false);
-  const [secondaryReady, setSecondaryReady] = useState(false);
   const [focusSymbol, setFocusSymbol] = useState('BNB-USDT');
 
   const loadQuantLab = useCallback(async (focus?: { symbol?: string; notional_usdt?: number } | null) => {
@@ -220,7 +219,6 @@ function App() {
           void loadQuantLab(dashboardFocusForQuantLab(nextDashboard));
           return nextDashboard;
         });
-        setSecondaryReady(true);
       }
       if (dec) setDecisionAudit(dec);
       if (h) setHealth(h);
@@ -318,7 +316,6 @@ function App() {
             apiTelemetrySeries={apiTelemetrySeries}
             quantLabCost={quantLabCost}
             showDeferredPanels={showDeferredPanels}
-            secondaryReady={secondaryReady}
             fallback={<DeferredPanelFallback />}
             ExecutionInsightsPanel={ExecutionInsightsPanel}
           />

@@ -33,7 +33,6 @@ interface MainTradingGridProps {
   apiTelemetrySeries?: ApiTelemetrySeriesData | null;
   quantLabCost?: QuantLabCostEstimateData | null;
   showDeferredPanels: boolean;
-  secondaryReady: boolean;
   fallback: ReactNode;
   ExecutionInsightsPanel: ComponentType<{ slippageInsights?: SlippageInsightsData | null }>;
 }
@@ -372,7 +371,6 @@ export function MainTradingGrid({
   apiTelemetrySeries,
   quantLabCost,
   showDeferredPanels,
-  secondaryReady,
   fallback,
   ExecutionInsightsPanel,
 }: MainTradingGridProps) {
@@ -386,13 +384,9 @@ export function MainTradingGrid({
       <div className="design-diagnostics-row">
         <MarketRadar marketState={marketState || null} />
         {showDeferredPanels ? (
-          secondaryReady ? (
-            <Suspense fallback={fallback}>
-              <ExecutionInsightsPanel slippageInsights={slippageInsights || null} />
-            </Suspense>
-          ) : (
-            fallback
-          )
+          <Suspense fallback={fallback}>
+            <ExecutionInsightsPanel slippageInsights={slippageInsights || null} />
+          </Suspense>
         ) : (
           fallback
         )}
