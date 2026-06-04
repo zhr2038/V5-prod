@@ -1,4 +1,4 @@
-import { Suspense } from 'react';
+import { Suspense, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import { Activity, Clock, Route } from 'lucide-react';
 import { PositionsPanel } from './PositionsPanel';
@@ -115,6 +115,7 @@ function focusTrades(trades: Trade[]) {
 }
 
 function HoldingsFocusPanel({ positions, trades, account }: { positions: Position[]; trades: Trade[]; account?: AccountData | null }) {
+  const [tradeDetailsOpen, setTradeDetailsOpen] = useState(false);
   const sortedPositions = [...positions].sort((a, b) => Number(b.value || 0) - Number(a.value || 0));
   const sortedTrades = focusTrades(trades);
   const latestTrade = sortedTrades[0] || null;
@@ -126,7 +127,18 @@ function HoldingsFocusPanel({ positions, trades, account }: { positions: Positio
     <section className="design-panel holdings-focus-panel">
       <div className="design-panel-heading">
         <span>{hasPositions ? '持仓聚焦' : '最近成交'}</span>
-        <small>{hasPositions ? sortedPositions.length : '更多 >'}</small>
+        {hasPositions ? (
+          <small>{sortedPositions.length}</small>
+        ) : (
+          <button
+            type="button"
+            className="panel-heading-action"
+            onClick={() => setTradeDetailsOpen(true)}
+            aria-label="查看最近成交明细"
+          >
+            更多 &gt;
+          </button>
+        )}
       </div>
       <table className="design-table">
         <thead>
@@ -190,6 +202,53 @@ function HoldingsFocusPanel({ positions, trades, account }: { positions: Positio
           <strong>{latestTrade.symbol.replace('/USDT', '').replace('-USDT', '')}</strong>
           <em className={latestTrade.side === 'buy' ? 'text-buy' : 'text-sell'}>{sideLabels[latestTrade.side] || latestTrade.side}</em>
           <b>{fmtUsd(latestTrade.price)}</b>
+        </div>
+      ) : null}
+      {!hasPositions && tradeDetailsOpen ? (
+        <div className="trade-details-overlay" role="dialog" aria-modal="true" aria-labelledby="trade-details-title">
+          <button className="trade-details-backdrop" type="button" aria-label="关闭最近成交明细" onClick={() => setTradeDetailsOpen(false)} />
+          <div className="trade-details-modal">
+            <div className="trade-details-head">
+              <div>
+                <span id="trade-details-title">最近成交明细</span>
+                <small>{sortedTrades.length ? `${sortedTrades.length} 条` : '暂无成交'}</small>
+              </div>
+              <button type="button" onClick={() => setTradeDetailsOpen(false)}>关闭</button>
+            </div>
+            <div className="trade-details-table-wrap">
+              <table className="design-table trade-details-table">
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>币种</th>
+                    <th>方向</th>
+                    <th>价格</th>
+                    <th>数量</th>
+                    <th>名义金额</th>
+                    <th>手续费</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedTrades.slice(0, 48).map((trade) => (
+                    <tr key={`detail-${trade.id}`}>
+                      <td>{shortTime(trade.timestamp)}</td>
+                      <td>{trade.symbol.replace('/USDT', '').replace('-USDT', '')}</td>
+                      <td className={trade.side === 'buy' ? 'text-buy' : 'text-sell'}>{sideLabels[trade.side] || trade.side}</td>
+                      <td className={trade.side === 'buy' ? 'text-buy' : 'text-sell'}>{fmtUsd(trade.price)}</td>
+                      <td>{fmtNum(trade.qty, 4)}</td>
+                      <td>{fmtUsd(trade.value)}</td>
+                      <td>{fmtUsd(trade.fee)}</td>
+                    </tr>
+                  ))}
+                  {!sortedTrades.length ? (
+                    <tr>
+                      <td colSpan={7} className="table-empty">暂无成交</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       ) : null}
     </section>
