@@ -2097,7 +2097,8 @@ body {
 }
 
 .design-diagnostics-row {
-  grid-auto-rows: minmax(220px, 240px);
+  grid-auto-rows: minmax(280px, auto);
+  align-items: stretch;
 }
 
 .design-ops-row {
@@ -2105,9 +2106,8 @@ body {
 }
 
 .design-diagnostics-row > * {
-  min-height: 0;
-  max-height: 240px;
-  overflow: hidden;
+  min-height: 280px;
+  max-height: none;
 }
 
 .design-diagnostics-row .reading-frame,
@@ -2116,7 +2116,7 @@ body {
 }
 
 .design-diagnostics-row .metric-pill {
-  min-height: 58px;
+  min-height: 64px;
 }
 
 .design-diagnostics-row .text-xs.leading-relaxed {
@@ -2124,6 +2124,65 @@ body {
   -webkit-line-clamp: 5;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.design-diagnostics-row .execution-insights-panel {
+  gap: 8px !important;
+}
+
+.design-diagnostics-row .execution-insights-panel > .flex.items-center.justify-between {
+  min-height: 22px;
+  gap: 8px;
+}
+
+.design-diagnostics-row .execution-insights-panel > .flex.items-center.justify-between .text-xs {
+  max-width: 58%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.design-diagnostics-row .execution-insights-metrics {
+  gap: 6px !important;
+}
+
+.design-diagnostics-row .execution-insights-metrics .metric-pill {
+  min-height: 74px;
+  padding: 10px !important;
+}
+
+.design-diagnostics-row .execution-insights-metrics .text-lg {
+  margin-top: 4px;
+  font-size: 16px !important;
+  line-height: 1.16;
+  overflow-wrap: anywhere;
+}
+
+.design-diagnostics-row .execution-insights-chart-card {
+  padding: 10px !important;
+  min-height: 108px;
+}
+
+.design-diagnostics-row .execution-histogram-wrap {
+  height: 82px !important;
+  margin-top: 8px !important;
+}
+
+.design-diagnostics-row .execution-histogram-wrap .absolute.inset-0.flex.items-end {
+  gap: 4px !important;
+  padding-bottom: 17px !important;
+}
+
+.design-diagnostics-row .execution-histogram-wrap .absolute.inset-x-0.bottom-0.flex {
+  gap: 4px !important;
+}
+
+.design-diagnostics-row .execution-histogram-wrap .absolute.inset-x-0.bottom-0.flex > div {
+  font-size: 9px !important;
+}
+
+.design-diagnostics-row .execution-insights-footer {
+  display: none;
 }
 
 .design-panel {
@@ -2535,18 +2594,19 @@ body {
 }
 
 .design-diagnostics-row .market-radar-panel {
+  min-height: 280px;
   gap: 8px !important;
 }
 
 .design-diagnostics-row .market-radar-dial {
-  min-height: 86px;
-  grid-template-columns: 92px minmax(0, 1fr);
+  min-height: 84px;
+  grid-template-columns: 88px minmax(0, 1fr);
   padding: 5px 8px;
 }
 
 .design-diagnostics-row .market-radar-dial svg {
-  width: 86px;
-  height: 86px;
+  width: 82px;
+  height: 82px;
 }
 
 .design-diagnostics-row .market-radar-votes {
@@ -2555,13 +2615,26 @@ body {
 }
 
 .design-diagnostics-row .market-radar-votes > div {
-  min-height: 62px;
-  padding: 6px !important;
-  gap: 4px !important;
+  min-height: 98px;
+  padding: 7px !important;
+  gap: 5px !important;
 }
 
 .design-diagnostics-row .market-radar-votes .flex.items-center.justify-between {
   gap: 4px;
+}
+
+.design-diagnostics-row .market-radar-votes .flex.items-center.justify-between .text-sm {
+  font-size: 12px !important;
+}
+
+.design-diagnostics-row .market-radar-votes .flex.items-center.justify-between .text-xs {
+  max-width: 48px;
+  overflow: hidden;
+  padding-left: 6px !important;
+  padding-right: 6px !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .design-diagnostics-row .market-radar-votes .glass-progress-track,
@@ -2569,8 +2642,23 @@ body {
   display: none;
 }
 
+.design-diagnostics-row .market-radar-votes .flex.flex-col.gap-2 {
+  gap: 3px !important;
+}
+
+.design-diagnostics-row .market-radar-votes .flex.items-center.gap-2.text-xs {
+  gap: 3px !important;
+  font-size: 10px !important;
+  line-height: 1.1;
+}
+
 .design-diagnostics-row .market-radar-votes .w-10 {
   width: auto;
+  min-width: 24px;
+}
+
+.design-diagnostics-row .market-radar-votes .text-right.font-mono {
+  min-width: 34px;
 }
 
 .design-diagnostics-row .market-radar-history,

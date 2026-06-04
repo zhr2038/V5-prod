@@ -54,7 +54,7 @@ export function ExecutionInsightsPanel({ slippageInsights }: ExecutionInsightsPa
 
   return (
     <div
-      className={`liquid-glass-thick reading-frame p-5 flex flex-col gap-4 ${toneClass(slippageInsights?.status)} ${pulse.className}`}
+      className={`liquid-glass-thick reading-frame p-5 flex flex-col gap-4 execution-insights-panel ${toneClass(slippageInsights?.status)} ${pulse.className}`}
       data-warning={p95ExceedsBaseline ? 'true' : 'false'}
       data-pulse={pulse.dataPulse}
     >
@@ -68,7 +68,7 @@ export function ExecutionInsightsPanel({ slippageInsights }: ExecutionInsightsPa
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 execution-insights-metrics">
         <div className="liquid-glass-thin metric-pill tone-coral px-4 py-3">
           <div className="text-xs text-[var(--text-dim)]">样本数</div>
           <div className="text-lg font-semibold">{fmtNum(slippageInsights?.sampleCount, 0)}</div>
@@ -87,12 +87,12 @@ export function ExecutionInsightsPanel({ slippageInsights }: ExecutionInsightsPa
         </div>
       </div>
 
-      <div className="liquid-glass-inset tone-neutral p-4">
+      <div className="liquid-glass-inset tone-neutral p-4 execution-insights-chart-card">
         <div className="flex items-center justify-between text-xs text-[var(--text-dim)]">
           <span>实测滑点分布</span>
           <span>{baselineLabel}</span>
         </div>
-        <div className="relative mt-4 h-48">
+        <div className="relative mt-4 h-48 execution-histogram-wrap">
           {[0.25, 0.5, 0.75, 1].map((ratio) => (
             <div
               key={ratio}
@@ -135,7 +135,7 @@ export function ExecutionInsightsPanel({ slippageInsights }: ExecutionInsightsPa
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 text-xs">
+      <div className="grid grid-cols-2 gap-3 text-xs execution-insights-footer">
         <div className="liquid-glass-thin list-row tone-pearl px-3 py-2 flex items-center justify-between">
           <span className="text-[var(--text-dim)]">最近成交</span>
           <span className="text-[var(--text-soft)]">{slippageInsights?.lastFillAt ? slippageInsights.lastFillAt.slice(5, 16).replace('T', ' ') : '—'}</span>
