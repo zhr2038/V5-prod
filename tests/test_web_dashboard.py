@@ -16,6 +16,8 @@ MODULE_PATH = REPO_ROOT / "scripts" / "web_dashboard.py"
 MONITOR_V2_JS_PATH = REPO_ROOT / "web" / "static" / "js" / "monitor_v2.js"
 ML_STATUS_PANEL_JS_PATH = REPO_ROOT / "web" / "static" / "js" / "ml_status_panel.js"
 ML_BAND_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "MLBand.tsx"
+MARKET_RADAR_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "MarketRadar.tsx"
+DASHBOARD_CSS_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "index.css"
 
 
 def load_web_dashboard_module():
@@ -25,6 +27,16 @@ def load_web_dashboard_module():
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+def test_market_radar_rss_summary_is_rendered_below_panel_not_inside_rss_card():
+    source = MARKET_RADAR_TSX_PATH.read_text(encoding="utf-8")
+    css = DASHBOARD_CSS_PATH.read_text(encoding="utf-8")
+
+    assert 'const rssSummary = votes.rss?.summary || votes.rss?.summary_short;' in source
+    assert '<VoteCard title="RSS" vote={votes.rss} showBars showSummary={false} />' in source
+    assert 'className="market-radar-rss-summary"' in source
+    assert '.market-radar-rss-summary' in css
 
 
 def _utc_epoch_from_text(value: str, fmt: str) -> float:

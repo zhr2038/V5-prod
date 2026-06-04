@@ -20,12 +20,14 @@ function VoteCard({
   showProbs,
   showBars,
   showFullSummary,
+  showSummary = true,
 }: {
   title: string;
   vote?: import('../types').MarketVote;
   showProbs?: boolean;
   showBars?: boolean;
   showFullSummary?: boolean;
+  showSummary?: boolean;
 }) {
   if (!vote) return null;
   const state = String(vote.state || '').toUpperCase();
@@ -77,7 +79,7 @@ function VoteCard({
           ))}
         </div>
       )}
-      {summary && (
+      {summary && showSummary && (
         <div
           className={`text-xs leading-relaxed text-[var(--text-soft)] break-words ${
             showFullSummary ? 'whitespace-normal' : 'line-clamp-2'
@@ -119,6 +121,7 @@ export function MarketRadar({ marketState }: MarketRadarProps) {
   const votes = marketState?.votes || {};
   const history = marketState?.history_24h || [];
   const alerts = marketState?.alerts || [];
+  const rssSummary = votes.rss?.summary || votes.rss?.summary_short;
   const hasVotes = Boolean(votes.hmm || votes.funding || votes.rss);
   const averageConfidence = hasVotes
     ? [votes.hmm, votes.funding, votes.rss].map(confidenceOf).reduce((sum, value) => sum + value, 0) /
@@ -175,8 +178,15 @@ export function MarketRadar({ marketState }: MarketRadarProps) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 market-radar-votes">
         <VoteCard title="HMM" vote={votes.hmm} showProbs />
         <VoteCard title="资金费率" vote={votes.funding} showBars />
-        <VoteCard title="RSS" vote={votes.rss} showBars showFullSummary />
+        <VoteCard title="RSS" vote={votes.rss} showBars showSummary={false} />
       </div>
+
+      {rssSummary ? (
+        <div className="market-radar-rss-summary">
+          <span>RSS情报</span>
+          <p>{rssSummary}</p>
+        </div>
+      ) : null}
 
       {alerts.length > 0 && (
         <div className="flex flex-wrap gap-2">
