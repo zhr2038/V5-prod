@@ -9,6 +9,10 @@ import type {
   Trade,
   LiveFollowupBundlesData,
   LiveFollowupBundleGenerateResult,
+  QuantLabStatusData,
+  QuantLabPermissionData,
+  QuantLabCostEstimateData,
+  QuantLabGateDecisionData,
 } from './types';
 
 const API_BASE = '';
@@ -26,6 +30,13 @@ type ApiPositionPayload = Partial<import('./types').Position> & {
   value_usdt?: number;
   price?: number;
 };
+
+export interface QuantLabCostEstimateParams {
+  symbol: string;
+  regime?: string;
+  notional_usdt?: number;
+  quantile?: string;
+}
 
 async function fetchJson<T>(url: string): Promise<T | null> {
   try {
@@ -132,6 +143,23 @@ export const api = {
   mlTraining: () => fetchJson<MLTrainingData>('/api/ml_training'),
   liveFollowupBundles: () => fetchJson<LiveFollowupBundlesData>('/api/live_followup_bundles?limit=5'),
   generateLiveFollowupBundle: () => postJson<LiveFollowupBundleGenerateResult>('/api/live_followup_bundles/generate'),
+  quantLabStatus: () => fetchJson<QuantLabStatusData>('/api/quant_lab/status'),
+  quantLabLivePermission: (strategy = 'v5', version = 'v1') =>
+    fetchJson<QuantLabPermissionData>(
+      `/api/quant_lab/live_permission?strategy=${encodeURIComponent(strategy)}&version=${encodeURIComponent(version)}`
+    ),
+  quantLabLivePermissionDetail: (strategy = 'v5', version = 'v1') =>
+    fetchJson<QuantLabPermissionData>(
+      `/api/quant_lab/live_permission_detail?strategy=${encodeURIComponent(strategy)}&version=${encodeURIComponent(version)}`
+    ),
+  quantLabCostEstimate: ({ symbol, regime = 'normal', notional_usdt = 0, quantile = 'p75' }: QuantLabCostEstimateParams) =>
+    fetchJson<QuantLabCostEstimateData>(
+      `/api/quant_lab/cost_estimate?symbol=${encodeURIComponent(symbol)}&regime=${encodeURIComponent(regime)}&notional_usdt=${encodeURIComponent(
+        String(notional_usdt)
+      )}&quantile=${encodeURIComponent(quantile)}`
+    ),
+  quantLabGateDecision: (alphaId = 'v5.core.momentum') =>
+    fetchJson<QuantLabGateDecisionData>(`/api/quant_lab/gate_decision?alpha_id=${encodeURIComponent(alphaId)}`),
   positionKline: async (symbol: string, timeframe: string): Promise<PositionKlinePayload> => {
     const payload = await fetchJson<PositionKlinePayload>(
       `/api/position_kline?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`

@@ -81,6 +81,103 @@ def test_dashboard_bind_host_can_be_overridden(monkeypatch):
     assert module._dashboard_bind_host() == "127.0.0.2"
 
 
+def test_quant_lab_proxy_fetch_uses_configured_backend_and_token(monkeypatch):
+    module = load_web_dashboard_module()
+    module._QUANT_LAB_PROXY_CACHE.clear()
+    captured = {}
+
+    class Response:
+        status_code = 200
+        text = '{"status":"ok"}'
+
+        def json(self):
+            return {"status": "ok", "mode": "read-only"}
+
+    def fake_get(url, *, params=None, headers=None, timeout=None):
+        captured["url"] = url
+        captured["params"] = params
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setenv("QUANT_LAB_API_TOKEN", "token-fixture")
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "quant_lab": {
+                "enabled": True,
+                "mode": "shadow",
+                "base_url": "http://qyun2.hrhome.top:8027",
+                "api_token_env": "QUANT_LAB_API_TOKEN",
+                "timeout_seconds": 1.2,
+                "allow_insecure_http_with_token": True,
+            }
+        },
+    )
+    monkeypatch.setattr(module.requests, "get", fake_get)
+
+    payload = module._quant_lab_proxy_fetch("/v1/health", ttl_seconds=0)
+
+    assert payload["available"] is True
+    assert payload["status"] == "ok"
+    assert captured["url"] == "http://qyun2.hrhome.top:8027/v1/health"
+    assert captured["headers"]["Authorization"] == "Bearer token-fixture"
+    assert captured["timeout"] == 1.2
+    assert payload["proxy"]["source"] == "v5_local_proxy"
+
+
+def test_quant_lab_cost_estimate_route_is_local_proxy(monkeypatch):
+    module = load_web_dashboard_module()
+    module._QUANT_LAB_PROXY_CACHE.clear()
+    captured = {}
+
+    class Response:
+        status_code = 200
+        text = '{"symbol":"BNB-USDT"}'
+
+        def json(self):
+            return {
+                "symbol": "BNB-USDT",
+                "regime": "normal",
+                "total_cost_bps": 1.74,
+                "cost_source": "mixed_actual_proxy",
+            }
+
+    def fake_get(url, *, params=None, headers=None, timeout=None):
+        captured["url"] = url
+        captured["params"] = params
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "quant_lab": {
+                "enabled": True,
+                "mode": "shadow",
+                "base_url": "http://qyun2.hrhome.top:8027",
+                "timeout_seconds": 2.0,
+            }
+        },
+    )
+    monkeypatch.setattr(module.requests, "get", fake_get)
+
+    with module.app.test_client() as client:
+        response = client.get("/api/quant_lab/cost_estimate?symbol=BNB-USDT&regime=normal&notional_usdt=15.82&quantile=p75")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["available"] is True
+    assert payload["symbol"] == "BNB-USDT"
+    assert captured["url"] == "http://qyun2.hrhome.top:8027/v1/costs/estimate"
+    assert captured["params"]["symbol"] == "BNB-USDT"
+    assert captured["params"]["venue"] == "OKX"
+    assert captured["params"]["notional_usdt"] == 15.82
+
+
 def test_load_config_surfaces_invalid_config(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     cfg_path = tmp_path / "configs" / "runtime.yaml"

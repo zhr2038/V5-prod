@@ -1,15 +1,24 @@
-import { Suspense, lazy, startTransition, useEffect, useState, useCallback } from 'react';
+import { lazy, startTransition, useEffect, useState, useCallback } from 'react';
 import { LiquidBg } from './components/LiquidBg';
-import { Hero } from './components/Hero';
-import { MetricsGrid } from './components/MetricsGrid';
-import { MLBand } from './components/MLBand';
-import { PositionsPanel } from './components/PositionsPanel';
-import { MarketRadar } from './components/MarketRadar';
-import { Sidebar } from './components/Sidebar';
+import { TopCommandBar } from './components/TopCommandBar';
+import { StatusRibbon } from './components/StatusRibbon';
+import { MainTradingGrid } from './components/MainTradingGrid';
+import { OpsRail } from './components/OpsRail';
 import { BundleExportPanel } from './components/BundleExportPanel';
 import { api } from './api';
 import { useInterval } from './hooks/useInterval';
-import type { DashboardData, RiskGuardData, MarketStateData, DecisionAuditData, HealthData } from './types';
+import type {
+  DashboardData,
+  RiskGuardData,
+  MarketStateData,
+  DecisionAuditData,
+  HealthData,
+  Position,
+  QuantLabStatusData,
+  QuantLabPermissionData,
+  QuantLabCostEstimateData,
+  QuantLabGateDecisionData,
+} from './types';
 
 const ExecutionInsightsPanel = lazy(() =>
   import('./components/ExecutionInsightsPanel').then((module) => ({ default: module.ExecutionInsightsPanel }))
@@ -100,16 +109,53 @@ function mergeDeferredDashboard(prev: DashboardData | null, deferred: Partial<Da
   };
 }
 
+function quantLabSymbol(symbol?: string) {
+  const text = String(symbol || '').trim().toUpperCase();
+  if (!text) return '';
+  return text.replace('/', '-').replace('_', '-');
+}
+
 function App() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [riskGuard, setRiskGuard] = useState<RiskGuardData | null>(null);
   const [marketState, setMarketState] = useState<MarketStateData | null>(null);
   const [decisionAudit, setDecisionAudit] = useState<DecisionAuditData | null>(null);
   const [health, setHealth] = useState<HealthData | null>(null);
+  const [quantLabStatus, setQuantLabStatus] = useState<QuantLabStatusData | null>(null);
+  const [quantLabPermission, setQuantLabPermission] = useState<QuantLabPermissionData | null>(null);
+  const [quantLabPermissionDetail, setQuantLabPermissionDetail] = useState<QuantLabPermissionData | null>(null);
+  const [quantLabCost, setQuantLabCost] = useState<QuantLabCostEstimateData | null>(null);
+  const [quantLabGate, setQuantLabGate] = useState<QuantLabGateDecisionData | null>(null);
   const [updateTime, setUpdateTime] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [showDeferredPanels, setShowDeferredPanels] = useState(false);
   const [secondaryReady, setSecondaryReady] = useState(false);
+
+  const loadQuantLab = useCallback(async (focusPosition?: Position | null) => {
+    const symbol = quantLabSymbol(focusPosition?.symbol);
+    const notional = Number(focusPosition?.value || 0) || 0;
+    const [status, permission, permissionDetail, gate, cost] = await Promise.all([
+      api.quantLabStatus(),
+      api.quantLabLivePermission('v5', 'v1'),
+      api.quantLabLivePermissionDetail('v5', 'v1'),
+      api.quantLabGateDecision('v5.core.momentum'),
+      symbol
+        ? api.quantLabCostEstimate({
+            symbol,
+            regime: 'normal',
+            notional_usdt: notional,
+            quantile: 'p75',
+          })
+        : Promise.resolve(null),
+    ]);
+    startTransition(() => {
+      if (status) setQuantLabStatus(status);
+      if (permission) setQuantLabPermission(permission);
+      if (permissionDetail) setQuantLabPermissionDetail(permissionDetail);
+      if (gate) setQuantLabGate(gate);
+      if (cost) setQuantLabCost(cost);
+    });
+  }, []);
 
   const loadPrimary = useCallback(async () => {
     if (document.hidden) return;
@@ -121,13 +167,14 @@ function App() {
     if (d) {
       setDashboard((prev) => (prev ? { ...prev, ...d } : d));
       setMarketState(d.marketState || null);
+      void loadQuantLab(d.positions?.[0] || null);
     }
     if (r) {
       setRiskGuard(r);
     }
     setUpdateTime(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
     setLoading(false);
-  }, []);
+  }, [loadQuantLab]);
 
   const loadSecondary = useCallback(async () => {
     const [deferred, dec, h] = await Promise.all([
@@ -186,65 +233,60 @@ function App() {
     loadSecondary();
   }, 60000);
 
-  const focusSymbol = dashboard?.positions?.[0]?.symbol?.replace('-USDT', '') || '';
+  useInterval(() => {
+    loadQuantLab(dashboard?.positions?.[0] || null);
+  }, 30000);
 
   return (
-    <div className="relative min-h-[100dvh] min-h-[100svh] min-h-screen">
+    <div className="dashboard-shell relative min-h-[100dvh] min-h-[100svh] min-h-screen">
       <LiquidBg />
 
-      <div className="relative z-10 pb-10">
-        <Hero
+      <div className="dashboard-frame relative z-10">
+        <TopCommandBar
+          systemStatus={dashboard?.systemStatus || null}
+          health={health}
+          updateTime={updateTime}
+          loading={loading}
+        />
+
+        <StatusRibbon
+          account={dashboard?.account || null}
           marketState={marketState}
           riskGuard={riskGuard}
+          quantLabStatus={quantLabStatus}
+          quantLabPermission={quantLabPermission}
           systemStatus={dashboard?.systemStatus || null}
-          updateTime={updateTime}
         />
 
-        <MetricsGrid
-          account={dashboard?.account || null}
-          systemStatus={dashboard?.systemStatus || null}
-          focusSymbol={focusSymbol}
-        />
-
-        <MLBand mlTraining={dashboard?.mlTraining || null} />
-
-        <div className="dashboard-section">
-          <div className="max-w-[1780px] mx-auto grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.42fr)] gap-4 lg:gap-5 items-start">
-            <div className="min-w-0 flex flex-col gap-4 lg:gap-5">
-              <PositionsPanel
-                positions={dashboard?.positions || []}
-                trades={dashboard?.trades || []}
-                account={dashboard?.account || null}
-              />
-              <MarketRadar marketState={marketState} />
-              {showDeferredPanels ? (
-                secondaryReady ? (
-                  <Suspense fallback={<DeferredPanelFallback />}>
-                    <ExecutionInsightsPanel slippageInsights={dashboard?.slippageInsights || null} />
-                  </Suspense>
-                ) : (
-                  <DeferredPanelFallback />
-                )
-              ) : null}
-            </div>
-            <div className="min-w-0">
-              <Sidebar
-                timers={dashboard?.timers || null}
-                alphaScores={dashboard?.alphaScores || []}
-                trades={dashboard?.trades || []}
-                health={health}
-                decisionAudit={decisionAudit}
-                apiTelemetry={dashboard?.apiTelemetry || null}
-                deferredReady={secondaryReady}
-              />
-            </div>
-          </div>
+        <div className="dashboard-workspace">
+          <MainTradingGrid
+            positions={dashboard?.positions || []}
+            trades={dashboard?.trades || []}
+            account={dashboard?.account || null}
+            marketState={marketState}
+            slippageInsights={dashboard?.slippageInsights || null}
+            showDeferredPanels={showDeferredPanels}
+            secondaryReady={secondaryReady}
+            fallback={<DeferredPanelFallback />}
+            ExecutionInsightsPanel={ExecutionInsightsPanel}
+          />
+          <OpsRail
+            timers={dashboard?.timers || null}
+            alphaScores={dashboard?.alphaScores || []}
+            trades={dashboard?.trades || []}
+            health={health}
+            decisionAudit={decisionAudit}
+            apiTelemetry={dashboard?.apiTelemetry || null}
+            quantLabPermission={quantLabPermission}
+            quantLabPermissionDetail={quantLabPermissionDetail}
+            quantLabCost={quantLabCost}
+            quantLabGate={quantLabGate}
+            deferredReady={secondaryReady}
+          />
         </div>
 
-        <div className="px-6 mt-4">
-          <div className="max-w-[1780px] mx-auto">
-            <BundleExportPanel />
-          </div>
+        <div className="bundle-dock">
+          <BundleExportPanel />
         </div>
 
         {loading && (

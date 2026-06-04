@@ -27,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 # Ensure repo-local imports work even when the script is launched outside the repo root.
 _BOOTSTRAP_WORKSPACE = Path(__file__).resolve().parents[1]
@@ -431,6 +432,8 @@ POSITION_KLINE_TIMEFRAMES: Dict[str, Dict[str, Any]] = {
 POSITION_KLINE_DEFAULT_LIMIT = 96
 _OKX_PUBLIC_PROVIDER_CACHE: Dict[str, Optional[OKXCCXTProvider]] = {'provider': None}
 _WORKSPACE_PYTHON_BIN_CACHE: Dict[str, str] = {'value': ''}
+_QUANT_LAB_PROXY_CACHE: Dict[tuple[str, tuple[tuple[str, str], ...]], tuple[float, Dict[str, Any]]] = {}
+_QUANT_LAB_PROXY_CACHE_LOCK = threading.Lock()
 
 
 def _normalize_dashboard_symbol(symbol: str) -> str:
@@ -2619,6 +2622,180 @@ def _load_quant_lab_api_status(
     if fallback_count:
         detail_parts.append(f'fallback {fallback_count}')
     return {'name': '中台 API', 'status': status, 'detail': ' · '.join(detail_parts)}
+
+
+def _quant_lab_proxy_cache_key(path: str, params: Dict[str, Any]) -> tuple[str, tuple[tuple[str, str], ...]]:
+    clean_params = {
+        str(key): str(value)
+        for key, value in dict(params or {}).items()
+        if value not in (None, '')
+    }
+    return str(path or ''), tuple(sorted(clean_params.items()))
+
+
+def _quant_lab_proxy_read_token(quant_lab_cfg: Dict[str, Any]) -> tuple[Optional[str], Dict[str, Any]]:
+    token_env = str(quant_lab_cfg.get('api_token_env') or 'QUANT_LAB_API_TOKEN').strip() or 'QUANT_LAB_API_TOKEN'
+    token = os.getenv(token_env, '').strip()
+    meta: Dict[str, Any] = {
+        'token_env': token_env,
+        'token_loaded': bool(token),
+        'token_source': 'env' if token else '',
+        'api_env_path_present': False,
+        'api_env_warning': '',
+    }
+    if token:
+        return token, meta
+
+    api_env_path = quant_lab_cfg.get('api_env_path')
+    if not api_env_path:
+        return None, meta
+    try:
+        from src.quant_lab_client.client import read_token_from_env_file
+
+        status = read_token_from_env_file(
+            api_env_path,
+            token_env,
+            allow_symlink=bool(quant_lab_cfg.get('allow_api_env_symlink', False)),
+            require_secure_permissions=bool(quant_lab_cfg.get('api_env_require_secure_permissions', True)),
+            mode=str(quant_lab_cfg.get('mode') or 'shadow'),
+        )
+        meta.update(
+            {
+                'api_env_path_present': bool(status.path_present),
+                'api_env_secure_permissions': status.secure_permissions,
+                'api_env_warning': status.warning or '',
+                'token_loaded': bool(status.token_loaded),
+                'token_source': 'api_env_path' if status.token_loaded else '',
+            }
+        )
+        return status.token, meta
+    except Exception as exc:
+        meta.update(
+            {
+                'api_env_path_present': True,
+                'api_env_warning': f'token_read_failed:{type(exc).__name__}',
+            }
+        )
+        return None, meta
+
+
+def _quant_lab_proxy_config() -> Dict[str, Any]:
+    try:
+        config = load_config()
+    except Exception:
+        config = {}
+    quant_lab_cfg = config.get('quant_lab', {}) if isinstance(config, dict) else {}
+    if not isinstance(quant_lab_cfg, dict):
+        quant_lab_cfg = {}
+
+    base_url = (
+        os.getenv('V5_DASHBOARD_QUANT_LAB_BASE_URL', '').strip()
+        or os.getenv('QUANT_LAB_BASE_URL', '').strip()
+        or str(quant_lab_cfg.get('base_url') or '').strip()
+        or 'http://127.0.0.1:8027'
+    ).rstrip('/')
+    try:
+        timeout_seconds = float(os.getenv('V5_DASHBOARD_QUANT_LAB_TIMEOUT_SECONDS', '') or quant_lab_cfg.get('timeout_seconds') or 2.0)
+    except (TypeError, ValueError):
+        timeout_seconds = 2.0
+    timeout_seconds = min(5.0, max(0.2, timeout_seconds))
+    token, token_meta = _quant_lab_proxy_read_token(quant_lab_cfg)
+    return {
+        'enabled': _dashboard_to_bool(quant_lab_cfg.get('enabled', True)),
+        'mode': str(quant_lab_cfg.get('mode') or 'shadow').strip() or 'shadow',
+        'base_url': base_url,
+        'timeout_seconds': timeout_seconds,
+        'token': token,
+        'token_meta': token_meta,
+    }
+
+
+def _quant_lab_proxy_degraded(reason: str, *, path: str, detail: str = '', status_code: Optional[int] = None) -> Dict[str, Any]:
+    return {
+        'available': False,
+        'status': 'degraded',
+        'reason': reason,
+        'detail': _sanitize_public_error_text(detail, default=reason) if detail else '',
+        'proxy': {
+            'source': 'v5_local_proxy',
+            'upstream_path': path,
+            'upstream_status_code': status_code,
+            'cache_hit': False,
+            'sampled_at': _utc_now().isoformat(),
+        },
+    }
+
+
+def _quant_lab_proxy_fetch(path: str, params: Optional[Dict[str, Any]] = None, *, ttl_seconds: float = 10.0) -> Dict[str, Any]:
+    params = {str(key): value for key, value in dict(params or {}).items() if value not in (None, '')}
+    cache_key = _quant_lab_proxy_cache_key(path, params)
+    now = time.time()
+    if ttl_seconds > 0:
+        with _QUANT_LAB_PROXY_CACHE_LOCK:
+            cached = _QUANT_LAB_PROXY_CACHE.get(cache_key)
+        if cached and cached[0] > now:
+            payload = copy.deepcopy(cached[1])
+            proxy_meta = payload.setdefault('proxy', {})
+            if isinstance(proxy_meta, dict):
+                proxy_meta['cache_hit'] = True
+            return payload
+
+    qcfg = _quant_lab_proxy_config()
+    if not qcfg.get('enabled'):
+        return _quant_lab_proxy_degraded('quant_lab_disabled', path=path, detail=f"mode {qcfg.get('mode') or 'unknown'}")
+    base_url = str(qcfg.get('base_url') or '').rstrip('/')
+    if not base_url:
+        return _quant_lab_proxy_degraded('quant_lab_base_url_missing', path=path)
+
+    headers = {'Accept': 'application/json'}
+    token = qcfg.get('token')
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+
+    url = f"{base_url}/{str(path or '').lstrip('/')}"
+    started = time.time()
+    try:
+        response = requests.get(
+            url,
+            params=params,
+            headers=headers,
+            timeout=float(qcfg.get('timeout_seconds') or 2.0),
+        )
+        latency_ms = round((time.time() - started) * 1000.0, 3)
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {'text': response.text[:400]}
+        if not isinstance(payload, dict):
+            payload = {'data': payload}
+        if response.status_code >= 400:
+            return _quant_lab_proxy_degraded(
+                'quant_lab_upstream_http_error',
+                path=path,
+                detail=f'HTTP {response.status_code}',
+                status_code=response.status_code,
+            )
+
+        out = copy.deepcopy(payload)
+        out.setdefault('available', True)
+        out['proxy'] = {
+            'source': 'v5_local_proxy',
+            'upstream_path': path,
+            'upstream_status_code': response.status_code,
+            'latency_ms': latency_ms,
+            'cache_hit': False,
+            'sampled_at': _utc_now().isoformat(),
+            'token_loaded': bool((qcfg.get('token_meta') or {}).get('token_loaded')),
+            'token_source': str((qcfg.get('token_meta') or {}).get('token_source') or ''),
+        }
+        if ttl_seconds > 0:
+            with _QUANT_LAB_PROXY_CACHE_LOCK:
+                _QUANT_LAB_PROXY_CACHE[cache_key] = (now + ttl_seconds, copy.deepcopy(out))
+        return out
+    except requests.Timeout as exc:
+        return _quant_lab_proxy_degraded('quant_lab_proxy_timeout', path=path, detail=str(exc))
+    except Exception as exc:
+        return _quant_lab_proxy_degraded('quant_lab_proxy_unavailable', path=path, detail=str(exc))
 
 
 def _load_backtest_slippage_baseline(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -7221,6 +7398,101 @@ def api_shadow_ml_overlay():
         return jsonify(payload)
     except Exception as exc:
         return _json_internal_error_response(exc, available=False)
+
+
+@app.route('/api/quant_lab/status')
+@_cache_json_response(10.0)
+def api_quant_lab_status():
+    try:
+        return jsonify(_quant_lab_proxy_fetch('/v1/health', ttl_seconds=10.0))
+    except Exception as exc:
+        return jsonify(_quant_lab_proxy_degraded('quant_lab_proxy_internal_error', path='/v1/health', detail=str(exc)))
+
+
+@app.route('/api/quant_lab/live_permission')
+@_cache_json_response(10.0)
+def api_quant_lab_live_permission():
+    try:
+        strategy = str(request.args.get('strategy') or 'v5').strip() or 'v5'
+        version = str(request.args.get('version') or 'v1').strip() or 'v1'
+        payload = _quant_lab_proxy_fetch(
+            '/v1/risk/live-permission',
+            {'strategy': strategy, 'version': version},
+            ttl_seconds=10.0,
+        )
+        return jsonify(payload)
+    except Exception as exc:
+        return jsonify(_quant_lab_proxy_degraded('quant_lab_proxy_internal_error', path='/v1/risk/live-permission', detail=str(exc)))
+
+
+@app.route('/api/quant_lab/live_permission_detail')
+@_cache_json_response(10.0)
+def api_quant_lab_live_permission_detail():
+    try:
+        strategy = str(request.args.get('strategy') or 'v5').strip() or 'v5'
+        version = str(request.args.get('version') or 'v1').strip() or 'v1'
+        payload = _quant_lab_proxy_fetch(
+            '/v1/risk/live-permission-detail',
+            {'strategy': strategy, 'version': version},
+            ttl_seconds=10.0,
+        )
+        if not payload.get('available') and payload.get('reason') == 'quant_lab_upstream_http_error':
+            fallback = _quant_lab_proxy_fetch(
+                '/v1/risk/live-permission',
+                {'strategy': strategy, 'version': version},
+                ttl_seconds=10.0,
+            )
+            fallback['detail_source'] = 'live_permission_fallback'
+            return jsonify(fallback)
+        return jsonify(payload)
+    except Exception as exc:
+        return jsonify(_quant_lab_proxy_degraded('quant_lab_proxy_internal_error', path='/v1/risk/live-permission-detail', detail=str(exc)))
+
+
+@app.route('/api/quant_lab/cost_estimate')
+@_cache_json_response(12.0)
+def api_quant_lab_cost_estimate():
+    try:
+        symbol = str(request.args.get('symbol') or '').strip().upper()
+        if not symbol:
+            return jsonify(_quant_lab_proxy_degraded('symbol_required', path='/v1/costs/estimate'))
+        regime = str(request.args.get('regime') or 'normal').strip() or 'normal'
+        quantile = str(request.args.get('quantile') or 'p75').strip() or 'p75'
+        try:
+            notional_usdt = float(request.args.get('notional_usdt') or 0.0)
+        except (TypeError, ValueError):
+            notional_usdt = 0.0
+        payload = _quant_lab_proxy_fetch(
+            '/v1/costs/estimate',
+            {
+                'symbol': symbol,
+                'request_symbol': symbol,
+                'normalized_symbol': symbol.replace('/', '-').replace('_', '-'),
+                'venue': 'OKX',
+                'instrument_type': 'spot',
+                'regime': regime,
+                'requested_regime': regime,
+                'notional_usdt': max(0.0, notional_usdt),
+                'quantile': quantile,
+                'requested_quantile': quantile,
+                'strategy_id': 'v5.dashboard',
+            },
+            ttl_seconds=12.0,
+        )
+        return jsonify(payload)
+    except Exception as exc:
+        return jsonify(_quant_lab_proxy_degraded('quant_lab_proxy_internal_error', path='/v1/costs/estimate', detail=str(exc)))
+
+
+@app.route('/api/quant_lab/gate_decision')
+@_cache_json_response(20.0)
+def api_quant_lab_gate_decision():
+    try:
+        alpha_id = str(request.args.get('alpha_id') or 'v5.core.momentum').strip() or 'v5.core.momentum'
+        safe_alpha_id = quote(alpha_id, safe='')
+        return jsonify(_quant_lab_proxy_fetch(f'/v1/gates/decision/{safe_alpha_id}', ttl_seconds=20.0))
+    except Exception as exc:
+        return jsonify(_quant_lab_proxy_degraded('quant_lab_proxy_internal_error', path='/v1/gates/decision', detail=str(exc)))
 
 
 @app.route('/api/health')

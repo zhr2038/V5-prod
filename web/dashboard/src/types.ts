@@ -235,6 +235,87 @@ export interface HealthData {
   critical_count: number;
 }
 
+export interface QuantLabProxyMeta {
+  source?: string;
+  upstream_path?: string;
+  upstream_status_code?: number | null;
+  latency_ms?: number | null;
+  cache_hit?: boolean;
+  sampled_at?: string;
+}
+
+export interface QuantLabStatusData extends UnknownRecord {
+  available?: boolean;
+  status?: string;
+  service?: string;
+  mode?: string;
+  proxy?: QuantLabProxyMeta;
+  data?: UnknownRecord;
+}
+
+export interface QuantLabPermissionData extends UnknownRecord {
+  available?: boolean;
+  strategy?: string;
+  version?: string;
+  permission?: string;
+  decision?: string;
+  status?: string;
+  permission_status?: string;
+  allowed_modes?: unknown[];
+  max_gross_exposure?: number | null;
+  max_gross_exposure_usdt?: number | null;
+  max_single_order_usdt?: number | null;
+  max_drawdown_pct?: number | null;
+  as_of_ts?: string | null;
+  expires_at?: string | null;
+  freshness_sec?: number | null;
+  ttl_remaining_sec?: number | null;
+  reasons?: unknown[];
+  risk_reason_codes?: unknown[];
+  proxy?: QuantLabProxyMeta;
+  data?: UnknownRecord;
+}
+
+export interface QuantLabCostEstimateData extends UnknownRecord {
+  available?: boolean;
+  symbol?: string;
+  regime?: string;
+  notional_usdt?: number | null;
+  quantile?: string;
+  fee_bps?: number | null;
+  slippage_bps?: number | null;
+  spread_bps?: number | null;
+  total_cost_bps?: number | null;
+  cost_bps?: number | null;
+  selected_total_cost_bps?: number | null;
+  one_way_all_in_cost_bps?: number | null;
+  roundtrip_all_in_cost_bps?: number | null;
+  fallback_level?: string | null;
+  source?: string | null;
+  cost_source?: string | null;
+  cost_quality?: string | null;
+  cost_trusted_for_paper?: boolean | null;
+  cost_trusted_for_live?: boolean | null;
+  sample_count?: number | null;
+  cost_model_version?: string | null;
+  as_of_ts?: string | null;
+  proxy?: QuantLabProxyMeta;
+  data?: UnknownRecord;
+}
+
+export interface QuantLabGateDecisionData extends UnknownRecord {
+  available?: boolean;
+  alpha_id?: string;
+  decision?: string;
+  permission?: string;
+  recommended_mode?: string;
+  status?: string;
+  reason?: string;
+  reasons?: unknown[];
+  proxy?: QuantLabProxyMeta;
+  data?: UnknownRecord;
+}
+
 export interface MLTrainingData {
   status?: string;
   phase?: string;
