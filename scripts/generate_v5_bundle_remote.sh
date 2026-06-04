@@ -199,6 +199,27 @@ RISK_ON_MULTI_BUY_SHADOW_FIELDS = (
     "response_action",
     "live_order_effect",
 )
+BACKTEST_ADVISORY_READER_FIELDS = (
+    "run_id",
+    "ts_utc",
+    "source_path",
+    "report_name",
+    "strategy_id",
+    "symbol",
+    "horizon_hours",
+    "sample_count",
+    "complete_sample_count",
+    "avg_net_bps",
+    "p25_net_bps",
+    "win_rate",
+    "recommendation",
+    "recommended_stage",
+    "decision_reasons",
+    "response_action",
+    "negative_advisory",
+    "max_live_notional_usdt_ignored",
+    "live_order_effect",
+)
 STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = (
     "run_id",
     "ts_utc",
@@ -1168,7 +1189,14 @@ def copy_current_reports():
         ("reports/quant_lab_latest/raw/reports/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
         ("reports/quant_lab/latest/reports/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
         ("reports/quant_lab/latest/raw/reports/risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv"),
+        ("reports/backtest_label_summary.csv", "raw/reports/backtest_label_summary.csv"),
+        ("reports/research_promotion_decision.csv", "raw/reports/research_promotion_decision.csv"),
+        ("reports/quant_lab_latest/reports/backtest_label_summary.csv", "raw/reports/backtest_label_summary.csv"),
+        ("reports/quant_lab_latest/reports/research_promotion_decision.csv", "raw/reports/research_promotion_decision.csv"),
+        ("reports/quant_lab/latest/reports/backtest_label_summary.csv", "raw/reports/backtest_label_summary.csv"),
+        ("reports/quant_lab/latest/reports/research_promotion_decision.csv", "raw/reports/research_promotion_decision.csv"),
         ("reports/summaries/strategy_opportunity_advisory_reader.csv", "summaries/strategy_opportunity_advisory_reader.csv"),
+        ("reports/summaries/backtest_advisory_reader.csv", "summaries/backtest_advisory_reader.csv"),
     ):
         if (ROOT / src_rel).is_file():
             copy_sanitized(src_rel, dest_rel)
@@ -1176,6 +1204,12 @@ def copy_current_reports():
         copy_optional_quant_lab_report("risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv", "csv")
     else:
         copy_quant_lab_report_from_latest_archive("risk_on_multi_buy_shadow.csv", "raw/reports/risk_on_multi_buy_shadow.csv", "csv")
+    for filename in ("backtest_label_summary.csv", "research_promotion_decision.csv"):
+        dest_rel = f"raw/reports/{filename}"
+        if not (OUT / dest_rel).is_file():
+            copy_optional_quant_lab_report(filename, dest_rel, "csv")
+        else:
+            copy_quant_lab_report_from_latest_archive(filename, dest_rel, "csv")
     for filename, dest_rel, file_kind in ENTRY_QUALITY_REPORT_FILES:
         if not copy_entry_quality_report(filename, dest_rel, file_kind):
             collection_errors.append({
@@ -1217,6 +1251,11 @@ def copy_current_reports():
             "reports/summaries/risk_on_multi_buy_shadow.csv",
             "summaries/risk_on_multi_buy_shadow.csv",
             RISK_ON_MULTI_BUY_SHADOW_FIELDS,
+        ),
+        (
+            "reports/summaries/backtest_advisory_reader.csv",
+            "summaries/backtest_advisory_reader.csv",
+            BACKTEST_ADVISORY_READER_FIELDS,
         ),
     ):
         if (ROOT / src_rel).is_file():
@@ -1431,6 +1470,60 @@ def write_csv(path, rows, fieldnames):
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
+
+
+def synthesize_backtest_advisory_reader_if_missing():
+    dest = OUT / "summaries" / "backtest_advisory_reader.csv"
+    if dest.is_file() and len(load_csv_dicts(dest)) > 0:
+        return
+
+    def response_action(recommendation, recommended_stage):
+        text = f"{recommendation or ''} {recommended_stage or ''}".upper()
+        if "KILL" in text:
+            return "negative_advisory", True
+        if "LIVE_SMALL" in text:
+            return "live_small_review_display_only", False
+        if "PAPER" in text:
+            return "paper_tracking", False
+        if "SHADOW" in text:
+            return "shadow_tracking", False
+        return "research_display_only", False
+
+    rows = []
+    for filename, report_name in (
+        ("backtest_label_summary.csv", "backtest_label_summary"),
+        ("research_promotion_decision.csv", "research_promotion_decision"),
+    ):
+        source = OUT / "raw" / "reports" / filename
+        for row in load_csv_dicts(source):
+            strategy_id = flatten_value(row.get("strategy_id") or row.get("strategy_candidate"))
+            if not strategy_id:
+                continue
+            recommendation = flatten_value(row.get("recommendation"))
+            recommended_stage = flatten_value(row.get("recommended_stage"))
+            action, negative = response_action(recommendation, recommended_stage)
+            rows.append({
+                "run_id": "bundle_export",
+                "ts_utc": NOW.isoformat().replace("+00:00", "Z"),
+                "source_path": f"raw/reports/{filename}",
+                "report_name": report_name,
+                "strategy_id": strategy_id,
+                "symbol": row.get("symbol"),
+                "horizon_hours": row.get("horizon_hours"),
+                "sample_count": row.get("sample_count"),
+                "complete_sample_count": row.get("complete_sample_count"),
+                "avg_net_bps": row.get("avg_net_bps"),
+                "p25_net_bps": row.get("p25_net_bps"),
+                "win_rate": row.get("win_rate"),
+                "recommendation": recommendation,
+                "recommended_stage": recommended_stage,
+                "decision_reasons": row.get("decision_reasons"),
+                "response_action": action,
+                "negative_advisory": str(bool(negative)).lower(),
+                "max_live_notional_usdt_ignored": "true",
+                "live_order_effect": "read_only_no_live_order",
+            })
+    write_csv("summaries/backtest_advisory_reader.csv", rows, BACKTEST_ADVISORY_READER_FIELDS)
 
 
 def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_meta):
@@ -14689,6 +14782,7 @@ copy_sanitized("configs/live_prod.yaml", "raw/config_live_prod.yaml", required=T
 for src_rel, dest_rel, required in STATE_FILES:
     copy_sanitized(src_rel, dest_rel, required=required)
 copy_current_reports()
+synthesize_backtest_advisory_reader_if_missing()
 provenance_meta = build_provenance_meta()
 copied_runs, recent_24_decisions = copy_recent_runs()
 merged_candidate_snapshot_rows = merge_candidate_snapshot_reports()

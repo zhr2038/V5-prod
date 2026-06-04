@@ -531,6 +531,28 @@ RISK_ON_MULTI_BUY_SHADOW_FIELDS = [
     "live_order_effect",
 ]
 
+BACKTEST_ADVISORY_READER_FIELDS = [
+    "run_id",
+    "ts_utc",
+    "source_path",
+    "report_name",
+    "strategy_id",
+    "symbol",
+    "horizon_hours",
+    "sample_count",
+    "complete_sample_count",
+    "avg_net_bps",
+    "p25_net_bps",
+    "win_rate",
+    "recommendation",
+    "recommended_stage",
+    "decision_reasons",
+    "response_action",
+    "negative_advisory",
+    "max_live_notional_usdt_ignored",
+    "live_order_effect",
+]
+
 
 @dataclass
 class AdvisoryReadResult:
@@ -3002,6 +3024,169 @@ def _read_risk_on_multi_buy_detail_rows(*, run_path: Path, reports_dir: Path) ->
     return rows
 
 
+def _backtest_report_paths(*, run_path: Path, reports_dir: Path) -> list[Path]:
+    candidates = [
+        reports_dir / "research_promotion_decision.csv",
+        reports_dir / "backtest_label_summary.csv",
+        reports_dir / "quant_lab" / "research_promotion_decision.csv",
+        reports_dir / "quant_lab" / "backtest_label_summary.csv",
+        reports_dir / "quant_lab_latest" / "research_promotion_decision.csv",
+        reports_dir / "quant_lab_latest" / "backtest_label_summary.csv",
+        reports_dir / "quant_lab_latest" / "reports" / "research_promotion_decision.csv",
+        reports_dir / "quant_lab_latest" / "reports" / "backtest_label_summary.csv",
+        reports_dir / "quant_lab_latest" / "raw" / "reports" / "research_promotion_decision.csv",
+        reports_dir / "quant_lab_latest" / "raw" / "reports" / "backtest_label_summary.csv",
+        reports_dir / "quant_lab" / "latest" / "reports" / "research_promotion_decision.csv",
+        reports_dir / "quant_lab" / "latest" / "reports" / "backtest_label_summary.csv",
+        reports_dir / "quant_lab" / "latest" / "raw" / "reports" / "research_promotion_decision.csv",
+        reports_dir / "quant_lab" / "latest" / "raw" / "reports" / "backtest_label_summary.csv",
+        reports_dir / "raw" / "reports" / "research_promotion_decision.csv",
+        reports_dir / "raw" / "reports" / "backtest_label_summary.csv",
+        reports_dir.parent / "raw" / "reports" / "research_promotion_decision.csv",
+        reports_dir.parent / "raw" / "reports" / "backtest_label_summary.csv",
+        run_path / "research_promotion_decision.csv",
+        run_path / "backtest_label_summary.csv",
+        reports_dir / "quant_lab_latest_bundle.zip",
+        reports_dir / "quant_lab_latest_bundle.tar.gz",
+        reports_dir / "quant_lab" / "latest_bundle.zip",
+        reports_dir / "quant_lab" / "latest_bundle.tar.gz",
+        reports_dir.parent / "reports" / "quant_lab_latest_bundle.zip",
+        reports_dir.parent / "reports" / "quant_lab_latest_bundle.tar.gz",
+        reports_dir.parent / "reports" / "quant_lab" / "latest_bundle.zip",
+        reports_dir.parent / "reports" / "quant_lab" / "latest_bundle.tar.gz",
+        Path("/var/lib/v5-prod/raw/reports/research_promotion_decision.csv"),
+        Path("/var/lib/v5-prod/raw/reports/backtest_label_summary.csv"),
+        Path("/var/lib/v5-prod/reports/research_promotion_decision.csv"),
+        Path("/var/lib/v5-prod/reports/backtest_label_summary.csv"),
+        Path("/var/lib/v5-prod/quant_lab_latest/reports/research_promotion_decision.csv"),
+        Path("/var/lib/v5-prod/quant_lab_latest/reports/backtest_label_summary.csv"),
+        Path("/var/lib/v5-prod/quant_lab/latest/reports/research_promotion_decision.csv"),
+        Path("/var/lib/v5-prod/quant_lab/latest/reports/backtest_label_summary.csv"),
+        Path("/var/lib/v5-prod/quant_lab_latest_bundle.zip"),
+        Path("/var/lib/v5-prod/quant_lab_latest_bundle.tar.gz"),
+    ]
+    for pattern in (
+        reports_dir / "quant_lab_latest_bundle*.zip",
+        reports_dir / "quant_lab_latest_bundle*.tar.gz",
+        reports_dir / "quant_lab_expert_pack*.zip",
+        reports_dir / "quant_lab_expert_pack*.tar.gz",
+        reports_dir.parent / "reports" / "quant_lab_latest_bundle*.zip",
+        reports_dir.parent / "reports" / "quant_lab_latest_bundle*.tar.gz",
+        reports_dir.parent / "reports" / "quant_lab_expert_pack*.zip",
+        reports_dir.parent / "reports" / "quant_lab_expert_pack*.tar.gz",
+        Path("/var/lib/v5-prod/quant_lab_latest_bundle*.zip"),
+        Path("/var/lib/v5-prod/quant_lab_latest_bundle*.tar.gz"),
+        Path("/var/lib/v5-prod/quant_lab_expert_pack*.zip"),
+        Path("/var/lib/v5-prod/quant_lab_expert_pack*.tar.gz"),
+    ):
+        try:
+            candidates.extend(
+                sorted(
+                    pattern.parent.glob(pattern.name),
+                    key=lambda path: path.stat().st_mtime if path.exists() else 0,
+                    reverse=True,
+                )
+            )
+        except Exception:
+            continue
+    return list(dict.fromkeys(path.resolve() for path in candidates))
+
+
+def _read_backtest_report_rows(*, run_path: Path, reports_dir: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen_paths: set[Path] = set()
+    targets = ("research_promotion_decision.csv", "backtest_label_summary.csv")
+    for path in _backtest_report_paths(run_path=run_path, reports_dir=reports_dir):
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        if not path.is_file():
+            continue
+        lower_name = path.name.lower()
+        if lower_name.endswith((".zip", ".tar", ".tar.gz", ".tgz")):
+            for target in targets:
+                rows.extend(_read_raw_csv_path(path, target_filename=target))
+        elif lower_name in targets:
+            rows.extend(_read_raw_csv_path(path, target_filename=lower_name))
+    return rows
+
+
+def _backtest_advisory_reader_rows(
+    report_rows: Iterable[Mapping[str, Any]],
+    *,
+    run_id: str,
+    asof_ts_ms: int,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    ts_utc = _iso_from_ms(asof_ts_ms)
+    for row in report_rows:
+        source_path = str(row.get("source_path") or "")
+        report_name = _backtest_report_name(source_path)
+        strategy_id = str(row.get("strategy_id") or row.get("strategy_candidate") or "").strip()
+        if not strategy_id:
+            continue
+        recommendation = str(row.get("recommendation") or "").strip()
+        recommended_stage = str(row.get("recommended_stage") or "").strip()
+        response_action, negative = _backtest_response_action(recommendation, recommended_stage)
+        key = (
+            report_name,
+            strategy_id,
+            str(row.get("symbol") or ""),
+            str(row.get("horizon_hours") or ""),
+            source_path,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            {
+                "run_id": run_id,
+                "ts_utc": ts_utc,
+                "source_path": source_path,
+                "report_name": report_name,
+                "strategy_id": strategy_id,
+                "symbol": row.get("symbol"),
+                "horizon_hours": row.get("horizon_hours"),
+                "sample_count": row.get("sample_count"),
+                "complete_sample_count": row.get("complete_sample_count"),
+                "avg_net_bps": row.get("avg_net_bps"),
+                "p25_net_bps": row.get("p25_net_bps"),
+                "win_rate": row.get("win_rate"),
+                "recommendation": recommendation,
+                "recommended_stage": recommended_stage,
+                "decision_reasons": row.get("decision_reasons"),
+                "response_action": response_action,
+                "negative_advisory": negative,
+                "max_live_notional_usdt_ignored": True,
+                "live_order_effect": "read_only_no_live_order",
+            }
+        )
+    return out
+
+
+def _backtest_report_name(source_path: str) -> str:
+    lower = source_path.lower()
+    if "research_promotion_decision.csv" in lower:
+        return "research_promotion_decision"
+    if "backtest_label_summary.csv" in lower:
+        return "backtest_label_summary"
+    return "unknown_backtest_report"
+
+
+def _backtest_response_action(recommendation: str, recommended_stage: str) -> tuple[str, bool]:
+    text = f"{recommendation} {recommended_stage}".upper()
+    if "KILL" in text:
+        return "negative_advisory", True
+    if "LIVE_SMALL" in text:
+        return "live_small_review_display_only", False
+    if "PAPER" in text:
+        return "paper_tracking", False
+    if "SHADOW" in text:
+        return "shadow_tracking", False
+    return "research_display_only", False
+
+
 def _risk_on_multi_buy_detail_for(
     advisory_row: Mapping[str, Any],
     detail_rows: Iterable[Mapping[str, Any]],
@@ -4556,6 +4741,11 @@ def update_sol_paper_strategy_tracker(
         run_path=run_path,
         candidate_rows=candidate_rows,
     )
+    backtest_advisory_rows = _backtest_advisory_reader_rows(
+        _read_backtest_report_rows(run_path=run_path, reports_dir=reports_dir),
+        run_id=str(getattr(audit, "run_id", "") or ""),
+        asof_ts_ms=asof_ts_ms,
+    )
     advisory_index = _advisory_by_strategy(advisory_rows)
     records_by_key = _load_existing_records(labels_path)
     new_records = _collect_candidates(
@@ -4674,6 +4864,11 @@ def update_sol_paper_strategy_tracker(
         risk_on_multi_buy_rows,
         RISK_ON_MULTI_BUY_SHADOW_FIELDS,
     )
+    _write_csv(
+        summaries_dir / "backtest_advisory_reader.csv",
+        backtest_advisory_rows,
+        BACKTEST_ADVISORY_READER_FIELDS,
+    )
 
     return {
         "enabled": True,
@@ -4686,6 +4881,7 @@ def update_sol_paper_strategy_tracker(
         "alpha_factory_advisory_rows": int(len(alpha_factory_rows)),
         "alpha_factory_family_rows": int(len(alpha_factory_family_rows)),
         "risk_on_multi_buy_shadow_rows": int(len(risk_on_multi_buy_rows)),
+        "backtest_advisory_rows": int(len(backtest_advisory_rows)),
         "bnb_paper_strategy_rows": int(len(bnb_records)),
         "proposal_rows": int(len(proposal_rows)),
         "eth_f3_alpha6_gate_rewrites": int(eth_f3_alpha6_gate_rewrites),

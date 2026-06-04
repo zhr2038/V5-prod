@@ -2146,6 +2146,77 @@ def test_risk_on_multi_buy_reads_reports_raw_reports_detail_file(tmp_path: Path)
     assert row["source_detail_available"] == "True"
 
 
+def test_backtest_advisory_reader_is_read_only(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    reports_dir = tmp_path / "reports"
+    run_dir = reports_dir / "runs" / "r_backtest_advisory"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        reports_dir,
+        [
+            {
+                "strategy_candidate": "v5.f4_volume_expansion_entry",
+                "decision": "KEEP_SHADOW",
+                "recommended_mode": "shadow",
+                "symbol": "SOL-USDT",
+                **_fresh_meta(start_s),
+            }
+        ],
+    )
+    report_path = reports_dir / "quant_lab" / "latest" / "reports" / "research_promotion_decision.csv"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    with report_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(
+            fh,
+            fieldnames=[
+                "strategy_id",
+                "symbol",
+                "horizon_hours",
+                "sample_count",
+                "complete_sample_count",
+                "avg_net_bps",
+                "p25_net_bps",
+                "win_rate",
+                "recommended_stage",
+                "decision_reasons",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "strategy_id": "BOTTOM_ZONE_PROBE_BACKTEST",
+                "symbol": "BNB-USDT",
+                "horizon_hours": "24",
+                "sample_count": "42",
+                "complete_sample_count": "38",
+                "avg_net_bps": "81.5",
+                "p25_net_bps": "-20",
+                "win_rate": "0.61",
+                "recommended_stage": "PAPER",
+                "decision_reasons": "paper_days_or_entries_insufficient",
+            }
+        )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_backtest_advisory", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["backtest_advisory_rows"] == 1
+    rows = _read_csv(reports_dir / "summaries" / "backtest_advisory_reader.csv")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["strategy_id"] == "BOTTOM_ZONE_PROBE_BACKTEST"
+    assert row["response_action"] == "paper_tracking"
+    assert row["max_live_notional_usdt_ignored"] == "True"
+    assert row["live_order_effect"] == "read_only_no_live_order"
+
+
 def test_risk_on_multi_buy_reads_quant_lab_bundle_reports_member(tmp_path: Path) -> None:
     cfg = _cfg()
     cfg.quant_lab.enabled = True

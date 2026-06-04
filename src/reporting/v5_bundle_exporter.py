@@ -36,6 +36,7 @@ from src.reporting.order_lifecycle import (
 from src.reporting.sol_paper_strategy_tracker import (
     ALPHA_FACTORY_ADVISORY_FIELDS,
     ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS,
+    BACKTEST_ADVISORY_READER_FIELDS,
     EXPANDED_UNIVERSE_ADVISORY_FIELDS,
     EXPANDED_UNIVERSE_PAPER_RUN_FIELDS,
     PAPER_DAILY_FIELDS,
@@ -1123,6 +1124,7 @@ def _copy_sol_paper_strategy_files(staging: Path, reports: Path) -> None:
         ("alpha_factory_advisory_reader.csv", ALPHA_FACTORY_ADVISORY_FIELDS),
         ("alpha_factory_family_summary.csv", ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS),
         ("risk_on_multi_buy_shadow.csv", RISK_ON_MULTI_BUY_SHADOW_FIELDS),
+        ("backtest_advisory_reader.csv", BACKTEST_ADVISORY_READER_FIELDS),
         ("final_score_vs_alpha6_conflict.csv", CONFLICT_FIELDS),
         ("bnb_strong_alpha6_bypass_shadow.csv", BYPASS_SHADOW_FIELDS),
         ("negative_expectancy_attribution.csv", NEGATIVE_EXPECTANCY_ATTRIBUTION_FIELDS),
