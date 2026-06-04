@@ -48,11 +48,6 @@ export function TopCommandBar({
 
   return (
     <header className="top-command-bar">
-      <div className="window-dots" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </div>
       <div className="top-command-brand">
         <div className="v5-mark" aria-hidden="true">V5</div>
         <div>

@@ -1710,12 +1710,12 @@ body {
 }
 
 .top-command-bar {
-  min-height: 78px;
+  min-height: 64px;
   display: grid;
   grid-template-columns: minmax(430px, 0.72fr) 1fr minmax(420px, 0.82fr);
   align-items: center;
   gap: 18px;
-  padding: 22px 18px 12px;
+  padding: 10px 18px;
   border: 1px solid rgba(70, 189, 217, 0.14);
   border-top: 0;
   border-radius: 0 0 8px 8px;
@@ -1728,24 +1728,6 @@ body {
   z-index: 30;
 }
 
-.window-dots {
-  position: absolute;
-  left: 16px;
-  top: 11px;
-  display: flex;
-  gap: 8px;
-}
-
-.window-dots span {
-  width: 11px;
-  height: 11px;
-  border-radius: 999px;
-}
-
-.window-dots span:nth-child(1) { background: #ff5f57; }
-.window-dots span:nth-child(2) { background: #ffbd2e; }
-.window-dots span:nth-child(3) { background: #28c840; }
-
 .top-command-brand,
 .top-command-meta,
 .top-command-actions {
@@ -1756,7 +1738,6 @@ body {
 
 .top-command-brand {
   gap: 14px;
-  padding-left: 18px;
 }
 
 .v5-mark {
