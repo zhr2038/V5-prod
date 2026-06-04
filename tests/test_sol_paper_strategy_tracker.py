@@ -1750,6 +1750,53 @@ def test_hype_wld_expanded_paper_ready_advisory_generates_paper_strategy_rows(tm
     assert all(row["live_symbols_unchanged"] == "True" for row in runs)
 
 
+def test_bottom_zone_probe_paper_advisory_generates_read_only_paper_row(tmp_path: Path) -> None:
+    cfg = AppConfig(symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT"])
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    reports_dir = tmp_path / "reports"
+    run_dir = reports_dir / "runs" / "r_bottom_zone"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        reports_dir,
+        [
+            {
+                "strategy_id": "BOTTOM_ZONE_PROBE_PAPER_V1",
+                "strategy_candidate": "v5.bottom_zone_probe_paper",
+                "symbol": "BNB-USDT",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "would_enter": "true",
+                "horizon_hours": "24",
+                "max_paper_notional_usdt": "5",
+                "max_live_notional_usdt": "0",
+                "cost_source": "public_spread_proxy",
+                "cost_bps": "20",
+                **_fresh_meta(start_s),
+            }
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_bottom_zone", start_s),
+        market_data_1h={"BNB/USDT": _series("BNB/USDT", start_s, {0: 640.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["total_records"] >= 1
+    runs = _read_csv(reports_dir / "summaries" / "paper_strategy_runs.csv")
+    bottom = next(row for row in runs if row["strategy_id"] == "BOTTOM_ZONE_PROBE_PAPER_V1")
+    assert bottom["symbol"] == "BNB/USDT"
+    assert bottom["would_enter"] == "True"
+    assert bottom["would_size_usdt"] == "5.0"
+    assert bottom["advisory_response_action"] == "paper_tracking"
+    assert bottom["live_order_effect"] == "read_only_no_live_order"
+    assert bottom["enable_live_experiment"] == "False"
+    assert cfg.symbols == ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+
+
 def test_alpha_factory_advisory_reader_is_read_only(tmp_path: Path) -> None:
     cfg = _cfg()
     cfg.quant_lab.enabled = True

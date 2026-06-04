@@ -39,6 +39,7 @@ BNB_SYMBOL = "BNB/USDT"
 ETH_F3_DOMINANT_STRATEGY_ID = "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1"
 BNB_F3_DOMINANT_STRATEGY_ID = "BNB_F3_DOMINANT_ENTRY_PAPER_V1"
 BNB_RISK_ON_BUY_STRATEGY_ID = "BNB_RISK_ON_BUY_PAPER_V1"
+BOTTOM_ZONE_PROBE_STRATEGY_ID = "BOTTOM_ZONE_PROBE_PAPER_V1"
 HYPE_EXPANDED_UNIVERSE_STRATEGY_ID = "HYPE_EXPANDED_UNIVERSE_PAPER_V1"
 WLD_EXPANDED_UNIVERSE_STRATEGY_ID = "WLD_EXPANDED_UNIVERSE_PAPER_V1"
 ETH_F3_DOMINANT_MIN_48H_COMPLETE_COUNT = 30
@@ -55,6 +56,10 @@ BNB_PAPER_LIVE_BLOCK_REASONS = [
 EXPANDED_UNIVERSE_PAPER_LIVE_BLOCK_REASONS = [
     "expanded_universe_paper_only_no_live",
     "not_in_v5_live_universe",
+]
+BOTTOM_ZONE_PAPER_LIVE_BLOCK_REASONS = [
+    "bottom_zone_probe_paper_only_no_live",
+    "bottom_zone_reversal_research_only",
 ]
 BNB_ALLOWED_PAPER_REGIMES = {"TREND_UP", "ALT_IMPULSE", "TRENDING"}
 DEFAULT_HORIZONS = [4, 8, 12, 24, 48, 72]
@@ -74,6 +79,12 @@ RISK_ON_MULTI_BUY_SHADOW_CANDIDATES = {
     "v5.risk_on_multi_buy_top1_shadow",
     "v5.risk_on_multi_buy_top2_shadow",
     "v5.risk_on_multi_buy_top3_shadow",
+}
+BOTTOM_ZONE_ADVISORY_CANDIDATES = {
+    "v5.bottom_zone_probe_paper",
+    "v5.bottom_zone_reversal_shadow",
+    "bottom_zone_reversal_shadow",
+    "bottom_zone_probe_paper",
 }
 
 DEFAULT_PAPER_STRATEGY_CONFIGS = [
@@ -2499,6 +2510,146 @@ def _expanded_universe_paper_rows(expanded_rows: Iterable[Mapping[str, Any]]) ->
     return out
 
 
+def _is_bottom_zone_advisory(row: Mapping[str, Any]) -> bool:
+    keys = {
+        str(row.get("strategy_id") or "").strip(),
+        str(row.get("strategy_candidate") or "").strip(),
+        str(row.get("experiment_name") or "").strip(),
+    }
+    normalized = {key.lower() for key in keys if key}
+    return bool(
+        BOTTOM_ZONE_PROBE_STRATEGY_ID.lower() in normalized
+        or normalized.intersection(BOTTOM_ZONE_ADVISORY_CANDIDATES)
+    )
+
+
+def _bottom_zone_paper_records(
+    advisory_rows: Iterable[Mapping[str, Any]],
+    *,
+    diagnostics: DiagnosticsConfig,
+    audit: DecisionAudit,
+    ts_utc: str,
+    asof_ts_ms: int,
+    rt_cost_bps: float,
+    required_days: int,
+    required_entry_days: int,
+    required_coverage: float,
+    allowed_cost_sources: set[str],
+    market_data_1h: Dict[str, MarketSeries],
+    cache_dir: Path,
+    cached: dict[str, list[dict[str, float | int]]],
+    top_of_book: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for advisory in advisory_rows:
+        if not _is_bottom_zone_advisory(advisory):
+            continue
+        fields = _advisory_response_fields(advisory, diagnostics)
+        response_action = str(fields.get("advisory_response_action") or "")
+        if response_action not in {"paper_tracking", "shadow_tracking", "negative_advisory", "research_display_only", "stale_paper_display_only", "stale_shadow_display_only"}:
+            continue
+        symbol = _symbol_text(advisory.get("symbol"))
+        if not symbol:
+            continue
+        would_enter = bool(
+            response_action == "paper_tracking"
+            and (
+                _normalize_bool(advisory.get("would_enter")) is not False
+                or str(advisory.get("decision") or "").strip().upper() == "PAPER_READY"
+            )
+        )
+        entry_px = _entry_px(
+            symbol=symbol,
+            entry_ts_ms=asof_ts_ms,
+            market_data_1h=market_data_1h,
+            cache_dir=cache_dir,
+            cached=cached,
+        )
+        quote_context = _quote_context(
+            symbol=symbol,
+            row=advisory,
+            top_of_book=top_of_book,
+            entry_px=entry_px,
+        )
+        estimated_cost = _normalize_float(
+            advisory.get("estimated_cost_bps")
+            or advisory.get("cost_bps")
+            or advisory.get("selected_total_cost_bps")
+        )
+        if estimated_cost is None:
+            estimated_cost = float(rt_cost_bps)
+        max_paper = _normalize_float(advisory.get("max_paper_notional_usdt"))
+        horizon = _parse_horizon_hours(advisory.get("horizon_hours")) or PRIMARY_HORIZON
+        no_sample_reason = str(advisory.get("no_sample_reason") or "")
+        if not no_sample_reason and not would_enter:
+            no_sample_reason = response_action
+        out.append(
+            {
+                "strategy_id": str(advisory.get("strategy_id") or BOTTOM_ZONE_PROBE_STRATEGY_ID),
+                "experiment_name": str(advisory.get("experiment_name") or "v5.bottom_zone_probe_paper"),
+                "enabled_shadow_only": True,
+                "enable_live_experiment": False,
+                "live_symbols_unchanged": True,
+                "run_id": str(advisory.get("run_id") or getattr(audit, "run_id", "") or ""),
+                "ts_utc": ts_utc,
+                "entry_ts_ms": asof_ts_ms,
+                "paper_date": ts_utc[:10],
+                "symbol": symbol,
+                "source_strategy_candidate": str(advisory.get("strategy_candidate") or "v5.bottom_zone_probe_paper"),
+                "candidate_id": str(advisory.get("candidate_id") or f"bottom_zone_{symbol}_{getattr(audit, 'run_id', '')}"),
+                "final_decision": "paper_advisory" if would_enter else "advisory_display",
+                "no_sample_reason": "" if would_enter else no_sample_reason,
+                "sol_candidate_present": True,
+                "risk_level": str(advisory.get("risk_level") or ""),
+                "original_block_reason": str(advisory.get("live_block_reasons") or advisory.get("advisory_reason") or no_sample_reason),
+                "cooldown_active": False,
+                "risk_off": False,
+                "skip_reason": "" if would_enter else no_sample_reason,
+                "entry_reason": "v5.bottom_zone_probe_paper",
+                "experiment_reason": "bottom_zone_probe_paper_tracking",
+                "would_enter": would_enter,
+                "would_exit": False,
+                "would_exit_time": _iso_from_ms(asof_ts_ms + horizon * 3600 * 1000) if asof_ts_ms > 0 and would_enter else "",
+                "would_exit_rule": f"paper_time_horizon_{horizon}h" if would_enter else "",
+                "expected_exit_horizon": f"{horizon}h" if would_enter else "",
+                "would_size_notional": max_paper if would_enter and max_paper is not None else 0.0,
+                "would_size_usdt": max_paper if would_enter and max_paper is not None else 0.0,
+                "entry_px": entry_px if would_enter else None,
+                "arrival_bid": quote_context.get("arrival_bid"),
+                "arrival_ask": quote_context.get("arrival_ask"),
+                "arrival_mid": quote_context.get("arrival_mid"),
+                "estimated_spread_bps": quote_context.get("estimated_spread_bps"),
+                "expected_order_type": quote_context.get("expected_order_type"),
+                "estimated_fill_px": quote_context.get("estimated_fill_px") if would_enter else None,
+                "final_score": _normalize_float(advisory.get("final_score")),
+                "alpha6_score": _normalize_float(advisory.get("alpha6_score")),
+                "alpha6_side": str(advisory.get("alpha6_side") or ""),
+                "f4_volume_expansion": _normalize_float(advisory.get("f4_volume_expansion")),
+                "f4_threshold": None,
+                "f5_rsi_trend_confirm": _normalize_float(advisory.get("f5_rsi_trend_confirm")),
+                "cost_source": str(advisory.get("cost_source") or "local_estimate"),
+                "cost_source_quality": str(advisory.get("cost_source_quality") or advisory.get("cost_quality") or ""),
+                "estimated_cost_bps": float(estimated_cost),
+                "cost_model_version": str(advisory.get("cost_model_version") or ""),
+                "cost_source_live_ready": _cost_source_live_ready(advisory, allowed_cost_sources),
+                "slippage_covered": _slippage_observed(quote_context),
+                "required_paper_days": required_days,
+                "required_entry_days": required_entry_days,
+                "required_slippage_coverage": required_coverage,
+                "rt_cost_bps": rt_cost_bps,
+                "primary_horizon_hours": horizon,
+                "extra_live_block_reasons": list(BOTTOM_ZONE_PAPER_LIVE_BLOCK_REASONS),
+                "live_order_effect": "read_only_no_live_order",
+                "proposal_present": False,
+                "proposal_source": "",
+                **fields,
+                "label_status": "pending" if would_enter else "heartbeat",
+                "label_not_observable_reason": "",
+            }
+        )
+    return out
+
+
 def _is_alpha_factory_advisory(row: Mapping[str, Any]) -> bool:
     source_module = str(row.get("source_module") or "").strip().lower()
     candidate = str(row.get("strategy_candidate") or "").strip().lower()
@@ -3713,6 +3864,7 @@ def _collect_candidates(
     cache_dir: Path,
     top_of_book: Mapping[str, Any] | None = None,
     advisory_by_strategy: Mapping[str, Mapping[str, Any]] | None = None,
+    advisory_rows: Iterable[Mapping[str, Any]] | None = None,
     proposal_rows: Iterable[Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     diagnostics = _diagnostics_cfg(cfg)
@@ -3907,6 +4059,24 @@ def _collect_candidates(
         heartbeat["enabled_shadow_only"] = enabled_shadow_only
         heartbeat["enable_live_experiment"] = enable_live_experiment
         records.append(heartbeat)
+    records.extend(
+        _bottom_zone_paper_records(
+            advisory_rows or [],
+            diagnostics=diagnostics,
+            audit=audit,
+            ts_utc=ts_utc,
+            asof_ts_ms=asof_ts_ms,
+            rt_cost_bps=rt_cost_bps,
+            required_days=required_days,
+            required_entry_days=required_entry_days,
+            required_coverage=required_coverage,
+            allowed_cost_sources=allowed_cost_sources,
+            market_data_1h=market_data_1h,
+            cache_dir=cache_dir,
+            cached=cached,
+            top_of_book=top_of_book,
+        )
+    )
     return records
 
 
@@ -4396,6 +4566,7 @@ def update_sol_paper_strategy_tracker(
         cache_dir=cache_root,
         top_of_book=top_of_book,
         advisory_by_strategy=advisory_index,
+        advisory_rows=advisory_rows,
         proposal_rows=proposal_rows,
     )
     inserted = 0
