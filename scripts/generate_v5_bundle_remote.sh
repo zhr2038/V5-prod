@@ -28,9 +28,13 @@ ROOT = Path(sys.argv[1]).resolve()
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from src.reporting.bnb_strong_alpha6_bypass_shadow import (
+    BYPASS_SHADOW_FIELDS as REPORT_BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS,
+    build_bnb_strong_alpha6_bypass_rows as report_build_bnb_strong_alpha6_bypass_rows,
     is_bnb_strong_alpha6_bypass_candidate as report_bnb_strong_alpha6_bypass_candidate,
 )
 from src.reporting.final_score_alpha6_conflict import (
+    CONFLICT_FIELDS as REPORT_FINAL_SCORE_ALPHA6_CONFLICT_FIELDS,
+    build_conflict_rows as report_build_final_score_alpha6_conflict_rows,
     is_final_score_alpha6_conflict_candidate as report_final_score_alpha6_conflict_candidate,
 )
 NOW = dt.datetime.now(dt.timezone.utc)
@@ -416,68 +420,8 @@ CANDIDATE_SNAPSHOT_FIELDS = (
     "no_signal_reason",
     "strategy_candidate",
 )
-FINAL_SCORE_ALPHA6_CONFLICT_FIELDS = (
-    "run_id",
-    "ts_utc",
-    "symbol",
-    "final_score",
-    "alpha6_score",
-    "alpha6_side",
-    "f3_vol_adj_ret",
-    "f4_volume_expansion",
-    "f5_rsi_trend_confirm",
-    "expected_edge_bps",
-    "required_edge_bps",
-    "cost_gate_verified",
-    "final_decision",
-    "block_reason",
-    "no_signal_reason",
-    "negative_expectancy_net_bps",
-    "negative_expectancy_fast_fail_net_bps",
-    "future_4h_net_bps",
-    "future_8h_net_bps",
-    "future_12h_net_bps",
-    "future_24h_net_bps",
-    "max_future_net_bps",
-    "best_future_horizon_hours",
-    "material_profit_flag",
-    "label_4h_status",
-    "label_8h_status",
-    "label_12h_status",
-    "label_24h_status",
-    "any_label_complete",
-    "all_labels_complete",
-    "label_status",
-    "missed_profit_flag",
-)
-BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS = (
-    "run_id",
-    "ts_utc",
-    "strategy_id",
-    "symbol",
-    "would_bypass",
-    "alpha6_score",
-    "f3",
-    "f4",
-    "f5",
-    "expected_edge_bps",
-    "required_edge_bps",
-    "final_score",
-    "final_decision",
-    "block_reason",
-    "no_signal_reason",
-    "negative_expectancy_blocked",
-    "future_4h_net_bps",
-    "future_8h_net_bps",
-    "future_12h_net_bps",
-    "future_24h_net_bps",
-    "max_future_net_bps",
-    "best_future_horizon_hours",
-    "material_profit_flag",
-    "label_status",
-    "outcome",
-    "live_order_effect",
-)
+FINAL_SCORE_ALPHA6_CONFLICT_FIELDS = tuple(REPORT_FINAL_SCORE_ALPHA6_CONFLICT_FIELDS)
+BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS = tuple(REPORT_BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS)
 ORDER_LIFECYCLE_FIELDS = (
     "schema_version",
     "lifecycle_id",
@@ -1561,6 +1505,8 @@ def synthesize_backtest_advisory_reader_if_missing():
 def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_meta):
     not_obs = "not_observable"
     candidate_snapshot_rows = read_candidate_snapshot_summary_rows()
+    skipped_candidate_label_rows = load_jsonl(OUT / "raw" / "reports" / "skipped_candidate_labels.jsonl")
+    candidate_label_input_rows = list(candidate_snapshot_rows) + list(skipped_candidate_label_rows)
     candidate_cost_source_coverage_value = candidate_cost_source_coverage(candidate_snapshot_rows)
 
     def as_float(value):
@@ -7720,7 +7666,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "recommendation": recommendation,
         }
 
-    final_score_alpha6_conflict_rows = build_final_score_alpha6_conflict_rows(candidate_snapshot_rows)
+    negative_expectancy_stats_by_symbol = {
+        symbol: final_score_negative_expectancy_stats(symbol)
+        for symbol in CONFLICT_SYMBOLS
+    }
+    final_score_alpha6_conflict_rows = report_build_final_score_alpha6_conflict_rows(
+        candidate_label_input_rows,
+        negative_expectancy_stats=negative_expectancy_stats_by_symbol,
+    )
     final_score_alpha6_conflict_summary = summarize_final_score_alpha6_conflicts(final_score_alpha6_conflict_rows)
     write_csv(
         "summaries/final_score_vs_alpha6_conflict.csv",
@@ -7826,7 +7779,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         out.sort(key=lambda item: (flatten_value(item.get("ts_utc")), flatten_value(item.get("run_id"))))
         return out
 
-    bnb_strong_alpha6_bypass_shadow_rows = build_bnb_strong_alpha6_bypass_shadow_rows(candidate_snapshot_rows)
+    bnb_strong_alpha6_bypass_shadow_rows = report_build_bnb_strong_alpha6_bypass_rows(candidate_label_input_rows)
     write_csv(
         "summaries/bnb_strong_alpha6_bypass_shadow.csv",
         bnb_strong_alpha6_bypass_shadow_rows,

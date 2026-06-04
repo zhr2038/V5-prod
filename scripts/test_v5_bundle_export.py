@@ -794,6 +794,18 @@ def fixture_final_score_alpha6_conflict_root(root):
         writer.writeheader()
         writer.writerow(candidate)
 
+    label = {
+        "run_id": run_id,
+        "ts_utc": iso(ts),
+        "symbol": "BNB-USDT",
+        "label_4h_net_bps": "478.016503",
+        "label_8h_net_bps": "555.852398",
+        "label_12h_net_bps": "711.524188",
+        "label_24h_net_bps": "1178.539625",
+    }
+    with (root / "reports/skipped_candidate_labels.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(label, ensure_ascii=False) + "\n")
+
     write_ohlcv_cache(
         root,
         "BNB/USDT",
@@ -5687,7 +5699,11 @@ def main():
             assert float(shadow["max_future_net_bps"]) > 1100.0, shadow
             assert shadow["best_future_horizon_hours"] == "24", shadow
             assert shadow["material_profit_flag"] == "true", shadow
-            assert shadow["label_status"] == "shadow_pending", shadow
+            assert shadow["label_4h_status"] == "complete", shadow
+            assert shadow["label_8h_status"] == "complete", shadow
+            assert shadow["label_12h_status"] == "complete", shadow
+            assert shadow["label_24h_status"] == "complete", shadow
+            assert shadow["label_status"] == "complete", shadow
             assert shadow["outcome"] == "material_profit_shadow", shadow
             assert shadow["live_order_effect"] == "read_only_no_live_order", shadow
             assert window["bnb_strong_alpha6_bypass_shadow_rows"] == 1, window
