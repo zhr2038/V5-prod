@@ -97,3 +97,26 @@ def test_bnb_strong_alpha6_joins_skipped_candidate_label_row() -> None:
     assert row["best_future_horizon_hours"] == 12
     assert row["material_profit_flag"] == "true"
     assert row["outcome"] == "material_profit_shadow"
+
+
+def test_bnb_strong_alpha6_joins_nearby_entry_ts_ms_label_row() -> None:
+    candidate = _base_row(ts_utc="2026-05-30T03:00:15Z", strategy_candidate="f3_dominant_entry")
+    label = {
+        "run_id": "r1",
+        "entry_ts_ms": 1_780_110_000_000,
+        "symbol": "BNB-USDT",
+        "label_4h_after_cost_bps": "51.0",
+        "label_8h_net_bps": "88.0",
+    }
+
+    rows = build_bnb_strong_alpha6_bypass_rows([candidate, label])
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["future_4h_net_bps"] == "51.0"
+    assert row["future_8h_net_bps"] == "88.0"
+    assert row["label_4h_status"] == "complete"
+    assert row["label_8h_status"] == "complete"
+    assert row["label_status"] == "partial_complete"
+    assert row["max_future_net_bps"] == 88.0
+    assert row["material_profit_flag"] == "true"

@@ -12,7 +12,7 @@ from src.reporting.final_score_alpha6_conflict import (
     first_observed,
     label_status_for_future,
     future_value_for_horizon,
-    label_join_key,
+    label_row_for,
     LABEL_HORIZONS,
     normalize_symbol,
     truthy,
@@ -96,7 +96,7 @@ def build_bnb_strong_alpha6_bypass_rows(
     for row in row_list:
         if not is_bnb_strong_alpha6_bypass_candidate(row):
             continue
-        label_row = label_index.get(label_join_key(row), {})
+        label_row = label_row_for(row, label_index)
         futures = {
             h: future_value_for_horizon(row, label_row, h, future_net_bps)
             for h in LABEL_HORIZONS

@@ -112,3 +112,41 @@ def test_final_score_alpha6_conflict_joins_skipped_candidate_label_row() -> None
     assert row["best_future_horizon_hours"] == 4
     assert row["material_profit_flag"] == "true"
     assert row["missed_profit_flag"] == "true"
+
+
+def test_final_score_alpha6_conflict_joins_entry_ts_ms_label_row() -> None:
+    candidate = _base_row(
+        ts_utc="2026-05-30T03:00:15Z",
+        strategy_candidate="f3_dominant_entry",
+    )
+    label = {
+        "run_id": "r1",
+        "entry_ts_ms": 1_780_110_015_000,
+        "symbol": "BNB-USDT",
+        "label_4h_after_cost_bps": "61.5",
+    }
+
+    rows = build_conflict_rows([candidate, label])
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["future_4h_net_bps"] == "61.5"
+    assert row["label_4h_status"] == "complete"
+    assert row["label_status"] == "partial_complete"
+
+
+def test_final_score_alpha6_conflict_joins_nearby_label_timestamp() -> None:
+    candidate = _base_row(ts_utc="2026-05-30T03:00:15Z")
+    label = {
+        "run_id": "r1",
+        "ts_utc": "2026-05-30T03:00:00Z",
+        "symbol": "BNB-USDT",
+        "label_8h_net_bps": "93.0",
+    }
+
+    rows = build_conflict_rows([candidate, label])
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["future_8h_net_bps"] == "93.0"
+    assert row["label_8h_status"] == "complete"

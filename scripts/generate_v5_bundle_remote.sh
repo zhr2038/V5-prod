@@ -82,6 +82,7 @@ CURRENT_REPORT_FILES = [
     ("reports/summaries/bnb_paper_strategy_runs.csv", "summaries/bnb_paper_strategy_runs.csv", False),
     ("reports/summaries/bnb_paper_strategy_daily.csv", "summaries/bnb_paper_strategy_daily.csv", False),
     ("reports/summaries/paper_slippage_coverage.csv", "summaries/paper_slippage_coverage.csv", False),
+    ("reports/summaries/late_breakout_failure_protect_shadow.csv", "summaries/late_breakout_failure_protect_shadow.csv", False),
     ("reports/quant_lab_usage.jsonl", "raw/reports/quant_lab_usage.jsonl", False),
     ("reports/quant_lab_requests.jsonl", "raw/reports/quant_lab_requests.jsonl", False),
 ]
@@ -228,6 +229,19 @@ RISK_ON_MULTI_BUY_SHADOW_FIELDS = (
     "source_detail_available",
     "source_detail_missing_paths",
     "response_action",
+    "live_order_effect",
+)
+LATE_BREAKOUT_FAILURE_PROTECT_FIELDS = (
+    "run_id",
+    "ts_utc",
+    "symbol",
+    "alpha6_score",
+    "overextension_score",
+    "would_block_entry",
+    "future_4h_net_bps",
+    "future_8h_net_bps",
+    "would_block_loss_count",
+    "would_block_profit_count",
     "live_order_effect",
 )
 BACKTEST_ADVISORY_READER_FIELDS = (
@@ -1227,6 +1241,11 @@ def copy_current_reports():
             "reports/summaries/risk_on_multi_buy_shadow.csv",
             "summaries/risk_on_multi_buy_shadow.csv",
             RISK_ON_MULTI_BUY_SHADOW_FIELDS,
+        ),
+        (
+            "reports/summaries/late_breakout_failure_protect_shadow.csv",
+            "summaries/late_breakout_failure_protect_shadow.csv",
+            LATE_BREAKOUT_FAILURE_PROTECT_FIELDS,
         ),
         (
             "reports/summaries/backtest_advisory_reader.csv",

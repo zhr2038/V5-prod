@@ -2,12 +2,33 @@ from __future__ import annotations
 
 import csv
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 
 SUPPORTED_SYMBOLS = {"BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"}
 LABEL_HORIZONS = (4, 8, 12, 24)
+LABEL_TIME_FIELDS = (
+    "ts_utc",
+    "timestamp",
+    "ts",
+    "decision_ts",
+    "entry_ts",
+    "candidate_ts",
+    "bar_ts",
+    "signal_ts",
+    "window_start_ts",
+)
+LABEL_TIME_MS_FIELDS = (
+    "entry_ts_ms",
+    "ts_ms",
+    "timestamp_ms",
+    "decision_ts_ms",
+    "candidate_ts_ms",
+)
+LABEL_NEAREST_MAX_SKEW_MS = 10 * 60 * 1000
+LABEL_BY_RUN_SYMBOL_KEY = ("__label_by_run_symbol__", "", "")
 CONFLICT_FIELDS = (
     "run_id",
     "ts_utc",
@@ -108,20 +129,71 @@ def best_future_net_bps(futures: Mapping[int, Any]) -> tuple[Any, Any, bool]:
     return best_value, best_horizon, best_value >= 50.0
 
 
+def _time_value_ms(value: Any) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none", "null", "not_observable", "pending"}:
+        return None
+    try:
+        if text.replace(".", "", 1).isdigit():
+            raw = float(text)
+            if raw <= 0:
+                return None
+            if raw < 10_000_000_000:
+                raw *= 1000.0
+            return int(raw)
+    except Exception:
+        pass
+    try:
+        normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+        dt_value = datetime.fromisoformat(normalized)
+        if dt_value.tzinfo is None:
+            dt_value = dt_value.replace(tzinfo=timezone.utc)
+        return int(dt_value.astimezone(timezone.utc).timestamp() * 1000.0)
+    except Exception:
+        return None
+
+
+def label_time_candidates_ms(row: Mapping[str, Any]) -> list[int]:
+    values: list[int] = []
+    for field in LABEL_TIME_FIELDS:
+        parsed = _time_value_ms(row.get(field))
+        if parsed is not None:
+            values.append(parsed)
+    for field in LABEL_TIME_MS_FIELDS:
+        parsed = _time_value_ms(row.get(field))
+        if parsed is not None:
+            values.append(parsed)
+    out: list[int] = []
+    seen: set[int] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _iso_from_ms(value: int) -> str:
+    return datetime.fromtimestamp(value / 1000.0, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def label_join_key(row: Mapping[str, Any]) -> tuple[str, str, str]:
+    times = label_time_candidates_ms(row)
     return (
         str(row.get("run_id") or "").strip(),
         normalize_symbol(row.get("symbol")),
-        str(
-            first_observed(
-                row.get("ts_utc"),
-                row.get("timestamp"),
-                row.get("ts"),
-                row.get("decision_ts"),
-                default="",
-            )
-        ).strip(),
+        _iso_from_ms(times[0]) if times else "",
     )
+
+
+def label_join_keys(row: Mapping[str, Any]) -> list[tuple[str, str, str]]:
+    run_id = str(row.get("run_id") or "").strip()
+    symbol = normalize_symbol(row.get("symbol"))
+    if not run_id or not symbol:
+        return []
+    return [(run_id, symbol, _iso_from_ms(value)) for value in label_time_candidates_ms(row)]
 
 
 def label_future_value(row: Mapping[str, Any], horizon: int) -> Any:
@@ -134,25 +206,71 @@ def label_future_value(row: Mapping[str, Any], horizon: int) -> Any:
     )
 
 
-def build_label_index(rows: Iterable[Mapping[str, Any]]) -> dict[tuple[str, str, str], dict[str, Any]]:
-    index: dict[tuple[str, str, str], dict[str, Any]] = {}
-    for row in rows:
-        key = label_join_key(row)
-        if not key[0] or not key[1] or not key[2]:
+def _observed_label_count(row: Mapping[str, Any]) -> int:
+    return sum(1 for horizon in LABEL_HORIZONS if as_float(label_future_value(row, horizon)) is not None)
+
+
+def _merge_label_row(existing: Mapping[str, Any], row: Mapping[str, Any]) -> dict[str, Any]:
+    merged = dict(existing)
+    for field, value in row.items():
+        if value in (None, ""):
             continue
-        observed_count = sum(1 for horizon in LABEL_HORIZONS if as_float(label_future_value(row, horizon)) is not None)
+        if merged.get(field) in (None, "", "not_observable"):
+            merged[field] = value
+    return merged
+
+
+def build_label_index(rows: Iterable[Mapping[str, Any]]) -> dict[tuple[str, str, str], Any]:
+    index: dict[tuple[str, str, str], Any] = {}
+    by_run_symbol: dict[tuple[str, str], list[tuple[int, dict[str, Any]]]] = {}
+    for row in rows:
+        keys = label_join_keys(row)
+        if not keys:
+            continue
+        observed_count = _observed_label_count(row)
         if observed_count <= 0:
             continue
-        existing = index.get(key)
-        if existing is None:
-            index[key] = dict(row)
-            continue
-        existing_count = sum(1 for horizon in LABEL_HORIZONS if as_float(label_future_value(existing, horizon)) is not None)
-        if observed_count > existing_count:
-            merged = dict(existing)
-            merged.update({field: value for field, value in row.items() if value not in (None, "")})
-            index[key] = merged
+        payload = dict(row)
+        for key in keys:
+            existing = index.get(key)
+            if existing is None:
+                index[key] = payload
+            elif observed_count > _observed_label_count(existing):
+                index[key] = _merge_label_row(existing, payload)
+        run_symbol = (keys[0][0], keys[0][1])
+        for time_ms in label_time_candidates_ms(row):
+            by_run_symbol.setdefault(run_symbol, []).append((time_ms, payload))
+    index[LABEL_BY_RUN_SYMBOL_KEY] = by_run_symbol
     return index
+
+
+def label_row_for(
+    row: Mapping[str, Any],
+    label_index: Mapping[tuple[str, str, str], Any],
+) -> Mapping[str, Any]:
+    for key in label_join_keys(row):
+        label_row = label_index.get(key)
+        if isinstance(label_row, Mapping):
+            return label_row
+    times = label_time_candidates_ms(row)
+    if not times:
+        return {}
+    run_id = str(row.get("run_id") or "").strip()
+    symbol = normalize_symbol(row.get("symbol"))
+    by_run_symbol = label_index.get(LABEL_BY_RUN_SYMBOL_KEY)
+    if not isinstance(by_run_symbol, Mapping):
+        return {}
+    candidates = by_run_symbol.get((run_id, symbol), [])
+    best: tuple[int, Mapping[str, Any]] | None = None
+    for candidate_time, candidate_row in candidates:
+        skew = min(abs(candidate_time - value) for value in times)
+        if skew > LABEL_NEAREST_MAX_SKEW_MS:
+            continue
+        if best is None or skew < best[0] or (
+            skew == best[0] and _observed_label_count(candidate_row) > _observed_label_count(best[1])
+        ):
+            best = (skew, candidate_row)
+    return best[1] if best is not None else {}
 
 
 def future_value_for_horizon(
@@ -324,7 +442,7 @@ def build_conflict_rows(
         if not is_final_score_alpha6_conflict_candidate(row):
             continue
         symbol = normalize_symbol(row.get("symbol"))
-        label_row = label_index.get(label_join_key(row), {})
+        label_row = label_row_for(row, label_index)
         futures = {
             h: future_value_for_horizon(row, label_row, h, future_net_bps)
             for h in LABEL_HORIZONS

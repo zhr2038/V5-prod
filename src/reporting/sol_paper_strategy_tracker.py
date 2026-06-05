@@ -563,6 +563,20 @@ RISK_ON_MULTI_BUY_SHADOW_FIELDS = [
     "live_order_effect",
 ]
 
+LATE_BREAKOUT_FAILURE_PROTECT_FIELDS = [
+    "run_id",
+    "ts_utc",
+    "symbol",
+    "alpha6_score",
+    "overextension_score",
+    "would_block_entry",
+    "future_4h_net_bps",
+    "future_8h_net_bps",
+    "would_block_loss_count",
+    "would_block_profit_count",
+    "live_order_effect",
+]
+
 BACKTEST_ADVISORY_READER_FIELDS = [
     "run_id",
     "ts_utc",
@@ -1580,11 +1594,17 @@ def _selected_advisory_freshness_meta(source_health_rows: Iterable[Mapping[str, 
     stale_reason = str(source_health.get("stale_reason") or source_health.get("freshness_reason") or "").strip()
     if advisory_fresh is True:
         stale_reason = ""
+    source_is_stale = advisory_fresh is False
     return {
         "advisory_source": selected_source,
         "selected_source": selected_source,
         "freshness_status": freshness_status,
         "advisory_fresh": advisory_fresh,
+        "advisory_age_sec": source_health.get("advisory_age_sec"),
+        "advisory_contract_match": _normalize_bool(source_health.get("advisory_contract_match")),
+        "stale_advisory_used": bool(source_is_stale and selected_source == "stale_local"),
+        "api_fallback_attempted": _normalize_bool(source_health.get("api_fallback_attempted")),
+        "api_fallback_success": _normalize_bool(source_health.get("api_fallback_success")),
         "stale_reason": stale_reason,
     }
 
@@ -1605,6 +1625,16 @@ def _normalize_selected_advisory_rows(
             payload["freshness_status"] = meta["freshness_status"]
         if meta.get("advisory_fresh") is not None:
             payload["advisory_fresh"] = bool(meta["advisory_fresh"])
+        if meta.get("advisory_age_sec") not in (None, ""):
+            payload["advisory_age_sec"] = meta["advisory_age_sec"]
+        if meta.get("advisory_contract_match") is not None:
+            payload["advisory_contract_match"] = bool(meta["advisory_contract_match"])
+        if meta.get("stale_advisory_used") is not None:
+            payload["stale_advisory_used"] = bool(meta["stale_advisory_used"])
+        if meta.get("api_fallback_attempted") is not None:
+            payload["api_fallback_attempted"] = bool(meta["api_fallback_attempted"])
+        if meta.get("api_fallback_success") is not None:
+            payload["api_fallback_success"] = bool(meta["api_fallback_success"])
         if meta.get("stale_reason") is not None:
             payload["stale_reason"] = meta.get("stale_reason") or ""
         out.append(payload)
@@ -3136,6 +3166,95 @@ def _read_risk_on_multi_buy_detail_rows(*, run_path: Path, reports_dir: Path) ->
     return rows
 
 
+def _late_breakout_failure_detail_paths(*, run_path: Path, reports_dir: Path) -> list[Path]:
+    filenames = (
+        "late_breakout_failure_protect_shadow.csv",
+        "late_breakout_failure_shadow.csv",
+    )
+    candidates: list[Path] = []
+    roots = (
+        reports_dir,
+        reports_dir / "raw" / "reports",
+        reports_dir / "quant_lab",
+        reports_dir / "quant_lab_latest",
+        reports_dir / "quant_lab_latest" / "reports",
+        reports_dir / "quant_lab_latest" / "raw" / "reports",
+        reports_dir / "quant_lab" / "latest" / "reports",
+        reports_dir / "quant_lab" / "latest" / "raw" / "reports",
+        reports_dir.parent / "raw" / "reports",
+        reports_dir.parent / "reports" / "quant_lab" / "latest" / "reports",
+        reports_dir.parent / "reports" / "quant_lab" / "latest" / "raw" / "reports",
+        run_path,
+        Path("/var/lib/v5-prod/raw/reports"),
+        Path("/var/lib/v5-prod/reports"),
+        Path("/var/lib/v5-prod/quant_lab_latest/reports"),
+        Path("/var/lib/v5-prod/quant_lab_latest/raw/reports"),
+        Path("/var/lib/v5-prod/quant_lab/latest/reports"),
+        Path("/var/lib/v5-prod/quant_lab/latest/raw/reports"),
+    )
+    for root in roots:
+        for filename in filenames:
+            candidates.append(root / filename)
+    candidates.extend(
+        [
+            reports_dir / "quant_lab_latest_bundle.zip",
+            reports_dir / "quant_lab_latest_bundle.tar.gz",
+            reports_dir / "quant_lab" / "latest_bundle.zip",
+            reports_dir / "quant_lab" / "latest_bundle.tar.gz",
+            reports_dir.parent / "reports" / "quant_lab_latest_bundle.zip",
+            reports_dir.parent / "reports" / "quant_lab_latest_bundle.tar.gz",
+            reports_dir.parent / "reports" / "quant_lab" / "latest_bundle.zip",
+            reports_dir.parent / "reports" / "quant_lab" / "latest_bundle.tar.gz",
+            Path("/var/lib/v5-prod/quant_lab_latest_bundle.zip"),
+            Path("/var/lib/v5-prod/quant_lab_latest_bundle.tar.gz"),
+        ]
+    )
+    for pattern in (
+        reports_dir / "quant_lab_latest_bundle*.zip",
+        reports_dir / "quant_lab_latest_bundle*.tar.gz",
+        reports_dir / "quant_lab_expert_pack*.zip",
+        reports_dir / "quant_lab_expert_pack*.tar.gz",
+        reports_dir.parent / "reports" / "quant_lab_latest_bundle*.zip",
+        reports_dir.parent / "reports" / "quant_lab_latest_bundle*.tar.gz",
+        reports_dir.parent / "reports" / "quant_lab_expert_pack*.zip",
+        reports_dir.parent / "reports" / "quant_lab_expert_pack*.tar.gz",
+        Path("/var/lib/v5-prod/quant_lab_latest_bundle*.zip"),
+        Path("/var/lib/v5-prod/quant_lab_latest_bundle*.tar.gz"),
+        Path("/var/lib/v5-prod/quant_lab_expert_pack*.zip"),
+        Path("/var/lib/v5-prod/quant_lab_expert_pack*.tar.gz"),
+    ):
+        try:
+            candidates.extend(
+                sorted(
+                    pattern.parent.glob(pattern.name),
+                    key=lambda path: path.stat().st_mtime if path.exists() else 0,
+                    reverse=True,
+                )
+            )
+        except Exception:
+            continue
+    return list(dict.fromkeys(path.resolve() for path in candidates))
+
+
+def _read_late_breakout_failure_detail_rows(*, run_path: Path, reports_dir: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen_paths: set[Path] = set()
+    targets = ("late_breakout_failure_protect_shadow.csv", "late_breakout_failure_shadow.csv")
+    for path in _late_breakout_failure_detail_paths(run_path=run_path, reports_dir=reports_dir):
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        if not path.is_file():
+            continue
+        lower_name = path.name.lower()
+        if lower_name.endswith((".zip", ".tar", ".tar.gz", ".tgz")):
+            for target in targets:
+                rows.extend(_read_raw_csv_path(path, target_filename=target))
+        elif lower_name in targets:
+            rows.extend(_read_raw_csv_path(path, target_filename=lower_name))
+    return rows
+
+
 def _backtest_report_paths(*, run_path: Path, reports_dir: Path) -> list[Path]:
     candidates = [
         reports_dir / "research_promotion_decision.csv",
@@ -3470,6 +3589,106 @@ def _risk_on_multi_buy_shadow_rows(
                 "live_order_effect": "read_only_no_live_order",
             }
         )
+    return out
+
+
+def _late_breakout_first_float(row: Mapping[str, Any], names: Iterable[str]) -> Optional[float]:
+    for name in names:
+        value = _normalize_float(row.get(name))
+        if value is not None:
+            return value
+    return None
+
+
+def _late_breakout_first_value(row: Mapping[str, Any], names: Iterable[str]) -> Any:
+    for name in names:
+        value = row.get(name)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _late_breakout_source_ts_ms(row: Mapping[str, Any], fallback_ms: int) -> int:
+    values = [
+        _advisory_time_ms(row.get(name))
+        for name in ("ts_utc", "decision_ts", "timestamp", "run_ts", "as_of_ts", "generated_at")
+    ]
+    values = [value for value in values if value is not None]
+    return max(values) if values else int(fallback_ms)
+
+
+def _late_breakout_failure_protect_rows(
+    detail_rows: Iterable[Mapping[str, Any]],
+    *,
+    run_id: str,
+    asof_ts_ms: int,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for row in detail_rows:
+        symbol = _symbol_text(_late_breakout_first_value(row, ("symbol", "v5_symbol", "instId", "instrument")))
+        ts_ms = _late_breakout_source_ts_ms(row, asof_ts_ms)
+        row_run_id = str(row.get("run_id") or run_id or "").strip()
+        key = (row_run_id, symbol, str(ts_ms))
+        if key in seen:
+            continue
+        seen.add(key)
+        future_4h = _late_breakout_first_float(
+            row,
+            (
+                "future_4h_net_bps",
+                "label_4h_net_bps",
+                "label_4h_after_cost_bps",
+                "paper_pnl_bps_4h",
+            ),
+        )
+        future_8h = _late_breakout_first_float(
+            row,
+            (
+                "future_8h_net_bps",
+                "label_8h_net_bps",
+                "label_8h_after_cost_bps",
+                "paper_pnl_bps_8h",
+            ),
+        )
+        would_block = _normalize_bool(
+            _late_breakout_first_value(
+                row,
+                (
+                    "would_block_entry",
+                    "would_block_if_enabled",
+                    "would_block",
+                    "shadow_would_block",
+                ),
+            )
+        )
+        if would_block is None:
+            would_block = True
+        loss_count = _normalize_float(row.get("would_block_loss_count"))
+        profit_count = _normalize_float(row.get("would_block_profit_count"))
+        if loss_count is None:
+            loss_count = 1.0 if would_block and any(value is not None and value < 0 for value in (future_4h, future_8h)) else 0.0
+        if profit_count is None:
+            profit_count = 1.0 if would_block and any(value is not None and value > 0 for value in (future_4h, future_8h)) else 0.0
+        out.append(
+            {
+                "run_id": row_run_id,
+                "ts_utc": _iso_from_ms(ts_ms),
+                "symbol": symbol,
+                "alpha6_score": _late_breakout_first_float(row, ("alpha6_score", "alpha6_buy_score")),
+                "overextension_score": _late_breakout_first_float(
+                    row,
+                    ("overextension_score", "late_breakout_score", "chase_risk_score"),
+                ),
+                "would_block_entry": bool(would_block),
+                "future_4h_net_bps": future_4h,
+                "future_8h_net_bps": future_8h,
+                "would_block_loss_count": int(loss_count),
+                "would_block_profit_count": int(profit_count),
+                "live_order_effect": "read_only_no_live_order",
+            }
+        )
+    out.sort(key=lambda item: (str(item.get("ts_utc") or ""), str(item.get("symbol") or "")))
     return out
 
 
@@ -4853,6 +5072,11 @@ def update_sol_paper_strategy_tracker(
         run_path=run_path,
         candidate_rows=candidate_rows,
     )
+    late_breakout_failure_rows = _late_breakout_failure_protect_rows(
+        _read_late_breakout_failure_detail_rows(run_path=run_path, reports_dir=reports_dir),
+        run_id=str(getattr(audit, "run_id", "") or ""),
+        asof_ts_ms=asof_ts_ms,
+    )
     backtest_advisory_rows = _backtest_advisory_reader_rows(
         _read_backtest_report_rows(run_path=run_path, reports_dir=reports_dir),
         run_id=str(getattr(audit, "run_id", "") or ""),
@@ -4983,6 +5207,11 @@ def update_sol_paper_strategy_tracker(
         RISK_ON_MULTI_BUY_SHADOW_FIELDS,
     )
     _write_csv(
+        summaries_dir / "late_breakout_failure_protect_shadow.csv",
+        late_breakout_failure_rows,
+        LATE_BREAKOUT_FAILURE_PROTECT_FIELDS,
+    )
+    _write_csv(
         summaries_dir / "backtest_advisory_reader.csv",
         backtest_advisory_rows,
         BACKTEST_ADVISORY_READER_FIELDS,
@@ -5000,6 +5229,7 @@ def update_sol_paper_strategy_tracker(
         "alpha_factory_advisory_rows": int(len(alpha_factory_rows)),
         "alpha_factory_family_rows": int(len(alpha_factory_family_rows)),
         "risk_on_multi_buy_shadow_rows": int(len(risk_on_multi_buy_rows)),
+        "late_breakout_failure_protect_rows": int(len(late_breakout_failure_rows)),
         "backtest_advisory_rows": int(len(backtest_advisory_rows)),
         "bnb_paper_strategy_rows": int(len(bnb_records)),
         "proposal_rows": int(len(proposal_rows)),

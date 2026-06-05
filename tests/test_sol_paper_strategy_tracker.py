@@ -2161,6 +2161,64 @@ def test_risk_on_multi_buy_reads_reports_raw_reports_detail_file(tmp_path: Path)
     assert row["source_detail_available"] == "True"
 
 
+def test_late_breakout_failure_protect_shadow_reads_quant_lab_detail(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    reports_dir = tmp_path / "reports"
+    run_dir = reports_dir / "runs" / "r_late_breakout"
+    run_dir.mkdir(parents=True)
+    detail_path = reports_dir / "quant_lab" / "latest" / "reports" / "late_breakout_failure_shadow.csv"
+    detail_path.parent.mkdir(parents=True, exist_ok=True)
+    with detail_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(
+            fh,
+            fieldnames=[
+                "run_id",
+                "ts_utc",
+                "symbol",
+                "alpha6_score",
+                "overextension_score",
+                "would_block_entry",
+                "future_4h_net_bps",
+                "future_8h_net_bps",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "run_id": "r_late_breakout",
+                "ts_utc": "2026-05-30T03:00:00Z",
+                "symbol": "BNB-USDT",
+                "alpha6_score": "0.98",
+                "overextension_score": "0.77",
+                "would_block_entry": "true",
+                "future_4h_net_bps": "-35.5",
+                "future_8h_net_bps": "62.0",
+            }
+        )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_late_breakout", start_s),
+        market_data_1h={"BNB/USDT": _series("BNB/USDT", start_s, {0: 640.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["late_breakout_failure_protect_rows"] == 1
+    rows = _read_csv(reports_dir / "summaries" / "late_breakout_failure_protect_shadow.csv")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["symbol"] == "BNB/USDT"
+    assert row["would_block_entry"] == "True"
+    assert row["future_4h_net_bps"] == "-35.5"
+    assert row["future_8h_net_bps"] == "62.0"
+    assert row["would_block_loss_count"] == "1"
+    assert row["would_block_profit_count"] == "1"
+    assert row["live_order_effect"] == "read_only_no_live_order"
+
+
 def test_backtest_advisory_reader_is_read_only(tmp_path: Path) -> None:
     cfg = _cfg()
     cfg.quant_lab.enabled = True
