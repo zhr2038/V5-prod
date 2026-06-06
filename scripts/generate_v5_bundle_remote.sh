@@ -1420,7 +1420,8 @@ def load_csv_dicts(path):
     if not path.is_file():
         return rows
     try:
-        with path.open("r", encoding="utf-8", errors="replace", newline="") as fh:
+        opener = gzip.open if path.suffix == ".gz" else Path.open
+        with opener(path, "rt", encoding="utf-8", errors="replace", newline="") as fh:
             reader = csv.DictReader(fh)
             for row in reader:
                 if row:
@@ -1525,7 +1526,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     not_obs = "not_observable"
     candidate_snapshot_rows = read_candidate_snapshot_summary_rows()
     skipped_candidate_label_rows = load_jsonl(OUT / "raw" / "reports" / "skipped_candidate_labels.jsonl")
-    candidate_label_input_rows = list(candidate_snapshot_rows) + list(skipped_candidate_label_rows)
+    skipped_candidate_outcome_rows = []
+    for outcome_path in sorted((OUT / "raw" / "reports").glob("**/skipped_candidate_outcomes*.csv")):
+        skipped_candidate_outcome_rows.extend(load_csv_dicts(outcome_path))
+    for outcome_path in sorted((OUT / "raw" / "reports").glob("**/skipped_candidate_outcomes*.csv.gz")):
+        skipped_candidate_outcome_rows.extend(load_csv_dicts(outcome_path))
+    for outcome_path in sorted((OUT / "raw" / "large" / "reports").glob("**/skipped_candidate_outcomes*.csv.gz")):
+        skipped_candidate_outcome_rows.extend(load_csv_dicts(outcome_path))
+    candidate_label_input_rows = (
+        list(candidate_snapshot_rows)
+        + list(skipped_candidate_label_rows)
+        + list(skipped_candidate_outcome_rows)
+    )
     candidate_cost_source_coverage_value = candidate_cost_source_coverage(candidate_snapshot_rows)
 
     def as_float(value):

@@ -794,17 +794,18 @@ def fixture_final_score_alpha6_conflict_root(root):
         writer.writeheader()
         writer.writerow(candidate)
 
-    label = {
-        "run_id": run_id,
-        "ts_utc": iso(ts),
-        "symbol": "BNB-USDT",
-        "label_4h_net_bps": "478.016503",
-        "label_8h_net_bps": "555.852398",
-        "label_12h_net_bps": "711.524188",
-        "label_24h_net_bps": "1178.539625",
-    }
-    with (root / "reports/skipped_candidate_labels.jsonl").open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(label, ensure_ascii=False) + "\n")
+    outcome_path = root / "reports/summaries/skipped_candidate_outcomes.csv"
+    outcome_path.parent.mkdir(parents=True, exist_ok=True)
+    write_text(
+        outcome_path,
+        "\n".join(
+            [
+                "run_id,ts_utc,symbol,label_4h_net_bps,label_8h_net_bps,label_12h_net_bps,label_24h_net_bps,label_status",
+                f"{run_id},{iso(ts)},BNB-USDT,478.016503,555.852398,711.524188,1178.539625,complete",
+            ]
+        )
+        + "\n",
+    )
 
     write_ohlcv_cache(
         root,
