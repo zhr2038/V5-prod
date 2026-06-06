@@ -3930,6 +3930,82 @@ def fixture_fresh_expanded_universe_advisory_root(root):
     return run_id
 
 
+def fixture_matured_pending_skipped_candidate_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    entry_dt = now - dt.timedelta(hours=30)
+    future_24h_dt = entry_dt + dt.timedelta(hours=24)
+    current_run_id = now.strftime("%Y%m%d_%H")
+    entry_run_id = entry_dt.strftime("%Y%m%d_%H")
+    future_run_id = future_24h_dt.strftime("%Y%m%d_%H")
+
+    write_text(root / "configs/live_prod.yaml", "btc_leadership_probe_enabled: true\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    entry_run_dir = root / "reports/runs/prod" / entry_run_id
+    write_json(
+        entry_run_dir / "decision_audit.json",
+        {
+            "now_ts": int(entry_dt.timestamp()) + 15,
+            "window_end_ts": int(entry_dt.timestamp()),
+            "router_decisions": [
+                {
+                    "symbol": "BTC/USDT",
+                    "action": "skip",
+                    "reason": "btc_leadership_probe_alpha6_score_too_low",
+                    "btc_leadership_probe": True,
+                    "entry_px": 100.0,
+                    "latest_px": 100.0,
+                    "alpha6_score": 0.05,
+                }
+            ],
+        },
+    )
+    write_text(entry_run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(entry_run_dir / "equity.jsonl", "{}\n")
+    write_json(entry_run_dir / "summary.json", {"run_id": entry_run_id})
+
+    future_run_dir = root / "reports/runs/prod" / future_run_id
+    write_json(
+        future_run_dir / "decision_audit.json",
+        {
+            "now_ts": int(future_24h_dt.timestamp()) + 15,
+            "window_end_ts": int(future_24h_dt.timestamp()),
+            "market": {"symbol": "BTC/USDT", "latest_px": 110.0},
+            "router_decisions": [{"symbol": "BTC/USDT", "action": "skip", "reason": "no_signal", "latest_px": 110.0}],
+        },
+    )
+    write_text(future_run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(future_run_dir / "equity.jsonl", "{}\n")
+    write_json(future_run_dir / "summary.json", {"run_id": future_run_id})
+
+    current_run_dir = root / "reports/runs/prod" / current_run_id
+    write_json(current_run_dir / "decision_audit.json", {"now_ts": int(now.timestamp()) + 15, "window_end_ts": int(now.timestamp()), "router_decisions": []})
+    write_text(current_run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(current_run_dir / "equity.jsonl", "{}\n")
+    write_json(current_run_dir / "summary.json", {"run_id": current_run_id})
+
+    write_text(
+        root / "reports/summaries/skipped_candidate_outcomes.csv",
+        "\n".join(
+            [
+                "ts_utc,run_id,symbol,skip_reason,entry_px,rt_cost_bps,label_4h_net_bps,label_4h_status,label_24h_net_bps,label_24h_status,label_48h_net_bps,label_48h_status,label_status",
+                f"{iso(int(entry_dt.timestamp()))},{entry_run_id},BTC/USDT,btc_leadership_probe_alpha6_score_too_low,100.0,0,,pending,,pending,,pending,pending",
+            ]
+        )
+        + "\n",
+    )
+    return entry_run_id
+
+
 def run_bundle(root):
     script_path = bash_path(SCRIPT)
     root_path = bash_path(root)
@@ -5968,6 +6044,33 @@ def main():
             assert "## PROTECT Sideways 普通开仓表现" in readme, readme
             assert "sample_count: 5" in readme, readme
             assert "BNB/USDT: count=5" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-matured-pending-skipped-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_matured_pending_skipped_candidate_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                blocked = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/btc_leadership_probe_blocked_outcomes.csv")).read().decode().splitlines()))
+                maturity = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/skipped_candidate_maturity_audit.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+            row = next(item for item in blocked if item["skip_reason"] == "btc_leadership_probe_alpha6_score_too_low")
+            assert row["label_status"] == "complete", row
+            assert row["label_24h_status"] == "complete", row
+            assert row["label_24h_net_bps"] == "1000", row
+            assert row["label_48h_status"] == "pending", row
+            maturity_row = next(item for item in maturity if item["skip_reason"] == "btc_leadership_probe_alpha6_score_too_low")
+            assert maturity_row["pending_after_maturity_horizons"] == "", maturity_row
+            assert maturity_row["maturity_issue"] != "pending_after_maturity", maturity_row
+            high_pending = [
+                item for item in issues["issues"]
+                if item.get("severity") == "high" and item.get("code") == "matured_skipped_candidates_still_pending"
+            ]
+            assert high_pending == [], high_pending
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

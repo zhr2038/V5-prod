@@ -6524,6 +6524,116 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             first_value(item or {}, ("latest_px", "last_px"), not_obs),
         )
 
+    def resolve_btc_blocked_horizon_labels(src, item, symbol, decision_ts, not_observable_reason):
+        src = src or {}
+        item = item or {}
+        entry_dt = parse_dt_utc(first_observed(first_value(src, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs), decision_ts))
+        entry_px = as_float(display_entry_px(src, item))
+        rt_cost_bps = as_float(first_observed(
+            first_value(src, ("rt_cost_bps", "roundtrip_cost_bps", "cost_bps"), not_obs),
+            first_value(item, ("rt_cost_bps", "roundtrip_cost_bps", "cost_bps"), not_obs),
+        ))
+        if rt_cost_bps is None:
+            rt_cost_bps = 0.0
+
+        values = {}
+        statuses = {}
+        reasons = {}
+        matured_pending = []
+        matured_not_observable = []
+        horizon_statuses = []
+
+        for horizon in label_horizons:
+            h = int(horizon)
+            net_key = f"label_{h}h_net_bps"
+            gross_key = f"label_{h}h_gross_bps"
+            status_key = f"label_{h}h_status"
+            reason_key = f"label_{h}h_reason"
+            existing_net = first_value(src, (net_key,), not_obs)
+            existing_status = flatten_value(first_value(src, (status_key,), "")).strip().lower()
+            existing_reason = flatten_value(first_value(src, (reason_key,), "")).strip()
+            existing_net_float = as_float(existing_net)
+
+            if existing_net_float is not None:
+                values[net_key] = fmt_num(existing_net_float, 6)
+                statuses[status_key] = "complete"
+                reasons[reason_key] = ""
+                horizon_statuses.append("complete")
+                continue
+
+            horizon_dt = entry_dt + dt.timedelta(hours=h) if entry_dt is not None else None
+            if not_observable_reason:
+                reason = not_observable_reason
+                values[net_key] = not_obs
+                statuses[status_key] = "not_observable"
+                reasons[reason_key] = reason
+                matured_not_observable.append(f"{h}h:{reason}")
+                horizon_statuses.append("not_observable")
+                continue
+
+            if horizon_dt is not None and NOW < horizon_dt:
+                values[net_key] = "pending"
+                statuses[status_key] = "pending"
+                reasons[reason_key] = existing_reason or f"awaiting_horizon_until_{horizon_dt.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+                horizon_statuses.append("pending")
+                continue
+
+            if entry_dt is None:
+                reason = "missing_entry_ts"
+                values[net_key] = not_obs
+                statuses[status_key] = "not_observable"
+                reasons[reason_key] = reason
+                matured_not_observable.append(f"{h}h:{reason}")
+                horizon_statuses.append("not_observable")
+                continue
+
+            if entry_px is None or entry_px <= 0.0:
+                reason = "missing_entry_px"
+                values[net_key] = not_obs
+                statuses[status_key] = "not_observable"
+                reasons[reason_key] = reason
+                matured_not_observable.append(f"{h}h:{reason}")
+                horizon_statuses.append("not_observable")
+                continue
+
+            future_px, future_source, future_reason = future_price_for_symbol(symbol, horizon_dt)
+            if future_px is not None and future_px > 0.0:
+                gross_bps = ((float(future_px) / float(entry_px)) - 1.0) * 10000.0
+                net_bps = gross_bps - float(rt_cost_bps)
+                values[net_key] = fmt_num(net_bps, 6)
+                values[gross_key] = fmt_num(gross_bps, 6)
+                statuses[status_key] = "complete"
+                reasons[reason_key] = "" if not future_source else f"backfilled_from_{future_source}"
+                horizon_statuses.append("complete")
+                continue
+
+            if existing_status == "pending":
+                matured_pending.append(f"{h}h")
+            reason = existing_reason or future_reason or "missing_future_px"
+            values[net_key] = not_obs
+            statuses[status_key] = "not_observable"
+            reasons[reason_key] = reason
+            matured_not_observable.append(f"{h}h:{reason}")
+            horizon_statuses.append("not_observable")
+
+        if any(status == "complete" for status in horizon_statuses):
+            aggregate_status = "complete"
+        elif any(status == "not_observable" for status in horizon_statuses):
+            aggregate_status = "not_observable"
+        elif any(status == "pending" for status in horizon_statuses):
+            aggregate_status = "pending"
+        else:
+            aggregate_status = flatten_value(first_value(src, ("label_status",), not_obs))
+
+        return {
+            "values": values,
+            "statuses": statuses,
+            "reasons": reasons,
+            "aggregate_status": aggregate_status,
+            "pending_after_maturity_horizons": matured_pending,
+            "not_observable_after_maturity_horizons": matured_not_observable,
+        }
+
     def not_observable_reason_for(skip_reason, src, item):
         if skip_reason == "btc_leadership_probe_not_flat" and explicit_entry_px(src, item) == not_obs:
             return "not_flat"
@@ -6551,10 +6661,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         label_present = label is not None
         outcome_present = outcome is not None
         not_observable_reason = not_observable_reason_for(reason, src, item)
-        label_status = flatten_value(first_value(src, ("label_status", "label_24h_status"), not_obs))
-        if not_observable_reason:
-            label_status = "not_observable"
-        elif label_status == not_obs and not (label_present or outcome_present):
+        resolved_labels = resolve_btc_blocked_horizon_labels(src, item, symbol, decision["ts_utc"], not_observable_reason)
+        label_status = resolved_labels["aggregate_status"]
+        pending_after_maturity_horizons = resolved_labels["pending_after_maturity_horizons"]
+        not_observable_after_maturity_horizons = resolved_labels["not_observable_after_maturity_horizons"]
+        if not not_observable_reason and label_status == not_obs and not (label_present or outcome_present):
             label_status = "unlabeled"
         age_hours = parse_time_to_hours_ago(first_observed(first_value(src, ("ts_utc", "entry_ts", "entry_ts_ms"), not_obs), decision["ts_utc"]))
         age_text = f"{age_hours:.3f}" if age_hours is not None else not_obs
@@ -6573,13 +6684,29 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             labeled_complete_count += 1
         if label_status == "not_observable":
             not_observable_count += 1
-        if label_status == "pending" and age_hours is not None and age_hours >= 24:
+        if pending_after_maturity_horizons:
             add_issue(
                 "high",
                 "matured_skipped_candidates_still_pending",
-                "Skipped candidate is old enough to mature but still pending.",
-                {"run_id": decision["run_id"], "ts_utc": decision["ts_utc"], "symbol": symbol, "skip_reason": reason, "age_hours": age_hours, "unique_key": btc_label_key_text(decision_key)},
+                "Skipped candidate has matured horizons that are still pending.",
+                {
+                    "run_id": decision["run_id"],
+                    "ts_utc": decision["ts_utc"],
+                    "symbol": symbol,
+                    "skip_reason": reason,
+                    "age_hours": age_hours,
+                    "pending_after_maturity_horizons": pending_after_maturity_horizons,
+                    "unique_key": btc_label_key_text(decision_key),
+                },
             )
+        if pending_after_maturity_horizons:
+            maturity_issue = "pending_after_maturity"
+        elif not_observable_reason or not_observable_after_maturity_horizons:
+            maturity_issue = "not_observable"
+        elif missing_label:
+            maturity_issue = "missing_label_or_outcome"
+        else:
+            maturity_issue = ""
         maturity_rows.append({
             "ts_utc": decision["ts_utc"],
             "run_id": decision["run_id"],
@@ -6591,7 +6718,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "label_status": label_status,
             "not_observable_reason": not_observable_reason,
             "age_hours": age_text,
-            "maturity_issue": "not_observable" if not_observable_reason else ("missing_label_or_outcome" if missing_label else ("pending_after_maturity" if label_status == "pending" and age_hours is not None and age_hours >= 24 else "")),
+            "pending_after_maturity_horizons": ",".join(pending_after_maturity_horizons),
+            "not_observable_after_maturity_horizons": ";".join(not_observable_after_maturity_horizons),
+            "maturity_issue": maturity_issue,
             "raw_json": safe_json(item),
         })
         btc_blocked_rows.append({
@@ -6601,10 +6730,27 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "skip_reason": reason,
             "entry_px": not_obs if not_observable_reason else display_entry_px(src, item),
             "age_hours": age_text,
-            "label_4h_net_bps": flatten_value(first_value(src, ("label_4h_net_bps",), not_obs)),
-            "label_8h_net_bps": flatten_value(first_value(src, ("label_8h_net_bps",), not_obs)),
-            "label_12h_net_bps": flatten_value(first_value(src, ("label_12h_net_bps",), not_obs)),
-            "label_24h_net_bps": flatten_value(first_value(src, ("label_24h_net_bps",), not_obs)),
+            "label_4h_net_bps": flatten_value(resolved_labels["values"].get("label_4h_net_bps", first_value(src, ("label_4h_net_bps",), not_obs))),
+            "label_8h_net_bps": flatten_value(resolved_labels["values"].get("label_8h_net_bps", first_value(src, ("label_8h_net_bps",), not_obs))),
+            "label_12h_net_bps": flatten_value(resolved_labels["values"].get("label_12h_net_bps", first_value(src, ("label_12h_net_bps",), not_obs))),
+            "label_24h_net_bps": flatten_value(resolved_labels["values"].get("label_24h_net_bps", first_value(src, ("label_24h_net_bps",), not_obs))),
+            "label_48h_net_bps": flatten_value(resolved_labels["values"].get("label_48h_net_bps", first_value(src, ("label_48h_net_bps",), not_obs))),
+            "label_72h_net_bps": flatten_value(resolved_labels["values"].get("label_72h_net_bps", first_value(src, ("label_72h_net_bps",), not_obs))),
+            "label_120h_net_bps": flatten_value(resolved_labels["values"].get("label_120h_net_bps", first_value(src, ("label_120h_net_bps",), not_obs))),
+            "label_4h_status": resolved_labels["statuses"].get("label_4h_status", flatten_value(first_value(src, ("label_4h_status",), not_obs))),
+            "label_8h_status": resolved_labels["statuses"].get("label_8h_status", flatten_value(first_value(src, ("label_8h_status",), not_obs))),
+            "label_12h_status": resolved_labels["statuses"].get("label_12h_status", flatten_value(first_value(src, ("label_12h_status",), not_obs))),
+            "label_24h_status": resolved_labels["statuses"].get("label_24h_status", flatten_value(first_value(src, ("label_24h_status",), not_obs))),
+            "label_48h_status": resolved_labels["statuses"].get("label_48h_status", flatten_value(first_value(src, ("label_48h_status",), not_obs))),
+            "label_72h_status": resolved_labels["statuses"].get("label_72h_status", flatten_value(first_value(src, ("label_72h_status",), not_obs))),
+            "label_120h_status": resolved_labels["statuses"].get("label_120h_status", flatten_value(first_value(src, ("label_120h_status",), not_obs))),
+            "label_4h_reason": resolved_labels["reasons"].get("label_4h_reason", flatten_value(first_value(src, ("label_4h_reason",), ""))),
+            "label_8h_reason": resolved_labels["reasons"].get("label_8h_reason", flatten_value(first_value(src, ("label_8h_reason",), ""))),
+            "label_12h_reason": resolved_labels["reasons"].get("label_12h_reason", flatten_value(first_value(src, ("label_12h_reason",), ""))),
+            "label_24h_reason": resolved_labels["reasons"].get("label_24h_reason", flatten_value(first_value(src, ("label_24h_reason",), ""))),
+            "label_48h_reason": resolved_labels["reasons"].get("label_48h_reason", flatten_value(first_value(src, ("label_48h_reason",), ""))),
+            "label_72h_reason": resolved_labels["reasons"].get("label_72h_reason", flatten_value(first_value(src, ("label_72h_reason",), ""))),
+            "label_120h_reason": resolved_labels["reasons"].get("label_120h_reason", flatten_value(first_value(src, ("label_120h_reason",), ""))),
             "label_status": label_status,
             "not_observable_reason": not_observable_reason,
             "alpha6_score": flatten_value(first_value(src, ("alpha6_score",), item.get("alpha6_score", not_obs))),
@@ -10658,12 +10804,31 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     write_csv(
         "summaries/skipped_candidate_maturity_audit.csv",
         maturity_rows,
-        ["ts_utc", "run_id", "symbol", "skip_reason", "action", "label_present", "outcome_present", "label_status", "not_observable_reason", "age_hours", "maturity_issue", "raw_json"],
+        ["ts_utc", "run_id", "symbol", "skip_reason", "action", "label_present", "outcome_present", "label_status", "not_observable_reason", "age_hours", "pending_after_maturity_horizons", "not_observable_after_maturity_horizons", "maturity_issue", "raw_json"],
     )
     write_csv(
         "summaries/btc_leadership_probe_blocked_outcomes.csv",
         btc_blocked_rows,
-        ["ts_utc", "run_id", "symbol", "skip_reason", "entry_px", "age_hours", *[f"label_{int(h)}h_net_bps" for h in label_horizons], "label_status", "not_observable_reason", "alpha6_score", "f4_volume_expansion", "f5_rsi_trend_confirm", "rolling_high", "breakout_met", "net_expectancy_bps", "closed_cycles"],
+        [
+            "ts_utc",
+            "run_id",
+            "symbol",
+            "skip_reason",
+            "entry_px",
+            "age_hours",
+            *[f"label_{int(h)}h_net_bps" for h in label_horizons],
+            *[f"label_{int(h)}h_status" for h in label_horizons],
+            *[f"label_{int(h)}h_reason" for h in label_horizons],
+            "label_status",
+            "not_observable_reason",
+            "alpha6_score",
+            "f4_volume_expansion",
+            "f5_rsi_trend_confirm",
+            "rolling_high",
+            "breakout_met",
+            "net_expectancy_bps",
+            "closed_cycles",
+        ],
     )
     write_csv(
         "summaries/negative_expectancy_consistency.csv",
