@@ -12009,6 +12009,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             selected_age_sec = max(0.0, (NOW - selected_latest_dt).total_seconds())
         max_age_sec = (config_number("quant_lab_strategy_opportunity_advisory_max_age_minutes") or 90.0) * 60.0
         selected_source_is_stale = any(not truthy_text(row.get("advisory_fresh")) for row in selected_rows) if selected_rows else True
+        local_fresh = bool(local_rows) and all(truthy_text(row.get("advisory_fresh")) for row in local_rows)
+        api_fresh = bool(api_rows) and all(truthy_text(row.get("advisory_fresh")) for row in api_rows)
         freshness_status_values = sorted({
             flatten_value(row.get("freshness_status")).strip()
             for row in selected_rows
@@ -12078,6 +12080,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "local_row_count": len(local_rows),
             "api_row_count": api_row_count,
             "selected_row_count": len(selected_rows),
+            "local_fresh": str(local_fresh).lower(),
+            "api_fresh": str(api_fresh).lower(),
+            "selection_reason": selected_reason,
             "latest_local_generated_at": iso_or_not_obs(local_latest_dt),
             "latest_api_generated_at": iso_or_not_obs(comparable_api_latest_dt),
             "selected_latest_generated_at": iso_or_not_obs(selected_latest_dt),
@@ -13540,8 +13545,21 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if not isinstance(row, dict):
             return {}
         payload = dict(row)
+        force_source_health_keys = {
+            "local_fresh",
+            "api_fresh",
+            "selection_reason",
+            "selected_source_is_stale",
+            "freshness_status",
+            "freshness_reason",
+            "stale_reason",
+            "stale_reason_detail",
+            "suggested_fix",
+            "warning",
+            "freshness_inconsistency_warning",
+        }
         for key, value in strategy_advisory_source_selection.items():
-            if value not in (None, ""):
+            if key in force_source_health_keys or value not in (None, ""):
                 payload[key] = flatten_value(value)
         max_age_sec = (config_number("quant_lab_strategy_opportunity_advisory_max_age_minutes") or 90.0) * 60.0
         if not payload.get("advisory_max_age_sec"):

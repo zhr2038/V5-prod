@@ -6579,9 +6579,12 @@ def main():
             assert len(source_health) == 1, source_health
             health_row = source_health[0]
             assert health_row["selected_source_is_stale"] == "false", health_row
+            assert health_row["local_fresh"] == "true", health_row
             assert health_row["freshness_status"] == "fresh", health_row
             assert health_row["freshness_reason"] == "fresh", health_row
             assert health_row["stale_reason"] == "", health_row
+            assert health_row["warning"] == "", health_row
+            assert health_row["selection_reason"] != "both_stale_local_newer_than_api", health_row
             assert "age_exceeds_max" not in health_row["stale_reason_detail"], health_row
             assert "expired" not in health_row["stale_reason_detail"], health_row
             assert float(health_row["advisory_age_sec"]) <= float(health_row["advisory_max_age_sec"]), health_row
