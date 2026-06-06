@@ -55,6 +55,11 @@ CONFLICT_FIELDS = (
     "max_future_net_bps",
     "best_future_horizon_hours",
     "material_profit_flag",
+    "label_join_attempted",
+    "label_join_key",
+    "label_join_match_type",
+    "label_join_time_skew_sec",
+    "label_join_failure_reason",
     "label_4h_status",
     "label_8h_status",
     "label_12h_status",
@@ -252,38 +257,95 @@ def label_row_for(
     row: Mapping[str, Any],
     label_index: Mapping[tuple[str, str, str], Any],
 ) -> Mapping[str, Any]:
+    label_row, _diagnostics = label_join_diagnostics(row, label_index)
+    return label_row
+
+
+def label_join_diagnostics(
+    row: Mapping[str, Any],
+    label_index: Mapping[tuple[str, str, str], Any],
+) -> tuple[Mapping[str, Any], dict[str, Any]]:
+    run_id = str(row.get("run_id") or "").strip()
+    raw_symbol = str(row.get("symbol") or "").strip()
+    symbol = normalize_symbol(raw_symbol)
+    times = label_time_candidates_ms(row)
+    keys = label_join_keys(row)
+    primary_key = keys[0] if keys else (run_id, symbol, _iso_from_ms(times[0]) if times else "")
+    diagnostics: dict[str, Any] = {
+        "label_join_attempted": "true" if run_id and symbol and times else "false",
+        "label_join_key": "|".join(str(part) for part in primary_key),
+        "label_join_match_type": "none",
+        "label_join_time_skew_sec": "not_observable",
+        "label_join_failure_reason": "",
+    }
+    if not run_id:
+        diagnostics["label_join_failure_reason"] = "missing_run_id"
+        return {}, diagnostics
+    if not symbol:
+        diagnostics["label_join_failure_reason"] = "missing_symbol"
+        return {}, diagnostics
+    if not times:
+        diagnostics["label_join_failure_reason"] = "missing_ts"
+        return {}, diagnostics
     for key in label_join_keys(row):
         label_row = label_index.get(key)
         if isinstance(label_row, Mapping):
-            return label_row
-    times = label_time_candidates_ms(row)
-    if not times:
-        return {}
-    run_id = str(row.get("run_id") or "").strip()
-    symbol = normalize_symbol(row.get("symbol"))
+            diagnostics["label_join_match_type"] = "exact"
+            diagnostics["label_join_time_skew_sec"] = 0
+            return label_row, diagnostics
     by_run_symbol = label_index.get(LABEL_BY_RUN_SYMBOL_KEY)
-    candidates: list[tuple[int, Mapping[str, Any]]] = []
+    same_run_candidates: list[tuple[int, Mapping[str, Any]]] = []
     if isinstance(by_run_symbol, Mapping):
-        candidates.extend(by_run_symbol.get((run_id, symbol), []))
+        same_run_candidates.extend(by_run_symbol.get((run_id, symbol), []))
+    best_same_run = _nearest_label_candidate(times, same_run_candidates)
+    if best_same_run is not None:
+        skew, candidate_row = best_same_run
+        if skew <= LABEL_NEAREST_MAX_SKEW_MS:
+            diagnostics["label_join_match_type"] = "nearest_same_run_symbol"
+            diagnostics["label_join_time_skew_sec"] = round(skew / 1000.0, 3)
+            return candidate_row, diagnostics
+        diagnostics["label_join_failure_reason"] = "nearest_label_too_far"
+        diagnostics["label_join_time_skew_sec"] = round(skew / 1000.0, 3)
+        return {}, diagnostics
     # V5 run_id can drift by one hour around UTC/local run folders while labels
     # keep the rounded signal timestamp. Fall back to symbol+nearby timestamp so
     # research diagnostics do not stay pending when the sample is otherwise the
     # same closed-bar candidate.
     by_symbol = label_index.get(LABEL_BY_SYMBOL_KEY)
+    symbol_candidates: list[tuple[int, Mapping[str, Any]]] = []
     if isinstance(by_symbol, Mapping):
-        candidates.extend(by_symbol.get(symbol, []))
-    if not candidates:
-        return {}
+        symbol_candidates.extend(by_symbol.get(symbol, []))
+    best_symbol = _nearest_label_candidate(times, symbol_candidates)
+    if best_symbol is not None:
+        skew, candidate_row = best_symbol
+        if skew <= LABEL_NEAREST_MAX_SKEW_MS:
+            diagnostics["label_join_match_type"] = "nearest_symbol_only"
+            diagnostics["label_join_time_skew_sec"] = round(skew / 1000.0, 3)
+            return candidate_row, diagnostics
+        diagnostics["label_join_failure_reason"] = "nearest_label_too_far"
+        diagnostics["label_join_time_skew_sec"] = round(skew / 1000.0, 3)
+        return {}, diagnostics
+    if raw_symbol and raw_symbol.upper().replace("-", "/") != symbol:
+        diagnostics["label_join_failure_reason"] = "symbol_normalization_mismatch"
+    else:
+        diagnostics["label_join_failure_reason"] = "no_label_same_run_symbol"
+    return {}, diagnostics
+
+
+def _nearest_label_candidate(
+    times: Sequence[int],
+    candidates: Sequence[tuple[int, Mapping[str, Any]]],
+) -> tuple[int, Mapping[str, Any]] | None:
+    if not times or not candidates:
+        return None
     best: tuple[int, Mapping[str, Any]] | None = None
     for candidate_time, candidate_row in candidates:
         skew = min(abs(candidate_time - value) for value in times)
-        if skew > LABEL_NEAREST_MAX_SKEW_MS:
-            continue
         if best is None or skew < best[0] or (
             skew == best[0] and _observed_label_count(candidate_row) > _observed_label_count(best[1])
         ):
             best = (skew, candidate_row)
-    return best[1] if best is not None else {}
+    return best
 
 
 def future_value_for_horizon(
@@ -455,7 +517,7 @@ def build_conflict_rows(
         if not is_final_score_alpha6_conflict_candidate(row):
             continue
         symbol = normalize_symbol(row.get("symbol"))
-        label_row = label_row_for(row, label_index)
+        label_row, label_join = label_join_diagnostics(row, label_index)
         futures = {
             h: future_value_for_horizon(row, label_row, h, future_net_bps)
             for h in LABEL_HORIZONS
@@ -500,6 +562,11 @@ def build_conflict_rows(
                 "max_future_net_bps": max_future,
                 "best_future_horizon_hours": best_horizon,
                 "material_profit_flag": str(material_profit).lower(),
+                "label_join_attempted": label_join["label_join_attempted"],
+                "label_join_key": label_join["label_join_key"],
+                "label_join_match_type": label_join["label_join_match_type"],
+                "label_join_time_skew_sec": label_join["label_join_time_skew_sec"],
+                "label_join_failure_reason": label_join["label_join_failure_reason"],
                 "label_4h_status": label_statuses[4],
                 "label_8h_status": label_statuses[8],
                 "label_12h_status": label_statuses[12],

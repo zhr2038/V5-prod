@@ -48,6 +48,9 @@ def test_bnb_strong_alpha6_rows_include_no_live_order_effect() -> None:
     assert row["max_future_net_bps"] == 240.0
     assert row["best_future_horizon_hours"] == 24
     assert row["material_profit_flag"] == "true"
+    assert row["label_join_attempted"] == "true"
+    assert row["label_join_match_type"] == "none"
+    assert row["label_join_failure_reason"] == "no_label_same_run_symbol"
     assert row["outcome"] == "material_profit_shadow"
     assert row["label_4h_status"] == "complete"
     assert row["label_8h_status"] == "complete"
@@ -97,6 +100,9 @@ def test_bnb_strong_alpha6_joins_skipped_candidate_label_row() -> None:
     assert row["best_future_horizon_hours"] == 12
     assert row["material_profit_flag"] == "true"
     assert row["outcome"] == "material_profit_shadow"
+    assert row["label_join_match_type"] == "exact"
+    assert row["label_join_time_skew_sec"] == 0
+    assert row["label_join_failure_reason"] == ""
 
 
 def test_bnb_strong_alpha6_joins_nearby_entry_ts_ms_label_row() -> None:
@@ -120,6 +126,8 @@ def test_bnb_strong_alpha6_joins_nearby_entry_ts_ms_label_row() -> None:
     assert row["label_status"] == "partial_complete"
     assert row["max_future_net_bps"] == 88.0
     assert row["material_profit_flag"] == "true"
+    assert row["label_join_match_type"] == "nearest_same_run_symbol"
+    assert row["label_join_time_skew_sec"] == 15.0
 
 
 def test_bnb_strong_alpha6_joins_nearby_label_when_run_id_drifts() -> None:
@@ -140,3 +148,5 @@ def test_bnb_strong_alpha6_joins_nearby_label_when_run_id_drifts() -> None:
     assert row["future_12h_net_bps"] == "83.0"
     assert row["label_status"] == "partial_complete"
     assert row["outcome"] == "material_profit_shadow"
+    assert row["label_join_match_type"] == "nearest_symbol_only"
+    assert row["label_join_time_skew_sec"] == 50.475

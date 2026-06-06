@@ -58,6 +58,9 @@ def test_final_score_alpha6_conflict_rows_keep_negative_expectancy_stats() -> No
     assert row["max_future_net_bps"] == 240.0
     assert row["best_future_horizon_hours"] == 24
     assert row["material_profit_flag"] == "true"
+    assert row["label_join_attempted"] == "true"
+    assert row["label_join_match_type"] == "none"
+    assert row["label_join_failure_reason"] == "no_label_same_run_symbol"
     assert row["label_4h_status"] == "complete"
     assert row["label_8h_status"] == "complete"
     assert row["label_12h_status"] == "complete"
@@ -108,6 +111,10 @@ def test_final_score_alpha6_conflict_joins_skipped_candidate_label_row() -> None
     assert row["label_8h_status"] == "complete"
     assert row["label_12h_status"] == "pending"
     assert row["label_status"] == "partial_complete"
+    assert row["label_join_attempted"] == "true"
+    assert row["label_join_match_type"] == "exact"
+    assert row["label_join_time_skew_sec"] == 0
+    assert row["label_join_failure_reason"] == ""
     assert row["max_future_net_bps"] == 70.5
     assert row["best_future_horizon_hours"] == 4
     assert row["material_profit_flag"] == "true"
@@ -133,6 +140,8 @@ def test_final_score_alpha6_conflict_joins_entry_ts_ms_label_row() -> None:
     assert row["future_4h_net_bps"] == "61.5"
     assert row["label_4h_status"] == "complete"
     assert row["label_status"] == "partial_complete"
+    assert row["label_join_match_type"] == "exact"
+    assert row["label_join_time_skew_sec"] == 0
 
 
 def test_final_score_alpha6_conflict_joins_nearby_label_timestamp() -> None:
@@ -150,6 +159,8 @@ def test_final_score_alpha6_conflict_joins_nearby_label_timestamp() -> None:
     row = rows[0]
     assert row["future_8h_net_bps"] == "93.0"
     assert row["label_8h_status"] == "complete"
+    assert row["label_join_match_type"] == "nearest_same_run_symbol"
+    assert row["label_join_time_skew_sec"] == 15.0
 
 
 def test_final_score_alpha6_conflict_joins_nearby_label_when_run_id_drifts() -> None:
@@ -170,3 +181,25 @@ def test_final_score_alpha6_conflict_joins_nearby_label_when_run_id_drifts() -> 
     assert row["future_24h_net_bps"] == "143.9"
     assert row["label_status"] == "partial_complete"
     assert row["material_profit_flag"] == "true"
+    assert row["label_join_match_type"] == "nearest_symbol_only"
+    assert row["label_join_time_skew_sec"] == 50.475
+
+
+def test_final_score_alpha6_conflict_label_join_reports_failure_reason() -> None:
+    candidate = _base_row(ts_utc="2026-05-30T03:00:00Z")
+    far_label = {
+        "run_id": "r1",
+        "ts_utc": "2026-05-30T04:00:01Z",
+        "symbol": "BNB-USDT",
+        "label_4h_net_bps": "70.0",
+    }
+
+    rows = build_conflict_rows([candidate, far_label])
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["label_join_attempted"] == "true"
+    assert row["label_join_match_type"] == "none"
+    assert row["label_join_failure_reason"] == "nearest_label_too_far"
+    assert row["label_join_time_skew_sec"] == 3601.0
+    assert row["label_status"] == "pending"

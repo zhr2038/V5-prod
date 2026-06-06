@@ -12,7 +12,7 @@ from src.reporting.final_score_alpha6_conflict import (
     first_observed,
     label_status_for_future,
     future_value_for_horizon,
-    label_row_for,
+    label_join_diagnostics,
     LABEL_HORIZONS,
     normalize_symbol,
     truthy,
@@ -44,6 +44,11 @@ BYPASS_SHADOW_FIELDS = (
     "max_future_net_bps",
     "best_future_horizon_hours",
     "material_profit_flag",
+    "label_join_attempted",
+    "label_join_key",
+    "label_join_match_type",
+    "label_join_time_skew_sec",
+    "label_join_failure_reason",
     "label_4h_status",
     "label_8h_status",
     "label_12h_status",
@@ -96,7 +101,7 @@ def build_bnb_strong_alpha6_bypass_rows(
     for row in row_list:
         if not is_bnb_strong_alpha6_bypass_candidate(row):
             continue
-        label_row = label_row_for(row, label_index)
+        label_row, label_join = label_join_diagnostics(row, label_index)
         futures = {
             h: future_value_for_horizon(row, label_row, h, future_net_bps)
             for h in LABEL_HORIZONS
@@ -134,6 +139,11 @@ def build_bnb_strong_alpha6_bypass_rows(
                 "max_future_net_bps": max_future,
                 "best_future_horizon_hours": best_horizon,
                 "material_profit_flag": str(material_profit).lower(),
+                "label_join_attempted": label_join["label_join_attempted"],
+                "label_join_key": label_join["label_join_key"],
+                "label_join_match_type": label_join["label_join_match_type"],
+                "label_join_time_skew_sec": label_join["label_join_time_skew_sec"],
+                "label_join_failure_reason": label_join["label_join_failure_reason"],
                 "label_4h_status": label_statuses[4],
                 "label_8h_status": label_statuses[8],
                 "label_12h_status": label_statuses[12],
