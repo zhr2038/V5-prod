@@ -2470,8 +2470,13 @@ def _expanded_would_enter(row: Mapping[str, Any]) -> bool:
     return bool(mode == "paper" and decision != "KILL")
 
 
+def _expanded_action_allows_entry(response_action: str) -> bool:
+    return str(response_action or "").strip() == "paper_tracking"
+
+
 def _expanded_no_sample_reason(row: Mapping[str, Any], fields: Mapping[str, Any]) -> str:
-    if _expanded_would_enter(row):
+    action = str(fields.get("advisory_response_action") or "").strip()
+    if _expanded_action_allows_entry(action) and _expanded_would_enter(row):
         return ""
     symbol = _symbol_text(row.get("symbol"))
     if not symbol:
@@ -2481,14 +2486,14 @@ def _expanded_no_sample_reason(row: Mapping[str, Any], fields: Mapping[str, Any]
     cost_source = str(row.get("cost_source") or row.get("cost_model_version") or "").strip().lower()
     if "global_default" in cost_source:
         return "cost_source_global_default"
-    maturity_state = str(
-        row.get("expanded_universe_maturity_state")
-        or row.get("maturity_state")
-        or row.get("decision")
-        or ""
-    ).strip().upper()
-    if maturity_state and maturity_state != "PAPER_READY":
-        return "maturity_not_paper_ready"
+    if action == "negative_advisory":
+        return "negative_advisory"
+    if action in {"stale_paper_display_only", "stale_shadow_display_only", "stale_advisory_live_disabled"}:
+        return "stale_advisory_display_only"
+    if action in {"research_display_only", "ignored_live_small_disabled", "ignored_recommended_mode_not_paper_or_shadow"}:
+        return "advisory_not_paper_mode"
+    if action == "no_advisory":
+        return "no_advisory"
     for value in (
         row.get("no_sample_reason"),
         row.get("advisory_reason"),
@@ -2497,13 +2502,18 @@ def _expanded_no_sample_reason(row: Mapping[str, Any], fields: Mapping[str, Any]
         text = str(value or "").strip()
         if text:
             return text
-    action = str(fields.get("advisory_response_action") or "").strip()
-    if action == "negative_advisory":
-        return "negative_advisory"
+    maturity_state = str(
+        row.get("expanded_universe_maturity_state")
+        or row.get("maturity_state")
+        or row.get("decision")
+        or ""
+    ).strip().upper()
+    if maturity_state and maturity_state != "PAPER_READY":
+        return "maturity_not_paper_ready"
     if action == "paper_tracking":
         return "maturity_not_paper_ready"
     if action == "shadow_tracking":
-        return "maturity_not_paper_ready"
+        return "advisory_not_paper_mode"
     return "expanded_universe_display_only"
 
 
@@ -2589,10 +2599,20 @@ def _expanded_universe_paper_rows(expanded_rows: Iterable[Mapping[str, Any]]) ->
     out: list[dict[str, Any]] = []
     for row in expanded_rows:
         response_action = str(row.get("response_action") or "")
-        if response_action not in {"paper_tracking", "shadow_tracking", "negative_advisory"}:
+        if response_action not in {
+            "paper_tracking",
+            "shadow_tracking",
+            "negative_advisory",
+            "research_display_only",
+            "stale_paper_display_only",
+            "stale_shadow_display_only",
+            "stale_advisory_live_disabled",
+            "ignored_live_small_disabled",
+            "ignored_recommended_mode_not_paper_or_shadow",
+        }:
             continue
         tracking_mode = "negative" if response_action == "negative_advisory" else str(row.get("recommended_mode") or "")
-        would_enter = _expanded_would_enter(row)
+        would_enter = _expanded_action_allows_entry(response_action) and _expanded_would_enter(row)
         max_paper = _normalize_float(row.get("max_paper_notional_usdt"))
         item = {
             "run_id": row.get("run_id"),

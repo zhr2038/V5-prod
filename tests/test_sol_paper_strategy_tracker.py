@@ -1677,7 +1677,11 @@ def test_expanded_paper_universe_advisory_is_read_only(tmp_path: Path) -> None:
     assert run_by_symbol["TRX/USDT"]["would_enter"] == "True"
     assert run_by_symbol["TRX/USDT"]["would_size_usdt"] == "7.0"
     assert run_by_symbol["HYPE/USDT"]["tracking_mode"] == "shadow"
+    assert run_by_symbol["HYPE/USDT"]["would_enter"] == "False"
+    assert run_by_symbol["HYPE/USDT"]["no_sample_reason"] == "needs_more_samples"
     assert run_by_symbol["SUI/USDT"]["tracking_mode"] == "negative"
+    assert run_by_symbol["SUI/USDT"]["would_enter"] == "False"
+    assert run_by_symbol["SUI/USDT"]["no_sample_reason"] == "negative_advisory"
 
 
 def test_hype_wld_expanded_paper_ready_advisory_generates_paper_strategy_rows(tmp_path: Path) -> None:
@@ -1819,6 +1823,56 @@ def test_expanded_paper_no_entry_rows_have_standard_no_sample_reason(tmp_path: P
     assert by_symbol["WLD/USDT"]["would_enter"] == "False"
     assert by_symbol["WLD/USDT"]["no_sample_reason"] == "missing_strategy_id"
     assert all(row["live_order_effect"] == "read_only_no_live_order" for row in runs)
+
+
+def test_expanded_paper_stale_display_only_outputs_no_entry_diagnostic(tmp_path: Path) -> None:
+    cfg = AppConfig(symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT"])
+    cfg.quant_lab.enabled = True
+    cfg.diagnostics.quant_lab_strategy_opportunity_advisory_api_enabled = False
+    start_s = 1_779_000_000
+    reports_dir = tmp_path / "reports"
+    run_dir = reports_dir / "runs" / "r_expanded_stale"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        reports_dir,
+        [
+            {
+                "strategy_id": "HYPE_EXPANDED_UNIVERSE_PAPER_V1",
+                "strategy_candidate": "v5.expanded_universe_hype_paper",
+                "symbol": "HYPE-USDT",
+                "universe_type": "expanded_paper",
+                "expanded_universe_maturity_state": "PAPER_READY",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "would_enter": "true",
+                "max_paper_notional_usdt": "8",
+                "max_live_notional_usdt": "0",
+                "generated_at": str(start_s),
+                "as_of_ts": str(start_s),
+                "expires_at": str(start_s + 600),
+                "contract_version": CONTRACT_VERSION,
+            }
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_expanded_stale", start_s + 1200),
+        market_data_1h={"HYPE/USDT": _series("HYPE/USDT", start_s + 1200, {0: 30.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["expanded_universe_advisory_rows"] == 1
+    assert result["expanded_universe_paper_rows"] == 1
+    runs = _read_csv(reports_dir / "summaries" / "expanded_universe_paper_runs.csv")
+    row = runs[0]
+    assert row["response_action"] == "stale_paper_display_only"
+    assert row["would_enter"] == "False"
+    assert row["would_size_usdt"] == "0.0"
+    assert row["no_sample_reason"] == "stale_advisory_display_only"
+    daily = _read_csv(reports_dir / "summaries" / "expanded_universe_paper_daily.csv")
+    assert daily[0]["entry_count"] == "0"
 
 
 def test_bottom_zone_probe_paper_advisory_generates_read_only_paper_row(tmp_path: Path) -> None:
