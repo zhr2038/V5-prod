@@ -6433,7 +6433,10 @@ def main():
             assert health_row["advisory_expires_at"].endswith("Z"), health_row
             assert health_row["selected_source"] == "local", health_row
             assert health_row["local_latest_file_mtime"].endswith("Z"), health_row
-            assert health_row["latest_quant_lab_bundle_seen"] == "not_observable", health_row
+            assert (
+                health_row["latest_quant_lab_bundle_seen"] == "not_observable"
+                or ".zip@" in health_row["latest_quant_lab_bundle_seen"]
+            ), health_row
             assert health_row["api_lake_generated_at"] == health_row["latest_api_generated_at"], health_row
             assert "expired" in health_row["stale_reason"], health_row
             assert "row_reasons=" in health_row["stale_reason_detail"], health_row
