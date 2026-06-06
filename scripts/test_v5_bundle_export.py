@@ -3783,10 +3783,11 @@ def fixture_entry_quality_advisory_root(root):
         root / "reports/summaries/strategy_opportunity_advisory_reader.csv",
         "\n".join(
             [
-                "source_path,advisory_source,advisory_fresh,advisory_age_sec,stale_advisory_used,api_fallback_attempted,api_fallback_success,generated_at,expires_at,strategy_candidate,symbol,decision,recommended_mode,would_block_if_enabled,would_enter,no_sample_reason,max_live_notional_usdt,response_action,live_block_reasons",
-                f"api:/v1/strategy-opportunity-advisory,api,False,2274,True,True,True,{advisory_generated_at},{advisory_expires_at},v5.entry_quality_missed_low_audit,BTC/USDT,KEEP_RESEARCH,research,,False,research_only,0,research_display_only,",
-                f"api:/v1/strategy-opportunity-advisory,api,False,2274,True,True,True,{advisory_generated_at},{advisory_expires_at},v5.late_entry_chase_guard_shadow,BTC/USDT,KEEP_SHADOW,shadow,True,False,late_chase_loss_shadow,0,shadow_tracking,",
-                f"api:/v1/strategy-opportunity-advisory,api,False,2274,True,True,True,{advisory_generated_at},{advisory_expires_at},v5.pullback_reversal_shadow_sol,SOL/USDT,PAPER_READY,paper,False,True,,25,paper_tracking,cost_source_not_actual_or_mixed",
+                "source_path,advisory_source,advisory_fresh,advisory_age_sec,stale_advisory_used,api_fallback_attempted,api_fallback_success,generated_at,expires_at,universe_type,strategy_id,strategy_candidate,experiment_name,symbol,decision,recommended_mode,horizon_hours,sample_count,complete_sample_count,would_block_if_enabled,would_enter,no_sample_reason,max_paper_notional_usdt,max_live_notional_usdt,response_action,live_block_reasons,future_4h_net_bps",
+                f"api:/v1/strategy-opportunity-advisory,api,False,2274,True,True,True,{advisory_generated_at},{advisory_expires_at},,,v5.entry_quality_missed_low_audit,,BTC/USDT,KEEP_RESEARCH,research,,,,,False,research_only,,0,research_display_only,,",
+                f"api:/v1/strategy-opportunity-advisory,api,False,2274,True,True,True,{advisory_generated_at},{advisory_expires_at},,,v5.late_entry_chase_guard_shadow,,BTC/USDT,KEEP_SHADOW,shadow,,,,True,False,late_chase_loss_shadow,,0,shadow_tracking,,",
+                f"api:/v1/strategy-opportunity-advisory,api,False,2274,True,True,True,{advisory_generated_at},{advisory_expires_at},,,v5.pullback_reversal_shadow_sol,,SOL/USDT,PAPER_READY,paper,,,,False,True,,25,25,paper_tracking,cost_source_not_actual_or_mixed,",
+                f"api:/v1/strategy-opportunity-advisory,api,True,30,False,True,True,{advisory_generated_at},{advisory_expires_at},expanded_paper,TRX_EXPANDED_PAPER_V1,v5.expanded_universe_trx_paper,v5.expanded_paper_trx,TRX-USDT,PAPER_READY,paper,4,12,8,False,True,,50,0,paper_tracking,,12.0",
             ]
         )
         + "\n",
@@ -3904,6 +3905,24 @@ def fixture_fresh_advisory_with_stale_reason_root(root, *, invalid_expiry=False)
             [
                 "strategy_candidate,symbol,decision,recommended_mode,generated_at,expires_at,contract_version,stale_reason",
                 f"v5.entry_quality_missed_low_audit,BTC/USDT,KEEP_RESEARCH,research,{generated_at},{expires_at},v5.quant_lab.telemetry.v2,age_exceeds_max;expired",
+            ]
+        )
+        + "\n",
+    )
+    return run_id
+
+
+def fixture_fresh_expanded_universe_advisory_root(root):
+    run_id = fixture_root(root)
+    now = dt.datetime.now(dt.timezone.utc)
+    generated_at = (now - dt.timedelta(seconds=30)).isoformat().replace("+00:00", "Z")
+    expires_at = (now + dt.timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    write_text(
+        root / "reports/strategy_opportunity_advisory.csv",
+        "\n".join(
+            [
+                "source_path,advisory_source,advisory_fresh,generated_at,expires_at,contract_version,universe_type,strategy_id,strategy_candidate,experiment_name,symbol,decision,recommended_mode,horizon_hours,sample_count,complete_sample_count,would_enter,no_sample_reason,max_paper_notional_usdt,max_live_notional_usdt,future_4h_net_bps",
+                f"reports/strategy_opportunity_advisory.csv,local,True,{generated_at},{expires_at},v5.quant_lab.telemetry.v2,expanded_paper,WLD_EXPANDED_UNIVERSE_PAPER_V1,v5.expanded_universe_wld_paper,v5.expanded_paper_wld,WLD-USDT,KEEP_SHADOW,shadow,24,18,10,False,shadow_only,50,0,",
             ]
         )
         + "\n",
@@ -6227,9 +6246,9 @@ def main():
             assert "BTC/USDT" in raw_missed_by_symbol, raw_missed_by_symbol
             assert "threshold_bps" in raw_late_sensitivity, raw_late_sensitivity
             assert "TRX/USDT" in expanded_advisory, expanded_advisory
-            assert "read_only_no_live_order" in expanded_runs, expanded_runs
-            assert "TRX_EXPANDED_PAPER_V1" in expanded_daily, expanded_daily
-            assert "read_only_no_live_order" in expanded_daily, expanded_daily
+            assert "stale_paper_display_only" in expanded_advisory, expanded_advisory
+            assert "TRX_EXPANDED_PAPER_V1" not in expanded_runs, expanded_runs
+            assert "TRX_EXPANDED_PAPER_V1" not in expanded_daily, expanded_daily
             assert "v5.expanded_relative_strength_top1_shadow" in alpha_factory, alpha_factory
             assert "read_only_no_live_order" in alpha_factory, alpha_factory
             assert "expanded" in alpha_factory_family, alpha_factory_family
@@ -6263,12 +6282,46 @@ def main():
             assert "advisory_age_sec: 227" in readme, readme
             assert "advisory_max_age_sec: 5400" in readme, readme
             assert f"advisory_expires_at: {health_row['advisory_expires_at']}" in readme, readme
-            assert "stale_advisory_count: 6" in readme, readme
-            assert "stale_response_downgraded_count: 5" in readme, readme
+            assert "stale_advisory_count: 7" in readme, readme
+            assert "stale_response_downgraded_count: 6" in readme, readme
             assert "freshness_rule:" in readme, readme
             assert "## Risk-on multi-buy shadow" in readme, readme
             assert "BNB/USDT" in readme and "SOL/USDT" in readme, readme
             assert "source_detail_available: true" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-fresh-expanded-advisory-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_fresh_expanded_universe_advisory_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                expanded_advisory_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/expanded_universe_advisory_reader.csv")).read().decode().splitlines()))
+                expanded_run_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/expanded_universe_paper_runs.csv")).read().decode().splitlines()))
+                expanded_daily_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/expanded_universe_paper_daily.csv")).read().decode().splitlines()))
+                strategy_reader_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/strategy_opportunity_advisory_reader.csv")).read().decode().splitlines()))
+            assert len(strategy_reader_rows) == 1, strategy_reader_rows
+            assert len(expanded_advisory_rows) == 1, expanded_advisory_rows
+            advisory = expanded_advisory_rows[0]
+            assert advisory["symbol"] == "WLD/USDT", advisory
+            assert advisory["response_action"] == "shadow_tracking", advisory
+            assert advisory["live_order_effect"] == "read_only_no_live_order", advisory
+            assert len(expanded_run_rows) == 1, expanded_run_rows
+            run_row = expanded_run_rows[0]
+            assert run_row["symbol"] == "WLD/USDT", run_row
+            assert run_row["response_action"] == "shadow_tracking", run_row
+            assert run_row["would_enter"] == "false", run_row
+            assert run_row["no_sample_reason"] == "shadow_only", run_row
+            assert run_row["live_order_effect"] == "read_only_no_live_order", run_row
+            assert len(expanded_daily_rows) == 1, expanded_daily_rows
+            daily = expanded_daily_rows[0]
+            assert daily["symbol"] == "WLD/USDT", daily
+            assert daily["entry_count"] == "0", daily
+            assert daily["shadow_count"] == "1", daily
+            assert daily["live_order_effect"] == "read_only_no_live_order", daily
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

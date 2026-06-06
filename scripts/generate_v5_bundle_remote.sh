@@ -11546,6 +11546,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         }
 
     def entry_quality_api_fallback_rows():
+        # Legacy name, unified purpose: this is now the selected advisory API
+        # reader for entry-quality, risk-on, Alpha Factory, and expanded-universe
+        # diagnostics.  Keep the full row set; downstream modules filter it.
         if not config_bool("quant_lab_strategy_opportunity_advisory_api_enabled", True):
             return []
         quant_lab_section = live_section_text("quant_lab")
@@ -11573,7 +11576,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             api_meta = strategy_advisory_payload_metadata(payload, headers)
             for item in extract_strategy_advisory_items(payload):
                 normalized = normalize_strategy_advisory_api_row(item, endpoint, api_meta)
-                if entry_quality_strategy_key(normalized) or risk_on_multi_buy_strategy_key(normalized):
+                if normalized.get("strategy_id") or normalized.get("strategy_candidate") or normalized.get("experiment_name"):
                     out_rows.append(normalized)
             if out_rows:
                 break
@@ -11851,6 +11854,241 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         return "entry_quality_advisory_only"
 
     strategy_advisory_rows_for_modules = list(strategy_advisory_summary_rows())
+
+    def strategy_advisory_reader_fields(rows):
+        preferred = [
+            "source_path",
+            "advisory_source",
+            "selected_source",
+            "advisory_fresh",
+            "freshness_status",
+            "stale_reason",
+            "advisory_age_sec",
+            "advisory_contract_match",
+            "stale_advisory_used",
+            "api_fallback_attempted",
+            "api_fallback_success",
+            "as_of_ts",
+            "generated_at",
+            "expires_at",
+            "contract_version",
+            "quant_lab_git_commit",
+            "source_version",
+            "strategy_id",
+            "strategy_candidate",
+            "experiment_name",
+            "source_module",
+            "symbol",
+            "decision",
+            "recommended_mode",
+            "universe_type",
+            "horizon_hours",
+            "sample_count",
+            "complete_sample_count",
+            "expanded_universe_maturity_state",
+            "cost_source",
+            "cost_source_quality",
+            "cost_bps",
+            "cost_model_version",
+            "advisory_status",
+            "advisory_reason",
+            "max_paper_notional_usdt",
+            "max_live_notional_usdt",
+            "live_block_reasons",
+            "would_block_if_enabled",
+            "would_enter",
+            "no_sample_reason",
+            "response_action",
+            "negative_advisory",
+            "max_live_notional_usdt_ignored",
+            "enable_live_small_from_quant_lab",
+        ]
+        fields = list(preferred)
+        for row in rows:
+            for field in row:
+                if field not in fields:
+                    fields.append(field)
+        return fields
+
+    def expanded_universe_advisory_row(row):
+        universe_type = flatten_value(advisory_value(row, "universe_type", default="")).strip().lower().replace("-", "_")
+        strategy_id = flatten_value(advisory_value(row, "strategy_id", default="")).strip()
+        strategy_candidate = flatten_value(advisory_value(row, "strategy_candidate", default="")).strip()
+        if not (
+            universe_type == "expanded_paper"
+            or strategy_id.startswith(("HYPE_EXPANDED_", "WLD_EXPANDED_"))
+            or strategy_candidate in {"v5.expanded_universe_hype_paper", "v5.expanded_universe_wld_paper"}
+        ):
+            return None
+        symbol = normalize_symbol_text(advisory_value(row, "symbol", default=""))
+        response_action = advisory_response_action(row)
+        negative = advisory_decision(row) == "KILL"
+        would_enter_text = flatten_value(advisory_value(row, "would_enter", default="")).strip().lower()
+        if would_enter_text in {"true", "1", "yes", "y"}:
+            would_enter = "true"
+        elif would_enter_text in {"false", "0", "no", "n"}:
+            would_enter = "false"
+        else:
+            would_enter = str(bool(advisory_mode(row) == "paper" and not negative)).lower()
+        no_sample_reason = flatten_value(advisory_value(row, "no_sample_reason", "advisory_reason", "live_block_reasons", default="")).strip()
+        if would_enter == "false" and not no_sample_reason:
+            no_sample_reason = response_action or "no_advisory"
+        payload = {
+            "run_id": copied_runs[-1] if copied_runs else not_obs,
+            "ts_utc": NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "source_path": flatten_value(advisory_value(row, "source_path", default="")),
+            "advisory_source": flatten_value(advisory_value(row, "advisory_source", default="")),
+            "advisory_fresh": flatten_value(advisory_value(row, "advisory_fresh", default="")),
+            "advisory_age_sec": flatten_value(advisory_value(row, "advisory_age_sec", default="")),
+            "advisory_contract_match": flatten_value(advisory_value(row, "advisory_contract_match", default="")),
+            "stale_advisory_used": flatten_value(advisory_value(row, "stale_advisory_used", default="")),
+            "api_fallback_attempted": flatten_value(advisory_value(row, "api_fallback_attempted", default="")),
+            "api_fallback_success": flatten_value(advisory_value(row, "api_fallback_success", default="")),
+            "as_of_ts": flatten_value(advisory_value(row, "as_of_ts", default="")),
+            "generated_at": flatten_value(advisory_value(row, "generated_at", default="")),
+            "expires_at": flatten_value(advisory_value(row, "expires_at", default="")),
+            "contract_version": flatten_value(advisory_value(row, "contract_version", default="")),
+            "quant_lab_git_commit": flatten_value(advisory_value(row, "quant_lab_git_commit", default="")),
+            "source_version": flatten_value(advisory_value(row, "source_version", default="")),
+            "universe_type": "expanded_paper",
+            "symbol": symbol,
+            "symbol_in_live_universe": "false",
+            "live_symbols_unchanged": "true",
+            "strategy_id": strategy_id,
+            "strategy_candidate": strategy_candidate,
+            "experiment_name": flatten_value(advisory_value(row, "experiment_name", default="")),
+            "decision": advisory_decision(row),
+            "recommended_mode": advisory_mode(row),
+            "horizon_hours": flatten_value(advisory_value(row, "horizon_hours", default="")),
+            "sample_count": flatten_value(advisory_value(row, "sample_count", default="")),
+            "complete_sample_count": flatten_value(advisory_value(row, "complete_sample_count", default="")),
+            "response_action": response_action,
+            "negative_advisory": str(bool(negative)).lower(),
+            "paper_tracking_allowed": str(response_action == "paper_tracking").lower(),
+            "shadow_tracking_allowed": str(response_action == "shadow_tracking").lower(),
+            "max_paper_notional_usdt": flatten_value(advisory_value(row, "max_paper_notional_usdt", default="")),
+            "max_live_notional_usdt": "0",
+            "max_live_notional_usdt_ignored": "true",
+            "live_block_reasons": flatten_value(advisory_value(row, "live_block_reasons", default="")),
+            "would_block_if_enabled": flatten_value(advisory_value(row, "would_block_if_enabled", default="")),
+            "would_enter": would_enter,
+            "no_sample_reason": "" if would_enter == "true" else no_sample_reason,
+            "advisory_reason": flatten_value(advisory_value(row, "advisory_reason", default="")),
+            "live_order_effect": "read_only_no_live_order",
+        }
+        for horizon in (4, 8, 12, 24, 48, 72):
+            for field in (
+                f"future_{horizon}h_net_bps",
+                f"label_{horizon}h_net_bps",
+                f"label_{horizon}h_after_cost_bps",
+            ):
+                payload[field] = flatten_value(advisory_value(row, field, default=""))
+        return payload
+
+    def expanded_universe_paper_run_row(row):
+        response_action = flatten_value(row.get("response_action")).strip()
+        if response_action not in {"paper_tracking", "shadow_tracking", "negative_advisory"}:
+            return None
+        would_enter = truthy_text(row.get("would_enter"))
+        tracking_mode = "negative" if response_action == "negative_advisory" else flatten_value(row.get("recommended_mode"))
+        payload = {
+            "run_id": row.get("run_id"),
+            "ts_utc": row.get("ts_utc"),
+            "paper_date": flatten_value(row.get("ts_utc"))[:10],
+            "universe_type": "expanded_paper",
+            "symbol": row.get("symbol"),
+            "symbol_in_live_universe": row.get("symbol_in_live_universe"),
+            "live_symbols_unchanged": "true",
+            "strategy_id": row.get("strategy_id"),
+            "strategy_candidate": row.get("strategy_candidate"),
+            "experiment_name": row.get("experiment_name"),
+            "tracking_mode": tracking_mode,
+            "decision": row.get("decision"),
+            "recommended_mode": row.get("recommended_mode"),
+            "response_action": response_action,
+            "negative_advisory": row.get("negative_advisory"),
+            "would_enter": str(bool(would_enter)).lower(),
+            "would_size_usdt": row.get("max_paper_notional_usdt") if would_enter else "0",
+            "max_paper_notional_usdt": row.get("max_paper_notional_usdt"),
+            "max_live_notional_usdt_ignored": "true",
+            "no_sample_reason": row.get("no_sample_reason"),
+            "advisory_source": row.get("advisory_source"),
+            "advisory_source_path": row.get("source_path"),
+            "advisory_fresh": row.get("advisory_fresh"),
+            "advisory_contract_match": row.get("advisory_contract_match"),
+            "live_block_reasons": row.get("live_block_reasons"),
+            "live_order_effect": "read_only_no_live_order",
+        }
+        for horizon in (4, 8, 12, 24, 48, 72):
+            value = first_observed(
+                row.get(f"future_{horizon}h_net_bps"),
+                row.get(f"label_{horizon}h_net_bps"),
+                row.get(f"label_{horizon}h_after_cost_bps"),
+                "",
+            )
+            payload[f"paper_pnl_bps_{horizon}h"] = value
+            payload[f"label_{horizon}h_status"] = "complete" if as_float(value) is not None else "pending"
+        return payload
+
+    def expanded_universe_paper_daily_rows(rows):
+        buckets = defaultdict(list)
+        for row in rows:
+            buckets[(row.get("paper_date"), row.get("strategy_id"), row.get("symbol"))].append(row)
+        out = []
+        for (paper_date, strategy_id, symbol), group in sorted(buckets.items(), key=lambda item: item[0]):
+            entry_rows = [row for row in group if truthy_text(row.get("would_enter"))]
+            payload = {
+                "paper_date": paper_date,
+                "strategy_id": strategy_id,
+                "experiment_name": first_observed(*(row.get("experiment_name") for row in group), ""),
+                "symbol": symbol,
+                "row_count": len(group),
+                "entry_count": len(entry_rows),
+                "shadow_count": sum(1 for row in group if row.get("response_action") == "shadow_tracking"),
+                "negative_count": sum(1 for row in group if row.get("response_action") == "negative_advisory"),
+                "live_order_effect": "read_only_no_live_order",
+            }
+            horizon_avgs = {}
+            horizon_counts = {}
+            horizon_wins = {}
+            for horizon in (4, 8, 12, 24, 48, 72):
+                values = [as_float(row.get(f"paper_pnl_bps_{horizon}h")) for row in entry_rows]
+                values = [value for value in values if value is not None]
+                horizon_counts[f"{horizon}h"] = len(values)
+                if values:
+                    avg = round(sum(values) / len(values), 6)
+                    horizon_avgs[f"{horizon}h"] = avg
+                    horizon_wins[f"{horizon}h"] = round(sum(1 for value in values if value > 0.0) / len(values), 6)
+                    payload[f"avg_paper_pnl_bps_{horizon}h"] = avg
+                else:
+                    payload[f"avg_paper_pnl_bps_{horizon}h"] = ""
+            payload["avg_paper_pnl_bps_by_horizon"] = json.dumps(horizon_avgs, ensure_ascii=False, sort_keys=True)
+            payload["paper_pnl_observed_count_by_horizon"] = json.dumps(horizon_counts, ensure_ascii=False, sort_keys=True)
+            payload["win_rate_by_horizon"] = json.dumps(horizon_wins, ensure_ascii=False, sort_keys=True)
+            out.append(payload)
+        return out
+
+    write_csv(
+        "summaries/strategy_opportunity_advisory_reader.csv",
+        strategy_advisory_rows_for_modules,
+        strategy_advisory_reader_fields(strategy_advisory_rows_for_modules),
+    )
+    expanded_universe_rows = [
+        row for row in (expanded_universe_advisory_row(row) for row in strategy_advisory_rows_for_modules)
+        if row is not None
+    ]
+    expanded_universe_paper_rows = [
+        row for row in (expanded_universe_paper_run_row(row) for row in expanded_universe_rows)
+        if row is not None
+    ]
+    write_csv("summaries/expanded_universe_advisory_reader.csv", expanded_universe_rows, EXPANDED_UNIVERSE_ADVISORY_FIELDS)
+    write_csv("summaries/expanded_universe_paper_runs.csv", expanded_universe_paper_rows, EXPANDED_UNIVERSE_PAPER_RUN_FIELDS)
+    write_csv(
+        "summaries/expanded_universe_paper_daily.csv",
+        expanded_universe_paper_daily_rows(expanded_universe_paper_rows),
+        EXPANDED_UNIVERSE_PAPER_DAILY_FIELDS,
+    )
+
     strategy_advisory_stale_count = sum(
         1 for row in strategy_advisory_rows_for_modules
         if not advisory_is_fresh(row)
