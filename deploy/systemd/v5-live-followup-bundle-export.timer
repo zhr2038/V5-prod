@@ -1,0 +1,11 @@
+[Unit]
+Description=Generate sanitized V5 live follow-up bundle every 3 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=3min
+RandomizedDelaySec=30s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

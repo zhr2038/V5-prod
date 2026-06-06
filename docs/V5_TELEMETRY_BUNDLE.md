@@ -79,9 +79,11 @@ Install the timer files from `deploy/systemd/` on the V5 production host:
 
 ```bash
 sudo cp deploy/systemd/v5-export-bundle.* /etc/systemd/system/
+sudo cp deploy/systemd/v5-live-followup-bundle-export.* /etc/systemd/system/
 sudo cp deploy/systemd/v5-quant-lab-selfcheck.* /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now v5-export-bundle.timer
+sudo systemctl enable --now v5-live-followup-bundle-export.timer
 sudo systemctl enable --now v5-quant-lab-selfcheck.timer
 ```
 

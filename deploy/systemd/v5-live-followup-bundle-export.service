@@ -1,0 +1,11 @@
+[Unit]
+Description=Generate sanitized V5 live follow-up bundle for quant-lab
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/clawd/v5-prod
+ExecStart=/bin/bash -lc 'set -euo pipefail; sudo -u ubuntu bash /home/ubuntu/clawd/v5-prod/scripts/generate_v5_bundle_remote.sh /home/ubuntu/clawd/v5-prod; latest=$$(ls -1t /tmp/v5_live_followup_bundle_*.tar.gz | head -1); install -m 0640 -o root -g v5readonly "$$latest" /var/lib/v5/exports/bundles/$$(basename "$$latest"); if [ -f "$${latest}.sha256" ]; then install -m 0640 -o root -g v5readonly "$${latest}.sha256" /var/lib/v5/exports/bundles/$$(basename "$${latest}.sha256"); fi; python3 /home/ubuntu/clawd/v5-prod/scripts/prune_v5_bundles.py /var/lib/v5/exports/bundles --keep-count 1000 --max-age-days 7'
+NoNewPrivileges=true
+PrivateTmp=true
