@@ -6404,6 +6404,7 @@ def main():
                 issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
                 source_health = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/strategy_opportunity_advisory_source_health.csv")).read().decode().splitlines()))
+                strategy_reader_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/strategy_opportunity_advisory_reader.csv")).read().decode().splitlines()))
                 expanded_advisory = tf.extractfile(extract_member(tf, "summaries/expanded_universe_advisory_reader.csv")).read().decode()
                 expanded_runs = tf.extractfile(extract_member(tf, "summaries/expanded_universe_paper_runs.csv")).read().decode()
                 expanded_daily = tf.extractfile(extract_member(tf, "summaries/expanded_universe_paper_daily.csv")).read().decode()
@@ -6438,6 +6439,17 @@ def main():
             assert by_strategy["v5.pullback_reversal_shadow_sol"]["would_enter"] == "True", strategy_rows
             assert by_strategy["v5.pullback_reversal_shadow_sol"]["status"] == "stale_paper_display_only", strategy_rows
             assert by_strategy["v5.pullback_reversal_shadow_sol"]["max_live_notional_usdt_ignored"] == "true", strategy_rows
+            reader_by_strategy = {row["strategy_candidate"]: row for row in strategy_reader_rows}
+            assert reader_by_strategy["v5.entry_quality_missed_low_audit"]["response_action"] == "research_display_only", strategy_reader_rows
+            assert reader_by_strategy["v5.entry_quality_missed_low_audit"]["status"] == "research_display_only", strategy_reader_rows
+            assert reader_by_strategy["v5.entry_quality_missed_low_audit"]["stale_response_downgraded"] == "false", strategy_reader_rows
+            assert reader_by_strategy["v5.late_entry_chase_guard_shadow"]["response_action"] == "stale_shadow_display_only", strategy_reader_rows
+            assert reader_by_strategy["v5.late_entry_chase_guard_shadow"]["status"] == "stale_shadow_display_only", strategy_reader_rows
+            assert reader_by_strategy["v5.late_entry_chase_guard_shadow"]["stale_response_downgraded"] == "true", strategy_reader_rows
+            assert reader_by_strategy["v5.pullback_reversal_shadow_sol"]["response_action"] == "stale_paper_display_only", strategy_reader_rows
+            assert reader_by_strategy["v5.pullback_reversal_shadow_sol"]["status"] == "stale_paper_display_only", strategy_reader_rows
+            assert reader_by_strategy["v5.pullback_reversal_shadow_sol"]["stale_response_downgraded"] == "true", strategy_reader_rows
+            assert reader_by_strategy["v5.pullback_reversal_shadow_sol"]["live_order_effect"] == "read_only_no_live_order", strategy_reader_rows
             assert late["late_entry_chase_guard_enabled"] == "false", late
             assert pullback["pullback_reversal_live_enabled"] == "false", pullback
             assert all(row["live_order_effect"] == "read_only_no_hard_block" for row in reader), reader
@@ -6540,6 +6552,10 @@ def main():
                 expanded_daily_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/expanded_universe_paper_daily.csv")).read().decode().splitlines()))
                 strategy_reader_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/strategy_opportunity_advisory_reader.csv")).read().decode().splitlines()))
             assert len(strategy_reader_rows) == 1, strategy_reader_rows
+            assert strategy_reader_rows[0]["response_action"] == "shadow_tracking", strategy_reader_rows
+            assert strategy_reader_rows[0]["status"] == "shadow_tracking", strategy_reader_rows
+            assert strategy_reader_rows[0]["stale_response_downgraded"] == "false", strategy_reader_rows
+            assert strategy_reader_rows[0]["live_order_effect"] == "read_only_no_live_order", strategy_reader_rows
             assert len(expanded_advisory_rows) == 1, expanded_advisory_rows
             advisory = expanded_advisory_rows[0]
             assert advisory["symbol"] == "WLD/USDT", advisory

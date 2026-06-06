@@ -12202,6 +12202,26 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             return "ignored_live_small_disabled"
         return "display_only"
 
+    def advisory_stale_response_downgraded(row):
+        return advisory_response_action(row) in {
+            "stale_paper_display_only",
+            "stale_shadow_display_only",
+            "stale_advisory_live_disabled",
+        }
+
+    def enrich_strategy_advisory_reader_row(row):
+        payload = dict(row)
+        response_action = advisory_response_action(payload)
+        payload["response_action"] = response_action
+        payload["status"] = response_action
+        payload["stale_response_downgraded"] = str(advisory_stale_response_downgraded(payload)).lower()
+        payload["negative_advisory"] = str(advisory_decision(payload) == "KILL").lower()
+        payload["max_live_notional_usdt_ignored"] = "true"
+        payload["enable_live_small_from_quant_lab"] = "false"
+        if not flatten_value(payload.get("live_order_effect")).strip():
+            payload["live_order_effect"] = "read_only_no_live_order"
+        return payload
+
     def advisory_no_sample_reason(row, module_name):
         reason = flatten_value(advisory_value(
             row,
@@ -12224,7 +12244,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             return "pullback_reversal_shadow_only"
         return "entry_quality_advisory_only"
 
-    strategy_advisory_rows_for_modules = list(strategy_advisory_summary_rows())
+    strategy_advisory_rows_for_modules = [
+        enrich_strategy_advisory_reader_row(row)
+        for row in strategy_advisory_summary_rows()
+    ]
 
     def strategy_advisory_reader_fields(rows):
         preferred = [
@@ -12270,9 +12293,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "would_enter",
             "no_sample_reason",
             "response_action",
+            "status",
+            "stale_response_downgraded",
             "negative_advisory",
             "max_live_notional_usdt_ignored",
             "enable_live_small_from_quant_lab",
+            "live_order_effect",
         ]
         fields = list(preferred)
         for row in rows:
