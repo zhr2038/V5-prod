@@ -1287,6 +1287,51 @@ def filter_raw_jsonl_outputs_recent_24h():
 
 
 def merge_candidate_snapshot_reports():
+    def norm_symbol(value):
+        text = flatten_value(value).strip().upper().replace("-", "/")
+        if text.endswith("/USDT"):
+            return text
+        if text.endswith("USDT") and "/" not in text and len(text) > 4:
+            return f"{text[:-4]}/USDT"
+        return text
+
+    def row_missing(value):
+        return flatten_value(value).strip().lower() in {"", "null", "none", "nan", "not_observable"}
+
+    def numeric_price(value):
+        try:
+            parsed = float(flatten_value(value))
+        except Exception:
+            return None
+        return parsed if parsed > 0 else None
+
+    def iter_json_dicts(value):
+        if isinstance(value, dict):
+            yield value
+            for nested in value.values():
+                yield from iter_json_dicts(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                yield from iter_json_dicts(nested)
+
+    price_by_run_symbol = {}
+    for audit_path in sorted((OUT / "raw" / "recent_runs").glob("*/decision_audit.json")):
+        try:
+            data = json.loads(audit_path.read_text(encoding="utf-8", errors="replace"))
+        except Exception as exc:
+            collection_errors.append({"source": str(audit_path), "error": f"candidate_snapshot_price_backfill: {exc!r}"})
+            continue
+        run_id = flatten_value(data.get("run_id") if isinstance(data, dict) else "") or audit_path.parent.name
+        for item in iter_json_dicts(data):
+            symbol = norm_symbol(item.get("symbol") or item.get("instId") or item.get("inst_id") or item.get("instrument"))
+            if not symbol:
+                continue
+            for field in ("entry_px", "latest_px", "current_px", "last_px", "price", "px", "close"):
+                price = numeric_price(item.get(field))
+                if price is not None:
+                    price_by_run_symbol.setdefault((run_id, symbol), (price, f"decision_audit.{field}"))
+                    break
+
     paths = []
     aggregate = OUT / "raw" / "reports" / "candidate_snapshot.csv"
     if aggregate.is_file():
@@ -1310,6 +1355,15 @@ def merge_candidate_snapshot_reports():
                     candidate_id = flatten_value(row.get("candidate_id"))
                     symbol = flatten_value(row.get("symbol"))
                     strategy = flatten_value(row.get("strategy_candidate"))
+                    normalized_symbol = norm_symbol(symbol)
+                    if row_missing(row.get("entry_px")):
+                        price_info = price_by_run_symbol.get((run_id, normalized_symbol))
+                        if price_info is not None:
+                            price, source = price_info
+                            row["entry_px"] = price
+                            row["latest_px"] = price if row_missing(row.get("latest_px")) else row.get("latest_px")
+                            row["current_px"] = price if row_missing(row.get("current_px")) else row.get("current_px")
+                            row["price_source"] = source if row_missing(row.get("price_source")) else row.get("price_source")
                     key = (candidate_id, run_id, symbol, strategy)
                     if key in seen:
                         continue

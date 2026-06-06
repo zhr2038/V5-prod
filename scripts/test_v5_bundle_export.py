@@ -5815,6 +5815,7 @@ def main():
             with tarfile.open(bundle, "r:gz") as tf:
                 rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/final_score_vs_alpha6_conflict.csv")).read().decode().splitlines()))
                 shadow_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_strong_alpha6_bypass_shadow.csv")).read().decode().splitlines()))
+                candidate_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/candidate_snapshot.csv")).read().decode().splitlines()))
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
@@ -5845,6 +5846,11 @@ def main():
             assert row["best_future_horizon_hours"] == "24", row
             assert row["material_profit_flag"] == "true", row
             assert row["missed_profit_flag"] == "true", row
+            candidate = next(item for item in candidate_rows if item["run_id"] == row["run_id"] and item["symbol"] == row["symbol"])
+            assert candidate["entry_px"] == "642.3", candidate
+            assert candidate["latest_px"] == "642.3", candidate
+            assert candidate["current_px"] == "642.3", candidate
+            assert candidate["price_source"] == "decision_audit.current_px", candidate
             assert window["final_score_alpha6_conflict_count"] == 1, window
             assert window["final_score_alpha6_conflict_recommendation"] == "review_final_score_alpha6_conflict", window
             assert "BNB/USDT" in window["final_score_alpha6_conflict_symbol_breakdown"], window
