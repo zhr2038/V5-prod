@@ -5816,6 +5816,8 @@ def main():
                 rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/final_score_vs_alpha6_conflict.csv")).read().decode().splitlines()))
                 shadow_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/bnb_strong_alpha6_bypass_shadow.csv")).read().decode().splitlines()))
                 candidate_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/candidate_snapshot.csv")).read().decode().splitlines()))
+                price_obs_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/candidate_snapshot_price_observability.csv")).read().decode().splitlines()))
+                price_obs_json = json.loads(tf.extractfile(extract_member(tf, "summaries/candidate_snapshot_price_observability.json")).read().decode())
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
@@ -5851,6 +5853,14 @@ def main():
             assert candidate["latest_px"] == "642.3", candidate
             assert candidate["current_px"] == "642.3", candidate
             assert candidate["price_source"] == "decision_audit.current_px", candidate
+            assert len(price_obs_rows) == 1, price_obs_rows
+            assert int(price_obs_rows[0]["price_observable_rows"]) >= 1, price_obs_rows
+            assert price_obs_rows[0]["live_order_effect"] == "none", price_obs_rows
+            assert price_obs_json["diagnostic_only"] is True, price_obs_json
+            assert price_obs_json["price_observable_rows"] >= 1, price_obs_json
+            assert window["candidate_price_observable_rows"] >= 1, window
+            assert manifest["candidate_price_observable_rows"] >= 1, manifest
+            assert "Candidate snapshot price observability" in readme, readme
             assert window["final_score_alpha6_conflict_count"] == 1, window
             assert window["final_score_alpha6_conflict_recommendation"] == "review_final_score_alpha6_conflict", window
             assert "BNB/USDT" in window["final_score_alpha6_conflict_symbol_breakdown"], window
@@ -6446,8 +6456,9 @@ def main():
             assert "threshold_bps" in raw_late_sensitivity, raw_late_sensitivity
             assert "TRX/USDT" in expanded_advisory, expanded_advisory
             assert "stale_paper_display_only" in expanded_advisory, expanded_advisory
-            assert "TRX_EXPANDED_PAPER_V1" not in expanded_runs, expanded_runs
-            assert "TRX_EXPANDED_PAPER_V1" not in expanded_daily, expanded_daily
+            assert "TRX_EXPANDED_PAPER_V1" in expanded_runs, expanded_runs
+            assert "stale_advisory_display_only" in expanded_runs, expanded_runs
+            assert "TRX_EXPANDED_PAPER_V1" in expanded_daily, expanded_daily
             assert "v5.expanded_relative_strength_top1_shadow" in alpha_factory, alpha_factory
             assert "read_only_no_live_order" in alpha_factory, alpha_factory
             assert "expanded" in alpha_factory_family, alpha_factory_family

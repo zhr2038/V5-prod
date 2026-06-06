@@ -115,6 +115,11 @@ EXPANDED_UNIVERSE_ADVISORY_FIELDS = (
     "horizon_hours",
     "sample_count",
     "complete_sample_count",
+    "expanded_universe_maturity_state",
+    "cost_source",
+    "cost_source_quality",
+    "cost_bps",
+    "cost_model_version",
     "response_action",
     "negative_advisory",
     "paper_tracking_allowed",
@@ -12212,6 +12217,57 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                     fields.append(field)
         return fields
 
+    def expanded_universe_no_sample_reason(row, response_action, would_enter):
+        if would_enter == "true" and response_action == "paper_tracking":
+            return ""
+        symbol = normalize_symbol_text(advisory_value(row, "symbol", default=""))
+        if not symbol:
+            return "symbol_not_normalized"
+        if not flatten_value(advisory_value(row, "strategy_id", default="")).strip():
+            return "missing_strategy_id"
+        cost_source = flatten_value(
+            advisory_value(row, "cost_source", "cost_model_version", default="")
+        ).strip().lower()
+        if "global_default" in cost_source:
+            return "cost_source_global_default"
+        if response_action == "negative_advisory":
+            return "negative_advisory"
+        if response_action in {
+            "stale_paper_display_only",
+            "stale_shadow_display_only",
+            "stale_advisory_live_disabled",
+        }:
+            return "stale_advisory_display_only"
+        if response_action in {
+            "research_display_only",
+            "ignored_live_small_disabled",
+            "ignored_recommended_mode_not_paper_or_shadow",
+        }:
+            return "advisory_not_paper_mode"
+        if response_action == "no_advisory":
+            return "no_advisory"
+        explicit = flatten_value(
+            advisory_value(row, "no_sample_reason", "advisory_reason", "live_block_reasons", default="")
+        ).strip()
+        if explicit:
+            return explicit
+        maturity = flatten_value(
+            advisory_value(
+                row,
+                "expanded_universe_maturity_state",
+                "maturity_state",
+                "decision",
+                default="",
+            )
+        ).strip().upper()
+        if maturity and maturity != "PAPER_READY":
+            return "maturity_not_paper_ready"
+        if response_action == "paper_tracking":
+            return "maturity_not_paper_ready"
+        if response_action == "shadow_tracking":
+            return "advisory_not_paper_mode"
+        return "expanded_universe_display_only"
+
     def expanded_universe_advisory_row(row):
         universe_type = flatten_value(advisory_value(row, "universe_type", default="")).strip().lower().replace("-", "_")
         strategy_id = flatten_value(advisory_value(row, "strategy_id", default="")).strip()
@@ -12232,9 +12288,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             would_enter = "false"
         else:
             would_enter = str(bool(advisory_mode(row) == "paper" and not negative)).lower()
-        no_sample_reason = flatten_value(advisory_value(row, "no_sample_reason", "advisory_reason", "live_block_reasons", default="")).strip()
-        if would_enter == "false" and not no_sample_reason:
-            no_sample_reason = response_action or "no_advisory"
+        no_sample_reason = expanded_universe_no_sample_reason(row, response_action, would_enter)
         payload = {
             "run_id": copied_runs[-1] if copied_runs else not_obs,
             "ts_utc": NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -12264,6 +12318,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "horizon_hours": flatten_value(advisory_value(row, "horizon_hours", default="")),
             "sample_count": flatten_value(advisory_value(row, "sample_count", default="")),
             "complete_sample_count": flatten_value(advisory_value(row, "complete_sample_count", default="")),
+            "expanded_universe_maturity_state": flatten_value(
+                advisory_value(
+                    row,
+                    "expanded_universe_maturity_state",
+                    "maturity_state",
+                    default="",
+                )
+            ),
+            "cost_source": flatten_value(advisory_value(row, "cost_source", default="")),
+            "cost_source_quality": flatten_value(
+                advisory_value(row, "cost_source_quality", "cost_quality", default="")
+            ),
+            "cost_bps": flatten_value(advisory_value(row, "cost_bps", default="")),
+            "cost_model_version": flatten_value(advisory_value(row, "cost_model_version", default="")),
             "response_action": response_action,
             "negative_advisory": str(bool(negative)).lower(),
             "paper_tracking_allowed": str(response_action == "paper_tracking").lower(),
@@ -12274,7 +12342,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "live_block_reasons": flatten_value(advisory_value(row, "live_block_reasons", default="")),
             "would_block_if_enabled": flatten_value(advisory_value(row, "would_block_if_enabled", default="")),
             "would_enter": would_enter,
-            "no_sample_reason": "" if would_enter == "true" else no_sample_reason,
+            "no_sample_reason": (
+                ""
+                if response_action == "paper_tracking" and would_enter == "true"
+                else no_sample_reason
+            ),
             "advisory_reason": flatten_value(advisory_value(row, "advisory_reason", default="")),
             "live_order_effect": "read_only_no_live_order",
         }
@@ -12289,10 +12361,25 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
 
     def expanded_universe_paper_run_row(row):
         response_action = flatten_value(row.get("response_action")).strip()
-        if response_action not in {"paper_tracking", "shadow_tracking", "negative_advisory"}:
+        if response_action not in {
+            "paper_tracking",
+            "shadow_tracking",
+            "negative_advisory",
+            "research_display_only",
+            "stale_paper_display_only",
+            "stale_shadow_display_only",
+            "stale_advisory_live_disabled",
+            "ignored_live_small_disabled",
+            "ignored_recommended_mode_not_paper_or_shadow",
+        }:
             return None
-        would_enter = truthy_text(row.get("would_enter"))
-        tracking_mode = "negative" if response_action == "negative_advisory" else flatten_value(row.get("recommended_mode"))
+        would_enter = response_action == "paper_tracking" and truthy_text(row.get("would_enter"))
+        if response_action == "negative_advisory":
+            tracking_mode = "negative"
+        elif response_action.endswith("_display_only") or response_action == "stale_advisory_live_disabled":
+            tracking_mode = "display_only"
+        else:
+            tracking_mode = flatten_value(row.get("recommended_mode"))
         payload = {
             "run_id": row.get("run_id"),
             "ts_utc": row.get("ts_utc"),
@@ -13518,6 +13605,98 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             ALPHA_FACTORY_ADVISORY_FIELDS,
         )
 
+    def candidate_price_observed(row):
+        return as_float(first_value(row, ("entry_px", "latest_px", "current_px"), not_obs)) is not None
+
+    candidate_price_observed_rows = [row for row in candidate_snapshot_rows if candidate_price_observed(row)]
+    candidate_price_missing_rows = [row for row in candidate_snapshot_rows if not candidate_price_observed(row)]
+    candidate_price_source_mix = Counter(
+        flatten_value(first_observed(first_value(row, ("price_source",), not_obs), not_obs))
+        for row in candidate_price_observed_rows
+    )
+    candidate_price_missing_by_decision = Counter(
+        flatten_value(first_observed(first_value(row, ("final_decision",), not_obs), not_obs))
+        for row in candidate_price_missing_rows
+    )
+    final_score_label_failure_mix = Counter(
+        flatten_value(row.get("label_join_failure_reason") or "")
+        for row in final_score_alpha6_conflict_rows
+        if flatten_value(row.get("label_status")) in {"not_observable", "pending"}
+    )
+    bnb_bypass_label_failure_mix = Counter(
+        flatten_value(row.get("label_join_failure_reason") or "")
+        for row in bnb_strong_alpha6_bypass_shadow_rows
+        if flatten_value(row.get("label_status")) in {"not_observable", "pending"}
+    )
+    candidate_price_observability = {
+        "schema_version": "v5.candidate_snapshot_price_observability.v1",
+        "diagnostic_only": True,
+        "live_order_effect": "none",
+        "candidate_snapshot_rows": len(candidate_snapshot_rows),
+        "price_observable_rows": len(candidate_price_observed_rows),
+        "price_not_observable_rows": len(candidate_price_missing_rows),
+        "price_observability_rate": (
+            round(len(candidate_price_observed_rows) / len(candidate_snapshot_rows), 6)
+            if candidate_snapshot_rows else 0.0
+        ),
+        "price_source_mix": dict(sorted(candidate_price_source_mix.items())),
+        "price_not_observable_by_final_decision": dict(sorted(candidate_price_missing_by_decision.items())),
+        "final_score_conflict_label_not_observable_count": sum(
+            1 for row in final_score_alpha6_conflict_rows
+            if flatten_value(row.get("label_status")) == "not_observable"
+        ),
+        "final_score_conflict_label_failure_reason_mix": dict(sorted(final_score_label_failure_mix.items())),
+        "bnb_strong_alpha6_bypass_label_not_observable_count": sum(
+            1 for row in bnb_strong_alpha6_bypass_shadow_rows
+            if flatten_value(row.get("label_status")) == "not_observable"
+        ),
+        "bnb_strong_alpha6_bypass_label_failure_reason_mix": dict(sorted(bnb_bypass_label_failure_mix.items())),
+        "diagnosis": (
+            "candidate_price_partially_observable"
+            if candidate_price_observed_rows and candidate_price_missing_rows
+            else "candidate_price_fully_observable"
+            if candidate_snapshot_rows
+            else "candidate_snapshot_missing"
+        ),
+    }
+    write_text(
+        "summaries/candidate_snapshot_price_observability.json",
+        json.dumps(candidate_price_observability, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    )
+    write_csv(
+        "summaries/candidate_snapshot_price_observability.csv",
+        [{
+            "candidate_snapshot_rows": candidate_price_observability["candidate_snapshot_rows"],
+            "price_observable_rows": candidate_price_observability["price_observable_rows"],
+            "price_not_observable_rows": candidate_price_observability["price_not_observable_rows"],
+            "price_observability_rate": candidate_price_observability["price_observability_rate"],
+            "price_source_mix": safe_json(candidate_price_observability["price_source_mix"]),
+            "price_not_observable_by_final_decision": safe_json(candidate_price_observability["price_not_observable_by_final_decision"]),
+            "final_score_conflict_label_not_observable_count": candidate_price_observability["final_score_conflict_label_not_observable_count"],
+            "final_score_conflict_label_failure_reason_mix": safe_json(candidate_price_observability["final_score_conflict_label_failure_reason_mix"]),
+            "bnb_strong_alpha6_bypass_label_not_observable_count": candidate_price_observability["bnb_strong_alpha6_bypass_label_not_observable_count"],
+            "bnb_strong_alpha6_bypass_label_failure_reason_mix": safe_json(candidate_price_observability["bnb_strong_alpha6_bypass_label_failure_reason_mix"]),
+            "diagnostic_only": "true",
+            "live_order_effect": "none",
+            "diagnosis": candidate_price_observability["diagnosis"],
+        }],
+        [
+            "candidate_snapshot_rows",
+            "price_observable_rows",
+            "price_not_observable_rows",
+            "price_observability_rate",
+            "price_source_mix",
+            "price_not_observable_by_final_decision",
+            "final_score_conflict_label_not_observable_count",
+            "final_score_conflict_label_failure_reason_mix",
+            "bnb_strong_alpha6_bypass_label_not_observable_count",
+            "bnb_strong_alpha6_bypass_label_failure_reason_mix",
+            "diagnostic_only",
+            "live_order_effect",
+            "diagnosis",
+        ],
+    )
+
     data_quality_warnings = []
     if provenance_meta.get("code_provenance") == "degraded":
         data_quality_warnings.append(f"dirty_worktree: {provenance_meta.get('provenance_status', not_obs)}")
@@ -13562,6 +13741,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "log_file_count": len(copied_logs),
         "candidate_snapshot_rows": len(candidate_snapshot_rows),
         "candidate_cost_source_coverage": candidate_cost_source_coverage_value,
+        "candidate_price_observable_rows": candidate_price_observability["price_observable_rows"],
+        "candidate_price_not_observable_rows": candidate_price_observability["price_not_observable_rows"],
+        "candidate_price_observability_rate": candidate_price_observability["price_observability_rate"],
+        "candidate_price_source_mix": safe_json(candidate_price_observability["price_source_mix"]),
+        "candidate_price_observability_diagnosis": candidate_price_observability["diagnosis"],
         "router_decision_rows": len(router_rows),
         "has_trade_data": has_trade_data,
         "trade_observation_status": trade_observation_status,
@@ -14776,6 +14960,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- by_symbol: {aggregate_summary_lines(skipped_candidate_outcomes_by_symbol, ['symbol', 'skip_reason'])}",
         f"- by_skip_reason: {aggregate_summary_lines(skipped_candidate_outcomes_by_reason, ['skip_reason'])}",
         "",
+        "## Candidate snapshot price observability",
+        f"- candidate_snapshot_rows: {candidate_price_observability.get('candidate_snapshot_rows', not_obs)}",
+        f"- price_observable_rows: {candidate_price_observability.get('price_observable_rows', not_obs)}",
+        f"- price_not_observable_rows: {candidate_price_observability.get('price_not_observable_rows', not_obs)}",
+        f"- price_observability_rate: {candidate_price_observability.get('price_observability_rate', not_obs)}",
+        f"- price_source_mix: {safe_json(candidate_price_observability.get('price_source_mix', {}))}",
+        f"- conflict_label_not_observable_count: {candidate_price_observability.get('final_score_conflict_label_not_observable_count', not_obs)}",
+        f"- bnb_bypass_label_not_observable_count: {candidate_price_observability.get('bnb_strong_alpha6_bypass_label_not_observable_count', not_obs)}",
+        "- interpretation: historical rows without exact candidate price remain not_observable instead of being joined to stale or far-away labels.",
+        "- output: summaries/candidate_snapshot_price_observability.csv and summaries/candidate_snapshot_price_observability.json",
+        "",
         "## 配置消费审计",
         f"- audited config keys: {len(config_runtime_consumption_rows)}",
         f"- live config keys not consumed in runtime: {config_runtime_not_consumed_count}",
@@ -14900,6 +15095,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         ),
         "candidate_snapshot_rows": len(candidate_snapshot_rows),
         "candidate_cost_source_coverage": candidate_cost_source_coverage_value,
+        "candidate_price_observable_rows": candidate_price_observability["price_observable_rows"],
+        "candidate_price_not_observable_rows": candidate_price_observability["price_not_observable_rows"],
+        "candidate_price_observability_rate": candidate_price_observability["price_observability_rate"],
         "order_lifecycle_rows": len(order_lifecycle_rows),
         "order_lifecycle_trade_metric_fill_count": order_lifecycle_trade_metric_fill_count,
         "order_lifecycle_missing_high_issue": order_lifecycle_missing_high_issue,
@@ -15363,6 +15561,9 @@ sanity = {
     "contains summaries/quant_lab_cost_usage.csv": (OUT / "summaries/quant_lab_cost_usage.csv").is_file(),
     "contains summaries/quant_lab_fallbacks.csv": (OUT / "summaries/quant_lab_fallbacks.csv").is_file(),
     "contains summaries/candidate_snapshot.csv": (OUT / "summaries/candidate_snapshot.csv").is_file(),
+    "contains summaries/candidate_snapshot_price_observability.json": (
+        OUT / "summaries/candidate_snapshot_price_observability.json"
+    ).is_file(),
     "contains summaries/issues_to_fix.json": (OUT / "summaries/issues_to_fix.json").is_file(),
     "provenance_status": provenance_meta.get("provenance_status", "not_observable"),
     "code provenance ok/degraded": provenance_meta.get("code_provenance", "not_observable"),
@@ -15412,6 +15613,7 @@ failure_check_names = [
     "contains summaries/quant_lab_cost_usage.csv",
     "contains summaries/quant_lab_fallbacks.csv",
     "contains summaries/candidate_snapshot.csv",
+    "contains summaries/candidate_snapshot_price_observability.json",
     "contains summaries/issues_to_fix.json",
     "provenance_status explicit",
     "no .env files",
@@ -15457,6 +15659,9 @@ manifest = {
     ),
     "candidate_snapshot_rows": int(summary_meta.get("candidate_snapshot_rows", 0) or 0),
     "candidate_cost_source_coverage": summary_meta.get("candidate_cost_source_coverage", 0.0),
+    "candidate_price_observable_rows": int(summary_meta.get("candidate_price_observable_rows", 0) or 0),
+    "candidate_price_not_observable_rows": int(summary_meta.get("candidate_price_not_observable_rows", 0) or 0),
+    "candidate_price_observability_rate": summary_meta.get("candidate_price_observability_rate", 0.0),
     "order_lifecycle_rows": int(summary_meta.get("order_lifecycle_rows", 0) or 0),
     "order_lifecycle_trade_metric_fill_count": int(
         summary_meta.get("order_lifecycle_trade_metric_fill_count", 0) or 0
