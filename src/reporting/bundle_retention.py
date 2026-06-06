@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -83,6 +84,8 @@ def prune_v5_bundle_exports(
             deleted_sha_count=0,
             dry_run=dry_run,
         )
+    if not os.access(directory, os.R_OK | os.X_OK):
+        raise PermissionError(f"bundle export directory is not readable: {directory}")
 
     bundles = _bundle_paths(directory)
     keep: set[Path] = set(bundles[:keep_count])
