@@ -28,6 +28,7 @@ LABEL_TIME_MS_FIELDS = (
     "candidate_ts_ms",
 )
 LABEL_NEAREST_MAX_SKEW_MS = 10 * 60 * 1000
+LABEL_SAME_RUN_BAR_START_MAX_SKEW_MS = 75 * 60 * 1000
 LABEL_BY_RUN_SYMBOL_KEY = ("__label_by_run_symbol__", "", "")
 LABEL_BY_SYMBOL_KEY = ("__label_by_symbol__", "", "")
 CONFLICT_FIELDS = (
@@ -302,6 +303,10 @@ def label_join_diagnostics(
         skew, candidate_row = best_same_run
         if skew <= LABEL_NEAREST_MAX_SKEW_MS:
             diagnostics["label_join_match_type"] = "nearest_same_run_symbol"
+            diagnostics["label_join_time_skew_sec"] = round(skew / 1000.0, 3)
+            return candidate_row, diagnostics
+        if skew <= LABEL_SAME_RUN_BAR_START_MAX_SKEW_MS:
+            diagnostics["label_join_match_type"] = "same_run_symbol_bar_start_drift"
             diagnostics["label_join_time_skew_sec"] = round(skew / 1000.0, 3)
             return candidate_row, diagnostics
         diagnostics["label_join_failure_reason"] = "nearest_label_too_far"

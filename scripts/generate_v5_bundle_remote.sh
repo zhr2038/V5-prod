@@ -6607,9 +6607,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 horizon_statuses.append("complete")
                 continue
 
-            if existing_status == "pending":
-                matured_pending.append(f"{h}h")
-            reason = existing_reason or future_reason or "missing_future_px"
+            stale_awaiting_reason = existing_reason.startswith("awaiting_horizon_until_")
+            reason = ("" if stale_awaiting_reason else existing_reason) or future_reason or "missing_future_px"
             values[net_key] = not_obs
             statuses[status_key] = "not_observable"
             reasons[reason_key] = reason

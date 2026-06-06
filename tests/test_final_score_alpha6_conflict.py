@@ -185,11 +185,33 @@ def test_final_score_alpha6_conflict_joins_nearby_label_when_run_id_drifts() -> 
     assert row["label_join_time_skew_sec"] == 50.475
 
 
+def test_final_score_alpha6_conflict_joins_same_run_bar_start_drift() -> None:
+    candidate = _base_row(run_id="20260521_21", ts_utc="2026-05-21T13:00:50.475143Z")
+    label = {
+        "run_id": "20260521_21",
+        "ts_utc": "2026-05-21T12:00:00Z",
+        "symbol": "BNB-USDT",
+        "label_4h_net_bps": "-6.9",
+        "label_24h_net_bps": "143.9",
+    }
+
+    rows = build_conflict_rows([candidate, label])
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["future_4h_net_bps"] == "-6.9"
+    assert row["future_24h_net_bps"] == "143.9"
+    assert row["label_status"] == "partial_complete"
+    assert row["label_join_match_type"] == "same_run_symbol_bar_start_drift"
+    assert row["label_join_time_skew_sec"] == 3650.475
+    assert row["label_join_failure_reason"] == ""
+
+
 def test_final_score_alpha6_conflict_label_join_reports_failure_reason() -> None:
     candidate = _base_row(ts_utc="2026-05-30T03:00:00Z")
     far_label = {
         "run_id": "r1",
-        "ts_utc": "2026-05-30T04:00:01Z",
+        "ts_utc": "2026-05-30T05:00:01Z",
         "symbol": "BNB-USDT",
         "label_4h_net_bps": "70.0",
     }
@@ -201,5 +223,5 @@ def test_final_score_alpha6_conflict_label_join_reports_failure_reason() -> None
     assert row["label_join_attempted"] == "true"
     assert row["label_join_match_type"] == "none"
     assert row["label_join_failure_reason"] == "nearest_label_too_far"
-    assert row["label_join_time_skew_sec"] == 3601.0
+    assert row["label_join_time_skew_sec"] == 7201.0
     assert row["label_status"] == "pending"
