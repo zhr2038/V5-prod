@@ -7846,6 +7846,74 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         symbol: final_score_negative_expectancy_stats(symbol)
         for symbol in CONFLICT_SYMBOLS
     }
+
+    def build_computed_alpha6_conflict_label_row(row):
+        if not (
+            report_final_score_alpha6_conflict_candidate(row)
+            or report_bnb_strong_alpha6_bypass_candidate(row)
+        ):
+            return None
+        symbol = normalize_symbol_text(first_value(row, ("symbol", "instId"), ""))
+        entry_dt = parse_dt_utc(first_observed(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs)))
+        entry_px, entry_reason, entry_source = resolve_alt_shadow_entry_px(row)
+        if not symbol or entry_dt is None or entry_px is None:
+            return None
+        rt_cost_bps = as_float(first_value(
+            row,
+            ("rt_cost_bps", "selected_entry_gate_cost_bps", "selected_total_cost_bps", "cost_bps"),
+            0,
+        ))
+        if rt_cost_bps is None:
+            rt_cost_bps = 0.0
+        label = {
+            "run_id": first_observed(first_value(row, ("run_id",), not_obs)),
+            "ts_utc": entry_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "symbol": symbol,
+            "label_join_source": "computed_from_bundle_market_data",
+            "entry_px": fmt_num(entry_px, 10),
+            "entry_price_source": entry_source or entry_reason or "computed_from_bundle_market_data",
+            "rt_cost_bps": fmt_num(rt_cost_bps, 6),
+        }
+        statuses = []
+        for horizon in (4, 8, 12, 24):
+            net_field = f"label_{horizon}h_net_bps"
+            status_field = f"label_{horizon}h_status"
+            reason_field = f"label_{horizon}h_reason"
+            horizon_dt = entry_dt + dt.timedelta(hours=horizon)
+            if NOW < horizon_dt:
+                label[net_field] = "pending"
+                label[status_field] = "pending"
+                label[reason_field] = f"awaiting_horizon_until_{horizon_dt.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+                statuses.append("pending")
+                continue
+            future_px, future_source, future_reason = future_price_for_symbol(symbol, horizon_dt)
+            if future_px is None:
+                label[net_field] = not_obs
+                label[status_field] = "not_observable"
+                label[reason_field] = future_reason or "missing_future_px"
+                statuses.append("not_observable")
+                continue
+            net_bps = ((future_px / entry_px) - 1.0) * 10000.0 - rt_cost_bps
+            label[net_field] = fmt_num(net_bps, 6)
+            label[status_field] = "complete"
+            label[reason_field] = future_source or "computed_from_bundle_market_data"
+            statuses.append("complete")
+        if any(status == "complete" for status in statuses):
+            label["label_status"] = "complete" if all(status == "complete" for status in statuses) else "partial_complete"
+            return label
+        return None
+
+    computed_alpha6_conflict_label_rows = [
+        label_row
+        for label_row in (
+            build_computed_alpha6_conflict_label_row(row)
+            for row in candidate_snapshot_rows
+        )
+        if label_row is not None
+    ]
+    if computed_alpha6_conflict_label_rows:
+        candidate_label_input_rows.extend(computed_alpha6_conflict_label_rows)
+
     final_score_alpha6_conflict_rows = report_build_final_score_alpha6_conflict_rows(
         candidate_label_input_rows,
         negative_expectancy_stats=negative_expectancy_stats_by_symbol,
