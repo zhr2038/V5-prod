@@ -3913,6 +3913,27 @@ def fixture_fresh_advisory_with_stale_reason_root(root, *, invalid_expiry=False)
     return run_id
 
 
+def fixture_mixed_generation_advisory_source_health_root(root):
+    run_id = fixture_root(root)
+    now = dt.datetime.now(dt.timezone.utc)
+    old_generated_at = (now - dt.timedelta(hours=2)).isoformat().replace("+00:00", "Z")
+    old_expires_at = (now - dt.timedelta(minutes=30)).isoformat().replace("+00:00", "Z")
+    latest_generated_at = (now - dt.timedelta(seconds=25)).isoformat().replace("+00:00", "Z")
+    latest_expires_at = (now + dt.timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    write_text(
+        root / "reports/strategy_opportunity_advisory.csv",
+        "\n".join(
+            [
+                "strategy_candidate,symbol,decision,recommended_mode,generated_at,expires_at,contract_version",
+                f"v5.old_expired_shadow,BNB/USDT,KEEP_SHADOW,shadow,{old_generated_at},{old_expires_at},v5.quant_lab.telemetry.v2",
+                f"v5.latest_fresh_shadow,SOL/USDT,KEEP_SHADOW,shadow,{latest_generated_at},{latest_expires_at},v5.quant_lab.telemetry.v2",
+            ]
+        )
+        + "\n",
+    )
+    return run_id
+
+
 def fixture_fresh_expanded_universe_advisory_root(root):
     run_id = fixture_root(root)
     now = dt.datetime.now(dt.timezone.utc)
@@ -6598,6 +6619,36 @@ def main():
             assert "freshness_reason: fresh" in readme, readme
             assert "stale_reason: age_exceeds_max" not in readme, readme
             assert "stale_reason: expired" not in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-mixed-generation-advisory-health-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_mixed_generation_advisory_source_health_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                source_health = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/strategy_opportunity_advisory_source_health.csv")).read().decode().splitlines()))
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert len(source_health) == 1, source_health
+            health_row = source_health[0]
+            assert health_row["selected_row_count"] == "2", health_row
+            assert health_row["selected_latest_generation_row_count"] == "1", health_row
+            assert health_row["selected_fresh_row_count"] == "1", health_row
+            assert health_row["selected_expired_row_count"] == "1", health_row
+            assert health_row["selected_source_is_stale"] == "false", health_row
+            assert health_row["local_fresh"] == "true", health_row
+            assert health_row["freshness_status"] == "fresh", health_row
+            assert health_row["freshness_reason"] == "fresh", health_row
+            assert health_row["stale_reason"] == "", health_row
+            assert "expired" not in health_row["stale_reason_detail"], health_row
+            assert window["strategy_advisory_selected_source_is_stale"] == "false", window
+            assert window["strategy_advisory_freshness_status"] == "fresh", window
+            assert window["strategy_advisory_stale_reason"] == "", window
+            assert "selected_source_is_stale: false" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

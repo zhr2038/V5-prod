@@ -283,6 +283,9 @@ STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = (
     "local_row_count",
     "api_row_count",
     "selected_row_count",
+    "selected_latest_generation_row_count",
+    "selected_fresh_row_count",
+    "selected_expired_row_count",
     "local_fresh",
     "api_fresh",
     "selection_reason",
@@ -11756,6 +11759,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         values = [value for value in values if value is not None]
         return max(values) if values else None
 
+    def latest_generation_strategy_advisory_rows(rows):
+        latest_dt = latest_strategy_advisory_dt(rows)
+        if latest_dt is None:
+            return []
+        latest_rows = []
+        for row in rows:
+            row_dt = advisory_reference_dt(row)
+            if row_dt is not None and abs((row_dt - latest_dt).total_seconds()) < 1.0:
+                latest_rows.append(row)
+        return latest_rows
+
     def mtime_iso(path):
         try:
             return dt.datetime.fromtimestamp(path.stat().st_mtime, tz=dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -12009,12 +12023,25 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if selected_latest_dt is not None:
             selected_age_sec = max(0.0, (NOW - selected_latest_dt).total_seconds())
         max_age_sec = (config_number("quant_lab_strategy_opportunity_advisory_max_age_minutes") or 90.0) * 60.0
-        selected_source_is_stale = any(not truthy_text(row.get("advisory_fresh")) for row in selected_rows) if selected_rows else True
-        local_fresh = bool(local_rows) and all(truthy_text(row.get("advisory_fresh")) for row in local_rows)
-        api_fresh = bool(api_rows) and all(truthy_text(row.get("advisory_fresh")) for row in api_rows)
+        selected_latest_rows = latest_generation_strategy_advisory_rows(selected_rows)
+        local_latest_rows = latest_generation_strategy_advisory_rows(local_rows)
+        api_latest_rows = latest_generation_strategy_advisory_rows(api_rows)
+        selected_fresh_row_count = sum(1 for row in selected_rows if truthy_text(row.get("advisory_fresh")))
+        selected_expired_row_count = sum(
+            1
+            for row in selected_rows
+            if "expired" in flatten_value(row.get("stale_reason")).strip().lower()
+            or "expired" in flatten_value(row.get("freshness_reason")).strip().lower()
+        )
+        selected_source_is_stale = (
+            not selected_latest_rows
+            or any(not truthy_text(row.get("advisory_fresh")) for row in selected_latest_rows)
+        )
+        local_fresh = bool(local_latest_rows) and all(truthy_text(row.get("advisory_fresh")) for row in local_latest_rows)
+        api_fresh = bool(api_latest_rows) and all(truthy_text(row.get("advisory_fresh")) for row in api_latest_rows)
         freshness_status_values = sorted({
             flatten_value(row.get("freshness_status")).strip()
-            for row in selected_rows
+            for row in selected_latest_rows
             if flatten_value(row.get("freshness_status")).strip()
         })
         if any(value == "invalid_timestamp" for value in freshness_status_values):
@@ -12027,25 +12054,25 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             freshness_status = "invalid_timestamp"
         row_stale_reasons = sorted({
             flatten_value(row.get("stale_reason")).strip()
-            for row in selected_rows
+            for row in selected_latest_rows
             if flatten_value(row.get("stale_reason")).strip()
         })
         freshness_reason_values = sorted({
             flatten_value(row.get("freshness_reason")).strip()
-            for row in selected_rows
+            for row in selected_latest_rows
             if flatten_value(row.get("freshness_reason")).strip()
         })
         stale_reasons = row_stale_reasons if selected_source_is_stale else []
         stale_reason = ";".join(stale_reasons)
         selected_expires_values = [
             parse_dt_utc(first_observed(row.get("advisory_expires_at"), row.get("expires_at"), ""))
-            for row in selected_rows
+            for row in selected_latest_rows
         ]
         selected_expires_values = [value for value in selected_expires_values if value is not None]
         selected_expires_at = min(selected_expires_values) if selected_expires_values else None
-        expires_before_generated_at = any(truthy_text(row.get("expires_before_generated_at")) for row in selected_rows)
-        expiry_corrected = any(truthy_text(row.get("expiry_corrected")) for row in selected_rows)
-        freshness_basis_values = [row.get("freshness_basis") for row in selected_rows if row.get("freshness_basis")]
+        expires_before_generated_at = any(truthy_text(row.get("expires_before_generated_at")) for row in selected_latest_rows)
+        expiry_corrected = any(truthy_text(row.get("expiry_corrected")) for row in selected_latest_rows)
+        freshness_basis_values = [row.get("freshness_basis") for row in selected_latest_rows if row.get("freshness_basis")]
         freshness_basis = first_observed(*(freshness_basis_values + [""]))
         if stale_reason:
             freshness_reason = stale_reason
@@ -12081,6 +12108,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "local_row_count": len(local_rows),
             "api_row_count": api_row_count,
             "selected_row_count": len(selected_rows),
+            "selected_latest_generation_row_count": len(selected_latest_rows),
+            "selected_fresh_row_count": selected_fresh_row_count,
+            "selected_expired_row_count": selected_expired_row_count,
             "local_fresh": str(local_fresh).lower(),
             "api_fresh": str(api_fresh).lower(),
             "selection_reason": selected_reason,
