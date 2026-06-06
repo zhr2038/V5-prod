@@ -43,6 +43,13 @@ BUNDLE_STEM = f"v5_live_followup_bundle_{STAMP}"
 OUT = Path("/tmp") / BUNDLE_STEM
 TAR = Path(f"{OUT}.tar.gz")
 SHA_PATH = Path(f"{TAR}.sha256")
+ROOT_POSIX = ROOT.as_posix()
+IS_PRODUCTION_ROOT = (
+    ROOT_POSIX == "/home/ubuntu/clawd/v5-prod"
+    or ROOT_POSIX.startswith("/home/ubuntu/clawd/v5-prod/")
+    or ROOT_POSIX == "/var/lib/v5-prod"
+    or ROOT_POSIX.startswith("/var/lib/v5-prod/")
+)
 PAYLOAD_DIRS = [
     "raw",
     "raw/state",
@@ -347,6 +354,15 @@ ENTRY_QUALITY_SOURCE_ARCHIVES = [
     "reports/quant_lab_expert_pack*.zip",
     "reports/quant_lab_expert_pack*.tar.gz",
 ]
+if not IS_PRODUCTION_ROOT:
+    ENTRY_QUALITY_SOURCE_DIRS = [
+        path for path in ENTRY_QUALITY_SOURCE_DIRS
+        if not str(path).startswith("/var/lib/v5-prod")
+    ]
+    ENTRY_QUALITY_SOURCE_ARCHIVES = [
+        path for path in ENTRY_QUALITY_SOURCE_ARCHIVES
+        if not str(path).startswith("/var/lib/v5-prod")
+    ]
 ENTRY_QUALITY_REPORT_API_ENDPOINT_TEMPLATES = [
     "/v1/reports/entry-quality/{filename}",
     "/v1/reports/entry_quality/{filename}",
@@ -12927,14 +12943,19 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             ROOT / "reports" / "quant_lab_latest" / "raw" / "reports" / "risk_on_multi_buy_shadow.csv",
             ROOT / "reports" / "quant_lab" / "latest" / "reports" / "risk_on_multi_buy_shadow.csv",
             ROOT / "reports" / "quant_lab" / "latest" / "raw" / "reports" / "risk_on_multi_buy_shadow.csv",
-            Path("/var/lib/v5-prod/raw/reports/risk_on_multi_buy_shadow.csv"),
-            Path("/var/lib/v5-prod/reports/risk_on_multi_buy_shadow.csv"),
-            Path("/var/lib/v5-prod/reports/raw/reports/risk_on_multi_buy_shadow.csv"),
-            Path("/var/lib/v5-prod/quant_lab_latest/reports/risk_on_multi_buy_shadow.csv"),
-            Path("/var/lib/v5-prod/quant_lab_latest/raw/reports/risk_on_multi_buy_shadow.csv"),
-            Path("/var/lib/v5-prod/quant_lab/latest/raw/reports/risk_on_multi_buy_shadow.csv"),
-            Path("/var/lib/v5-prod/quant_lab/latest/reports/risk_on_multi_buy_shadow.csv"),
         ]
+        if IS_PRODUCTION_ROOT:
+            detail_paths.extend(
+                [
+                    Path("/var/lib/v5-prod/raw/reports/risk_on_multi_buy_shadow.csv"),
+                    Path("/var/lib/v5-prod/reports/risk_on_multi_buy_shadow.csv"),
+                    Path("/var/lib/v5-prod/reports/raw/reports/risk_on_multi_buy_shadow.csv"),
+                    Path("/var/lib/v5-prod/quant_lab_latest/reports/risk_on_multi_buy_shadow.csv"),
+                    Path("/var/lib/v5-prod/quant_lab_latest/raw/reports/risk_on_multi_buy_shadow.csv"),
+                    Path("/var/lib/v5-prod/quant_lab/latest/raw/reports/risk_on_multi_buy_shadow.csv"),
+                    Path("/var/lib/v5-prod/quant_lab/latest/reports/risk_on_multi_buy_shadow.csv"),
+                ]
+            )
         rows = []
         seen_paths = set()
         for path in detail_paths:
