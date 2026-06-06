@@ -4965,6 +4965,7 @@ def main():
             assert bnb_profit_row["has_f3_dominant_signal"] == "true", bnb_profit_row
             assert bnb_profit_row["classification_reason"] == "bnb_f3_dominant_swing_hold", bnb_profit_row
             assert bnb_profit_row["max_unrealized_bps"] == "80", bnb_profit_row
+            assert bnb_profit_row["selected_roundtrip_cost_bps"] == "0", bnb_profit_row
             assert bnb_profit_row["profit_lock_30bps"] == "30", bnb_profit_row
             assert bnb_profit_row["profit_lock_50bps"] == "50", bnb_profit_row
             assert bnb_profit_row["profit_lock_30bps_exit"] == "30", bnb_profit_row
@@ -5220,6 +5221,7 @@ def main():
             assert row["classification_reason"] == "bnb_atr_trailing_exit_metadata_incomplete", row
             assert row["atr_trailing_exit"] == "true", row
             assert row["actual_exit_net_bps"] == "-100", row
+            assert row["selected_roundtrip_cost_bps"] == "0", row
             assert row["max_unrealized_bps"] == "70", row
             assert row["delayed_exit_24h_net_bps"] == "200", row
             assert row["delayed_exit_24h_from_actual_exit_net_bps"] == "200", row
