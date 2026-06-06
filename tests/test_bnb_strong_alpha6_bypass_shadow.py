@@ -120,3 +120,23 @@ def test_bnb_strong_alpha6_joins_nearby_entry_ts_ms_label_row() -> None:
     assert row["label_status"] == "partial_complete"
     assert row["max_future_net_bps"] == 88.0
     assert row["material_profit_flag"] == "true"
+
+
+def test_bnb_strong_alpha6_joins_nearby_label_when_run_id_drifts() -> None:
+    candidate = _base_row(run_id="20260521_21", ts_utc="2026-05-21T13:00:50.475143Z")
+    label = {
+        "run_id": "20260521_22",
+        "ts_utc": "2026-05-21T13:00:00Z",
+        "symbol": "BNB-USDT",
+        "label_8h_net_bps": "90.0",
+        "label_12h_net_bps": "83.0",
+    }
+
+    rows = build_bnb_strong_alpha6_bypass_rows([candidate, label])
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["future_8h_net_bps"] == "90.0"
+    assert row["future_12h_net_bps"] == "83.0"
+    assert row["label_status"] == "partial_complete"
+    assert row["outcome"] == "material_profit_shadow"

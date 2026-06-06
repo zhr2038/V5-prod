@@ -150,3 +150,23 @@ def test_final_score_alpha6_conflict_joins_nearby_label_timestamp() -> None:
     row = rows[0]
     assert row["future_8h_net_bps"] == "93.0"
     assert row["label_8h_status"] == "complete"
+
+
+def test_final_score_alpha6_conflict_joins_nearby_label_when_run_id_drifts() -> None:
+    candidate = _base_row(run_id="20260521_21", ts_utc="2026-05-21T13:00:50.475143Z")
+    label = {
+        "run_id": "20260521_22",
+        "ts_utc": "2026-05-21T13:00:00Z",
+        "symbol": "BNB-USDT",
+        "label_4h_net_bps": "-6.9",
+        "label_24h_net_bps": "143.9",
+    }
+
+    rows = build_conflict_rows([candidate, label])
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["future_4h_net_bps"] == "-6.9"
+    assert row["future_24h_net_bps"] == "143.9"
+    assert row["label_status"] == "partial_complete"
+    assert row["material_profit_flag"] == "true"

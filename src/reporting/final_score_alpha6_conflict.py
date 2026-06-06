@@ -29,6 +29,7 @@ LABEL_TIME_MS_FIELDS = (
 )
 LABEL_NEAREST_MAX_SKEW_MS = 10 * 60 * 1000
 LABEL_BY_RUN_SYMBOL_KEY = ("__label_by_run_symbol__", "", "")
+LABEL_BY_SYMBOL_KEY = ("__label_by_symbol__", "", "")
 CONFLICT_FIELDS = (
     "run_id",
     "ts_utc",
@@ -223,6 +224,7 @@ def _merge_label_row(existing: Mapping[str, Any], row: Mapping[str, Any]) -> dic
 def build_label_index(rows: Iterable[Mapping[str, Any]]) -> dict[tuple[str, str, str], Any]:
     index: dict[tuple[str, str, str], Any] = {}
     by_run_symbol: dict[tuple[str, str], list[tuple[int, dict[str, Any]]]] = {}
+    by_symbol: dict[str, list[tuple[int, dict[str, Any]]]] = {}
     for row in rows:
         keys = label_join_keys(row)
         if not keys:
@@ -240,7 +242,9 @@ def build_label_index(rows: Iterable[Mapping[str, Any]]) -> dict[tuple[str, str,
         run_symbol = (keys[0][0], keys[0][1])
         for time_ms in label_time_candidates_ms(row):
             by_run_symbol.setdefault(run_symbol, []).append((time_ms, payload))
+            by_symbol.setdefault(keys[0][1], []).append((time_ms, payload))
     index[LABEL_BY_RUN_SYMBOL_KEY] = by_run_symbol
+    index[LABEL_BY_SYMBOL_KEY] = by_symbol
     return index
 
 
@@ -258,9 +262,18 @@ def label_row_for(
     run_id = str(row.get("run_id") or "").strip()
     symbol = normalize_symbol(row.get("symbol"))
     by_run_symbol = label_index.get(LABEL_BY_RUN_SYMBOL_KEY)
-    if not isinstance(by_run_symbol, Mapping):
+    candidates: list[tuple[int, Mapping[str, Any]]] = []
+    if isinstance(by_run_symbol, Mapping):
+        candidates.extend(by_run_symbol.get((run_id, symbol), []))
+    # V5 run_id can drift by one hour around UTC/local run folders while labels
+    # keep the rounded signal timestamp. Fall back to symbol+nearby timestamp so
+    # research diagnostics do not stay pending when the sample is otherwise the
+    # same closed-bar candidate.
+    by_symbol = label_index.get(LABEL_BY_SYMBOL_KEY)
+    if isinstance(by_symbol, Mapping):
+        candidates.extend(by_symbol.get(symbol, []))
+    if not candidates:
         return {}
-    candidates = by_run_symbol.get((run_id, symbol), [])
     best: tuple[int, Mapping[str, Any]] | None = None
     for candidate_time, candidate_row in candidates:
         skew = min(abs(candidate_time - value) for value in times)
