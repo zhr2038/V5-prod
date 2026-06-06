@@ -13592,6 +13592,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         selected_is_stale = truthy_text(payload.get("selected_source_is_stale"))
         if not selected_is_stale:
             payload["stale_reason"] = ""
+            payload["warning"] = ""
+            payload["freshness_inconsistency_warning"] = ""
+            selected_source = flatten_value(payload.get("selected_source")).strip().lower()
+            if selected_source == "api":
+                payload["api_fresh"] = "true"
+                if str(payload.get("selection_reason") or "").startswith(("both_stale", "stale_")):
+                    payload["selection_reason"] = "api_selected_fresh"
+            elif selected_source in {"local", "stale_local"}:
+                payload["local_fresh"] = "true"
+                if str(payload.get("selection_reason") or "").startswith(("both_stale", "stale_")):
+                    payload["selection_reason"] = "fresh_local"
         if not payload.get("freshness_status"):
             payload["freshness_status"] = "stale" if selected_is_stale else "fresh"
         if not payload.get("freshness_reason"):
