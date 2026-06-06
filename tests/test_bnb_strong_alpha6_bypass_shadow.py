@@ -70,7 +70,7 @@ def test_bnb_strong_alpha6_label_status_partial_when_some_horizons_observed() ->
 
     row = rows[0]
     assert row["label_4h_status"] == "complete"
-    assert row["label_8h_status"] == "pending"
+    assert row["label_8h_status"] == "not_observable"
     assert row["any_label_complete"] == "true"
     assert row["all_labels_complete"] == "false"
     assert row["label_status"] == "partial_complete"
@@ -93,7 +93,7 @@ def test_bnb_strong_alpha6_joins_skipped_candidate_label_row() -> None:
     assert row["future_4h_net_bps"] == "64.0"
     assert row["future_12h_net_bps"] == "120.0"
     assert row["label_4h_status"] == "complete"
-    assert row["label_8h_status"] == "pending"
+    assert row["label_8h_status"] == "not_observable"
     assert row["label_12h_status"] == "complete"
     assert row["label_status"] == "partial_complete"
     assert row["max_future_net_bps"] == 120.0

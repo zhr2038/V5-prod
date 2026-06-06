@@ -112,7 +112,12 @@ def first_observed(*values: Any, default: str = "not_observable") -> Any:
 
 
 def label_status_for_future(value: Any) -> str:
-    return "complete" if as_float(value) is not None else "pending"
+    if as_float(value) is not None:
+        return "complete"
+    text = str(value or "").strip().lower()
+    if text == "pending":
+        return "pending"
+    return "not_observable"
 
 
 def aggregate_label_status(statuses: Iterable[str]) -> str:
@@ -122,6 +127,10 @@ def aggregate_label_status(statuses: Iterable[str]) -> str:
         return "complete"
     if completed:
         return "partial_complete"
+    if any(status == "pending" for status in status_list):
+        return "pending"
+    if status_list and all(status == "not_observable" for status in status_list):
+        return "not_observable"
     return "pending"
 
 

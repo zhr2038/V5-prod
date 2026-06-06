@@ -84,7 +84,7 @@ def test_final_score_alpha6_conflict_label_status_partial_complete() -> None:
     row = rows[0]
     assert row["future_4h_net_bps"] == 12.0
     assert row["label_4h_status"] == "complete"
-    assert row["label_8h_status"] == "pending"
+    assert row["label_8h_status"] == "not_observable"
     assert row["any_label_complete"] == "true"
     assert row["all_labels_complete"] == "false"
     assert row["label_status"] == "partial_complete"
@@ -112,7 +112,7 @@ def test_final_score_alpha6_conflict_joins_skipped_candidate_label_row() -> None
     assert row["future_8h_net_bps"] == "-2.0"
     assert row["label_4h_status"] == "complete"
     assert row["label_8h_status"] == "complete"
-    assert row["label_12h_status"] == "pending"
+    assert row["label_12h_status"] == "not_observable"
     assert row["label_status"] == "partial_complete"
     assert row["label_join_attempted"] == "true"
     assert row["label_join_match_type"] == "exact"
@@ -227,7 +227,7 @@ def test_final_score_alpha6_conflict_label_join_reports_failure_reason() -> None
     assert row["label_join_match_type"] == "none"
     assert row["label_join_failure_reason"] == "nearest_label_too_far"
     assert row["label_join_time_skew_sec"] == 7201.0
-    assert row["label_status"] == "pending"
+    assert row["label_status"] == "not_observable"
 
 
 def test_final_score_alpha6_conflict_loads_mature_outcome_summary_labels(tmp_path) -> None:
