@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import gzip
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -396,7 +397,8 @@ def _read_csv(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     try:
-        with path.open("r", encoding="utf-8", newline="") as fh:
+        opener = gzip.open if path.suffix == ".gz" else Path.open
+        with opener(path, "rt", encoding="utf-8", newline="") as fh:
             return [dict(row) for row in csv.DictReader(fh)]
     except Exception:
         return []
@@ -464,6 +466,19 @@ def load_report_input_rows(root: Path) -> list[dict[str, Any]]:
     csv_paths.extend(sorted((root / "raw" / "recent_runs").glob("*/candidate_snapshot.csv")))
     csv_paths.extend(sorted((root / "reports" / "runs" / "prod").glob("*/candidate_snapshot.csv")))
     for path in csv_paths:
+        for row in _read_csv(path):
+            row.setdefault("source_path", str(path))
+            rows.append(row)
+    label_csv_paths = [
+        root / "summaries" / "skipped_candidate_outcomes.csv",
+        root / "summaries" / "skipped_candidate_outcomes.csv.gz",
+        root / "reports" / "summaries" / "skipped_candidate_outcomes.csv",
+        root / "reports" / "summaries" / "skipped_candidate_outcomes.csv.gz",
+        root / "raw" / "reports" / "summaries" / "skipped_candidate_outcomes.csv",
+        root / "raw" / "reports" / "summaries" / "skipped_candidate_outcomes.csv.gz",
+        root / "raw" / "large" / "reports" / "summaries" / "skipped_candidate_outcomes.csv.gz",
+    ]
+    for path in label_csv_paths:
         for row in _read_csv(path):
             row.setdefault("source_path", str(path))
             rows.append(row)

@@ -1,6 +1,9 @@
+import gzip
+
 from src.reporting.final_score_alpha6_conflict import (
     build_conflict_rows,
     is_final_score_alpha6_conflict_candidate,
+    load_report_input_rows,
 )
 
 
@@ -225,3 +228,78 @@ def test_final_score_alpha6_conflict_label_join_reports_failure_reason() -> None
     assert row["label_join_failure_reason"] == "nearest_label_too_far"
     assert row["label_join_time_skew_sec"] == 7201.0
     assert row["label_status"] == "pending"
+
+
+def test_final_score_alpha6_conflict_loads_mature_outcome_summary_labels(tmp_path) -> None:
+    candidate_path = tmp_path / "reports" / "candidate_snapshot.csv"
+    candidate_path.parent.mkdir(parents=True)
+    candidate_path.write_text(
+        "\n".join(
+            [
+                "run_id,ts_utc,symbol,alpha6_side,alpha6_score,expected_edge_bps,required_edge_bps,cost_gate_verified,final_score,final_decision",
+                "20260530_03,2026-05-30T03:00:00Z,BNB/USDT,buy,0.994,140,30,true,-0.17,no_order",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    outcome_path = tmp_path / "reports" / "summaries" / "skipped_candidate_outcomes.csv"
+    outcome_path.parent.mkdir(parents=True)
+    outcome_path.write_text(
+        "\n".join(
+            [
+                "run_id,ts_utc,symbol,label_4h_net_bps,label_8h_net_bps,label_12h_net_bps,label_24h_net_bps,label_status",
+                "20260530_03,2026-05-30T03:00:00Z,BNB-USDT,120.0,80.0,40.0,240.0,complete",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rows = build_conflict_rows(load_report_input_rows(tmp_path))
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["future_4h_net_bps"] == "120.0"
+    assert row["future_24h_net_bps"] == "240.0"
+    assert row["label_status"] == "complete"
+    assert row["label_join_match_type"] == "exact"
+    assert row["label_join_failure_reason"] == ""
+    assert row["material_profit_flag"] == "true"
+
+
+def test_final_score_alpha6_conflict_loads_raw_large_gz_outcome_labels(tmp_path) -> None:
+    candidate_path = tmp_path / "candidate_snapshot.csv"
+    candidate_path.write_text(
+        "\n".join(
+            [
+                "run_id,ts_utc,symbol,alpha6_side,alpha6_score,expected_edge_bps,required_edge_bps,cost_gate_verified,final_score,final_decision",
+                "20260530_10,2026-05-30T10:00:00Z,BNB/USDT,buy,0.98,100,30,true,-0.1,no_order",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    outcome_path = tmp_path / "raw" / "large" / "reports" / "summaries" / "skipped_candidate_outcomes.csv.gz"
+    outcome_path.parent.mkdir(parents=True)
+    with gzip.open(outcome_path, "wt", encoding="utf-8", newline="") as fh:
+        fh.write(
+            "\n".join(
+                [
+                    "run_id,ts_utc,symbol,label_4h_net_bps,label_8h_net_bps,label_12h_net_bps,label_24h_net_bps,label_status",
+                    "20260530_10,2026-05-30T10:00:00Z,BNB-USDT,51.0,52.0,53.0,54.0,complete",
+                ]
+            )
+            + "\n"
+        )
+
+    rows = build_conflict_rows(load_report_input_rows(tmp_path))
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["future_4h_net_bps"] == "51.0"
+    assert row["future_24h_net_bps"] == "54.0"
+    assert row["label_status"] == "complete"
+    assert row["label_join_match_type"] == "exact"
+    assert row["label_join_failure_reason"] == ""
+    assert row["material_profit_flag"] == "true"
