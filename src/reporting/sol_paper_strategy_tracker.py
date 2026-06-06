@@ -2471,6 +2471,24 @@ def _expanded_would_enter(row: Mapping[str, Any]) -> bool:
 
 
 def _expanded_no_sample_reason(row: Mapping[str, Any], fields: Mapping[str, Any]) -> str:
+    if _expanded_would_enter(row):
+        return ""
+    symbol = _symbol_text(row.get("symbol"))
+    if not symbol:
+        return "symbol_not_normalized"
+    if not str(row.get("strategy_id") or "").strip():
+        return "missing_strategy_id"
+    cost_source = str(row.get("cost_source") or row.get("cost_model_version") or "").strip().lower()
+    if "global_default" in cost_source:
+        return "cost_source_global_default"
+    maturity_state = str(
+        row.get("expanded_universe_maturity_state")
+        or row.get("maturity_state")
+        or row.get("decision")
+        or ""
+    ).strip().upper()
+    if maturity_state and maturity_state != "PAPER_READY":
+        return "maturity_not_paper_ready"
     for value in (
         row.get("no_sample_reason"),
         row.get("advisory_reason"),
@@ -2483,9 +2501,9 @@ def _expanded_no_sample_reason(row: Mapping[str, Any], fields: Mapping[str, Any]
     if action == "negative_advisory":
         return "negative_advisory"
     if action == "paper_tracking":
-        return "expanded_paper_tracking"
+        return "maturity_not_paper_ready"
     if action == "shadow_tracking":
-        return "expanded_shadow_tracking"
+        return "maturity_not_paper_ready"
     return "expanded_universe_display_only"
 
 

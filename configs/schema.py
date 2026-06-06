@@ -1693,6 +1693,31 @@ class DiagnosticsConfig(BaseModel):
                     "not_in_v5_live_universe",
                 ],
             },
+            {
+                "strategy_id": "BOTTOM_ZONE_PROBE_PAPER_V1",
+                "experiment_name": "v5.bottom_zone_probe_paper",
+                "source_strategy_candidates": [
+                    "v5.bottom_zone_probe_paper",
+                    "v5.bottom_zone_reversal_shadow",
+                    "bottom_zone_probe_paper",
+                    "bottom_zone_reversal_shadow",
+                ],
+                "allowed_block_reasons": [],
+                "primary_horizon_hours": 24,
+                "require_protect_level": False,
+                "require_no_cooldown": False,
+                "require_alpha6_buy": False,
+                "bottom_zone_paper_only": True,
+                "allowed_market_pressure_states": [
+                    "CAPITULATION_WATCH",
+                    "BOTTOM_PROBE_ALLOWED",
+                ],
+                "require_fast_microstructure_confirmation": True,
+                "extra_live_block_reasons": [
+                    "bottom_zone_probe_paper_only_no_live",
+                    "bottom_zone_reversal_research_only",
+                ],
+            },
         ],
         description="Read-only paper strategy definitions for SOL/ETH/BNB and expanded-universe diagnostics",
     )

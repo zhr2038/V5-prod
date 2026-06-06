@@ -1765,6 +1765,62 @@ def test_hype_wld_expanded_paper_ready_advisory_generates_paper_strategy_rows(tm
     assert all(row["live_order_effect"] == "read_only_no_live_order" for row in expanded_daily)
 
 
+def test_expanded_paper_no_entry_rows_have_standard_no_sample_reason(tmp_path: Path) -> None:
+    cfg = AppConfig(symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT"])
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    reports_dir = tmp_path / "reports"
+    run_dir = reports_dir / "runs" / "r_expanded_no_entry"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        reports_dir,
+        [
+            {
+                "strategy_id": "HYPE_EXPANDED_UNIVERSE_PAPER_V1",
+                "strategy_candidate": "v5.expanded_universe_hype_paper",
+                "symbol": "HYPE-USDT",
+                "universe_type": "expanded_paper",
+                "expanded_universe_maturity_state": "PAPER_READY",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "would_enter": "false",
+                "cost_source": "global_default_v0",
+                "max_live_notional_usdt": "0",
+                **_fresh_meta(start_s),
+            },
+            {
+                "strategy_candidate": "v5.expanded_universe_wld_paper",
+                "symbol": "WLD-USDT",
+                "universe_type": "expanded_paper",
+                "expanded_universe_maturity_state": "PAPER_READY",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "would_enter": "false",
+                "cost_source": "public_spread_proxy",
+                "max_live_notional_usdt": "0",
+                **_fresh_meta(start_s),
+            },
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_expanded_no_entry", start_s),
+        market_data_1h={"HYPE/USDT": _series("HYPE/USDT", start_s, {0: 30.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["expanded_universe_paper_rows"] == 2
+    runs = _read_csv(reports_dir / "summaries" / "expanded_universe_paper_runs.csv")
+    by_symbol = {row["symbol"]: row for row in runs}
+    assert by_symbol["HYPE/USDT"]["would_enter"] == "False"
+    assert by_symbol["HYPE/USDT"]["no_sample_reason"] == "cost_source_global_default"
+    assert by_symbol["WLD/USDT"]["would_enter"] == "False"
+    assert by_symbol["WLD/USDT"]["no_sample_reason"] == "missing_strategy_id"
+    assert all(row["live_order_effect"] == "read_only_no_live_order" for row in runs)
+
+
 def test_bottom_zone_probe_paper_advisory_generates_read_only_paper_row(tmp_path: Path) -> None:
     cfg = AppConfig(symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT"])
     cfg.quant_lab.enabled = True
