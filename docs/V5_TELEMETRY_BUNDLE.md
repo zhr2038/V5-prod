@@ -8,7 +8,9 @@ The V5 telemetry bundle is a sanitized local archive for quant-lab audit import,
 python scripts/export_v5_bundle.py \
   --reports-dir reports \
   --out-dir /var/lib/v5/exports/bundles \
-  --window-hours 72
+  --window-hours 72 \
+  --keep-count 1000 \
+  --max-age-days 7
 ```
 
 Output files:
@@ -17,6 +19,8 @@ Output files:
 - `/var/lib/v5/exports/bundles/v5_live_followup_bundle_<YYYYMMDDTHHMMSSZ>.tar.gz.sha256`
 
 The exporter writes a `.tmp` archive first, renames it atomically, and writes the SHA256 sidecar after the archive is complete.
+
+Retention is count- and age-bounded. The default keeps the latest 1000 complete bundle archives and removes archives older than 7 days, together with orphaned SHA256 sidecars. This prevents high-frequency timers from accumulating thousands of short-interval bundles while preserving the freshest research evidence.
 
 ## Structure
 
@@ -81,4 +85,4 @@ sudo systemctl enable --now v5-export-bundle.timer
 sudo systemctl enable --now v5-quant-lab-selfcheck.timer
 ```
 
-The remote bundle directory is `/var/lib/v5/exports/bundles`. quant-lab should pull only completed `.tar.gz` files with matching `.sha256` sidecars.
+The remote bundle directory is `/var/lib/v5/exports/bundles`. quant-lab should pull only completed `.tar.gz` files with matching `.sha256` sidecars. If a production service invokes `scripts/generate_v5_bundle_remote.sh` directly, run `python scripts/prune_v5_bundles.py /var/lib/v5/exports/bundles --keep-count 1000 --max-age-days 7` after installing the latest archive.

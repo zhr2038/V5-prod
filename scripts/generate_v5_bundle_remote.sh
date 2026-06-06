@@ -27,6 +27,7 @@ from pathlib import Path
 ROOT = Path(sys.argv[1]).resolve()
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+from src.reporting.bundle_retention import prune_v5_bundle_exports
 from src.reporting.bnb_strong_alpha6_bypass_shadow import (
     BYPASS_SHADOW_FIELDS as REPORT_BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS,
     build_bnb_strong_alpha6_bypass_rows as report_build_bnb_strong_alpha6_bypass_rows,
@@ -15883,11 +15884,20 @@ with tarfile.open(TAR, "w:gz") as tf:
 sha = hashlib.sha256(TAR.read_bytes()).hexdigest()
 SHA_PATH.write_text(f"{sha}  {TAR.name}\n", encoding="utf-8")
 size = TAR.stat().st_size
+try:
+    tmp_retention = prune_v5_bundle_exports(
+        Path("/tmp"),
+        keep_count=int(os.getenv("V5_TMP_BUNDLE_KEEP_COUNT", "50") or "50"),
+        max_age_days=float(os.getenv("V5_TMP_BUNDLE_MAX_AGE_DAYS", "2") or "2"),
+    ).to_dict()
+except Exception as exc:
+    tmp_retention = {"error": repr(exc)}
 
 print(f"BUNDLE_PATH={TAR}")
 print(f"SHA256_PATH={SHA_PATH}")
 print(f"SHA256={sha}")
 print(f"SIZE_BYTES={size}")
+print("TMP_BUNDLE_RETENTION=" + json.dumps(tmp_retention, ensure_ascii=False, sort_keys=True))
 print("SANITY_CHECKS=" + json.dumps(sanity, ensure_ascii=False, sort_keys=True))
 print(f"HIGH_ISSUES={int(summary_meta.get('high_issue_count', 0))}")
 print(f"MEDIUM_ISSUES={int(summary_meta.get('medium_issue_count', 0))}")

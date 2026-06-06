@@ -17,6 +17,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 from urllib.parse import urlparse
 
+from src.reporting.bundle_retention import (
+    DEFAULT_KEEP_COUNT,
+    DEFAULT_MAX_AGE_DAYS,
+    prune_v5_bundle_exports,
+)
 from src.reporting.metrics import (
     SUMMARY_METRICS_VERSION,
     TRADE_EXPORT_SCHEMA_VERSION,
@@ -2522,9 +2527,28 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--reports-dir", default="reports")
     parser.add_argument("--out-dir", default="/var/lib/v5/exports/bundles")
     parser.add_argument("--window-hours", type=int, default=72)
+    parser.add_argument("--keep-count", type=int, default=DEFAULT_KEEP_COUNT)
+    parser.add_argument("--max-age-days", type=float, default=DEFAULT_MAX_AGE_DAYS)
+    parser.add_argument("--no-prune", action="store_true")
     args = parser.parse_args(argv)
     bundle = export_v5_bundle(reports_dir=args.reports_dir, out_dir=args.out_dir, window_hours=args.window_hours)
-    print(json.dumps({"bundle_path": str(bundle), "sha256_path": str(bundle) + ".sha256"}, ensure_ascii=False))
+    retention = None
+    if not args.no_prune:
+        retention = prune_v5_bundle_exports(
+            args.out_dir,
+            keep_count=args.keep_count,
+            max_age_days=args.max_age_days,
+        ).to_dict()
+    print(
+        json.dumps(
+            {
+                "bundle_path": str(bundle),
+                "sha256_path": str(bundle) + ".sha256",
+                "retention": retention,
+            },
+            ensure_ascii=False,
+        )
+    )
     return 0
 
 

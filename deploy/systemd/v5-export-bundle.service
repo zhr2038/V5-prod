@@ -7,6 +7,6 @@ Wants=network-online.target
 Type=oneshot
 User=ubuntu
 WorkingDirectory=/home/ubuntu/clawd/v5-prod
-ExecStart=/home/ubuntu/clawd/v5-prod/.venv/bin/python scripts/export_v5_bundle.py --reports-dir reports --out-dir /var/lib/v5/exports/bundles --window-hours 72
+ExecStart=/home/ubuntu/clawd/v5-prod/.venv/bin/python scripts/export_v5_bundle.py --reports-dir reports --out-dir /var/lib/v5/exports/bundles --window-hours 72 --keep-count 1000 --max-age-days 7
 NoNewPrivileges=true
 PrivateTmp=true
