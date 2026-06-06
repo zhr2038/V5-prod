@@ -27,6 +27,10 @@ CANDIDATE_SNAPSHOT_FIELDS = (
     "run_id",
     "ts_utc",
     "symbol",
+    "entry_px",
+    "latest_px",
+    "current_px",
+    "price_source",
     "regime_state",
     "risk_level",
     "current_position",
@@ -322,8 +326,18 @@ def build_candidate_snapshot_rows(
             order_cost_meta,
         )
         position = position_lookup.get(symbol)
+        router_rows = router_decisions.get(symbol, [])
+        router_latest = router_rows[-1] if router_rows else {}
+        candidate_price, candidate_price_source = _candidate_snapshot_price(
+            symbol=symbol,
+            prices=prices,
+            order=order,
+            top=top,
+            explain=explain,
+            router_decision=router_latest,
+        )
         current_position = _float_or_none(getattr(position, "qty", None))
-        current_weight = _current_weight(position, prices.get(symbol), equity_usdt)
+        current_weight = _current_weight(position, candidate_price, equity_usdt)
         target_raw = _float_or_none(target_weights_raw.get(symbol))
         target_after = _float_or_none(target_weights_after_risk.get(symbol))
         block_reason = _block_reason(router_decisions.get(symbol, []))
@@ -593,6 +607,10 @@ def build_candidate_snapshot_rows(
             "run_id": run_id,
             "ts_utc": ts_utc,
             "symbol": symbol,
+            "entry_px": candidate_price,
+            "latest_px": candidate_price,
+            "current_px": candidate_price,
+            "price_source": candidate_price_source,
             "regime_state": _string_or_none(regime_state),
             "risk_level": _string_or_none(risk_level),
             "current_position": current_position,
@@ -775,6 +793,44 @@ def _csv_value(value: Any) -> Any:
     if isinstance(value, (dict, list, tuple)):
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
     return value
+
+
+def _candidate_snapshot_price(
+    *,
+    symbol: str,
+    prices: Mapping[str, Any],
+    order: Any,
+    top: Mapping[str, Any],
+    explain: Mapping[str, Any],
+    router_decision: Mapping[str, Any],
+) -> tuple[Optional[float], Optional[str]]:
+    candidates: tuple[tuple[Any, str], ...] = (
+        (prices.get(symbol), "prices"),
+        (getattr(order, "signal_price", None), "order.signal_price"),
+        (_nested_get(order, ("meta", "signal_price")), "order.meta.signal_price"),
+        (_nested_get(order, ("meta", "entry_px")), "order.meta.entry_px"),
+        (explain.get("entry_px"), "target_execution_explain.entry_px"),
+        (explain.get("latest_px"), "target_execution_explain.latest_px"),
+        (explain.get("current_px"), "target_execution_explain.current_px"),
+        (explain.get("price"), "target_execution_explain.price"),
+        (router_decision.get("entry_px"), "router_decision.entry_px"),
+        (router_decision.get("latest_px"), "router_decision.latest_px"),
+        (router_decision.get("current_px"), "router_decision.current_px"),
+        (router_decision.get("price"), "router_decision.price"),
+        (top.get("entry_px"), "top_scores.entry_px"),
+        (top.get("latest_px"), "top_scores.latest_px"),
+        (top.get("current_px"), "top_scores.current_px"),
+        (top.get("price"), "top_scores.price"),
+        (_nested_get(top, ("market", "latest_px")), "top_scores.market.latest_px"),
+        (_nested_get(top, ("market", "current_px")), "top_scores.market.current_px"),
+        (_nested_get(top, ("metadata", "latest_px")), "top_scores.metadata.latest_px"),
+        (_nested_get(top, ("metadata", "current_px")), "top_scores.metadata.current_px"),
+    )
+    for value, source in candidates:
+        parsed = _first_float(value)
+        if parsed is not None and parsed > 0:
+            return parsed, source
+    return None, None
 
 
 def _ordered_symbols(*groups: Iterable[Any]) -> list[str]:

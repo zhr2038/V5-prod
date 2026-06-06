@@ -40,6 +40,7 @@ def test_candidate_snapshot_builds_symbol_rows_and_stable_ids(tmp_path: Path) ->
                 "alpha6_score": 0.28,
                 "alpha6_side": "buy",
                 "selected_rank": 2,
+                "latest_px": 151.2,
             }
         ],
         strategy_signals=[
@@ -107,6 +108,10 @@ def test_candidate_snapshot_builds_symbol_rows_and_stable_ids(tmp_path: Path) ->
     sol = rows[1]
     assert bnb["candidate_id"] == candidate_id_for("run_001", "BNB/USDT", "portfolio_alpha6_factor")
     assert bnb["strategy_candidate"] == "portfolio_alpha6_factor"
+    assert bnb["entry_px"] == 600.0
+    assert bnb["latest_px"] == 600.0
+    assert bnb["current_px"] == 600.0
+    assert bnb["price_source"] == "prices"
     assert bnb["current_weight"] == 0.12
     assert bnb["expected_edge_bps"] == 60.0
     assert bnb["expected_edge_source"] == "order.meta.expected_edge_bps"
@@ -126,6 +131,10 @@ def test_candidate_snapshot_builds_symbol_rows_and_stable_ids(tmp_path: Path) ->
     assert sol["no_signal_reason"] is None
     assert sol["final_decision"] == "blocked"
     assert sol["f4_volume_expansion"] == 0.4
+    assert sol["entry_px"] == 151.2
+    assert sol["latest_px"] == 151.2
+    assert sol["current_px"] == 151.2
+    assert sol["price_source"] == "target_execution_explain.latest_px"
     assert sol["cost_source"] == "local_estimate"
     assert sol["cost_source_quality"] == "local_estimate"
     assert sol["cost_bps"] == 30.0
