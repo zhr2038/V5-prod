@@ -11676,10 +11676,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             meta["advisory_row_count"] = str(len(items))
         return meta
 
-    def advisory_reference_dt(row):
+    def advisory_row_generation_dt(row):
         values = [
             parse_dt_utc(row.get("as_of_ts")),
             parse_dt_utc(row.get("generated_at")),
+            parse_dt_utc(row.get("created_at")),
+        ]
+        values = [value for value in values if value is not None]
+        return max(values) if values else None
+
+    def advisory_reference_dt(row):
+        row_dt = advisory_row_generation_dt(row)
+        if row_dt is not None:
+            return row_dt
+        values = [
             parse_dt_utc(row.get("advisory_dataset_generated_at")),
             parse_dt_utc(row.get("api_lake_generated_at")),
         ]
@@ -11760,12 +11770,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         return max(values) if values else None
 
     def latest_generation_strategy_advisory_rows(rows):
-        latest_dt = latest_strategy_advisory_dt(rows)
+        row_dts = [advisory_row_generation_dt(row) for row in rows]
+        row_dts = [value for value in row_dts if value is not None]
+        latest_dt = max(row_dts) if row_dts else latest_strategy_advisory_dt(rows)
         if latest_dt is None:
             return []
         latest_rows = []
         for row in rows:
-            row_dt = advisory_reference_dt(row)
+            row_dt = advisory_row_generation_dt(row) or advisory_reference_dt(row)
             if row_dt is not None and abs((row_dt - latest_dt).total_seconds()) < 1.0:
                 latest_rows.append(row)
         return latest_rows

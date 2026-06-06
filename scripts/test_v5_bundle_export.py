@@ -3924,9 +3924,9 @@ def fixture_mixed_generation_advisory_source_health_root(root):
         root / "reports/strategy_opportunity_advisory.csv",
         "\n".join(
             [
-                "strategy_candidate,symbol,decision,recommended_mode,generated_at,expires_at,contract_version",
-                f"v5.old_expired_shadow,BNB/USDT,KEEP_SHADOW,shadow,{old_generated_at},{old_expires_at},v5.quant_lab.telemetry.v2",
-                f"v5.latest_fresh_shadow,SOL/USDT,KEEP_SHADOW,shadow,{latest_generated_at},{latest_expires_at},v5.quant_lab.telemetry.v2",
+                "strategy_candidate,symbol,decision,recommended_mode,generated_at,expires_at,contract_version,api_lake_generated_at,advisory_dataset_generated_at",
+                f"v5.old_expired_shadow,BNB/USDT,KEEP_SHADOW,shadow,{old_generated_at},{old_expires_at},v5.quant_lab.telemetry.v2,{latest_generated_at},{latest_generated_at}",
+                f"v5.latest_fresh_shadow,SOL/USDT,KEEP_SHADOW,shadow,{latest_generated_at},{latest_expires_at},v5.quant_lab.telemetry.v2,{latest_generated_at},{latest_generated_at}",
             ]
         )
         + "\n",
