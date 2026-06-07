@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Copy, Download, FileArchive, Info, PackageCheck, RefreshCw } from 'lucide-react';
 import { api } from '../api';
-import type { LiveFollowupBundle, LiveFollowupBundleGenerateResult } from '../types';
+import type { LiveFollowupBundle, LiveFollowupBundleGenerateResult, LiveFollowupBundleGenerationStatus } from '../types';
 
 function fmtBundleSize(bytes: unknown) {
   const value = Number(bytes);
@@ -31,13 +31,19 @@ function shortBundleName(name: string) {
 
 function resultTone(result?: LiveFollowupBundleGenerateResult | null) {
   if (!result) return 'text-[var(--text-dim)]';
+  if (result.generation?.running || result.state === 'running') return 'text-cyan-200';
   return result.ok ? 'text-emerald-300' : 'text-rose-300';
+}
+
+function isGenerationRunning(status?: LiveFollowupBundleGenerationStatus | null) {
+  return Boolean(status?.running || status?.state === 'running');
 }
 
 export function BundleExportPanel() {
   const [bundles, setBundles] = useState<LiveFollowupBundle[]>([]);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [generationStatus, setGenerationStatus] = useState<LiveFollowupBundleGenerationStatus | null>(null);
   const [lastResult, setLastResult] = useState<LiveFollowupBundleGenerateResult | null>(null);
   const [error, setError] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -45,20 +51,46 @@ export function BundleExportPanel() {
 
   const latest = bundles[0];
   const statusText = useMemo(() => {
-    if (generating) return '正在生成今日包';
+    if (generating || isGenerationRunning(generationStatus)) {
+      const elapsed = Number(generationStatus?.elapsed_seconds || 0);
+      return elapsed > 0 ? `正在生成今日包 · ${elapsed.toFixed(1)}s` : '正在生成今日包';
+    }
     if (lastResult) {
       return lastResult.ok
         ? `生成完成 · ${fmtBundleSize(lastResult.size_bytes)} · ${Number(lastResult.elapsed_seconds || 0).toFixed(1)}s`
         : lastResult.error || '生成失败';
     }
     return latest ? `最新 ${fmtBundleTime(latest.mtime_utc)} · ${fmtBundleSize(latest.size_bytes)}` : '暂无可下载包';
-  }, [generating, lastResult, latest]);
+  }, [generating, generationStatus, lastResult, latest]);
 
   const refreshBundles = useCallback(async () => {
     setLoading(true);
     const payload = await api.liveFollowupBundles();
     if (payload?.ok) {
       setBundles(Array.isArray(payload.bundles) ? payload.bundles : []);
+      setGenerationStatus(payload.generation || null);
+      const running = isGenerationRunning(payload.generation);
+      setGenerating(running);
+      if (!running && payload.generation && payload.generation.state !== 'idle' && typeof payload.generation.ok === 'boolean') {
+        setLastResult({
+          ok: payload.generation.ok,
+          state: payload.generation.state,
+          generation: payload.generation,
+          return_code: payload.generation.return_code ?? undefined,
+          elapsed_seconds: payload.generation.elapsed_seconds,
+          bundle_path: payload.generation.bundle_path,
+          sha256_path: payload.generation.sha256_path,
+          sha256: payload.generation.sha256,
+          size_bytes: payload.generation.size_bytes,
+          high_issues: payload.generation.high_issues,
+          medium_issues: payload.generation.medium_issues,
+          file_count: payload.generation.file_count,
+          stdout_tail: payload.generation.stdout_tail,
+          stderr_tail: payload.generation.stderr_tail,
+          bundles: Array.isArray(payload.bundles) ? payload.bundles : [],
+          error: payload.generation.error,
+        });
+      }
       setError('');
     } else {
       setError(payload?.error || '读取 bundle 列表失败');
@@ -73,6 +105,7 @@ export function BundleExportPanel() {
     setError('');
     const result = await api.generateLiveFollowupBundle();
     setLastResult(result);
+    setGenerationStatus(result?.generation || null);
     if (Array.isArray(result?.bundles)) {
       setBundles(result.bundles);
     } else {
@@ -81,7 +114,7 @@ export function BundleExportPanel() {
     if (!result?.ok) {
       setError(result?.error || '生成今日包失败');
     }
-    setGenerating(false);
+    setGenerating(isGenerationRunning(result?.generation));
   }, [generating, refreshBundles]);
 
   useEffect(() => {
@@ -98,6 +131,14 @@ export function BundleExportPanel() {
     }, 30000);
     return () => window.clearInterval(timer);
   }, [autoRefresh, refreshBundles]);
+
+  useEffect(() => {
+    if (!generating) return undefined;
+    const timer = window.setInterval(() => {
+      void refreshBundles();
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [generating, refreshBundles]);
 
   const copyBundleName = useCallback((bundle: LiveFollowupBundle) => {
     void navigator.clipboard?.writeText(bundle.name);

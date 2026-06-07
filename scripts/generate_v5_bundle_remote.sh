@@ -3,6 +3,16 @@ set -euo pipefail
 
 ROOT="${1:-${V5_REMOTE_ROOT:-/home/ubuntu/clawd/v5-prod}}"
 
+BUNDLE_LOCK_FILE="${V5_BUNDLE_GENERATE_LOCK_FILE:-/tmp/v5_live_followup_bundle_generate.lock}"
+BUNDLE_LOCK_WAIT_SEC="${V5_BUNDLE_GENERATE_LOCK_WAIT_SEC:-600}"
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$BUNDLE_LOCK_FILE"
+  if ! flock -w "$BUNDLE_LOCK_WAIT_SEC" 9; then
+    echo "ERROR=bundle generation already running after ${BUNDLE_LOCK_WAIT_SEC}s wait" >&2
+    exit 75
+  fi
+fi
+
 python3 - "$ROOT" <<'PY'
 import csv
 import datetime as dt

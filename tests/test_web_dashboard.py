@@ -534,11 +534,13 @@ def test_generate_live_followup_bundle_runs_packager(monkeypatch, tmp_path):
     monkeypatch.setattr(module.subprocess, "run", fake_run)
     client = module.app.test_client()
 
-    response = client.post("/api/live_followup_bundles/generate")
+    response = client.post("/api/live_followup_bundles/generate?sync=1")
 
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["ok"] is True
+    assert payload["state"] == "completed"
+    assert payload["generation"]["state"] == "completed"
     assert payload["bundle_path"] == str(bundle)
     assert payload["size_bytes"] == 6
     assert payload["medium_issues"] == 1
@@ -546,6 +548,75 @@ def test_generate_live_followup_bundle_runs_packager(monkeypatch, tmp_path):
     assert payload["bundles"][0]["name"] == bundle.name
     assert calls
     assert calls[0][0][-1] == str(tmp_path)
+
+
+def test_generate_live_followup_bundle_async_returns_immediately(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    monkeypatch.setattr(module, "_bundle_search_dirs", lambda config=None: [bundle_dir])
+
+    started = []
+
+    class FakeThread:
+        def __init__(self, target, args=(), daemon=False):
+            self.target = target
+            self.args = args
+            self.daemon = daemon
+
+        def start(self):
+            started.append((self.target, self.args, self.daemon))
+
+    monkeypatch.setattr(module.threading, "Thread", FakeThread)
+    client = module.app.test_client()
+
+    response = client.post("/api/live_followup_bundles/generate")
+
+    assert response.status_code == 202
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["state"] == "running"
+    assert payload["generation"]["running"] is True
+    assert payload["message"] == "bundle generation started"
+    assert started
+    module._BUNDLE_GENERATE_LOCK.release()
+
+
+def test_generate_live_followup_bundle_running_is_not_frontend_error(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    monkeypatch.setattr(module, "_bundle_search_dirs", lambda config=None: [bundle_dir])
+    assert module._BUNDLE_GENERATE_LOCK.acquire(blocking=False)
+    module._set_bundle_generation_status(state="running", running=True, job_id="test-job")
+    client = module.app.test_client()
+
+    response = client.post("/api/live_followup_bundles/generate")
+
+    assert response.status_code == 202
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["state"] == "running"
+    assert payload["generation"]["job_id"] == "test-job"
+    assert payload["message"] == "bundle generation already running"
+    module._BUNDLE_GENERATE_LOCK.release()
+
+
+def test_live_followup_bundles_exposes_generation_status(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    monkeypatch.setattr(module, "_bundle_search_dirs", lambda config=None: [bundle_dir])
+    module._set_bundle_generation_status(state="running", running=True, job_id="list-job")
+    client = module.app.test_client()
+
+    response = client.get("/api/live_followup_bundles")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["generation"]["state"] == "running"
+    assert payload["generation"]["running"] is True
+    assert payload["generation"]["job_id"] == "list-job"
 
 
 def test_resolve_react_build_path_ignores_legacy_admin_dist(monkeypatch, tmp_path):

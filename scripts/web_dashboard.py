@@ -226,6 +226,18 @@ _OKX_HEALTH_CHECK_CACHE_LOCK = threading.Lock()
 _DASHBOARD_ROUTE_CACHE: Dict[tuple[str, tuple[tuple[str, str], ...]], tuple[float, Any, int]] = {}
 _DASHBOARD_ROUTE_CACHE_LOCK = threading.Lock()
 _BUNDLE_GENERATE_LOCK = threading.Lock()
+_BUNDLE_GENERATE_STATUS_LOCK = threading.Lock()
+_BUNDLE_GENERATE_STATUS: Dict[str, Any] = {
+    'state': 'idle',
+    'running': False,
+    'job_id': '',
+    'started_at': '',
+    'completed_at': '',
+    'elapsed_seconds': 0.0,
+    'ok': None,
+    'error': '',
+    'return_code': None,
+}
 BUNDLE_NAME_RE = re.compile(r'^v5_live_followup_bundle_\d{8}T\d{6}Z\.tar\.gz(?:\.sha256)?$')
 BUNDLE_GENERATION_OUTPUT_KEY_RE = re.compile(r'^(BUNDLE_PATH|SHA256_PATH|SHA256|SIZE_BYTES|HIGH_ISSUES|MEDIUM_ISSUES|FILE_COUNT)=(.*)$')
 BUNDLE_SECRET_VALUE_RE = re.compile(
@@ -3610,6 +3622,118 @@ def _bundle_int(value: Any) -> int:
         return 0
 
 
+def _bundle_generation_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def _bundle_generation_public_status() -> Dict[str, Any]:
+    with _BUNDLE_GENERATE_STATUS_LOCK:
+        status = dict(_BUNDLE_GENERATE_STATUS)
+    started_epoch = status.pop('_started_epoch', None)
+    if status.get('running') and started_epoch:
+        try:
+            status['elapsed_seconds'] = round(max(0.0, time.time() - float(started_epoch)), 2)
+        except (TypeError, ValueError):
+            pass
+    return status
+
+
+def _set_bundle_generation_status(**updates: Any) -> Dict[str, Any]:
+    with _BUNDLE_GENERATE_STATUS_LOCK:
+        _BUNDLE_GENERATE_STATUS.update(updates)
+        status = dict(_BUNDLE_GENERATE_STATUS)
+    status.pop('_started_epoch', None)
+    return status
+
+
+def _run_live_followup_bundle_packager() -> tuple[Dict[str, Any], int]:
+    script = WORKSPACE / 'scripts' / 'generate_v5_bundle_remote.sh'
+    if not script.is_file():
+        return {'ok': False, 'error': 'bundle script not found'}, 404
+
+    bash_bin = str(os.getenv('V5_DASHBOARD_BASH') or shutil.which('bash') or '/bin/bash').strip()
+    if not bash_bin or '\0' in bash_bin:
+        return {'ok': False, 'error': 'invalid bash executable'}, 400
+    timeout_sec = int(os.getenv('V5_DASHBOARD_BUNDLE_GENERATE_TIMEOUT_SEC', '900') or '900')
+    started = time.time()
+    try:
+        proc = subprocess.run(  # noqa: S603 - bash executable is validated and script path is fixed inside the workspace.
+            [bash_bin, str(script), str(WORKSPACE)],
+            cwd=str(WORKSPACE),
+            text=True,
+            capture_output=True,
+            timeout=timeout_sec,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            'ok': False,
+            'error': 'bundle generation timed out',
+            'elapsed_seconds': round(time.time() - started, 2),
+            'stdout_tail': _sanitize_bundle_command_output(exc.stdout),
+            'stderr_tail': _sanitize_bundle_command_output(exc.stderr),
+        }, 504
+
+    elapsed = time.time() - started
+    parsed = _parse_bundle_generation_output(proc.stdout)
+    ok = proc.returncode == 0
+    payload = {
+        'ok': ok,
+        'return_code': proc.returncode,
+        'elapsed_seconds': round(elapsed, 2),
+        'bundle_path': parsed.get('bundle_path', ''),
+        'sha256_path': parsed.get('sha256_path', ''),
+        'sha256': parsed.get('sha256', ''),
+        'size_bytes': _bundle_int(parsed.get('size_bytes')),
+        'high_issues': _bundle_int(parsed.get('high_issues')),
+        'medium_issues': _bundle_int(parsed.get('medium_issues')),
+        'file_count': _bundle_int(parsed.get('file_count')),
+        'stdout_tail': _sanitize_bundle_command_output(proc.stdout),
+        'stderr_tail': _sanitize_bundle_command_output(proc.stderr),
+        'bundles': _list_live_followup_bundles(limit=5),
+    }
+    if not ok:
+        payload['error'] = 'bundle generation failed'
+    return payload, 200 if ok else 500
+
+
+def _bundle_generation_worker(job_id: str) -> None:
+    try:
+        payload, status_code = _run_live_followup_bundle_packager()
+        state = 'completed' if payload.get('ok') else ('timeout' if status_code == 504 else 'failed')
+        _set_bundle_generation_status(
+            state=state,
+            running=False,
+            completed_at=_bundle_generation_now_iso(),
+            ok=bool(payload.get('ok')),
+            error='' if payload.get('ok') else str(payload.get('error') or 'bundle generation failed'),
+            status_code=status_code,
+            return_code=payload.get('return_code'),
+            elapsed_seconds=payload.get('elapsed_seconds', 0.0),
+            bundle_path=payload.get('bundle_path', ''),
+            sha256_path=payload.get('sha256_path', ''),
+            sha256=payload.get('sha256', ''),
+            size_bytes=payload.get('size_bytes', 0),
+            high_issues=payload.get('high_issues', 0),
+            medium_issues=payload.get('medium_issues', 0),
+            file_count=payload.get('file_count', 0),
+            stdout_tail=payload.get('stdout_tail', ''),
+            stderr_tail=payload.get('stderr_tail', ''),
+        )
+    except Exception as exc:
+        _log_dashboard_exception('live follow-up bundle background generation', exc)
+        _set_bundle_generation_status(
+            state='failed',
+            running=False,
+            completed_at=_bundle_generation_now_iso(),
+            ok=False,
+            error=_sanitize_public_error_text(exc, default='bundle generation failed'),
+            return_code=None,
+        )
+    finally:
+        _BUNDLE_GENERATE_LOCK.release()
+
+
 @app.route('/api/live_followup_bundles')
 def api_live_followup_bundles():
     try:
@@ -3624,6 +3748,7 @@ def api_live_followup_bundles():
             'bundles': bundles,
             'count': len(bundles),
             'limit': limit,
+            'generation': _bundle_generation_public_status(),
             'last_update': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         })
     except Exception as exc:
@@ -3645,58 +3770,99 @@ def api_live_followup_bundle_download():
 @app.route('/api/live_followup_bundles/generate', methods=['POST'])
 def api_generate_live_followup_bundle():
     if not _BUNDLE_GENERATE_LOCK.acquire(blocking=False):
-        return jsonify({'ok': False, 'error': 'bundle generation already running'}), 409
+        status = _bundle_generation_public_status()
+        return jsonify({
+            'ok': True,
+            'state': status.get('state') or 'running',
+            'generation': status,
+            'bundles': _list_live_followup_bundles(limit=5),
+            'message': 'bundle generation already running',
+        }), 202
+
+    sync = str(request.args.get('sync') or '').strip().lower() in {'1', 'true', 'yes'}
+    job_id = datetime.now(timezone.utc).strftime('bundle-%Y%m%dT%H%M%SZ')
+    _set_bundle_generation_status(
+        state='running',
+        running=True,
+        job_id=job_id,
+        started_at=_bundle_generation_now_iso(),
+        completed_at='',
+        _started_epoch=time.time(),
+        ok=None,
+        error='',
+        return_code=None,
+        status_code=None,
+        elapsed_seconds=0.0,
+        bundle_path='',
+        sha256_path='',
+        sha256='',
+        size_bytes=0,
+        high_issues=0,
+        medium_issues=0,
+        file_count=0,
+        stdout_tail='',
+        stderr_tail='',
+    )
+
+    if sync:
+        try:
+            payload, status_code = _run_live_followup_bundle_packager()
+            state = 'completed' if payload.get('ok') else ('timeout' if status_code == 504 else 'failed')
+            generation = _set_bundle_generation_status(
+                state=state,
+                running=False,
+                completed_at=_bundle_generation_now_iso(),
+                ok=bool(payload.get('ok')),
+                error='' if payload.get('ok') else str(payload.get('error') or 'bundle generation failed'),
+                status_code=status_code,
+                return_code=payload.get('return_code'),
+                elapsed_seconds=payload.get('elapsed_seconds', 0.0),
+                bundle_path=payload.get('bundle_path', ''),
+                sha256_path=payload.get('sha256_path', ''),
+                sha256=payload.get('sha256', ''),
+                size_bytes=payload.get('size_bytes', 0),
+                high_issues=payload.get('high_issues', 0),
+                medium_issues=payload.get('medium_issues', 0),
+                file_count=payload.get('file_count', 0),
+                stdout_tail=payload.get('stdout_tail', ''),
+                stderr_tail=payload.get('stderr_tail', ''),
+            )
+            payload['state'] = state
+            payload['generation'] = generation
+            return jsonify(payload), status_code
+        except Exception as exc:
+            _set_bundle_generation_status(
+                state='failed',
+                running=False,
+                completed_at=_bundle_generation_now_iso(),
+                ok=False,
+                error=_sanitize_public_error_text(exc, default='bundle generation failed'),
+            )
+            return _json_internal_error_response(exc, ok=False)
+        finally:
+            _BUNDLE_GENERATE_LOCK.release()
 
     try:
-        script = WORKSPACE / 'scripts' / 'generate_v5_bundle_remote.sh'
-        if not script.is_file():
-            return jsonify({'ok': False, 'error': 'bundle script not found'}), 404
-
-        bash_bin = str(os.getenv('V5_DASHBOARD_BASH') or shutil.which('bash') or '/bin/bash').strip()
-        if not bash_bin or '\0' in bash_bin:
-            return jsonify({'ok': False, 'error': 'invalid bash executable'}), 400
-        timeout_sec = int(os.getenv('V5_DASHBOARD_BUNDLE_GENERATE_TIMEOUT_SEC', '900') or '900')
-        started = time.time()
-        proc = subprocess.run(  # noqa: S603 - bash executable is validated and script path is fixed inside the workspace.
-            [bash_bin, str(script), str(WORKSPACE)],
-            cwd=str(WORKSPACE),
-            text=True,
-            capture_output=True,
-            timeout=timeout_sec,
-            check=False,
-        )
-        elapsed = time.time() - started
-        parsed = _parse_bundle_generation_output(proc.stdout)
-        ok = proc.returncode == 0
-        payload = {
-            'ok': ok,
-            'return_code': proc.returncode,
-            'elapsed_seconds': round(elapsed, 2),
-            'bundle_path': parsed.get('bundle_path', ''),
-            'sha256_path': parsed.get('sha256_path', ''),
-            'sha256': parsed.get('sha256', ''),
-            'size_bytes': _bundle_int(parsed.get('size_bytes')),
-            'high_issues': _bundle_int(parsed.get('high_issues')),
-            'medium_issues': _bundle_int(parsed.get('medium_issues')),
-            'file_count': _bundle_int(parsed.get('file_count')),
-            'stdout_tail': _sanitize_bundle_command_output(proc.stdout),
-            'stderr_tail': _sanitize_bundle_command_output(proc.stderr),
-            'bundles': _list_live_followup_bundles(limit=5),
-        }
-        if not ok:
-            payload['error'] = 'bundle generation failed'
-        return jsonify(payload), 200 if ok else 500
-    except subprocess.TimeoutExpired as exc:
+        thread = threading.Thread(target=_bundle_generation_worker, args=(job_id,), daemon=True)
+        thread.start()
+        status = _bundle_generation_public_status()
         return jsonify({
-            'ok': False,
-            'error': 'bundle generation timed out',
-            'stdout_tail': _sanitize_bundle_command_output(exc.stdout),
-            'stderr_tail': _sanitize_bundle_command_output(exc.stderr),
-        }), 504
+            'ok': True,
+            'state': status.get('state') or 'running',
+            'generation': status,
+            'bundles': _list_live_followup_bundles(limit=5),
+            'message': 'bundle generation started',
+        }), 202
     except Exception as exc:
-        return _json_internal_error_response(exc, ok=False)
-    finally:
         _BUNDLE_GENERATE_LOCK.release()
+        _set_bundle_generation_status(
+            state='failed',
+            running=False,
+            completed_at=_bundle_generation_now_iso(),
+            ok=False,
+            error=_sanitize_public_error_text(exc, default='bundle generation failed'),
+        )
+        return _json_internal_error_response(exc, ok=False)
 
 
 @app.route('/api/account')

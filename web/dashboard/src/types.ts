@@ -443,18 +443,44 @@ export interface LiveFollowupBundle {
   source_dir?: string;
 }
 
+export interface LiveFollowupBundleGenerationStatus {
+  state?: 'idle' | 'running' | 'completed' | 'failed' | 'timeout' | string;
+  running?: boolean;
+  job_id?: string;
+  started_at?: string;
+  completed_at?: string;
+  elapsed_seconds?: number;
+  ok?: boolean | null;
+  error?: string;
+  return_code?: number | null;
+  status_code?: number | null;
+  bundle_path?: string;
+  sha256_path?: string;
+  sha256?: string;
+  size_bytes?: number;
+  high_issues?: number;
+  medium_issues?: number;
+  file_count?: number;
+  stdout_tail?: string;
+  stderr_tail?: string;
+}
+
 export interface LiveFollowupBundlesData {
   ok: boolean;
   bundles: LiveFollowupBundle[];
   count: number;
   limit?: number;
   searched_dirs?: string[];
+  generation?: LiveFollowupBundleGenerationStatus;
   last_update?: string;
   error?: string;
 }
 
 export interface LiveFollowupBundleGenerateResult {
   ok: boolean;
+  state?: string;
+  generation?: LiveFollowupBundleGenerationStatus;
+  message?: string;
   return_code?: number;
   elapsed_seconds?: number;
   bundle_path?: string;
