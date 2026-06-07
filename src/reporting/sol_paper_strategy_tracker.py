@@ -2922,10 +2922,33 @@ def _alpha_factory_advisory_rows(
         source_health_freshness_status = (
             "stale" if _normalize_bool(source_health.get("selected_source_is_stale")) else "fresh"
         )
+    selected_fresh: Optional[bool] = None
+    if source_health_freshness_status == "fresh":
+        selected_fresh = True
+    elif source_health_freshness_status in {"stale", "invalid_timestamp"}:
+        selected_fresh = False
+    source_health_stale_reason = str(
+        source_health.get("stale_reason") or source_health.get("freshness_reason") or ""
+    ).strip()
+    source_health_age_sec = source_health.get("advisory_age_sec")
     out: list[dict[str, Any]] = []
     for row in advisory_rows:
         if not _is_alpha_factory_advisory(row):
             continue
+        effective_source = selected_source or row.get("advisory_source")
+        effective_fresh = selected_fresh
+        if effective_fresh is None:
+            effective_fresh = _normalize_bool(row.get("advisory_fresh"))
+        effective_stale_reason = (
+            ""
+            if effective_fresh is True
+            else (source_health_stale_reason or str(row.get("stale_reason") or ""))
+        )
+        effective_row = dict(row)
+        effective_row["advisory_source"] = effective_source
+        if effective_fresh is not None:
+            effective_row["advisory_fresh"] = effective_fresh
+        effective_row["stale_reason"] = effective_stale_reason
         out.append(
             {
                 "run_id": run_id,
@@ -2936,14 +2959,14 @@ def _alpha_factory_advisory_rows(
                 "recommended_mode": row.get("recommended_mode"),
                 "promotion_state": row.get("promotion_state"),
                 "alpha_factory_score": row.get("alpha_factory_score"),
-                "advisory_source": row.get("advisory_source"),
-                "selected_source": selected_source or row.get("advisory_source"),
+                "advisory_source": effective_source,
+                "selected_source": effective_source,
                 "source_health_freshness_status": source_health_freshness_status,
-                "advisory_fresh": row.get("advisory_fresh"),
-                "advisory_age_sec": row.get("advisory_age_sec"),
-                "stale_reason": row.get("stale_reason"),
-                "stale_response_downgraded": _alpha_factory_stale_response_downgraded(row),
-                "response_action": _alpha_factory_response_action(row),
+                "advisory_fresh": effective_row.get("advisory_fresh"),
+                "advisory_age_sec": source_health_age_sec or row.get("advisory_age_sec"),
+                "stale_reason": effective_stale_reason,
+                "stale_response_downgraded": _alpha_factory_stale_response_downgraded(effective_row),
+                "response_action": _alpha_factory_response_action(effective_row),
                 "max_live_notional_usdt_ignored": True,
                 "live_order_effect": "read_only_no_live_order",
             }
