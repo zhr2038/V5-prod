@@ -705,6 +705,32 @@ class V5Pipeline:
         side = str(signal.get("side", "") or "").strip().lower()
         return side or None
 
+    @staticmethod
+    def _signal_metadata_truthy(signal: Optional[Dict[str, Any]], *keys: str) -> bool:
+        if not isinstance(signal, dict):
+            return False
+        sources = [signal]
+        metadata = signal.get("metadata")
+        if isinstance(metadata, dict):
+            sources.append(metadata)
+        truthy_strings = {"1", "true", "yes", "y", "buy", "bullish", "positive", "confirmed"}
+        falsy_strings = {"0", "false", "no", "n", "sell", "bearish", "negative", "none", "not_observable"}
+        for source in sources:
+            for key in keys:
+                if key not in source:
+                    continue
+                value = source.get(key)
+                if isinstance(value, bool):
+                    return bool(value)
+                if isinstance(value, (int, float)):
+                    return float(value) > 0.0
+                text = str(value or "").strip().lower()
+                if text in truthy_strings:
+                    return True
+                if text in falsy_strings:
+                    return False
+        return False
+
     def _expected_edge_metadata_for_buy(
         self,
         *,
@@ -2848,6 +2874,7 @@ class V5Pipeline:
         strategy_signal_lookup: Dict[str, Dict[str, Dict[str, Any]]],
     ) -> List[Dict[str, Any]]:
         alpha6_lookup = strategy_signal_lookup.get("Alpha6Factor") or {}
+        trend_lookup = strategy_signal_lookup.get("TrendFollowing") or {}
         min_alpha6_score = float(getattr(self.cfg.execution, "protect_entry_alpha6_min_score", 0.40) or 0.0)
         min_f4 = float(getattr(self.cfg.execution, "protect_entry_min_f4_volume_expansion", 0.0) or 0.0)
         min_f5 = float(getattr(self.cfg.execution, "protect_entry_min_f5_rsi_trend_confirm", 0.30) or 0.0)
@@ -2855,6 +2882,7 @@ class V5Pipeline:
         for item in candidates or []:
             symbol = str(item.get("symbol") or "")
             alpha6_signal = alpha6_lookup.get(symbol)
+            trend_signal = trend_lookup.get(symbol)
             alpha6_score = self._signal_score(alpha6_signal)
             alpha6_side = self._signal_side(alpha6_signal)
             f4_volume_expansion = self._alpha6_volume_expansion(alpha6_signal)
@@ -2868,6 +2896,27 @@ class V5Pipeline:
                 and f5_rsi_trend_confirm is not None
                 and float(f5_rsi_trend_confirm) >= min_f5
             )
+            expected_edge_bps = None
+            for signal in (alpha6_signal, trend_signal):
+                expected_edge_bps = self._signal_expected_net_bps(signal)
+                if expected_edge_bps is not None:
+                    break
+            fast_microstructure_confirmed = bool(
+                self._signal_metadata_truthy(
+                    alpha6_signal,
+                    "fast_microstructure_confirmation",
+                    "fast_microstructure_confirmed",
+                    "microstructure_confirmation",
+                    "microstructure_confirmed",
+                )
+                or self._signal_metadata_truthy(
+                    trend_signal,
+                    "fast_microstructure_confirmation",
+                    "fast_microstructure_confirmed",
+                    "microstructure_confirmation",
+                    "microstructure_confirmed",
+                )
+            )
             row = dict(item)
             row.update(
                 {
@@ -2877,6 +2926,8 @@ class V5Pipeline:
                     "f4_volume_expansion": f4_volume_expansion,
                     "f5_rsi_trend_confirm": f5_rsi_trend_confirm,
                     "alpha6_confirmed": alpha6_confirmed,
+                    "fast_microstructure_confirmed": fast_microstructure_confirmed,
+                    "expected_edge_bps": expected_edge_bps,
                     "expected_net_bps": self._market_impulse_probe_expected_net_bps(symbol),
                 }
             )
@@ -2885,8 +2936,8 @@ class V5Pipeline:
 
     @staticmethod
     def _market_impulse_probe_selection_mode(value: Any) -> str:
-        mode = str(value or "priority").strip().lower()
-        return mode if mode in {"priority", "trend_score", "alpha6_confirmed", "expected_net_shadow"} else "priority"
+        mode = str(value or "composite").strip().lower()
+        return mode if mode in {"priority", "trend_score", "alpha6_confirmed", "expected_net_shadow", "composite"} else "composite"
 
     def _market_impulse_probe_sort_key(self, item: Dict[str, Any], mode: str) -> tuple:
         symbol = str(item.get("symbol") or "")
@@ -2901,12 +2952,20 @@ class V5Pipeline:
         alpha6_score_f = float(alpha6_score) if alpha6_score is not None else -999.0
         expected_net = item.get("expected_net_bps")
         expected_net_f = float(expected_net) if expected_net is not None else -1_000_000.0
+        expected_edge = _float_or_none(item.get("expected_edge_bps"))
+        expected_edge_f = float(expected_edge) if expected_edge is not None else -1_000_000.0
         if mode == "trend_score":
             return (-trend_score, priority_rank, symbol)
         if mode == "alpha6_confirmed":
             return (0 if bool(item.get("alpha6_confirmed")) else 1, -alpha6_score_f, -trend_score, priority_rank, symbol)
         if mode == "expected_net_shadow":
             return (0 if expected_net is not None else 1, -expected_net_f, -trend_score, priority_rank, symbol)
+        if mode == "composite":
+            edge_component = 0.0 if expected_edge is None else max(-2.0, min(2.0, expected_edge_f / 100.0))
+            alpha_component = 0.35 if bool(item.get("alpha6_confirmed")) else 0.0
+            micro_component = 0.25 if bool(item.get("fast_microstructure_confirmed")) else 0.0
+            composite_score = float(trend_score) + edge_component + alpha_component + micro_component
+            return (-composite_score, 0 if expected_edge is not None else 1, priority_rank, symbol)
         return (priority_rank, -trend_score, symbol)
 
     def _market_impulse_probe_select_symbol(self, candidates: List[Dict[str, Any]], mode: str) -> Optional[str]:
@@ -2916,7 +2975,17 @@ class V5Pipeline:
             return None
         if mode == "expected_net_shadow" and not any(item.get("expected_net_bps") is not None for item in candidates):
             return None
-        row = sorted(candidates, key=lambda item: self._market_impulse_probe_sort_key(item, mode))[0]
+        candidate_rows = list(candidates)
+        if mode == "composite":
+            candidate_rows = [
+                item
+                for item in candidate_rows
+                if _float_or_none(item.get("expected_edge_bps")) is None
+                or float(_float_or_none(item.get("expected_edge_bps")) or 0.0) >= 0.0
+            ]
+            if not candidate_rows:
+                return None
+        row = sorted(candidate_rows, key=lambda item: self._market_impulse_probe_sort_key(item, mode))[0]
         return str(row.get("symbol") or "") or None
 
     def _market_impulse_probe_shadow_selection(
@@ -2938,6 +3007,7 @@ class V5Pipeline:
             "selected_by_trend_score": self._market_impulse_probe_select_symbol(candidates, "trend_score"),
             "selected_by_alpha6_confirmed": self._market_impulse_probe_select_symbol(candidates, "alpha6_confirmed"),
             "selected_by_expected_net_shadow": self._market_impulse_probe_select_symbol(candidates, "expected_net_shadow"),
+            "selected_by_composite": self._market_impulse_probe_select_symbol(candidates, "composite"),
             "candidates": [dict(item) for item in candidates],
             "live_missed_eth_by_trend_score": False,
         }
@@ -2951,8 +3021,9 @@ class V5Pipeline:
         require_feature_enabled: bool = True,
     ) -> Dict[str, Any]:
         enabled = bool(getattr(self.cfg.execution, "market_impulse_probe_enabled", True))
+        live_enabled = bool(getattr(self.cfg.execution, "market_impulse_probe_live_enabled", False))
         selection_mode = self._market_impulse_probe_selection_mode(
-            getattr(self.cfg.execution, "market_impulse_probe_selection_mode", "priority")
+            getattr(self.cfg.execution, "market_impulse_probe_selection_mode", "composite")
         )
         shadow_enabled = bool(getattr(getattr(self.cfg, "diagnostics", None), "market_impulse_selection_shadow_enabled", True))
 
@@ -2967,6 +3038,8 @@ class V5Pipeline:
                 "btc_trend_score": btc_trend_score,
                 "candidates": rows,
                 "selection_mode": selection_mode,
+                "feature_enabled": bool(enabled),
+                "live_enabled": bool(live_enabled),
             }
             if shadow_enabled:
                 payload["shadow_selection"] = self._market_impulse_probe_shadow_selection(
@@ -2978,7 +3051,7 @@ class V5Pipeline:
                 )
             return payload
 
-        if require_feature_enabled and not enabled:
+        if require_feature_enabled and not enabled and not shadow_enabled:
             return inactive_context()
 
         if bool(getattr(self.cfg.execution, "market_impulse_probe_only_in_protect", True)):
@@ -3024,8 +3097,16 @@ class V5Pipeline:
             candidates=trend_buy_candidates,
             strategy_signal_lookup=strategy_signal_lookup,
         )
+        candidate_pool = list(enriched_candidates)
+        if selection_mode == "composite":
+            candidate_pool = [
+                item
+                for item in candidate_pool
+                if _float_or_none(item.get("expected_edge_bps")) is None
+                or float(_float_or_none(item.get("expected_edge_bps")) or 0.0) >= 0.0
+            ]
         selected_candidates = sorted(
-            enriched_candidates,
+            candidate_pool,
             key=lambda item: self._market_impulse_probe_sort_key(item, selection_mode),
         )
         payload = {
@@ -3034,6 +3115,8 @@ class V5Pipeline:
             "btc_trend_score": btc_trend_score,
             "candidates": selected_candidates,
             "selection_mode": selection_mode,
+            "feature_enabled": bool(enabled),
+            "live_enabled": bool(live_enabled),
         }
         if shadow_enabled:
             payload["shadow_selection"] = self._market_impulse_probe_shadow_selection(
@@ -3120,6 +3203,70 @@ class V5Pipeline:
             "market_impulse_probe_min_btc_f4_volume": float(min_f4),
             "market_impulse_probe_min_btc_f5_rsi": float(min_f5),
             "current_level": current_auto_risk_level,
+        }
+
+    def _market_impulse_probe_live_gate_decision(
+        self,
+        *,
+        symbol: str,
+        candidate: Dict[str, Any],
+        expected_meta: Dict[str, Any],
+        trend_buy_count: int,
+        btc_trend_score: Optional[float],
+        trend_score: float,
+    ) -> Optional[Dict[str, Any]]:
+        min_edge_bps = float(
+            _coalesce(getattr(self.cfg.execution, "market_impulse_probe_min_expected_edge_bps", None), 80.0)
+        )
+        min_final_score = float(
+            _coalesce(getattr(self.cfg.execution, "market_impulse_probe_min_final_score", None), 0.25)
+        )
+        expected_edge = _float_or_none(expected_meta.get("expected_edge_bps"))
+        final_score = _float_or_none(expected_meta.get("final_score"))
+        alpha6_confirmed = bool(candidate.get("alpha6_confirmed"))
+        fast_microstructure_confirmed = bool(candidate.get("fast_microstructure_confirmed"))
+
+        block_reason = None
+        if bool(getattr(self.cfg.execution, "market_impulse_probe_require_positive_expected_edge", True)):
+            if expected_edge is None:
+                block_reason = "expected_edge_not_observable"
+            elif float(expected_edge) < float(min_edge_bps):
+                block_reason = "expected_edge_below_market_impulse_probe_min"
+            elif float(expected_edge) < 0.0:
+                block_reason = "expected_edge_negative"
+
+        if block_reason is None and final_score is None and float(min_final_score) > -10.0:
+            block_reason = "final_score_not_observable"
+        if block_reason is None and final_score is not None and float(final_score) < float(min_final_score):
+            block_reason = "final_score_below_market_impulse_probe_min"
+
+        if (
+            block_reason is None
+            and bool(getattr(self.cfg.execution, "market_impulse_probe_require_alpha6_or_microstructure_confirm", True))
+            and not bool(alpha6_confirmed)
+            and not bool(fast_microstructure_confirmed)
+        ):
+            block_reason = "missing_alpha6_or_microstructure_confirm"
+
+        if block_reason is None:
+            return None
+
+        return {
+            "symbol": str(symbol or ""),
+            "action": "skip",
+            "reason": "market_impulse_probe_live_gate",
+            "market_impulse_probe": True,
+            "market_impulse_probe_live_gate_block_reason": block_reason,
+            "expected_edge_bps": float(expected_edge) if expected_edge is not None else "not_observable",
+            "expected_edge_source": expected_meta.get("expected_edge_source"),
+            "market_impulse_probe_min_expected_edge_bps": float(min_edge_bps),
+            "final_score": float(final_score) if final_score is not None else "not_observable",
+            "market_impulse_probe_min_final_score": float(min_final_score),
+            "alpha6_confirmed": bool(alpha6_confirmed),
+            "fast_microstructure_confirmed": bool(fast_microstructure_confirmed),
+            "trend_buy_count": int(trend_buy_count or 0),
+            "btc_trend_score": btc_trend_score,
+            "trend_score": float(trend_score),
         }
 
     def _should_soften_fast_fail_with_market_impulse(
@@ -5355,6 +5502,7 @@ class V5Pipeline:
 
         # 4.5 Profit-first exit priority (profit-taking > fixed stop > rank exit)
         probe_exit_orders = []
+        probe_exit_shadow_router_decisions = []
         protect_profit_lock_orders = []
         protect_profit_lock_router_decisions = []
         profit_orders = []
@@ -5364,6 +5512,18 @@ class V5Pipeline:
         if bool(getattr(self.cfg.execution, "probe_exit_enabled", True)):
             take_profit_bps = float(_coalesce(getattr(self.cfg.execution, "probe_take_profit_net_bps", None), 80.0))
             stop_loss_bps = float(_coalesce(getattr(self.cfg.execution, "probe_stop_loss_net_bps", None), -50.0))
+            market_impulse_min_observation_hours = float(
+                _coalesce(getattr(self.cfg.execution, "btc_market_impulse_probe_min_observation_hours", None), 4.0)
+            )
+            soft_stop_loss_bps = float(
+                _coalesce(getattr(self.cfg.execution, "probe_soft_stop_loss_net_bps", None), stop_loss_bps)
+            )
+            hard_stop_loss_bps = float(
+                _coalesce(getattr(self.cfg.execution, "probe_hard_stop_loss_net_bps", None), -120.0)
+            )
+            stop_loss_confirm_bars = int(
+                _coalesce(getattr(self.cfg.execution, "probe_stop_loss_confirm_bars", None), 2)
+            )
             trailing_enable_bps = float(
                 _coalesce(getattr(self.cfg.execution, "probe_trailing_enable_after_net_bps", None), 50.0)
             )
@@ -5402,9 +5562,91 @@ class V5Pipeline:
                     else None
                 )
 
+                probe_type = str(probe_meta.get("probe_type") or "").strip()
+                is_market_impulse_probe = probe_type == "market_impulse_probe"
                 reason = None
-                if net_bps <= stop_loss_bps:
+                stop_loss_kind = None
+                if is_market_impulse_probe and net_bps <= hard_stop_loss_bps:
                     reason = "probe_stop_loss"
+                    stop_loss_kind = "hard"
+                elif is_market_impulse_probe and net_bps <= soft_stop_loss_bps:
+                    if held_hours is None or float(held_hours) < float(market_impulse_min_observation_hours):
+                        if audit:
+                            audit.counts["probe_stop_loss_delayed_by_min_observation_count"] = int(
+                                audit.counts.get("probe_stop_loss_delayed_by_min_observation_count", 0) or 0
+                            ) + 1
+                            audit.add_note(
+                                "Market impulse probe soft stop delayed by min observation: "
+                                f"{p.symbol} net={net_bps:.2f}bps held_hours={held_hours}"
+                            )
+                            probe_exit_shadow_router_decisions.append(
+                                {
+                                    "symbol": p.symbol,
+                                    "action": "skip",
+                                    "reason": "probe_stop_loss_delayed_by_min_observation",
+                                    "exit_reason": "probe_stop_loss",
+                                    "would_exit_shadow": True,
+                                    "probe_exit_policy_active": True,
+                                    "probe_type": probe_type,
+                                    "entry_reason": probe_meta.get("entry_reason"),
+                                    "entry_px": float(entry_px),
+                                    "entry_ts": probe_meta.get("entry_ts"),
+                                    "net_bps": float(net_bps),
+                                    "hold_hours": held_hours,
+                                    "btc_market_impulse_probe_min_observation_hours": float(market_impulse_min_observation_hours),
+                                    "probe_soft_stop_loss_net_bps": float(soft_stop_loss_bps),
+                                    "probe_hard_stop_loss_net_bps": float(hard_stop_loss_bps),
+                                }
+                            )
+                        continue
+                    close_values = list(getattr(s, "close", []) or [])
+                    confirm_values = close_values[-max(1, stop_loss_confirm_bars):]
+                    confirmed_count = 0
+                    if len(confirm_values) >= max(1, stop_loss_confirm_bars):
+                        confirmed_count = sum(
+                            1
+                            for value in confirm_values
+                            if self._probe_net_bps(entry_px=entry_px, current_px=float(value or 0.0)) <= soft_stop_loss_bps
+                        )
+                    soft_stop_confirmed = bool(
+                        len(confirm_values) >= max(1, stop_loss_confirm_bars)
+                        and confirmed_count >= max(1, stop_loss_confirm_bars)
+                    )
+                    if not soft_stop_confirmed:
+                        if audit:
+                            audit.counts["probe_stop_loss_waiting_for_confirmation_count"] = int(
+                                audit.counts.get("probe_stop_loss_waiting_for_confirmation_count", 0) or 0
+                            ) + 1
+                            audit.add_note(
+                                "Market impulse probe soft stop waiting for confirmation: "
+                                f"{p.symbol} net={net_bps:.2f}bps confirmed={confirmed_count}/{stop_loss_confirm_bars}"
+                            )
+                            probe_exit_shadow_router_decisions.append(
+                                {
+                                    "symbol": p.symbol,
+                                    "action": "skip",
+                                    "reason": "probe_stop_loss_waiting_for_confirmation",
+                                    "exit_reason": "probe_stop_loss",
+                                    "would_exit_shadow": True,
+                                    "probe_exit_policy_active": True,
+                                    "probe_type": probe_type,
+                                    "entry_reason": probe_meta.get("entry_reason"),
+                                    "entry_px": float(entry_px),
+                                    "entry_ts": probe_meta.get("entry_ts"),
+                                    "net_bps": float(net_bps),
+                                    "hold_hours": held_hours,
+                                    "probe_stop_loss_confirm_bars": int(stop_loss_confirm_bars),
+                                    "probe_stop_loss_confirmed_bars": int(confirmed_count),
+                                    "probe_soft_stop_loss_net_bps": float(soft_stop_loss_bps),
+                                    "probe_hard_stop_loss_net_bps": float(hard_stop_loss_bps),
+                                }
+                            )
+                        continue
+                    reason = "probe_stop_loss"
+                    stop_loss_kind = "soft_confirmed"
+                elif (not is_market_impulse_probe) and net_bps <= stop_loss_bps:
+                    reason = "probe_stop_loss"
+                    stop_loss_kind = "legacy"
                 elif net_bps >= take_profit_bps:
                     reason = "probe_take_profit"
                 elif highest_net_bps >= trailing_enable_bps and (highest_net_bps - net_bps) >= trailing_gap_bps:
@@ -5440,6 +5682,11 @@ class V5Pipeline:
                             "hold_hours": held_hours,
                             "probe_take_profit_net_bps": float(take_profit_bps),
                             "probe_stop_loss_net_bps": float(stop_loss_bps),
+                            "probe_stop_loss_kind": stop_loss_kind,
+                            "btc_market_impulse_probe_min_observation_hours": float(market_impulse_min_observation_hours),
+                            "probe_soft_stop_loss_net_bps": float(soft_stop_loss_bps),
+                            "probe_hard_stop_loss_net_bps": float(hard_stop_loss_bps),
+                            "probe_stop_loss_confirm_bars": int(stop_loss_confirm_bars),
                             "probe_trailing_enable_after_net_bps": float(trailing_enable_bps),
                             "probe_trailing_gap_bps": float(trailing_gap_bps),
                             "probe_time_stop_hours": float(time_stop_hours),
@@ -6385,6 +6632,7 @@ class V5Pipeline:
         rebalance_orders: List[Order] = []
         router_decisions = (
             list(exit_router_decisions)
+            + list(probe_exit_shadow_router_decisions)
             + list(rank_exit_guard_decisions)
             + list(position_state_cleanup_router_decisions)
             + list(btc_leadership_probe_router_decisions)
@@ -7827,6 +8075,7 @@ class V5Pipeline:
 
         if (
             bool(getattr(self.cfg.execution, "market_impulse_probe_enabled", True))
+            and bool(getattr(self.cfg.execution, "market_impulse_probe_live_enabled", False))
             and (not bool(getattr(self.cfg.execution, "market_impulse_probe_only_in_protect", True)) or protect_entry_gate_active)
             and not is_risk_off_close_only
             and not active_positions
@@ -7883,6 +8132,36 @@ class V5Pipeline:
                                 f"alpha6_score={quality_block.get('alpha6_score')} "
                                 f"f4={quality_block.get('f4_volume_expansion')} "
                                 f"f5={quality_block.get('f5_rsi_trend_confirm')}"
+                            )
+                        continue
+                    expected_meta = self._expected_edge_metadata_for_buy(
+                        symbol=sym,
+                        final_score=alpha.scores.get(sym),
+                        strategy_signal_lookup=strategy_signal_lookup,
+                        explicit_expected_net_bps=candidate.get("expected_edge_bps"),
+                    )
+                    live_gate_block = self._market_impulse_probe_live_gate_decision(
+                        symbol=sym,
+                        candidate=dict(candidate or {}),
+                        expected_meta=expected_meta,
+                        trend_buy_count=int(market_impulse_probe_context.get("trend_buy_count") or 0),
+                        btc_trend_score=market_impulse_probe_context.get("btc_trend_score"),
+                        trend_score=trend_score,
+                    )
+                    if live_gate_block is not None:
+                        if audit:
+                            audit.counts["market_impulse_probe_blocked_count"] = int(
+                                audit.counts.get("market_impulse_probe_blocked_count", 0) or 0
+                            ) + 1
+                            audit.counts["market_impulse_probe_live_gate_block_count"] = int(
+                                audit.counts.get("market_impulse_probe_live_gate_block_count", 0) or 0
+                            ) + 1
+                            router_decisions.append(live_gate_block)
+                            audit.add_note(
+                                "Market impulse probe blocked by live gate: "
+                                f"{sym} reason={live_gate_block.get('market_impulse_probe_live_gate_block_reason')} "
+                                f"expected_edge={live_gate_block.get('expected_edge_bps')} "
+                                f"final_score={live_gate_block.get('final_score')}"
                             )
                         continue
                     allowed_probe, probe_block_reason, bypass_reason = self._market_impulse_probe_negexp_gate(symbol=sym)
@@ -7970,6 +8249,34 @@ class V5Pipeline:
                                 f"elapsed_hours={float(reentry_guard.get('elapsed_hours') or 0.0):.2f}"
                             )
                         continue
+                    if (
+                        bool(reentry_guard.get("breakout_exception_met", False))
+                        and not bool(getattr(self.cfg.execution, "market_impulse_probe_reentry_after_loss_enabled", False))
+                        and str(reentry_guard.get("last_exit_reason") or "").strip().lower() == "probe_stop_loss"
+                    ):
+                        if audit:
+                            audit.counts["market_impulse_probe_blocked_count"] = int(
+                                audit.counts.get("market_impulse_probe_blocked_count", 0) or 0
+                            ) + 1
+                            audit.counts["market_impulse_probe_reentry_after_loss_block_count"] = int(
+                                audit.counts.get("market_impulse_probe_reentry_after_loss_block_count", 0) or 0
+                            ) + 1
+                            router_decisions.append(
+                                {
+                                    **self._same_symbol_reentry_breakout_bypass_decision(sym, reentry_guard),
+                                    "action": "skip",
+                                    "reason": "market_impulse_probe_reentry_after_loss_disabled",
+                                    "market_impulse_probe": True,
+                                    "trend_buy_count": int(market_impulse_probe_context.get("trend_buy_count") or 0),
+                                    "btc_trend_score": market_impulse_probe_context.get("btc_trend_score"),
+                                    "trend_score": trend_score,
+                                }
+                            )
+                            audit.add_note(
+                                "Market impulse probe blocked despite breakout bypass because prior exit was probe_stop_loss: "
+                                f"{sym} elapsed_hours={float(reentry_guard.get('elapsed_hours') or 0.0):.2f}"
+                            )
+                        continue
                     if bool(reentry_guard.get("breakout_exception_met", False)) and audit:
                         router_decisions.append(
                             {
@@ -7998,14 +8305,7 @@ class V5Pipeline:
                         "market_impulse_probe_time_stop_hours": int(probe_time_stop_hours),
                         "reason": "market_impulse_probe",
                     }
-                    meta.update(
-                        self._expected_edge_metadata_for_buy(
-                            symbol=sym,
-                            final_score=alpha.scores.get(sym),
-                            strategy_signal_lookup=strategy_signal_lookup,
-                            explicit_expected_net_bps=candidate.get("expected_net_bps"),
-                        )
-                    )
+                    meta.update(expected_meta)
                     probe_tags = probe_tags_from_order_meta(meta, entry_px=px, entry_ts=utc_now_iso())
                     if probe_tags is not None:
                         meta.update(probe_tags)

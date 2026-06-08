@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -74,27 +76,42 @@ def _strategy_payload(signals: dict[str, tuple[str, float, dict | None]]):
     for symbol, payload in signals.items():
         trend_side, trend_score, alpha6_meta = payload
         if trend_side:
+            trend_metadata = {"adx": 35.0}
+            if alpha6_meta is not None:
+                if alpha6_meta.get("trend_expected_edge_bps") is not None:
+                    trend_metadata["expected_edge_bps"] = float(alpha6_meta.get("trend_expected_edge_bps"))
+                if alpha6_meta.get("fast_microstructure_confirmed") is not None:
+                    trend_metadata["fast_microstructure_confirmed"] = bool(
+                        alpha6_meta.get("fast_microstructure_confirmed")
+                    )
             trend_signals.append(
                 {
                     "symbol": symbol,
                     "side": trend_side,
                     "score": trend_score,
                     "confidence": 0.8,
-                    "metadata": {"adx": 35.0},
+                    "metadata": trend_metadata,
                 }
             )
         if alpha6_meta is not None:
+            alpha6_metadata = {
+                "z_factors": {
+                    "f4_volume_expansion": float(alpha6_meta.get("f4", 0.0)),
+                    "f5_rsi_trend_confirm": float(alpha6_meta.get("f5", 0.0)),
+                }
+            }
+            if alpha6_meta.get("expected_edge_bps") is not None:
+                alpha6_metadata["expected_edge_bps"] = float(alpha6_meta.get("expected_edge_bps"))
+            if alpha6_meta.get("fast_microstructure_confirmed") is not None:
+                alpha6_metadata["fast_microstructure_confirmed"] = bool(
+                    alpha6_meta.get("fast_microstructure_confirmed")
+                )
             alpha6_signals.append(
                 {
                     "symbol": symbol,
                     "side": str(alpha6_meta.get("side", "buy")),
                     "score": float(alpha6_meta.get("score", 0.0)),
-                    "metadata": {
-                        "z_factors": {
-                            "f4_volume_expansion": float(alpha6_meta.get("f4", 0.0)),
-                            "f5_rsi_trend_confirm": float(alpha6_meta.get("f5", 0.0)),
-                        }
-                    },
+                    "metadata": alpha6_metadata,
                 }
             )
     strategies = []
@@ -169,11 +186,18 @@ def _base_cfg(tmp_path: Path) -> AppConfig:
     cfg.execution.negative_expectancy_open_block_enabled = False
     cfg.execution.negative_expectancy_fast_fail_open_block_enabled = False
     cfg.execution.market_impulse_probe_enabled = True
+    cfg.execution.market_impulse_probe_live_enabled = True
     cfg.execution.market_impulse_probe_only_in_protect = True
     cfg.execution.market_impulse_probe_min_trend_buy_count = 3
     cfg.execution.market_impulse_probe_require_btc_trend_buy = True
     cfg.execution.market_impulse_probe_min_btc_trend_score = 0.60
     cfg.execution.market_impulse_probe_min_symbol_trend_score = 0.60
+    cfg.execution.market_impulse_probe_selection_mode = "priority"
+    cfg.execution.market_impulse_probe_min_expected_edge_bps = -10000.0
+    cfg.execution.market_impulse_probe_min_final_score = -10.0
+    cfg.execution.market_impulse_probe_require_positive_expected_edge = False
+    cfg.execution.market_impulse_probe_require_alpha6_or_microstructure_confirm = False
+    cfg.execution.market_impulse_probe_reentry_after_loss_enabled = True
     cfg.execution.market_impulse_probe_target_w = 0.06
     cfg.execution.market_impulse_probe_max_symbols = 1
     cfg.execution.market_impulse_probe_time_stop_hours = 4
@@ -501,6 +525,79 @@ def test_market_impulse_shadow_expected_net_selects_observed_best(tmp_path: Path
     assert eth["expected_net_bps"] == 22.0
 
 
+def test_market_impulse_probe_live_gate_blocks_negative_edge_and_final_score(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.market_impulse_probe_selection_mode = "priority"
+    cfg.execution.market_impulse_probe_min_expected_edge_bps = 80.0
+    cfg.execution.market_impulse_probe_min_final_score = 0.25
+    cfg.execution.market_impulse_probe_require_positive_expected_edge = True
+    cfg.execution.market_impulse_probe_require_alpha6_or_microstructure_confirm = True
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    payload = _strategy_payload(
+        {
+            "BTC/USDT": (
+                "buy",
+                0.90,
+                {"side": "buy", "score": 0.95, "f4": 0.80, "f5": 0.80, "expected_edge_bps": -146.13},
+            ),
+            "ETH/USDT": ("buy", 0.82, None),
+            "SOL/USDT": ("buy", 0.78, None),
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    audit = DecisionAudit(run_id="market-impulse-live-gate-negative-edge")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": -0.741}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    decision = next(d for d in audit.router_decisions if d.get("reason") == "market_impulse_probe_live_gate")
+    assert decision["symbol"] == "BTC/USDT"
+    assert decision["market_impulse_probe_live_gate_block_reason"] == "expected_edge_below_market_impulse_probe_min"
+    assert decision["expected_edge_bps"] == pytest.approx(-146.13)
+    assert decision["final_score"] == pytest.approx(-0.741)
+
+
+def test_market_impulse_composite_selection_does_not_pick_negative_edge_btc(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.market_impulse_probe_selection_mode = "composite"
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    payload = _strategy_payload(
+        {
+            "BTC/USDT": ("buy", 0.90, {"trend_expected_edge_bps": -146.13}),
+            "ETH/USDT": ("buy", 0.82, {"trend_expected_edge_bps": 0.0}),
+            "SOL/USDT": ("buy", 0.78, {"trend_expected_edge_bps": 0.0}),
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    audit = DecisionAudit(run_id="market-impulse-composite-negative-btc")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    assert out.orders[0].symbol == "ETH/USDT"
+    shadow = audit.market_impulse_shadow_selection
+    assert shadow["selected_by_composite"] == "ETH/USDT"
+    assert shadow["selected_live"] == "ETH/USDT"
+
+
 def test_same_symbol_reentry_blocks_market_impulse_after_profit_lock(tmp_path: Path) -> None:
     cfg = _base_cfg(tmp_path)
     _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
@@ -568,6 +665,40 @@ def test_same_symbol_reentry_allows_breakout_above_last_high(tmp_path: Path) -> 
     assert out.orders[0].meta["market_impulse_probe"] is True
     assert audit.counts["same_symbol_reentry_breakout_bypass_count"] == 1
     assert not any(d.get("reason") == "same_symbol_reentry_cooldown" for d in audit.router_decisions)
+
+
+def test_market_impulse_probe_disables_reentry_breakout_after_probe_stop_loss(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.market_impulse_probe_reentry_after_loss_enabled = False
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    pipe = _build_pipe(cfg, tmp_path, _impulse_payload())
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    _write_reentry_memory(
+        cfg,
+        pipe,
+        hours_ago=2.0,
+        reason="probe_stop_loss",
+        exit_px=70000.0,
+        highest_px_before_exit=70200.0,
+        net_bps=-70.0,
+    )
+    audit = DecisionAudit(run_id="market-impulse-probe-stop-no-breakout-reentry")
+
+    out = pipe.run(
+        market_data_1h=_market_data_with_btc(70350.0),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    decision = next(
+        d for d in audit.router_decisions if d.get("reason") == "market_impulse_probe_reentry_after_loss_disabled"
+    )
+    assert decision["last_exit_reason"] == "probe_stop_loss"
 
 
 def test_same_symbol_reentry_blocks_probe_after_probe_stop_loss(tmp_path: Path) -> None:

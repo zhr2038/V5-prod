@@ -775,7 +775,11 @@ class ExecutionConfig(BaseModel):
     protect_recovery_disallow_symbols_with_negative_expectancy: bool = Field(default=True)
     market_impulse_probe_enabled: bool = Field(
         default=True,
-        description="Enable small beta probe entries during broad market impulse conditions",
+        description="Enable market impulse probe evaluation. Live order emission is controlled separately by market_impulse_probe_live_enabled.",
+    )
+    market_impulse_probe_live_enabled: bool = Field(
+        default=False,
+        description="Allow market impulse probe to emit real OPEN_LONG orders. Keep false for shadow-only observation.",
     )
     market_impulse_probe_only_in_protect: bool = Field(
         default=True,
@@ -792,21 +796,26 @@ class ExecutionConfig(BaseModel):
         description="Require BTC TrendFollowing buy confirmation before allowing market impulse probe",
     )
     market_impulse_probe_min_btc_trend_score: float = Field(
-        default=0.60,
+        default=0.75,
         ge=-10.0,
         le=10.0,
         description="Minimum BTC TrendFollowing score required for market impulse probe",
     )
     market_impulse_probe_min_symbol_trend_score: float = Field(
-        default=0.60,
+        default=0.75,
         ge=-10.0,
         le=10.0,
         description="Minimum per-symbol TrendFollowing score required for market impulse probe candidates",
     )
     market_impulse_probe_selection_mode: str = Field(
-        default="priority",
-        description="Selection mode for market impulse probe candidates: priority, trend_score, alpha6_confirmed, or expected_net_shadow",
+        default="composite",
+        description="Selection mode for market impulse probe candidates: priority, trend_score, alpha6_confirmed, expected_net_shadow, or composite",
     )
+    market_impulse_probe_min_expected_edge_bps: float = Field(default=80.0, ge=-10000.0, le=10000.0)
+    market_impulse_probe_min_final_score: float = Field(default=0.25, ge=-10.0, le=10.0)
+    market_impulse_probe_require_positive_expected_edge: bool = Field(default=True)
+    market_impulse_probe_require_alpha6_or_microstructure_confirm: bool = Field(default=True)
+    market_impulse_probe_reentry_after_loss_enabled: bool = Field(default=False)
     market_impulse_probe_max_symbols: int = Field(
         default=1,
         ge=1,
@@ -892,6 +901,10 @@ class ExecutionConfig(BaseModel):
     probe_exit_enabled: bool = Field(default=True)
     probe_take_profit_net_bps: float = Field(default=80.0, ge=-10000.0, le=10000.0)
     probe_stop_loss_net_bps: float = Field(default=-50.0, ge=-10000.0, le=10000.0)
+    btc_market_impulse_probe_min_observation_hours: float = Field(default=4.0, ge=0.0, le=24 * 30)
+    probe_soft_stop_loss_net_bps: float = Field(default=-50.0, ge=-10000.0, le=10000.0)
+    probe_hard_stop_loss_net_bps: float = Field(default=-120.0, ge=-10000.0, le=10000.0)
+    probe_stop_loss_confirm_bars: int = Field(default=2, ge=1, le=24)
     probe_trailing_enable_after_net_bps: float = Field(default=50.0, ge=-10000.0, le=10000.0)
     probe_trailing_gap_bps: float = Field(default=25.0, ge=0.0, le=10000.0)
     probe_time_stop_hours: int = Field(default=8, ge=0, le=24 * 30)
@@ -1235,10 +1248,10 @@ class ExecutionConfig(BaseModel):
     @field_validator("market_impulse_probe_selection_mode")
     @classmethod
     def _validate_market_impulse_probe_selection_mode(cls, v: str) -> str:
-        value = str(v or "priority").strip().lower()
-        allowed = {"priority", "trend_score", "alpha6_confirmed", "expected_net_shadow"}
+        value = str(v or "composite").strip().lower()
+        allowed = {"priority", "trend_score", "alpha6_confirmed", "expected_net_shadow", "composite"}
         if value not in allowed:
-            raise ValueError("market_impulse_probe_selection_mode must be one of: priority, trend_score, alpha6_confirmed, expected_net_shadow")
+            raise ValueError("market_impulse_probe_selection_mode must be one of: priority, trend_score, alpha6_confirmed, expected_net_shadow, composite")
         return value
 
     @field_validator("protect_recovery_allowed_symbols")

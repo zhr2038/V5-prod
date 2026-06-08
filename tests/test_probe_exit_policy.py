@@ -48,6 +48,22 @@ def _series(close: float, *, high: float | None = None) -> MarketSeries:
     )
 
 
+def _series_with_tail(tail: list[float], *, high: float | None = None) -> MarketSeries:
+    closes = [100.0 for _ in range(max(0, 31 - len(tail)))] + list(tail)
+    highs = [100.0 for _ in range(max(0, 31 - len(tail)))] + [high if high is not None else value for value in tail]
+    ts = [_ms(1_700_000_000 + i * 3600) for i in range(len(closes))]
+    return MarketSeries(
+        symbol="BTC/USDT",
+        timeframe="1h",
+        ts=ts,
+        open=list(closes),
+        high=highs,
+        low=list(closes),
+        close=list(closes),
+        volume=[1000.0 for _ in closes],
+    )
+
+
 def _regime(state: RegimeState = RegimeState.TRENDING) -> RegimeResult:
     return RegimeResult(
         state=state,
@@ -349,17 +365,62 @@ def test_active_market_impulse_probe_ignores_normal_zero_target_close(tmp_path: 
     assert audit.counts["active_probe_ignore_zero_target_close_count"] == 1
 
 
-def test_active_market_impulse_probe_stop_loss_closes_even_when_target_zero(tmp_path: Path) -> None:
+def test_active_market_impulse_probe_soft_stop_loss_before_observation_is_shadow_only(tmp_path: Path) -> None:
     out, audit = _run_zero_target_case(
         tmp_path,
         _probe_position(probe_type="market_impulse_probe"),
         _series(99.50),
     )
 
+    assert not [order for order in out.orders if order.side == "sell" and order.intent == "CLOSE_LONG"]
+    decision = _single_probe_exit_decision(audit)
+    assert decision["reason"] == "probe_stop_loss_delayed_by_min_observation"
+    assert decision["would_exit_shadow"] is True
+    assert decision["probe_type"] == "market_impulse_probe"
+    assert audit.counts["probe_stop_loss_delayed_by_min_observation_count"] == 1
+    assert audit.counts["active_probe_ignore_zero_target_close_count"] == 1
+
+
+def test_active_market_impulse_probe_hard_stop_loss_closes_before_observation(tmp_path: Path) -> None:
+    out, audit = _run_zero_target_case(
+        tmp_path,
+        _probe_position(probe_type="market_impulse_probe"),
+        _series(98.80),
+    )
+
     order = _single_exit(out)
     assert order.meta["reason"] == "probe_stop_loss"
+    assert order.meta["probe_stop_loss_kind"] == "hard"
+    assert order.meta["probe_type"] == "market_impulse_probe"
     assert audit.counts["probe_stop_loss_count"] == 1
-    assert audit.counts["active_probe_ignore_zero_target_close_count"] == 0
+
+
+def test_active_market_impulse_probe_soft_stop_requires_confirmed_bars(tmp_path: Path) -> None:
+    out, audit = _run_zero_target_case(
+        tmp_path,
+        _probe_position(entry_ts="2026-04-25T03:00:00Z", probe_type="market_impulse_probe"),
+        _series_with_tail([99.40, 99.50]),
+    )
+
+    order = _single_exit(out)
+    assert order.meta["reason"] == "probe_stop_loss"
+    assert order.meta["probe_stop_loss_kind"] == "soft_confirmed"
+    assert order.meta["probe_stop_loss_confirm_bars"] == 2
+    assert audit.counts["probe_stop_loss_count"] == 1
+
+
+def test_active_market_impulse_probe_soft_stop_waits_for_confirmation(tmp_path: Path) -> None:
+    out, audit = _run_zero_target_case(
+        tmp_path,
+        _probe_position(entry_ts="2026-04-25T03:00:00Z", probe_type="market_impulse_probe"),
+        _series(99.50),
+    )
+
+    assert not [order for order in out.orders if order.side == "sell" and order.intent == "CLOSE_LONG"]
+    decision = _single_probe_exit_decision(audit)
+    assert decision["reason"] == "probe_stop_loss_waiting_for_confirmation"
+    assert decision["would_exit_shadow"] is True
+    assert audit.counts["probe_stop_loss_waiting_for_confirmation_count"] == 1
 
 
 def test_active_market_impulse_probe_time_stop_closes_instead_of_zero_target(tmp_path: Path) -> None:

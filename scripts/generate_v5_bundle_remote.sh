@@ -43,6 +43,14 @@ from src.reporting.bnb_strong_alpha6_bypass_shadow import (
     build_bnb_strong_alpha6_bypass_rows as report_build_bnb_strong_alpha6_bypass_rows,
     is_bnb_strong_alpha6_bypass_candidate as report_bnb_strong_alpha6_bypass_candidate,
 )
+from src.reporting.btc_probe_entry_quality_audit import (
+    BTC_PROBE_ENTRY_QUALITY_FIELDS,
+    is_btc_market_impulse_probe_candidate as report_is_btc_market_impulse_probe_candidate,
+)
+from src.reporting.btc_probe_exit_regret_audit import (
+    BTC_PROBE_EXIT_REGRET_FIELDS,
+    is_btc_market_impulse_probe_roundtrip as report_is_btc_market_impulse_probe_roundtrip,
+)
 from src.reporting.final_score_alpha6_conflict import (
     CONFLICT_FIELDS as REPORT_FINAL_SCORE_ALPHA6_CONFLICT_FIELDS,
     build_conflict_rows as report_build_final_score_alpha6_conflict_rows,
@@ -8123,6 +8131,160 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS,
     )
 
+    def btc_probe_regret_diagnosis(exit_reason, net_at_exit, future_4h):
+        future_value = as_float(future_4h)
+        exit_value = as_float(net_at_exit)
+        if future_4h == "pending":
+            return "pending"
+        if future_value is None or exit_value is None:
+            return not_obs
+        if str(exit_reason or "").strip().lower() == "probe_stop_loss" and future_value > exit_value:
+            if future_value > 0:
+                return "probe_stop_loss_too_early_recovered_after_4h"
+            return "probe_stop_loss_too_early_less_bad_after_4h"
+        return "probe_exit_not_regretted_4h"
+
+    def build_btc_probe_exit_regret_rows(rows):
+        out = []
+        for row in rows:
+            if row.get("roundtrip_status") != "closed":
+                continue
+            if not report_is_btc_market_impulse_probe_roundtrip(row):
+                continue
+            symbol = "BTC/USDT"
+            entry_ts = first_observed(row.get("entry_ts"), row.get("ts_utc"), row.get("timestamp"), not_obs)
+            exit_ts = first_observed(row.get("exit_ts"), row.get("close_ts"), not_obs)
+            entry_dt = parse_dt_utc(entry_ts)
+            exit_dt = parse_dt_utc(exit_ts)
+            entry_px = as_float(first_observed(row.get("entry_px"), row.get("open_px"), row.get("entry_price"), not_obs))
+            exit_px = as_float(first_observed(row.get("exit_px"), row.get("close_px"), row.get("exit_price"), not_obs))
+            rt_cost_bps = candidate_conflict_cost_bps(row)
+            future = {
+                horizon: forward_net_bps(symbol, exit_dt, entry_px, horizon, rt_cost_bps)
+                for horizon in (1, 2, 4, 8, 24)
+            }
+            net_at_exit = first_observed(row.get("net_bps"), row.get("realized_net_bps"), row.get("actual_exit_net_bps"), not_obs)
+            net_at_exit_f = as_float(net_at_exit)
+            regret_4h = not_obs
+            regret_8h = not_obs
+            if as_float(future[4]) is not None and net_at_exit_f is not None:
+                regret_4h = fmt_num(float(as_float(future[4])) - float(net_at_exit_f), 6)
+            if as_float(future[8]) is not None and net_at_exit_f is not None:
+                regret_8h = fmt_num(float(as_float(future[8])) - float(net_at_exit_f), 6)
+            out.append({
+                "entry_ts": entry_ts,
+                "exit_ts": exit_ts,
+                "entry_px": fmt_num(entry_px, 10) if entry_px is not None else not_obs,
+                "exit_px": fmt_num(exit_px, 10) if exit_px is not None else not_obs,
+                "hold_hours": first_observed(row.get("hold_hours"), row.get("held_hours"), not_obs),
+                "exit_reason": first_observed(row.get("exit_reason"), row.get("close_reason"), not_obs),
+                "probe_type": "market_impulse_probe",
+                "net_bps_at_exit": net_at_exit,
+                "future_1h_after_exit_bps": future[1],
+                "future_2h_after_exit_bps": future[2],
+                "future_4h_after_exit_bps": future[4],
+                "future_8h_after_exit_bps": future[8],
+                "future_24h_after_exit_bps": future[24],
+                "regret_bps_4h": regret_4h,
+                "regret_bps_8h": regret_8h,
+                "diagnosis": btc_probe_regret_diagnosis(first_observed(row.get("exit_reason"), not_obs), net_at_exit, future[4]),
+            })
+        out.sort(key=lambda item: (flatten_value(item.get("exit_ts")), flatten_value(item.get("entry_ts"))))
+        return out
+
+    def btc_probe_entry_quality_status(row, expected_edge, final_score):
+        text = " ".join(
+            flatten_value(value).lower()
+            for value in (
+                row.get("block_reason"),
+                row.get("no_signal_reason"),
+                row.get("router_reason"),
+                row.get("same_symbol_reentry_bypass"),
+                row.get("bypassed_negative_expectancy_reason"),
+                row.get("market_impulse_probe_bypassed_negative_expectancy_reason"),
+            )
+        )
+        reentry_after_loss = "probe_stop_loss" in text or "same_symbol_reentry_breakout" in text
+        if expected_edge is not None and expected_edge < 0 and final_score is not None and final_score < 0 and reentry_after_loss:
+            return "invalid_negative_edge_reentry_after_loss"
+        if expected_edge is not None and expected_edge < 0:
+            return "invalid_negative_expected_edge"
+        if final_score is not None and final_score < 0:
+            return "invalid_negative_final_score"
+        alpha_side = flatten_value(first_observed(row.get("alpha6_side"), row.get("alpha6_signal_side"), "")).lower()
+        micro_ok = truthy_text(first_observed(row.get("fast_microstructure_confirmed"), row.get("microstructure_confirmed"), ""))
+        if alpha_side and alpha_side != "buy" and not micro_ok:
+            return "missing_alpha6_or_microstructure_confirm"
+        return "observed"
+
+    def build_btc_probe_entry_quality_rows(rows, roundtrip_rows):
+        out = []
+        seen = set()
+        input_rows = list(rows or []) + list(roundtrip_rows or [])
+        for row in input_rows:
+            if not report_is_btc_market_impulse_probe_candidate(row):
+                continue
+            symbol = "BTC/USDT"
+            ts_text = first_observed(row.get("ts_utc"), row.get("entry_ts"), row.get("timestamp"), row.get("ts"), not_obs)
+            ts_dt = parse_dt_utc(ts_text)
+            entry_px = candidate_conflict_entry_price(row, symbol, ts_dt)
+            final_score = as_float(first_observed(row.get("final_score"), row.get("score"), not_obs))
+            expected_edge = as_float(first_observed(row.get("expected_edge_bps"), row.get("expected_net_bps"), row.get("edge_bps"), not_obs))
+            key = (flatten_value(first_observed(row.get("run_id"), not_obs)), flatten_value(ts_text), fmt_num(entry_px, 10) if entry_px is not None else "")
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({
+                "run_id": first_observed(row.get("run_id"), not_obs),
+                "entry_ts": ts_text,
+                "entry_px": fmt_num(entry_px, 10) if entry_px is not None else not_obs,
+                "final_score": first_observed(row.get("final_score"), not_obs),
+                "expected_edge_bps": first_observed(row.get("expected_edge_bps"), row.get("expected_net_bps"), not_obs),
+                "required_edge_bps": first_observed(row.get("required_edge_bps"), row.get("required_net_bps"), not_obs),
+                "btc_trend_score": first_observed(row.get("btc_trend_score"), row.get("market_impulse_probe_btc_trend_score"), not_obs),
+                "trend_buy_count": first_observed(row.get("trend_buy_count"), row.get("market_impulse_probe_trend_buy_count"), not_obs),
+                "alpha6_score": first_observed(row.get("alpha6_score"), not_obs),
+                "alpha6_side": first_observed(row.get("alpha6_side"), not_obs),
+                "negative_expectancy_state": first_observed(
+                    row.get("bypassed_negative_expectancy_reason"),
+                    row.get("market_impulse_probe_bypassed_negative_expectancy_reason"),
+                    row.get("negative_expectancy_state"),
+                    not_obs,
+                ),
+                "same_symbol_reentry_bypass": first_observed(
+                    row.get("same_symbol_reentry_breakout_bypass"),
+                    row.get("same_symbol_reentry_bypass"),
+                    not_obs,
+                ),
+                "price_distance_from_recent_low_bps": first_observed(
+                    row.get("price_distance_from_recent_low_bps"),
+                    row.get("entry_vs_pre_24h_low_bps"),
+                    not_obs,
+                ),
+                "price_distance_from_recent_high_bps": first_observed(
+                    row.get("price_distance_from_recent_high_bps"),
+                    row.get("entry_vs_pre_24h_high_bps"),
+                    not_obs,
+                ),
+                "anti_chase_flag": first_observed(row.get("anti_chase_flag"), row.get("anti_chase_blocked"), not_obs),
+                "entry_quality_status": btc_probe_entry_quality_status(row, expected_edge, final_score),
+            })
+        out.sort(key=lambda item: (flatten_value(item.get("entry_ts")), flatten_value(item.get("run_id"))))
+        return out
+
+    btc_probe_exit_regret_rows = build_btc_probe_exit_regret_rows(closed_roundtrip_rows)
+    write_csv(
+        "summaries/btc_probe_exit_regret_audit.csv",
+        btc_probe_exit_regret_rows,
+        BTC_PROBE_EXIT_REGRET_FIELDS,
+    )
+    btc_probe_entry_quality_rows = build_btc_probe_entry_quality_rows(candidate_label_input_rows, closed_roundtrip_rows)
+    write_csv(
+        "summaries/btc_probe_entry_quality_audit.csv",
+        btc_probe_entry_quality_rows,
+        BTC_PROBE_ENTRY_QUALITY_FIELDS,
+    )
+
     def better_to_hold_text(future_net_bps, realized_net_bps):
         if future_net_bps == "pending":
             return "pending"
@@ -15684,6 +15846,8 @@ sanity = {
     "contains summaries/bnb_recovery_missed_opportunity.csv": (OUT / "summaries/bnb_recovery_missed_opportunity.csv").is_file(),
     "contains summaries/bnb_strong_alpha6_bypass_shadow.csv": (OUT / "summaries/bnb_strong_alpha6_bypass_shadow.csv").is_file(),
     "contains summaries/final_score_vs_alpha6_conflict.csv": (OUT / "summaries/final_score_vs_alpha6_conflict.csv").is_file(),
+    "contains summaries/btc_probe_exit_regret_audit.csv": (OUT / "summaries/btc_probe_exit_regret_audit.csv").is_file(),
+    "contains summaries/btc_probe_entry_quality_audit.csv": (OUT / "summaries/btc_probe_entry_quality_audit.csv").is_file(),
     "contains summaries/quant_lab_compliance.csv": (OUT / "summaries/quant_lab_compliance.csv").is_file(),
     "contains summaries/quant_lab_permission_audit.csv": (OUT / "summaries/quant_lab_permission_audit.csv").is_file(),
     "contains summaries/quant_lab_mode_audit.csv": (OUT / "summaries/quant_lab_mode_audit.csv").is_file(),
