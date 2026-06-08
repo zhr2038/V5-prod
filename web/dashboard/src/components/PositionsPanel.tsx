@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type PointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { CandlestickChart, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fmtUsd, fmtNum, fmtPct, sideLabels } from '../lib/format';
 import { api } from '../api';
@@ -20,6 +20,25 @@ const timeframes = [
 ];
 
 const defaultFocusSymbol = 'BNB-USDT';
+
+function normalizeUsdtSymbol(value?: unknown) {
+  const raw = String(value || '').trim().toUpperCase();
+  if (!raw) return '';
+  const normalized = raw.replace(/_/g, '-').replace(/\//g, '-');
+  if (normalized.endsWith('-USDT')) return normalized;
+  if (normalized.endsWith('USDT')) return `${normalized.slice(0, -4).replace(/-$/, '')}-USDT`;
+  return `${normalized}-USDT`;
+}
+
+function symbolBase(value?: unknown) {
+  return normalizeUsdtSymbol(value).replace(/-USDT$/, '');
+}
+
+function sameInstrument(left?: unknown, right?: unknown) {
+  const a = normalizeUsdtSymbol(left);
+  const b = normalizeUsdtSymbol(right);
+  return Boolean(a && b && a === b);
+}
 
 function candleTimestamp(candle: KlineData) {
   const rawNumeric = Number(candle.timestamp ?? candle.ts ?? 0);
@@ -593,14 +612,18 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
   const [livePositions, setLivePositions] = useState<Position[]>(positions);
   const [liveTrades, setLiveTrades] = useState<Trade[]>(trades);
   const [selectedSymbol, setSelectedSymbol] = useState<string>('');
+  const lastSyncedFocusSymbol = useRef('');
   const sorted = useMemo(
     () => [...livePositions].sort((a, b) => b.value - a.value),
     [livePositions]
   );
-  const latestTrade = useMemo(
-    () =>
-      [...liveTrades].sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a))[0] || null,
+  const sortedTrades = useMemo(
+    () => [...liveTrades].sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a)),
     [liveTrades]
+  );
+  const normalizedFocusSymbol = useMemo(
+    () => normalizeUsdtSymbol(focusSymbol || defaultFocusSymbol),
+    [focusSymbol]
   );
   const [tf, setTf] = useState('1h');
   const [kline, setKline] = useState<PositionKlinePayload | null>(null);
@@ -614,37 +637,32 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
   }, [trades]);
 
   useEffect(() => {
-    if (!sorted.length) {
-      setSelectedSymbol('');
-      return;
+    if (normalizedFocusSymbol && normalizedFocusSymbol !== lastSyncedFocusSymbol.current) {
+      lastSyncedFocusSymbol.current = normalizedFocusSymbol;
+      setSelectedSymbol((current) =>
+        sameInstrument(current, normalizedFocusSymbol) ? current : normalizedFocusSymbol
+      );
     }
-    if (!selectedSymbol || !sorted.some((item) => item.symbol === selectedSymbol)) {
-      setSelectedSymbol(sorted[0].symbol);
-    }
-  }, [sorted, selectedSymbol]);
+  }, [normalizedFocusSymbol]);
 
   const spotlightIndex = selectedSymbol
-    ? sorted.findIndex((item) => item.symbol === selectedSymbol)
+    ? sorted.findIndex((item) => sameInstrument(item.symbol, selectedSymbol))
     : 0;
-  const spotlightPosition = sorted[Math.max(0, spotlightIndex)] || null;
-  const fallbackTrade = !spotlightPosition ? latestTrade : null;
-  const fallbackSymbol = fallbackTrade
-    ? String(fallbackTrade.symbol || '').replace('/USDT', '').replace('-USDT', '')
-    : '';
-  const activeSymbol = spotlightPosition?.symbol || focusSymbol || fallbackTrade?.symbol || defaultFocusSymbol;
-  const activeDisplaySymbol = String(activeSymbol || defaultFocusSymbol)
-    .replace('/USDT', '-USDT')
-    .replace('_USDT', '-USDT');
+  const spotlightPosition = spotlightIndex >= 0 ? sorted[spotlightIndex] : null;
+  const activeSymbol = normalizeUsdtSymbol(selectedSymbol || normalizedFocusSymbol || defaultFocusSymbol);
+  const matchingTrade = sortedTrades.find((trade) => sameInstrument(trade.symbol, activeSymbol)) || null;
+  const fallbackTrade = !spotlightPosition ? matchingTrade : null;
+  const activeDisplaySymbol = activeSymbol || normalizeUsdtSymbol(defaultFocusSymbol);
   const activeReferencePrice =
     spotlightPosition && Number(spotlightPosition.avgPrice) > 0
       ? spotlightPosition.avgPrice
-      : (fallbackTrade && Number(fallbackTrade.price) > 0 ? fallbackTrade.price : undefined);
+      : (matchingTrade && Number(matchingTrade.price) > 0 ? matchingTrade.price : undefined);
   const activeReferenceLabel = spotlightPosition
     ? '持仓均价'
-    : (fallbackTrade && Number(fallbackTrade.price) > 0 ? '成交价' : undefined);
+    : (matchingTrade && Number(matchingTrade.price) > 0 ? '成交价' : undefined);
   const spotlightLabel = spotlightPosition
-    ? spotlightPosition.symbol.replace('-USDT', '')
-    : fallbackSymbol || activeDisplaySymbol;
+    ? symbolBase(spotlightPosition.symbol)
+    : symbolBase(activeSymbol);
   const chartCandles = Array.isArray(kline?.candles) ? kline.candles : [];
   const chartSummary = kline?.summary || null;
   const latestCandle = chartCandles[chartCandles.length - 1] || null;
@@ -685,11 +703,13 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
       return;
     }
     let mounted = true;
-    const klineSymbol = String(activeSymbol || '')
-      .replace('/USDT', '')
-      .replace('-USDT', '');
+    const klineSymbol = symbolBase(activeSymbol);
+    setKline(null);
     api.positionKline(klineSymbol, tf).then((data) => {
-      if (mounted) setKline(data);
+      if (!mounted) return;
+      const payloadSymbol = normalizeUsdtSymbol(data?.symbol || activeSymbol);
+      if (payloadSymbol && !sameInstrument(payloadSymbol, activeSymbol)) return;
+      setKline(data);
     });
     return () => {
       mounted = false;
@@ -714,10 +734,10 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
 
   useInterval(() => {
     if (document.hidden || !activeSymbol) return;
-    const klineSymbol = String(activeSymbol || '')
-      .replace('/USDT', '')
-      .replace('-USDT', '');
+    const klineSymbol = symbolBase(activeSymbol);
     api.positionKline(klineSymbol, tf).then((data) => {
+      const payloadSymbol = normalizeUsdtSymbol(data?.symbol || activeSymbol);
+      if (payloadSymbol && !sameInstrument(payloadSymbol, activeSymbol)) return;
       setKline(data);
     });
   }, activeSymbol ? 10000 : null);
@@ -729,13 +749,13 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
           <CandlestickChart className="w-4 h-4" />
           <span>{spotlightPosition ? '持仓聚焦' : `市场聚焦 · ${spotlightLabel}`}</span>
         </div>
-        {(spotlightPosition || fallbackTrade) && (
+        {activeSymbol && (
           <div className="flex items-center gap-2">
             <button
               className="p-1 rounded-lg hover:bg-white/10 disabled:opacity-30"
               onClick={() => {
                 const nextIndex = Math.max(0, spotlightIndex - 1);
-                setSelectedSymbol(sorted[nextIndex]?.symbol || '');
+                setSelectedSymbol(normalizeUsdtSymbol(sorted[nextIndex]?.symbol || ''));
               }}
               disabled={!spotlightPosition || spotlightIndex <= 0}
             >
@@ -748,7 +768,7 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
               className="p-1 rounded-lg hover:bg-white/10 disabled:opacity-30"
               onClick={() => {
                 const nextIndex = Math.min(sorted.length - 1, spotlightIndex + 1);
-                setSelectedSymbol(sorted[nextIndex]?.symbol || '');
+                setSelectedSymbol(normalizeUsdtSymbol(sorted[nextIndex]?.symbol || ''));
               }}
               disabled={!spotlightPosition || spotlightIndex >= sorted.length - 1}
             >

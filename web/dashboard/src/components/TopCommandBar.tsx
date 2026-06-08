@@ -45,6 +45,10 @@ export function TopCommandBar({
 }: TopCommandBarProps) {
   const reduceMotion = useReducedMotion();
   const isRunning = Boolean(systemStatus?.isRunning);
+  const submitSymbolSearch = (value: string) => {
+    const symbol = normalizeSearchSymbol(value);
+    if (symbol) onSymbolSearch?.(symbol);
+  };
 
   return (
     <header className="top-command-bar">
@@ -76,12 +80,20 @@ export function TopCommandBar({
           onSubmit={(event) => {
             event.preventDefault();
             const data = new FormData(event.currentTarget);
-            const symbol = normalizeSearchSymbol(String(data.get('symbol') || ''));
-            if (symbol) onSymbolSearch?.(symbol);
+            submitSymbolSearch(String(data.get('symbol') || ''));
           }}
         >
           <Search className="h-4 w-4" />
-          <input name="symbol" aria-label="搜索币种" placeholder="输入币种切换K线，如 BNB" />
+          <input
+            name="symbol"
+            aria-label="搜索币种"
+            placeholder="输入币种切换K线，如 BNB"
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return;
+              event.preventDefault();
+              submitSymbolSearch(event.currentTarget.value);
+            }}
+          />
         </form>
         <button className="icon-command" type="button" aria-label="全屏" onClick={toggleFullscreen} title="切换全屏">
           <Maximize2 className="h-4 w-4" />
