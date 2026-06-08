@@ -959,6 +959,18 @@ def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict
             )
         ),
         "would_enter": _normalize_bool(_advisory_first(row, ("would_enter", "would_enter_if_enabled"))),
+        "alpha6_score": _normalize_float(_advisory_first(row, ("alpha6_score", "alpha6_buy_score"))),
+        "overextension_score": _normalize_float(
+            _advisory_first(
+                row,
+                (
+                    "overextension_score",
+                    "late_breakout_score",
+                    "chase_risk_score",
+                    "post_impulse_overextension_score",
+                ),
+            )
+        ),
         "top_k": _normalize_float(_advisory_first(row, ("top_k", "k", "rank_k"))),
         "selected_symbols": _advisory_first(
             row,
@@ -3753,6 +3765,62 @@ def _late_breakout_failure_protect_rows(
     return out
 
 
+def _late_breakout_failure_advisory_rows(
+    advisory_rows: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in advisory_rows:
+        text = " ".join(
+            str(row.get(name) or "")
+            for name in (
+                "strategy_id",
+                "strategy_candidate",
+                "experiment_name",
+                "advisory_reason",
+                "no_sample_reason",
+            )
+        ).lower()
+        if not any(
+            token in text
+            for token in (
+                "late_breakout_failure",
+                "late_breakout",
+                "post_impulse_overextension",
+                "overextension",
+            )
+        ):
+            continue
+        alpha6_score = _normalize_float(row.get("alpha6_score"))
+        overextension_score = _normalize_float(row.get("overextension_score"))
+        explicit_block = _normalize_bool(
+            _late_breakout_first_value(
+                row,
+                (
+                    "would_block_entry",
+                    "would_block_if_enabled",
+                    "would_block",
+                    "would_filter",
+                ),
+            )
+        )
+        strong_overextension = (
+            alpha6_score is not None
+            and alpha6_score >= 0.9
+            and overextension_score is not None
+            and overextension_score >= 0.5
+        )
+        if explicit_block is not True and "late_breakout" not in text and not strong_overextension:
+            continue
+        payload = dict(row)
+        payload.setdefault("would_block_entry", True)
+        payload.setdefault("live_order_effect", "read_only_no_live_order")
+        return_symbol = _symbol_text(payload.get("symbol"))
+        if return_symbol and return_symbol != "MULTI":
+            payload["symbol"] = return_symbol
+        out.append(payload)
+    return out
+
+
 def _record_key(record: Mapping[str, Any]) -> str:
     return "|".join(
         [
@@ -5133,8 +5201,12 @@ def update_sol_paper_strategy_tracker(
         run_path=run_path,
         candidate_rows=candidate_rows,
     )
+    late_breakout_source_rows = [
+        *_read_late_breakout_failure_detail_rows(run_path=run_path, reports_dir=reports_dir),
+        *_late_breakout_failure_advisory_rows(advisory_rows),
+    ]
     late_breakout_failure_rows = _late_breakout_failure_protect_rows(
-        _read_late_breakout_failure_detail_rows(run_path=run_path, reports_dir=reports_dir),
+        late_breakout_source_rows,
         run_id=str(getattr(audit, "run_id", "") or ""),
         asof_ts_ms=asof_ts_ms,
     )

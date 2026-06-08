@@ -2329,6 +2329,50 @@ def test_late_breakout_failure_protect_shadow_reads_quant_lab_detail(tmp_path: P
     assert row["live_order_effect"] == "read_only_no_live_order"
 
 
+def test_late_breakout_failure_protect_shadow_reads_advisory_fallback(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    reports_dir = tmp_path / "reports"
+    run_dir = reports_dir / "runs" / "r_late_breakout_advisory"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        reports_dir,
+        [
+            {
+                "strategy_candidate": "v5.late_breakout_failure_protect_shadow",
+                "decision": "KEEP_SHADOW",
+                "recommended_mode": "shadow",
+                "symbol": "SOL-USDT",
+                "alpha6_score": "0.96",
+                "overextension_score": "0.82",
+                "would_block_if_enabled": "true",
+                "future_4h_net_bps": "-55.0",
+                "future_8h_net_bps": "-35.0",
+                **_fresh_meta(start_s),
+            }
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_late_breakout_advisory", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["late_breakout_failure_protect_rows"] == 1
+    rows = _read_csv(reports_dir / "summaries" / "late_breakout_failure_protect_shadow.csv")
+    row = rows[0]
+    assert row["symbol"] == "SOL/USDT"
+    assert row["alpha6_score"] == "0.96"
+    assert row["overextension_score"] == "0.82"
+    assert row["would_block_entry"] == "True"
+    assert row["future_4h_net_bps"] == "-55.0"
+    assert row["live_order_effect"] == "read_only_no_live_order"
+
+
 def test_backtest_advisory_reader_is_read_only(tmp_path: Path) -> None:
     cfg = _cfg()
     cfg.quant_lab.enabled = True
