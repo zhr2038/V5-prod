@@ -43,6 +43,8 @@ SHADOW_SYNC_ITEMS = (
 
 WEB_DASHBOARD_RESTART_EXACT_PATHS = frozenset(
     {
+        "configs/live_prod.yaml",
+        "configs/schema.py",
         "deploy/render_systemd_units.py",
         "deploy/systemd/v5-web-dashboard.service",
         "scripts/web_dashboard.py",
@@ -50,6 +52,7 @@ WEB_DASHBOARD_RESTART_EXACT_PATHS = frozenset(
     }
 )
 WEB_DASHBOARD_RESTART_PREFIXES = (
+    "configs/",
     "web/",
 )
 

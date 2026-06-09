@@ -437,6 +437,9 @@ def test_should_upload_detects_same_size_content_drift(tmp_path: Path) -> None:
 
 def test_should_restart_web_dashboard_only_for_web_runtime_changes() -> None:
     assert _should_restart_web_dashboard(["deploy/sync_prod_release.py"]) is False
+    assert _should_restart_web_dashboard(["configs/schema.py"]) is True
+    assert _should_restart_web_dashboard(["configs/live_prod.yaml"]) is True
+    assert _should_restart_web_dashboard(["configs/config.yaml"]) is True
     assert _should_restart_web_dashboard(["scripts/web_dashboard.py"]) is True
     assert _should_restart_web_dashboard(["web/static/app.js"]) is True
     assert _should_restart_web_dashboard(["deploy/systemd/v5-web-dashboard.service"]) is True
