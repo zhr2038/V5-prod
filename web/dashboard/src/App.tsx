@@ -325,6 +325,8 @@ function App() {
     loadQuantLab(dashboardFocusForQuantLab(dashboard));
   }, 30000);
 
+  const displayMarketState = marketState || dashboard?.marketState || null;
+
   return (
     <div className="dashboard-shell relative min-h-[100dvh] min-h-[100svh] min-h-screen">
       <LiquidBg />
@@ -346,7 +348,7 @@ function App() {
 
         <StatusRibbon
           account={dashboard?.account || null}
-          marketState={marketState}
+          marketState={displayMarketState}
           riskGuard={riskGuard}
           quantLabStatus={quantLabStatus}
           quantLabPermission={quantLabPermission}
@@ -359,7 +361,7 @@ function App() {
             trades={dashboard?.trades || []}
             focusSymbol={focusSymbol}
             account={dashboard?.account || null}
-            marketState={marketState}
+            marketState={displayMarketState}
             slippageInsights={dashboard?.slippageInsights || null}
             timers={dashboard?.timers || null}
             decisionAudit={decisionAudit}
