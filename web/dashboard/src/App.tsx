@@ -189,21 +189,20 @@ function App() {
       api.trades(),
     ]);
     if (d) {
-      const nextDashboard = {
-        ...(dashboard || {}),
+      const nextDashboardBase = {
         ...d,
         trades: Array.isArray(liveTrades?.trades) && liveTrades.trades.length > 0 ? liveTrades.trades : d.trades,
       } as DashboardData;
-      setDashboard((prev) => (prev ? { ...prev, ...nextDashboard } : nextDashboard));
+      setDashboard((prev) => (prev ? { ...prev, ...nextDashboardBase } : nextDashboardBase));
       setMarketState(d.marketState || null);
-      void loadQuantLab(dashboardFocusForQuantLab(nextDashboard));
+      void loadQuantLab(dashboardFocusForQuantLab(nextDashboardBase));
     }
     if (r) {
       setRiskGuard(r);
     }
     setUpdateTime(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
     setLoading(false);
-  }, [dashboard, loadQuantLab]);
+  }, [loadQuantLab]);
 
   const loadSecondary = useCallback(async () => {
     void loadApiTelemetrySeries();
