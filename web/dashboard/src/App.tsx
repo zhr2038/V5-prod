@@ -41,11 +41,45 @@ type IdleWindow = Window & {
   cancelIdleCallback?: (handle: number) => void;
 };
 
+const UI_CACHE_TTL_MS = 10 * 60 * 1000;
+const UI_CACHE_KEYS = {
+  dashboard: 'v5.dashboard.primary',
+  riskGuard: 'v5.dashboard.riskGuard',
+  health: 'v5.dashboard.health',
+  quantLabStatus: 'v5.dashboard.quantLabStatus',
+  quantLabPermission: 'v5.dashboard.quantLabPermission',
+  quantLabCost: 'v5.dashboard.quantLabCost',
+} as const;
+
 function isTouchWebKit() {
   return Boolean(
     window.matchMedia('(hover: none) and (pointer: coarse)').matches &&
       globalThis.CSS?.supports?.('-webkit-touch-callout', 'none')
   );
+}
+
+function readUiCache<T>(key: string): T | null {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { savedAt?: number; value?: T };
+    if (!parsed?.savedAt || Date.now() - parsed.savedAt > UI_CACHE_TTL_MS) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+    return parsed.value ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeUiCache<T>(key: string, value: T | null | undefined) {
+  if (!value) return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value }));
+  } catch {
+    // Storage can be unavailable in private modes; polling still remains authoritative.
+  }
 }
 
 function deferredPayloadLooksSparse(payload?: Partial<DashboardData> | null) {
@@ -135,14 +169,14 @@ function dashboardFocusForQuantLab(dashboard?: DashboardData | null) {
 }
 
 function App() {
-  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
-  const [riskGuard, setRiskGuard] = useState<RiskGuardData | null>(null);
-  const [marketState, setMarketState] = useState<MarketStateData | null>(null);
+  const [dashboard, setDashboard] = useState<DashboardData | null>(() => readUiCache(UI_CACHE_KEYS.dashboard));
+  const [riskGuard, setRiskGuard] = useState<RiskGuardData | null>(() => readUiCache(UI_CACHE_KEYS.riskGuard));
+  const [marketState, setMarketState] = useState<MarketStateData | null>(() => dashboard?.marketState || null);
   const [decisionAudit, setDecisionAudit] = useState<DecisionAuditData | null>(null);
-  const [health, setHealth] = useState<HealthData | null>(null);
-  const [quantLabStatus, setQuantLabStatus] = useState<QuantLabStatusData | null>(null);
-  const [quantLabPermission, setQuantLabPermission] = useState<QuantLabPermissionData | null>(null);
-  const [quantLabCost, setQuantLabCost] = useState<QuantLabCostEstimateData | null>(null);
+  const [health, setHealth] = useState<HealthData | null>(() => readUiCache(UI_CACHE_KEYS.health));
+  const [quantLabStatus, setQuantLabStatus] = useState<QuantLabStatusData | null>(() => readUiCache(UI_CACHE_KEYS.quantLabStatus));
+  const [quantLabPermission, setQuantLabPermission] = useState<QuantLabPermissionData | null>(() => readUiCache(UI_CACHE_KEYS.quantLabPermission));
+  const [quantLabCost, setQuantLabCost] = useState<QuantLabCostEstimateData | null>(() => readUiCache(UI_CACHE_KEYS.quantLabCost));
   const [apiTelemetrySeries, setApiTelemetrySeries] = useState<ApiTelemetrySeriesData | null>(null);
   const [updateTime, setUpdateTime] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -165,9 +199,18 @@ function App() {
         : Promise.resolve(null),
     ]);
     startTransition(() => {
-      if (status) setQuantLabStatus(status);
-      if (permission) setQuantLabPermission(permission);
-      if (cost) setQuantLabCost(cost);
+      if (status) {
+        setQuantLabStatus(status);
+        writeUiCache(UI_CACHE_KEYS.quantLabStatus, status);
+      }
+      if (permission) {
+        setQuantLabPermission(permission);
+        writeUiCache(UI_CACHE_KEYS.quantLabPermission, permission);
+      }
+      if (cost) {
+        setQuantLabCost(cost);
+        writeUiCache(UI_CACHE_KEYS.quantLabCost, cost);
+      }
     });
   }, []);
 
@@ -193,12 +236,17 @@ function App() {
         ...d,
         trades: Array.isArray(liveTrades?.trades) && liveTrades.trades.length > 0 ? liveTrades.trades : d.trades,
       } as DashboardData;
-      setDashboard((prev) => (prev ? { ...prev, ...nextDashboardBase } : nextDashboardBase));
+      setDashboard((prev) => {
+        const merged = prev ? { ...prev, ...nextDashboardBase } : nextDashboardBase;
+        writeUiCache(UI_CACHE_KEYS.dashboard, merged);
+        return merged;
+      });
       setMarketState(d.marketState || null);
       void loadQuantLab(dashboardFocusForQuantLab(nextDashboardBase));
     }
     if (r) {
       setRiskGuard(r);
+      writeUiCache(UI_CACHE_KEYS.riskGuard, r);
     }
     setUpdateTime(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
     setLoading(false);
@@ -215,12 +263,16 @@ function App() {
       if (deferred) {
         setDashboard((prev) => {
           const nextDashboard = mergeDeferredDashboard(prev, deferred);
+          writeUiCache(UI_CACHE_KEYS.dashboard, nextDashboard);
           void loadQuantLab(dashboardFocusForQuantLab(nextDashboard));
           return nextDashboard;
         });
       }
       if (dec) setDecisionAudit(dec);
-      if (h) setHealth(h);
+      if (h) {
+        setHealth(h);
+        writeUiCache(UI_CACHE_KEYS.health, h);
+      }
     });
   }, [loadApiTelemetrySeries, loadQuantLab]);
 
