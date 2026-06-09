@@ -2,7 +2,7 @@ import { Activity, Gauge, ShieldCheck, TrendingUp, WalletCards } from 'lucide-re
 import { motion, useReducedMotion } from 'framer-motion';
 import type { CSSProperties } from 'react';
 import { useDataPulse } from '../hooks/useDataPulse';
-import { fmtNum, fmtPct, fmtUnsignedPct, riskLabels, stateLabels } from '../lib/format';
+import { fmtNum, fmtPct, fmtUnsignedPct, fmtUsd, riskLabels, stateLabels } from '../lib/format';
 import type {
   AccountData,
   MarketStateData,
@@ -223,6 +223,13 @@ export function StatusRibbon({
       />
       <RibbonCard
         icon={WalletCards}
+        label="账户资金"
+        value={fmtUsd(account?.totalEquity)}
+        sub={`现金 ${fmtUsd(account?.cash)} · 在仓 ${fmtUsd(account?.positionsValue)}`}
+        tone={Number(account?.totalPnl || 0) < 0 ? 'danger' : 'good'}
+      />
+      <RibbonCard
+        icon={Activity}
         label="今日回撤"
         value={fmtPct(account?.todayPnlPercent, 2)}
         sub={`最大回撤 ${fmtUnsignedPct(account?.maxDrawdown, 2)}`}
