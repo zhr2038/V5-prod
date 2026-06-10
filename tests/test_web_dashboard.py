@@ -1639,6 +1639,33 @@ def test_dashboard_api_deferred_view_keeps_deferred_child_errors(monkeypatch):
     assert payload["trades"] == []
 
 
+def test_dashboard_api_deferred_view_skips_primary_child_endpoints(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def fail_if_called():
+        raise AssertionError("primary endpoint should not be called by deferred dashboard")
+
+    monkeypatch.setattr(module, "api_account", fail_if_called)
+    monkeypatch.setattr(module, "api_positions", fail_if_called)
+    monkeypatch.setattr(module, "api_market_state", fail_if_called)
+    monkeypatch.setattr(module, "api_ml_training", fail_if_called)
+    monkeypatch.setattr(module, "api_status", lambda: module.jsonify({"timer_active": True, "dry_run": False, "mode": "live"}))
+    monkeypatch.setattr(module, "api_trades", lambda: module.jsonify({"trades": []}))
+    monkeypatch.setattr(module, "api_scores", lambda: module.jsonify({"scores": []}))
+    monkeypatch.setattr(module, "api_timers", lambda: module.jsonify({"timers": []}))
+    monkeypatch.setattr(module, "_load_api_telemetry_summary", lambda runtime_paths=None, lookback_hours=24: None)
+    monkeypatch.setattr(module, "_load_slippage_insights", lambda runtime_paths=None, cfg=None, lookback_days=14: None)
+
+    response = client.get("/api/dashboard?view=deferred")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["systemStatus"]["mode"] == "live"
+    assert payload["trades"] == []
+    assert payload["alphaScores"] == []
+
+
 def test_dashboard_api_sanitizes_child_error_messages(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()
@@ -2392,6 +2419,65 @@ def test_api_scores_limits_recent_decision_audit_scan(monkeypatch, tmp_path):
     assert payload["previous_run"] == "20260312_18"
     assert payload["scores"][0]["symbol"] == "COIN19/USDT"
     assert reads["decision_audit"] <= 4
+
+
+def test_api_scores_uses_default_recent_decision_audit_scan_limit(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.delenv("V5_DASHBOARD_SCORE_AUDIT_SCAN_LIMIT", raising=False)
+
+    latest_run_id = ""
+    previous_run_id = ""
+    for idx in range(80):
+        day = 12 + idx // 24
+        hour = idx % 24
+        run_id = f"202603{day:02d}_{hour:02d}"
+        previous_run_id = latest_run_id
+        latest_run_id = run_id
+        run_dir = runs_dir / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "decision_audit.json").write_text(
+            json.dumps(
+                {
+                    "regime": "TRENDING",
+                    "top_scores": [
+                        {
+                            "symbol": f"COIN{idx}/USDT",
+                            "score": 0.5 + idx / 100,
+                            "display_score": 0.5 + idx / 100,
+                            "raw_score": 0.5 + idx / 100,
+                            "rank": 1,
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+    original_load_json_payload = module._load_json_payload
+    reads = {"decision_audit": 0}
+
+    def counting_load_json_payload(path):
+        if Path(path).name == "decision_audit.json":
+            reads["decision_audit"] += 1
+        return original_load_json_payload(path)
+
+    monkeypatch.setattr(module, "_load_json_payload", counting_load_json_payload)
+
+    response = client.get("/api/scores")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_run"] == latest_run_id
+    assert payload["previous_run"] == previous_run_id
+    assert payload["scores"][0]["symbol"] == "COIN79/USDT"
+    assert reads["decision_audit"] <= module.DEFAULT_SCORE_AUDIT_SCAN_LIMIT
 
 
 def test_api_scores_falls_back_to_active_runtime_alpha_snapshot(monkeypatch, tmp_path):
@@ -7684,6 +7770,57 @@ def test_market_state_snapshot_limits_recent_decision_audit_scan(monkeypatch, tm
     assert snapshot["final_score"] == pytest.approx(0.19)
     assert snapshot["ts"] == _utc_epoch_from_text("20260312_19", "%Y%m%d_%H")
     assert reads["decision_audit"] <= 4
+
+
+def test_market_state_snapshot_uses_default_recent_decision_audit_scan_limit(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.delenv("V5_DASHBOARD_MARKET_AUDIT_SCAN_LIMIT", raising=False)
+
+    latest_run_id = ""
+    for idx in range(80):
+        day = 12 + idx // 24
+        hour = idx % 24
+        latest_run_id = f"202603{day:02d}_{hour:02d}"
+        run_dir = runs_dir / latest_run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "decision_audit.json").write_text(
+            json.dumps(
+                {
+                    "regime": "SIDEWAYS" if idx < 79 else "TRENDING",
+                    "regime_multiplier": 0.8 if idx < 79 else 1.2,
+                    "final_score": idx / 100,
+                    "regime_details": {
+                        "final_state": "SIDEWAYS" if idx < 79 else "TRENDING",
+                        "method": "decision_audit",
+                        "votes": {"hmm": {"state": "TRENDING", "confidence": 0.7}},
+                    },
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+    original_load_json_payload = module._load_json_payload
+    reads = {"decision_audit": 0}
+
+    def counting_load_json_payload(path):
+        if Path(path).name == "decision_audit.json":
+            reads["decision_audit"] += 1
+        return original_load_json_payload(path)
+
+    monkeypatch.setattr(module, "_load_json_payload", counting_load_json_payload)
+
+    snapshot = module._load_market_state_snapshot(reports_dir)
+
+    assert latest_run_id == "20260315_07"
+    assert snapshot["state"] == "TRENDING"
+    assert snapshot["position_multiplier"] == 1.2
+    assert snapshot["final_score"] == pytest.approx(0.79)
+    assert reads["decision_audit"] <= module.DEFAULT_MARKET_AUDIT_SCAN_LIMIT
 
 
 def test_decision_chain_legacy_utc_run_time_is_not_double_shifted(monkeypatch, tmp_path):

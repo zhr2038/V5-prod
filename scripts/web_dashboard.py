@@ -685,14 +685,18 @@ def _legacy_display_score(score: float) -> float:
     return math.copysign(math.tanh(magnitude / scale), raw)
 
 
-def _load_recent_scan_limit(env_name: str) -> Optional[int]:
+DEFAULT_SCORE_AUDIT_SCAN_LIMIT = 48
+DEFAULT_MARKET_AUDIT_SCAN_LIMIT = 48
+
+
+def _load_recent_scan_limit(env_name: str, default: Optional[int] = None) -> Optional[int]:
     raw = str(os.getenv(env_name, '') or '').strip()
     if not raw:
-        return None
+        return default
     try:
         value = int(raw)
     except (TypeError, ValueError):
-        return None
+        return default
     return value if value > 0 else None
 
 
@@ -4598,7 +4602,10 @@ def api_scores():
         usable_runs: List[Dict[str, Any]] = []
         for entry in _iter_decision_audits(
             runtime_paths.reports_dir,
-            scan_limit=_load_recent_scan_limit('V5_DASHBOARD_SCORE_AUDIT_SCAN_LIMIT'),
+            scan_limit=_load_recent_scan_limit(
+                'V5_DASHBOARD_SCORE_AUDIT_SCAN_LIMIT',
+                default=DEFAULT_SCORE_AUDIT_SCAN_LIMIT,
+            ),
         ):
             items = _normalize_top_scores(entry['audit'].get('top_scores', []))
             if not items:
@@ -5221,7 +5228,10 @@ def _load_market_state_snapshot(reports_dir: Path) -> Dict[str, Any]:
     try:
         audit_entries = _iter_decision_audits(
             reports_dir,
-            scan_limit=_load_recent_scan_limit('V5_DASHBOARD_MARKET_AUDIT_SCAN_LIMIT'),
+            scan_limit=_load_recent_scan_limit(
+                'V5_DASHBOARD_MARKET_AUDIT_SCAN_LIMIT',
+                default=DEFAULT_MARKET_AUDIT_SCAN_LIMIT,
+            ),
         )
         regime_json_snapshot = _load_regime_json_snapshot(reports_dir)
         if audit_entries:
@@ -5575,7 +5585,62 @@ def api_dashboard():
     try:
         view = str(request.args.get('view', 'full') or 'full').strip().lower()
         errors: List[str] = []
-        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
+        config = load_config()
+        runtime_paths = _resolve_dashboard_runtime_paths(config)
+        if view == 'deferred':
+            status_data = _call_dashboard_api(api_status, default={}, label='status', errors=errors)
+            if not isinstance(status_data, dict):
+                status_data = {}
+            trades_payload = _call_dashboard_api(api_trades, default={'trades': []}, label='trades', errors=errors)
+            scores_data = _call_dashboard_api(api_scores, default={'scores': []}, label='scores', errors=errors)
+            timers_data = _call_dashboard_api(api_timers, default={'timers': []}, label='timers', errors=errors)
+            api_telemetry = _load_api_telemetry_summary(runtime_paths=runtime_paths)
+            slippage_insights = _load_slippage_insights(runtime_paths=runtime_paths, cfg=config)
+
+            trades_data = trades_payload
+            if isinstance(trades_payload, dict):
+                trades_data = trades_payload.get('trades', trades_payload.get('data', []))
+            if not isinstance(trades_data, list):
+                trades_data = []
+            if not isinstance(scores_data, dict):
+                scores_data = {'scores': []}
+
+            trades = []
+            for i, trade in enumerate(trades_data[:20]):
+                trades.append({
+                    'id': str(i),
+                    'timestamp': trade.get('time', '') if trade.get('time') else '',
+                    'symbol': trade.get('symbol', '').replace('-USDT', '/USDT'),
+                    'side': trade.get('side', 'buy'),
+                    'type': 'REBALANCE',
+                    'price': float(trade.get('price', 0) or 0),
+                    'qty': float(trade.get('qty', 0) or 0),
+                    'value': trade.get('amount', 0),
+                    'fee': abs(trade.get('fee', 0)),
+                })
+
+            alpha_scores = []
+            for score in scores_data.get('scores', [])[:10]:
+                alpha_scores.append({
+                    'symbol': score.get('symbol', '').replace('-USDT', '/USDT'),
+                    'score': score.get('score', 0),
+                    'f1_mom_5d': 0,
+                    'f2_mom_20d': 0,
+                    'f3_vol_adj': 0,
+                    'f4_volume': 0,
+                    'f5_rsi': 0,
+                    'weight': 0.1,
+                })
+
+            return jsonify({
+                'trades': trades,
+                'alphaScores': alpha_scores,
+                'timers': timers_data,
+                'apiTelemetry': api_telemetry,
+                'slippageInsights': slippage_insights,
+                'systemStatus': _build_dashboard_system_status(status_data, account_data={}, errors=errors),
+            })
+
         account_data = _call_dashboard_api(api_account, default={}, label='account', errors=errors)
         positions_payload = _call_dashboard_api(api_positions, default={'positions': []}, label='positions', errors=errors)
         status_data = _call_dashboard_api(api_status, default={}, label='status', errors=errors)
