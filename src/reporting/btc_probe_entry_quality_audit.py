@@ -14,6 +14,9 @@ BTC_PROBE_ENTRY_QUALITY_FIELDS = (
     "trend_buy_count",
     "alpha6_score",
     "alpha6_side",
+    "bypassed_negative_expectancy_reason",
+    "selected_symbol",
+    "selection_mode",
     "negative_expectancy_state",
     "same_symbol_reentry_bypass",
     "price_distance_from_recent_low_bps",
@@ -29,4 +32,3 @@ def is_btc_market_impulse_probe_candidate(row: Mapping[str, Any]) -> bool:
         return False
     text = " ".join(str(value or "").lower() for value in row.values())
     return "market_impulse_probe" in text
-

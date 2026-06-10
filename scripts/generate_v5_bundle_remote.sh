@@ -8193,18 +8193,30 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         return out
 
     def btc_probe_entry_quality_status(row, expected_edge, final_score):
+        status_values = [row]
+        status_values.extend(btc_probe_entry_contexts(row))
         text = " ".join(
             flatten_value(value).lower()
+            for context in status_values
+            if isinstance(context, dict)
             for value in (
-                row.get("block_reason"),
-                row.get("no_signal_reason"),
-                row.get("router_reason"),
-                row.get("same_symbol_reentry_bypass"),
-                row.get("bypassed_negative_expectancy_reason"),
-                row.get("market_impulse_probe_bypassed_negative_expectancy_reason"),
+                context.get("block_reason"),
+                context.get("no_signal_reason"),
+                context.get("router_reason"),
+                context.get("reason"),
+                context.get("same_symbol_reentry_bypass"),
+                context.get("same_symbol_reentry_breakout_bypass"),
+                context.get("bypassed_negative_expectancy_reason"),
+                context.get("market_impulse_probe_bypassed_negative_expectancy_reason"),
+                context.get("market_impulse_probe_reentry_after_loss_reason"),
             )
         )
-        reentry_after_loss = "probe_stop_loss" in text or "same_symbol_reentry_breakout" in text
+        reentry_after_loss = (
+            "probe_stop_loss" in text
+            or "same_symbol_reentry_breakout" in text
+            or "reentry_after_loss" in text
+            or "after_loss" in text
+        )
         if expected_edge is not None and expected_edge < 0 and final_score is not None and final_score < 0 and reentry_after_loss:
             return "invalid_negative_edge_reentry_after_loss"
         if expected_edge is not None and expected_edge < 0:
@@ -8217,10 +8229,59 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             return "missing_alpha6_or_microstructure_confirm"
         return "observed"
 
+    def btc_probe_entry_contexts(row):
+        def walk(obj, depth=0):
+            if depth > 8:
+                return
+            if isinstance(obj, dict):
+                yield obj
+                for key in (
+                    "entry_router_decision",
+                    "entry_decision",
+                    "router_decision",
+                    "router_info",
+                    "market_impulse_probe_context",
+                    "market_impulse_shadow_selection",
+                    "raw_json",
+                    "raw_meta",
+                    "meta",
+                    "metadata",
+                    "order_meta",
+                ):
+                    if key in obj:
+                        yield from walk(obj.get(key), depth + 1)
+            elif isinstance(obj, list):
+                for item in obj:
+                    yield from walk(item, depth + 1)
+            elif isinstance(obj, str):
+                parsed = parse_json_obj(obj, None)
+                if isinstance(parsed, (dict, list)):
+                    yield from walk(parsed, depth + 1)
+
+        seen_ids = set()
+        for context in walk(row):
+            if not isinstance(context, dict):
+                continue
+            ident = id(context)
+            if ident in seen_ids:
+                continue
+            seen_ids.add(ident)
+            yield context
+
+    def btc_probe_entry_value(row, *keys):
+        for key in keys:
+            if isinstance(row, dict) and row.get(key) not in (None, "", not_obs):
+                return row.get(key)
+        for context in btc_probe_entry_contexts(row):
+            for key in keys:
+                if context.get(key) not in (None, "", not_obs):
+                    return context.get(key)
+        return not_obs
+
     def build_btc_probe_entry_quality_rows(rows, roundtrip_rows):
         out = []
         seen = set()
-        input_rows = list(rows or []) + list(roundtrip_rows or [])
+        input_rows = list(roundtrip_rows or []) + list(rows or [])
         for row in input_rows:
             if not report_is_btc_market_impulse_probe_candidate(row):
                 continue
@@ -8228,32 +8289,71 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             ts_text = first_observed(row.get("ts_utc"), row.get("entry_ts"), row.get("timestamp"), row.get("ts"), not_obs)
             ts_dt = parse_dt_utc(ts_text)
             entry_px = candidate_conflict_entry_price(row, symbol, ts_dt)
-            final_score = as_float(first_observed(row.get("final_score"), row.get("score"), not_obs))
-            expected_edge = as_float(first_observed(row.get("expected_edge_bps"), row.get("expected_net_bps"), row.get("edge_bps"), not_obs))
+            final_score_text = first_observed(
+                btc_probe_entry_value(row, "final_score", "score"),
+                not_obs,
+            )
+            expected_edge_text = first_observed(
+                btc_probe_entry_value(row, "expected_edge_bps", "expected_net_bps", "edge_bps"),
+                not_obs,
+            )
+            final_score = as_float(final_score_text)
+            expected_edge = as_float(expected_edge_text)
             key = (flatten_value(first_observed(row.get("run_id"), not_obs)), flatten_value(ts_text), fmt_num(entry_px, 10) if entry_px is not None else "")
             if key in seen:
                 continue
             seen.add(key)
+            bypass_reason = first_observed(
+                btc_probe_entry_value(
+                    row,
+                    "bypassed_negative_expectancy_reason",
+                    "market_impulse_probe_bypassed_negative_expectancy_reason",
+                    "market_impulse_probe_reentry_after_loss_reason",
+                ),
+                not_obs,
+            )
             out.append({
                 "run_id": first_observed(row.get("run_id"), not_obs),
                 "entry_ts": ts_text,
                 "entry_px": fmt_num(entry_px, 10) if entry_px is not None else not_obs,
-                "final_score": first_observed(row.get("final_score"), not_obs),
-                "expected_edge_bps": first_observed(row.get("expected_edge_bps"), row.get("expected_net_bps"), not_obs),
-                "required_edge_bps": first_observed(row.get("required_edge_bps"), row.get("required_net_bps"), not_obs),
-                "btc_trend_score": first_observed(row.get("btc_trend_score"), row.get("market_impulse_probe_btc_trend_score"), not_obs),
-                "trend_buy_count": first_observed(row.get("trend_buy_count"), row.get("market_impulse_probe_trend_buy_count"), not_obs),
-                "alpha6_score": first_observed(row.get("alpha6_score"), not_obs),
-                "alpha6_side": first_observed(row.get("alpha6_side"), not_obs),
+                "final_score": final_score_text,
+                "expected_edge_bps": expected_edge_text,
+                "required_edge_bps": first_observed(
+                    btc_probe_entry_value(row, "required_edge_bps", "required_net_bps"),
+                    not_obs,
+                ),
+                "btc_trend_score": first_observed(
+                    btc_probe_entry_value(row, "btc_trend_score", "market_impulse_probe_btc_trend_score"),
+                    not_obs,
+                ),
+                "trend_buy_count": first_observed(
+                    btc_probe_entry_value(row, "trend_buy_count", "market_impulse_probe_trend_buy_count"),
+                    not_obs,
+                ),
+                "alpha6_score": first_observed(btc_probe_entry_value(row, "alpha6_score"), not_obs),
+                "alpha6_side": first_observed(btc_probe_entry_value(row, "alpha6_side"), not_obs),
+                "bypassed_negative_expectancy_reason": bypass_reason,
+                "selected_symbol": first_observed(
+                    btc_probe_entry_value(
+                        row,
+                        "selected_symbol",
+                        "selected_live",
+                        "selected_by_priority",
+                        "market_impulse_probe_selected_symbol",
+                    ),
+                    not_obs,
+                ),
+                "selection_mode": first_observed(
+                    btc_probe_entry_value(row, "selection_mode", "market_impulse_probe_selection_mode"),
+                    not_obs,
+                ),
                 "negative_expectancy_state": first_observed(
-                    row.get("bypassed_negative_expectancy_reason"),
-                    row.get("market_impulse_probe_bypassed_negative_expectancy_reason"),
-                    row.get("negative_expectancy_state"),
+                    bypass_reason,
+                    btc_probe_entry_value(row, "negative_expectancy_state"),
                     not_obs,
                 ),
                 "same_symbol_reentry_bypass": first_observed(
-                    row.get("same_symbol_reentry_breakout_bypass"),
-                    row.get("same_symbol_reentry_bypass"),
+                    btc_probe_entry_value(row, "same_symbol_reentry_breakout_bypass", "same_symbol_reentry_bypass"),
                     not_obs,
                 ),
                 "price_distance_from_recent_low_bps": first_observed(
@@ -13888,9 +13988,29 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         freshness_status = flatten_value(advisory_source_health.get("freshness_status") or "")
         if not freshness_status:
             freshness_status = "stale" if truthy_text(advisory_source_health.get("selected_source_is_stale")) else "fresh"
+        selected_is_stale = truthy_text(advisory_source_health.get("selected_source_is_stale"))
+        if freshness_status.strip().lower() == "fresh":
+            selected_is_stale = False
+        elif freshness_status.strip().lower() in {"stale", "invalid_timestamp"}:
+            selected_is_stale = True
+        selected_stale_reason = "" if not selected_is_stale else flatten_value(
+            first_observed(
+                advisory_source_health.get("stale_reason"),
+                advisory_source_health.get("freshness_reason"),
+                not_obs,
+            )
+        )
         for row in alpha_factory_advisory_rows:
             row["selected_source"] = selected_source
             row["source_health_freshness_status"] = freshness_status
+            if selected_source != not_obs:
+                row["advisory_source"] = selected_source
+            row["advisory_fresh"] = "false" if selected_is_stale else "true"
+            row["stale_reason"] = selected_stale_reason if selected_is_stale else ""
+            action_row = dict(row)
+            action_row.pop("response_action", None)
+            row["response_action"] = advisory_response_action(action_row)
+            row["stale_response_downgraded"] = str(advisory_stale_response_downgraded(action_row)).lower()
         write_csv(
             "summaries/alpha_factory_advisory_reader.csv",
             alpha_factory_advisory_rows,

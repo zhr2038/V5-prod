@@ -3361,6 +3361,70 @@ def fixture_market_impulse_selection_shadow_root(root):
     return run_id
 
 
+def fixture_btc_probe_entry_quality_nested_router_root(root):
+    now = dt.datetime.now(dt.timezone.utc)
+    window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
+    entry_ts = window_end - 3 * 3600
+    exit_ts = window_end - 2 * 3600
+    run_id = dt.datetime.fromtimestamp(entry_ts, dt.timezone.utc).strftime("%Y%m%d_%H")
+
+    write_text(root / "configs/live_prod.yaml", "market_impulse_probe_selection_mode: priority\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(
+        run_dir / "decision_audit.json",
+        {
+            "now_ts": exit_ts + 15,
+            "window_end_ts": window_end,
+            "regime": "Trending",
+            "market_impulse_selection_mode": "priority",
+            "router_decisions": [
+                {
+                    "symbol": "BTC/USDT",
+                    "action": "create",
+                    "intent": "OPEN_LONG",
+                    "reason": "market_impulse_probe",
+                    "probe_type": "market_impulse_probe",
+                    "final_score": -1.988,
+                    "expected_edge_bps": -146.13,
+                    "required_edge_bps": 80,
+                    "btc_trend_score": 0.73,
+                    "trend_buy_count": 3,
+                    "alpha6_score": 0.396,
+                    "alpha6_side": "buy",
+                    "bypassed_negative_expectancy_reason": "negative_expectancy_fast_fail_open_block",
+                    "same_symbol_reentry_bypass": "probe_stop_loss_reentry_after_loss",
+                    "selected_symbol": "BTC/USDT",
+                    "selection_mode": "priority",
+                }
+            ],
+        },
+    )
+    write_text(
+        run_dir / "trades.csv",
+        "\n".join(
+            [
+                "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,reason,exit_reason",
+                f"{iso(entry_ts)},{run_id},BTC/USDT,OPEN_LONG,buy,0.001,100000,100,0.01,market_impulse_probe,",
+                f"{iso(exit_ts)},{run_id},BTC/USDT,CLOSE_LONG,sell,0.001,99500,99.5,0.01,,probe_stop_loss",
+                "",
+            ]
+        ),
+    )
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id})
+    return run_id
+
+
 def fixture_factor_contribution_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     current_window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -5512,6 +5576,39 @@ def main():
             assert row["selected_by_expected_net_shadow"] == "ETH/USDT", row
             assert "ETH/USDT" in row["candidates_json"], row
             assert window["market_impulse_selection_shadow_rows"] == 1, window
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-btc-probe-entry-quality-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_btc_probe_entry_quality_nested_router_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(
+                    csv.DictReader(
+                        tf.extractfile(
+                            extract_member(tf, "summaries/btc_probe_entry_quality_audit.csv")
+                        ).read().decode().splitlines()
+                    )
+                )
+            assert len(rows) == 1, rows
+            row = rows[0]
+            assert row["run_id"], row
+            assert row["final_score"] == "-1.988", row
+            assert row["expected_edge_bps"] == "-146.13", row
+            assert row["required_edge_bps"] == "80", row
+            assert row["btc_trend_score"] == "0.73", row
+            assert row["trend_buy_count"] == "3", row
+            assert row["alpha6_score"] == "0.396", row
+            assert row["alpha6_side"] == "buy", row
+            assert row["bypassed_negative_expectancy_reason"] == "negative_expectancy_fast_fail_open_block", row
+            assert row["same_symbol_reentry_bypass"] == "probe_stop_loss_reentry_after_loss", row
+            assert row["selected_symbol"] == "BTC/USDT", row
+            assert row["selection_mode"] == "priority", row
+            assert row["entry_quality_status"] == "invalid_negative_edge_reentry_after_loss", row
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

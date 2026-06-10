@@ -2772,6 +2772,7 @@ def test_alpha_factory_reader_uses_selected_api_advisory_rows(
     assert reader[0]["advisory_fresh"] == "True"
     assert reader[0]["response_action"] == "shadow_tracking"
     assert reader[0]["stale_response_downgraded"] == "False"
+    assert reader[0]["stale_reason"] == ""
     assert reader[0]["alpha_factory_score"] == "0.77"
     assert reader[0]["advisory_source"] != "stale_local"
 
@@ -2853,6 +2854,7 @@ def test_strategy_advisory_fresh_api_beats_newer_stale_local(
     assert reader[0]["source_health_freshness_status"] == "fresh"
     assert reader[0]["advisory_fresh"] == "True"
     assert reader[0]["response_action"] == "shadow_tracking"
+    assert reader[0]["stale_reason"] == ""
     assert reader[0]["alpha_factory_score"] == "0.88"
 
 
