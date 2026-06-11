@@ -8287,12 +8287,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             yield context
 
     def btc_probe_entry_value(row, *keys):
+        def observed(value):
+            if value in (None, "", not_obs):
+                return False
+            text = flatten_value(value).strip().lower()
+            return text not in {"null", "none", "nan"}
+
         for key in keys:
-            if isinstance(row, dict) and row.get(key) not in (None, "", not_obs):
+            if isinstance(row, dict) and observed(row.get(key)):
                 return row.get(key)
         for context in btc_probe_entry_contexts(row):
             for key in keys:
-                if context.get(key) not in (None, "", not_obs):
+                if observed(context.get(key)):
                     return context.get(key)
         return not_obs
 

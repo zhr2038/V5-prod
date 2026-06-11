@@ -3361,7 +3361,7 @@ def fixture_market_impulse_selection_shadow_root(root):
     return run_id
 
 
-def fixture_btc_probe_entry_quality_nested_router_root(root):
+def fixture_btc_probe_entry_quality_nested_router_root(root, *, alpha6_score=0.396, alpha6_side="buy"):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
     entry_ts = window_end - 3 * 3600
@@ -3399,8 +3399,8 @@ def fixture_btc_probe_entry_quality_nested_router_root(root):
                     "required_edge_bps": 80,
                     "btc_trend_score": 0.73,
                     "trend_buy_count": 3,
-                    "alpha6_score": 0.396,
-                    "alpha6_side": "buy",
+                    "alpha6_score": alpha6_score,
+                    "alpha6_side": alpha6_side,
                     "bypassed_negative_expectancy_reason": "negative_expectancy_fast_fail_open_block",
                     "same_symbol_reentry_bypass": "probe_stop_loss_reentry_after_loss",
                     "selected_symbol": "BTC/USDT",
@@ -5610,6 +5610,33 @@ def main():
             assert row["selected_symbol"] == "BTC/USDT", row
             assert row["selection_mode"] == "priority", row
             assert row["anti_chase_flag"] == "false", row
+            assert row["entry_quality_status"] == "invalid_negative_edge_reentry_after_loss", row
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-btc-probe-entry-quality-null-alpha6-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_btc_probe_entry_quality_nested_router_root(
+            root,
+            alpha6_score=None,
+            alpha6_side=None,
+        )
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(
+                    csv.DictReader(
+                        tf.extractfile(
+                            extract_member(tf, "summaries/btc_probe_entry_quality_audit.csv")
+                        ).read().decode().splitlines()
+                    )
+                )
+            assert len(rows) == 1, rows
+            row = rows[0]
+            assert row["alpha6_score"] == "not_observable", row
+            assert row["alpha6_side"] == "not_observable", row
             assert row["entry_quality_status"] == "invalid_negative_edge_reentry_after_loss", row
         finally:
             bundle.unlink(missing_ok=True)
