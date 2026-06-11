@@ -181,6 +181,18 @@ export interface MarketStateData {
   state?: string;
   method?: string;
   position_multiplier?: number;
+  price?: number | null;
+  atr_percent?: number | null;
+  volatility_pct?: number | null;
+  volatility?: number | null;
+  metrics?: {
+    price?: number | null;
+    ma20?: number | null;
+    ma60?: number | null;
+    atr_percent?: number | null;
+    volatility_pct?: number | null;
+    volatility?: number | null;
+  };
   votes?: {
     hmm?: MarketVote;
     funding?: MarketVote;

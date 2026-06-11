@@ -18,6 +18,7 @@ ML_STATUS_PANEL_JS_PATH = REPO_ROOT / "web" / "static" / "js" / "ml_status_panel
 ML_BAND_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "MLBand.tsx"
 MARKET_RADAR_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "MarketRadar.tsx"
 MAIN_TRADING_GRID_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "MainTradingGrid.tsx"
+STATUS_RIBBON_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "StatusRibbon.tsx"
 DASHBOARD_CSS_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "index.css"
 
 
@@ -48,6 +49,15 @@ def test_execution_path_panel_uses_strategy_and_route_counts_not_selected_only()
     assert "<span>信号生成</span><strong>{fmtNum(strategySignalCount, 0)}</strong>" in source
     assert "<span>风控检查</span><strong>{fmtNum(routeChecked, 0)}</strong>" in source
     assert "firstNumber(rejectedSummary.total, blockedRoutes.length)" in source
+
+
+def test_status_ribbon_formats_market_volatility_as_percent_points():
+    source = STATUS_RIBBON_TSX_PATH.read_text(encoding="utf-8")
+
+    assert "fmtPercentPoints(volatilityPctPoints)" in source
+    assert "marketRecord.volatility_pct" in source
+    assert "marketRecord.atr_percent" in source
+    assert "fmtUnsignedPct(volatilityRatio, 2)" in source
 
 
 def _utc_epoch_from_text(value: str, fmt: str) -> float:
@@ -7256,6 +7266,41 @@ def test_market_state_backfills_hmm_vote_from_regime_history(monkeypatch):
     assert hmm["confidence"] == 0.62
     assert hmm["weight"] == 0.35
     assert hmm["probs"]["TrendingUp"] == 0.62
+
+
+def test_market_state_exposes_volatility_pct_from_market_indicators(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "_load_market_state_snapshot", lambda _: {
+        "state": "TRENDING",
+        "position_multiplier": 1.2,
+        "method": "decision_audit",
+        "votes": {"hmm": {"state": "TRENDING", "confidence": 0.7}},
+        "alerts": [],
+        "monitor": {},
+    })
+    monkeypatch.setattr(module, "_load_latest_regime_history_snapshot", lambda _: {"votes": {}})
+    monkeypatch.setattr(module, "_load_market_vote_history", lambda *args, **kwargs: [])
+    monkeypatch.setattr(module, "load_config", lambda: {"regime": {"hmm_weight": 0.35, "funding_weight": 0.4, "rss_weight": 0.25}})
+    monkeypatch.setattr(module, "_signal_health", lambda *args, **kwargs: {"status": "fresh", "is_fresh": True, "error": None})
+    monkeypatch.setattr(module, "_build_live_funding_vote", lambda *args, **kwargs: {})
+    monkeypatch.setattr(module, "_build_live_rss_vote", lambda *args, **kwargs: {})
+    monkeypatch.setattr(module, "calculate_market_indicators", lambda: {
+        "price": 604.6,
+        "ma20": 603.31,
+        "ma60": 600.3,
+        "atr_percent": 0.82,
+    })
+
+    response = client.get("/api/market_state")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["volatility_pct"] == 0.82
+    assert payload["atr_percent"] == 0.82
+    assert payload["metrics"]["volatility_pct"] == 0.82
+    assert payload["metrics"]["atr_percent"] == 0.82
 
 
 def test_market_state_returns_vote_history_and_live_rss_summary(monkeypatch):

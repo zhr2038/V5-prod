@@ -56,6 +56,11 @@ function fmtLatencyMs(value: number | null) {
   return `${value >= 100 ? value.toFixed(0) : value.toFixed(1)}ms`;
 }
 
+function fmtPercentPoints(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return '--';
+  return `${Math.abs(value).toFixed(2)}%`;
+}
+
 function compactEndpoint(value: string) {
   const endpoint = value.trim();
   if (!endpoint || endpoint === '--') return '--';
@@ -142,7 +147,16 @@ export function StatusRibbon({
     riskConfig.pos_mult_trending,
     riskConfig.pos_mult_sideways
   );
-  const volatilityPct = firstNumber(marketRecord.volatility_pct, marketMetrics.volatility_pct, marketRecord.volatility);
+  const volatilityPctPoints = firstNumber(
+    marketRecord.volatility_pct,
+    marketRecord.atr_percent,
+    marketMetrics.volatility_pct,
+    marketMetrics.atr_percent
+  );
+  const volatilityRatio = firstNumber(marketRecord.volatility, marketMetrics.volatility);
+  const volatilityText = volatilityPctPoints !== null
+    ? fmtPercentPoints(volatilityPctPoints)
+    : fmtUnsignedPct(volatilityRatio, 2);
   const permissionData = nestedRecord(quantLabPermission?.data);
   const permission = firstText(
     quantLabPermission?.permission,
@@ -204,7 +218,7 @@ export function StatusRibbon({
         icon={TrendingUp}
         label="市场状态"
         value={stateLabels[state] || state}
-        sub={`波动率 ${fmtUnsignedPct(volatilityPct, 2)}`}
+        sub={`波动率 ${volatilityText}`}
         tone={state === 'RISK_OFF' ? 'danger' : 'good'}
       />
       <RibbonCard

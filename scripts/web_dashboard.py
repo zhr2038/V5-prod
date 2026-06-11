@@ -4866,11 +4866,13 @@ def calculate_market_indicators():
         ma60 = latest['ma60']
         atr = latest['atr']
         atr_percent = (atr / price * 100) if price > 0 else 1.0
+        volatility_pct = round(atr_percent, 2) if not pd.isna(atr_percent) else 1.0
         
         return {
             'ma20': round(ma20, 2) if not pd.isna(ma20) else 0,
             'ma60': round(ma60, 2) if not pd.isna(ma60) else 0,
-            'atr_percent': round(atr_percent, 2) if not pd.isna(atr_percent) else 1.0,
+            'atr_percent': volatility_pct,
+            'volatility_pct': volatility_pct,
             'price': round(price, 2)
         }
     except Exception as e:
@@ -5410,6 +5412,10 @@ def api_market_state():
             except Exception:
                 latest_history_ts_ms = None
         snapshot_ts_epoch = _coerce_timestamp_epoch(snapshot.get('ts'))
+        volatility_pct = _maybe_float(indicators.get('volatility_pct'))
+        if volatility_pct is None:
+            volatility_pct = _maybe_float(indicators.get('atr_percent'))
+
         return jsonify({
             'state': regime.upper().replace('-', '_'),
             'position_multiplier': multiplier,
@@ -5423,7 +5429,16 @@ def api_market_state():
             'alerts': merged_alerts,
             'monitor': monitor,
             'final_score': float(snapshot.get('final_score', 0.0) or 0.0),
-            'price': indicators['price'],
+            'price': indicators.get('price', 0),
+            'volatility_pct': volatility_pct,
+            'atr_percent': volatility_pct,
+            'metrics': {
+                'price': indicators.get('price', 0),
+                'ma20': indicators.get('ma20', 0),
+                'ma60': indicators.get('ma60', 0),
+                'atr_percent': volatility_pct,
+                'volatility_pct': volatility_pct,
+            },
             'signal_health': signal_health,
             'history_24h': history_24h,
             'last_update': (
