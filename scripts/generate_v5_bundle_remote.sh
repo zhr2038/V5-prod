@@ -8223,8 +8223,25 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             return "invalid_negative_expected_edge"
         if final_score is not None and final_score < 0:
             return "invalid_negative_final_score"
-        alpha_side = flatten_value(first_observed(row.get("alpha6_side"), row.get("alpha6_signal_side"), "")).lower()
-        micro_ok = truthy_text(first_observed(row.get("fast_microstructure_confirmed"), row.get("microstructure_confirmed"), ""))
+        alpha_side = flatten_value(first_observed(
+            btc_probe_entry_value(
+                row,
+                "alpha6_side",
+                "alpha6_signal_side",
+                "alpha6_direction",
+                "market_impulse_probe_alpha6_side",
+            ),
+            "",
+        )).lower()
+        micro_ok = truthy_text(first_observed(
+            btc_probe_entry_value(
+                row,
+                "fast_microstructure_confirmed",
+                "microstructure_confirmed",
+                "market_impulse_probe_microstructure_confirmed",
+            ),
+            "",
+        ))
         if alpha_side and alpha_side != "buy" and not micro_ok:
             return "missing_alpha6_or_microstructure_confirm"
         return "observed"
@@ -8242,6 +8259,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                     "router_info",
                     "market_impulse_probe_context",
                     "market_impulse_shadow_selection",
+                    "decision_audit_contexts",
                     "raw_json",
                     "raw_meta",
                     "meta",
@@ -8281,8 +8299,46 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     def build_btc_probe_entry_quality_rows(rows, roundtrip_rows):
         out = []
         seen = set()
+        context_by_run_symbol = defaultdict(list)
+        for context_row in rows or []:
+            if not report_is_btc_market_impulse_probe_candidate(context_row):
+                continue
+            context_symbol = normalize_symbol_text(first_observed(context_row.get("symbol"), "BTC/USDT"))
+            if context_symbol != "BTC/USDT":
+                continue
+            context_run_id = flatten_value(first_observed(context_row.get("run_id"), not_obs))
+            if context_run_id == not_obs:
+                continue
+            context_by_run_symbol[(context_run_id, context_symbol)].append(context_row)
+
+        def enrich_with_decision_context(raw_row):
+            row = dict(raw_row)
+            symbol = normalize_symbol_text(first_observed(row.get("symbol"), "BTC/USDT"))
+            run_ids = [
+                flatten_value(first_observed(row.get("run_id"), not_obs)),
+                entry_run_id_from_roundtrip_source(row.get("source_file")),
+            ]
+            contexts = []
+            for run_id in run_ids:
+                if run_id == not_obs:
+                    continue
+                contexts.extend(context_by_run_symbol.get((run_id, symbol), []))
+            if contexts:
+                existing = row.get("decision_audit_contexts")
+                merged_contexts = []
+                if isinstance(existing, list):
+                    merged_contexts.extend(existing)
+                elif existing not in (None, "", not_obs):
+                    merged_contexts.append(existing)
+                merged_contexts.extend(contexts)
+                row["decision_audit_contexts"] = merged_contexts
+            return row
+
         input_rows = list(roundtrip_rows or []) + list(rows or [])
-        for row in input_rows:
+        for raw_row in input_rows:
+            if truthy_text(raw_row.get("_probe_entry_quality_context_only")):
+                continue
+            row = enrich_with_decision_context(raw_row)
             if not report_is_btc_market_impulse_probe_candidate(row):
                 continue
             symbol = "BTC/USDT"
@@ -8294,7 +8350,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 not_obs,
             )
             expected_edge_text = first_observed(
-                btc_probe_entry_value(row, "expected_edge_bps", "expected_net_bps", "edge_bps"),
+                btc_probe_entry_value(
+                    row,
+                    "expected_edge_bps",
+                    "expected_net_bps",
+                    "edge_bps",
+                    "expected_edge_net_bps",
+                    "market_impulse_probe_expected_edge_bps",
+                ),
                 not_obs,
             )
             final_score = as_float(final_score_text)
@@ -8319,7 +8382,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "final_score": final_score_text,
                 "expected_edge_bps": expected_edge_text,
                 "required_edge_bps": first_observed(
-                    btc_probe_entry_value(row, "required_edge_bps", "required_net_bps"),
+                    btc_probe_entry_value(
+                        row,
+                        "required_edge_bps",
+                        "required_net_bps",
+                        "min_required_edge_bps",
+                        "market_impulse_probe_required_edge_bps",
+                        "market_impulse_probe_min_required_edge_bps",
+                    ),
                     not_obs,
                 ),
                 "btc_trend_score": first_observed(
@@ -8330,8 +8400,27 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                     btc_probe_entry_value(row, "trend_buy_count", "market_impulse_probe_trend_buy_count"),
                     not_obs,
                 ),
-                "alpha6_score": first_observed(btc_probe_entry_value(row, "alpha6_score"), not_obs),
-                "alpha6_side": first_observed(btc_probe_entry_value(row, "alpha6_side"), not_obs),
+                "alpha6_score": first_observed(
+                    btc_probe_entry_value(
+                        row,
+                        "alpha6_score",
+                        "alpha6_buy_score",
+                        "alpha6_prob_buy",
+                        "alpha6_signal_score",
+                        "market_impulse_probe_alpha6_score",
+                    ),
+                    not_obs,
+                ),
+                "alpha6_side": first_observed(
+                    btc_probe_entry_value(
+                        row,
+                        "alpha6_side",
+                        "alpha6_signal_side",
+                        "alpha6_direction",
+                        "market_impulse_probe_alpha6_side",
+                    ),
+                    not_obs,
+                ),
                 "bypassed_negative_expectancy_reason": bypass_reason,
                 "selected_symbol": first_observed(
                     btc_probe_entry_value(
@@ -8353,7 +8442,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                     not_obs,
                 ),
                 "same_symbol_reentry_bypass": first_observed(
-                    btc_probe_entry_value(row, "same_symbol_reentry_breakout_bypass", "same_symbol_reentry_bypass"),
+                    btc_probe_entry_value(
+                        row,
+                        "same_symbol_reentry_breakout_bypass",
+                        "same_symbol_reentry_bypass",
+                        "market_impulse_probe_same_symbol_reentry_bypass",
+                    ),
                     not_obs,
                 ),
                 "price_distance_from_recent_low_bps": first_observed(
@@ -8366,11 +8460,93 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                     row.get("entry_vs_pre_24h_high_bps"),
                     not_obs,
                 ),
-                "anti_chase_flag": first_observed(row.get("anti_chase_flag"), row.get("anti_chase_blocked"), not_obs),
+                "anti_chase_flag": bool_observed(
+                    btc_probe_entry_value(
+                        row,
+                        "anti_chase_flag",
+                        "anti_chase_blocked",
+                        "anti_chase_add_size_blocked",
+                        "market_impulse_probe_anti_chase_flag",
+                    )
+                ),
                 "entry_quality_status": btc_probe_entry_quality_status(row, expected_edge, final_score),
             })
         out.sort(key=lambda item: (flatten_value(item.get("entry_ts")), flatten_value(item.get("run_id"))))
         return out
+
+    def btc_probe_entry_quality_decision_context_rows():
+        rows = []
+        for run_id, audit in audit_by_run.items():
+            audit_ts = run_ts(run_id, audit)
+            base = {
+                "_probe_entry_quality_context_only": "true",
+                "run_id": run_id,
+                "ts_utc": audit_ts,
+                "symbol": "BTC/USDT",
+                "selection_mode": first_observed(
+                    audit.get("market_impulse_selection_mode"),
+                    audit.get("selection_mode"),
+                    not_obs,
+                ),
+            }
+            for item in audit.get("router_decisions") or []:
+                if not isinstance(item, dict):
+                    continue
+                if normalize_symbol_text(first_observed(item.get("symbol"), "")) != "BTC/USDT":
+                    continue
+                if "market_impulse_probe" not in safe_json(item).lower():
+                    continue
+                rows.append({
+                    **base,
+                    **item,
+                    "raw_json": safe_json(item),
+                })
+            market_shadow = audit.get("market_impulse_shadow_selection")
+            if not isinstance(market_shadow, dict):
+                continue
+            candidate_rows = []
+            for candidate in market_shadow.get("candidates") or []:
+                if not isinstance(candidate, dict):
+                    continue
+                if normalize_symbol_text(first_observed(candidate.get("symbol"), "")) == "BTC/USDT":
+                    candidate_rows.append(candidate)
+            selected_values = [
+                market_shadow.get(name)
+                for name in (
+                    "selected_live",
+                    "selected_by_priority",
+                    "selected_by_trend_score",
+                    "selected_by_alpha6_confirmed",
+                    "selected_by_expected_net_shadow",
+                    "selected_symbol",
+                )
+            ]
+            btc_selected = any(normalize_symbol_text(value) == "BTC/USDT" for value in selected_values)
+            if not btc_selected and not candidate_rows:
+                continue
+            shadow_common = {
+                **base,
+                "reason": "market_impulse_probe",
+                "probe_type": "market_impulse_probe",
+                "market_impulse_shadow_selection": market_shadow,
+                "trend_buy_count": first_observed(market_shadow.get("trend_buy_count"), not_obs),
+                "btc_trend_score": first_observed(market_shadow.get("btc_trend_score"), not_obs),
+                "selected_symbol": first_observed(
+                    market_shadow.get("selected_live"),
+                    market_shadow.get("selected_by_priority"),
+                    market_shadow.get("selected_symbol"),
+                    not_obs,
+                ),
+            }
+            if btc_selected:
+                rows.append(shadow_common)
+            for candidate in candidate_rows:
+                rows.append({
+                    **shadow_common,
+                    **candidate,
+                    "raw_json": safe_json(candidate),
+                })
+        return rows
 
     btc_probe_exit_regret_rows = build_btc_probe_exit_regret_rows(closed_roundtrip_rows)
     write_csv(
@@ -8378,7 +8554,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         btc_probe_exit_regret_rows,
         BTC_PROBE_EXIT_REGRET_FIELDS,
     )
-    btc_probe_entry_quality_rows = build_btc_probe_entry_quality_rows(candidate_label_input_rows, closed_roundtrip_rows)
+    btc_probe_entry_quality_context_rows = btc_probe_entry_quality_decision_context_rows()
+    btc_probe_entry_quality_rows = build_btc_probe_entry_quality_rows(
+        candidate_label_input_rows + btc_probe_entry_quality_context_rows,
+        closed_roundtrip_rows,
+    )
     write_csv(
         "summaries/btc_probe_entry_quality_audit.csv",
         btc_probe_entry_quality_rows,

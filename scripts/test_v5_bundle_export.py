@@ -3405,6 +3405,7 @@ def fixture_btc_probe_entry_quality_nested_router_root(root):
                     "same_symbol_reentry_bypass": "probe_stop_loss_reentry_after_loss",
                     "selected_symbol": "BTC/USDT",
                     "selection_mode": "priority",
+                    "anti_chase_flag": False,
                 }
             ],
         },
@@ -5608,6 +5609,7 @@ def main():
             assert row["same_symbol_reentry_bypass"] == "probe_stop_loss_reentry_after_loss", row
             assert row["selected_symbol"] == "BTC/USDT", row
             assert row["selection_mode"] == "priority", row
+            assert row["anti_chase_flag"] == "false", row
             assert row["entry_quality_status"] == "invalid_negative_edge_reentry_after_loss", row
         finally:
             bundle.unlink(missing_ok=True)
