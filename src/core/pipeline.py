@@ -8369,6 +8369,7 @@ class V5Pipeline:
                                 "trend_score": trend_score,
                                 "final_score": meta.get("final_score"),
                                 "alpha6_score": meta.get("alpha6_score"),
+                                "alpha6_side": meta.get("alpha6_side"),
                                 "expected_edge_bps": meta.get("expected_edge_bps"),
                                 "expected_edge_source": meta.get("expected_edge_source"),
                                 "alpha6_expected_edge_bps_proxy": meta.get("alpha6_expected_edge_bps_proxy"),

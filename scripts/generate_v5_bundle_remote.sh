@@ -8229,6 +8229,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "alpha6_side",
                 "alpha6_signal_side",
                 "alpha6_direction",
+                "current_alpha6_side",
                 "market_impulse_probe_alpha6_side",
             ),
             "",
@@ -8300,6 +8301,42 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             for key in keys:
                 if observed(context.get(key)):
                     return context.get(key)
+        return not_obs
+
+    def btc_probe_same_symbol_reentry_bypass(row):
+        value = btc_probe_entry_value(
+            row,
+            "same_symbol_reentry_breakout_bypass",
+            "same_symbol_reentry_bypass",
+            "market_impulse_probe_same_symbol_reentry_bypass",
+            "market_impulse_probe_reentry_after_loss_reason",
+        )
+        if value != not_obs:
+            return value
+        for context in btc_probe_entry_contexts(row):
+            reason = flatten_value(first_observed(context.get("reason"), context.get("blocked_reason"), ""))
+            if reason == "same_symbol_reentry_breakout_bypass":
+                return reason
+        return not_obs
+
+    def btc_probe_anti_chase_flag(row):
+        value = btc_probe_entry_value(
+            row,
+            "anti_chase_flag",
+            "anti_chase_blocked",
+            "anti_chase_add_size_blocked",
+            "anti_chase_premium_blocked",
+            "anti_chase_reason",
+            "anti_chase_block_reason",
+            "market_impulse_probe_anti_chase_flag",
+            "market_impulse_probe_anti_chase_blocked",
+        )
+        if value != not_obs:
+            return bool_observed(value)
+        for context in btc_probe_entry_contexts(row):
+            reason = flatten_value(first_observed(context.get("reason"), context.get("blocked_reason"), ""))
+            if reason in {"anti_chase_premium", "anti_chase_add_size"}:
+                return "true"
         return not_obs
 
     def build_btc_probe_entry_quality_rows(rows, roundtrip_rows):
@@ -8413,6 +8450,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                         "alpha6_buy_score",
                         "alpha6_prob_buy",
                         "alpha6_signal_score",
+                        "actual_alpha6_score",
+                        "current_alpha6_score",
                         "market_impulse_probe_alpha6_score",
                     ),
                     not_obs,
@@ -8423,6 +8462,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                         "alpha6_side",
                         "alpha6_signal_side",
                         "alpha6_direction",
+                        "current_alpha6_side",
                         "market_impulse_probe_alpha6_side",
                     ),
                     not_obs,
@@ -8448,12 +8488,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                     not_obs,
                 ),
                 "same_symbol_reentry_bypass": first_observed(
-                    btc_probe_entry_value(
-                        row,
-                        "same_symbol_reentry_breakout_bypass",
-                        "same_symbol_reentry_bypass",
-                        "market_impulse_probe_same_symbol_reentry_bypass",
-                    ),
+                    btc_probe_same_symbol_reentry_bypass(row),
                     not_obs,
                 ),
                 "price_distance_from_recent_low_bps": first_observed(
@@ -8467,13 +8502,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                     not_obs,
                 ),
                 "anti_chase_flag": bool_observed(
-                    btc_probe_entry_value(
-                        row,
-                        "anti_chase_flag",
-                        "anti_chase_blocked",
-                        "anti_chase_add_size_blocked",
-                        "market_impulse_probe_anti_chase_flag",
-                    )
+                    btc_probe_anti_chase_flag(row)
                 ),
                 "entry_quality_status": btc_probe_entry_quality_status(row, expected_edge, final_score),
             })
