@@ -281,6 +281,7 @@ def run_harness(out_dir: str | Path = DEFAULT_OUT_DIR) -> dict[str, Any]:
         timeout_seconds=0.2,
         max_retries=0,
         cache_ttl_seconds=0,
+        cost_cache_ttl_seconds=0,
         http_client=mock_http,
         request_log_path=cfg.quant_lab.request_log_path,
         run_id=RUN_ID,

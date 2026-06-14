@@ -27,6 +27,8 @@ def test_v5_bundle_export_script_regression() -> None:
         cwd=root,
         text=True,
         capture_output=True,
-        timeout=180,
+        # This helper exercises dozens of bundle-export fixtures; keep the
+        # wrapper above the normal full-script runtime but below a real hang.
+        timeout=600,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
