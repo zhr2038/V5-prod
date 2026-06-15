@@ -1206,7 +1206,28 @@ def _read_jsonl(path: Path) -> list[Dict[str, Any]]:
 
 
 def _filter_window(rows: list[Dict[str, Any]], since_ts: str) -> list[Dict[str, Any]]:
-    return [row for row in rows if not row.get("ts") or str(row.get("ts")) >= since_ts]
+    since = _parse_utc_dt(since_ts)
+    if since is None:
+        return list(rows)
+    kept: list[Dict[str, Any]] = []
+    for row in rows:
+        row_ts = _parse_utc_dt(
+            row.get("ts")
+            or row.get("ts_utc")
+            or row.get("timestamp")
+            or row.get("created_at")
+        )
+        if row_ts is None or row_ts >= since:
+            kept.append(row)
+    return kept
+
+
+def _jsonl_rows_text(rows: Iterable[Mapping[str, Any]]) -> str:
+    rendered = [
+        json.dumps(_sanitize_bundle_obj(dict(row)), ensure_ascii=False, sort_keys=True)
+        for row in rows
+    ]
+    return "\n".join(rendered) + ("\n" if rendered else "")
 
 
 def _parse_utc_dt(value: Any) -> Optional[datetime]:
@@ -2396,8 +2417,8 @@ def export_v5_bundle(
     tmp_path = out / f"{bundle_name}.tmp"
     staging = Path(tempfile.mkdtemp(prefix="v5_bundle_", dir=str(out)))
     try:
-        _write_text(staging / "raw/quant_lab/quant_lab_usage.jsonl", _redact_text(usage_path.read_text(encoding="utf-8") if usage_path.exists() else ""))
-        _write_text(staging / "raw/quant_lab/quant_lab_requests.jsonl", _redact_text(requests_path.read_text(encoding="utf-8") if requests_path.exists() else ""))
+        _write_text(staging / "raw/quant_lab/quant_lab_usage.jsonl", _redact_text(_jsonl_rows_text(usage_rows)))
+        _write_text(staging / "raw/quant_lab/quant_lab_requests.jsonl", _redact_text(_jsonl_rows_text(request_rows)))
         _write_csv(staging / "summaries/quant_lab_compliance.csv", COMPLIANCE_FIELDS, compliance_rows)
         _write_csv(staging / "summaries/quant_lab_permission_audit.csv", PERMISSION_AUDIT_FIELDS, permission_rows)
         _write_csv(staging / "summaries/quant_lab_mode_audit.csv", MODE_AUDIT_FIELDS, mode_rows)

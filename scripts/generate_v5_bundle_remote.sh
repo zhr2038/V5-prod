@@ -778,6 +778,52 @@ def filter_jsonl_recent_24h(text):
     return "\n".join(kept) + ("\n" if kept else "")
 
 
+def parse_jsonl_row_ts_utc(row):
+    ts_text = ""
+    for key in ("ts_utc", "timestamp", "ts", "created_at", "entry_ts"):
+        value = row.get(key)
+        if value not in (None, ""):
+            ts_text = str(value)
+            break
+    if not ts_text:
+        return None
+    try:
+        text_value = ts_text.strip()
+        if re.fullmatch(r"\d+(?:\.\d+)?", text_value):
+            raw_ts = float(text_value)
+            if raw_ts > 10_000_000_000:
+                raw_ts /= 1000.0
+            return dt.datetime.fromtimestamp(raw_ts, tz=dt.timezone.utc)
+        if text_value.endswith("Z"):
+            text_value = text_value[:-1] + "+00:00"
+        parsed = dt.datetime.fromisoformat(text_value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        return parsed.astimezone(dt.timezone.utc)
+    except Exception:
+        return None
+
+
+def filter_jsonl_since(text, since_dt):
+    kept = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            row = json.loads(stripped)
+        except Exception:
+            kept.append(sanitize_text(line))
+            continue
+        if not isinstance(row, dict):
+            kept.append(sanitize_text(line))
+            continue
+        ts_dt = parse_jsonl_row_ts_utc(row)
+        if ts_dt is None or ts_dt >= since_dt:
+            kept.append(json.dumps(sanitize_obj(row), ensure_ascii=False, sort_keys=True))
+    return "\n".join(kept) + ("\n" if kept else "")
+
+
 def write_text(dest_rel, text):
     dest = OUT / dest_rel
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -814,6 +860,23 @@ def copy_sanitized(src_rel, dest_rel, required=False, limit=MAX_COPY_BYTES):
             text = sanitize_text(text)
         write_text(dest_rel, text)
         copied_sources[dest_rel] = str(src)
+        return True
+    except Exception as exc:
+        collection_errors.append({"source": str(src), "dest": dest_rel, "error": repr(exc)})
+        return False
+
+
+def copy_jsonl_since(src_rel, dest_rel, since_dt, required=False, limit=MAX_COPY_BYTES):
+    src = ROOT / src_rel
+    if not src.is_file():
+        record_missing(src_rel)
+        if required:
+            notes.append(f"required source missing: {src_rel}")
+        return False
+    try:
+        text = read_text_limited(src, limit)
+        write_text(dest_rel, filter_jsonl_since(text, since_dt))
+        copied_sources[dest_rel] = f"{src} (windowed >= {since_dt.isoformat()})"
         return True
     except Exception as exc:
         collection_errors.append({"source": str(src), "dest": dest_rel, "error": repr(exc)})
@@ -1206,7 +1269,10 @@ def copy_recent_runs():
 
 def copy_current_reports():
     for src_rel, dest_rel, required in CURRENT_REPORT_FILES:
-        copy_sanitized(src_rel, dest_rel, required=required)
+        if src_rel in ("reports/quant_lab_usage.jsonl", "reports/quant_lab_requests.jsonl"):
+            copy_jsonl_since(src_rel, dest_rel, WINDOW_72H_START, required=required)
+        else:
+            copy_sanitized(src_rel, dest_rel, required=required)
     for src_rel, dest_rel in (
         ("reports/strategy_opportunity_advisory.csv", "raw/reports/strategy_opportunity_advisory.csv"),
         ("reports/quant_lab/strategy_opportunity_advisory.csv", "raw/reports/quant_lab/strategy_opportunity_advisory.csv"),

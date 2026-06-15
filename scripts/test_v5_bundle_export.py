@@ -855,6 +855,13 @@ def fixture_quant_lab_summary_root(root):
 
     usage_rows = [
         {
+            "ts": iso(window_end - 10 * 24 * 3600),
+            "run_id": "stale_quant_lab_usage",
+            "event_type": "fallback",
+            "fallback_used": True,
+            "fallback_reason": "stale_row_should_not_ship",
+        },
+        {
             "ts": iso(window_end - 1),
             "run_id": run_id,
             "event_type": "health_check",
@@ -945,6 +952,14 @@ def fixture_quant_lab_summary_root(root):
     write_text(root / "reports/quant_lab_usage.jsonl", "\n".join(json.dumps(row) for row in usage_rows) + "\n")
 
     request_rows = [
+        {
+            "ts": iso(window_end - 10 * 24 * 3600),
+            "run_id": "stale_quant_lab_request",
+            "method": "GET",
+            "endpoint_path": "/v1/health",
+            "success": False,
+            "status_code": 503,
+        },
         {
             "ts": iso(window_end + 2),
             "run_id": run_id,
@@ -4320,8 +4335,12 @@ def main():
                 )
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 readiness = json.loads(tf.extractfile(extract_member(tf, "summaries/enforce_readiness_snapshot.json")).read().decode())
+                raw_usage = tf.extractfile(extract_member(tf, "raw/reports/quant_lab_usage.jsonl")).read().decode()
+                raw_requests = tf.extractfile(extract_member(tf, "raw/reports/quant_lab_requests.jsonl")).read().decode()
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
 
+            assert "stale_quant_lab_usage" not in raw_usage, raw_usage
+            assert "stale_quant_lab_request" not in raw_requests, raw_requests
             assert "/v1/health" not in fallback_text, fallback_text
             assert "/v1/risk/live-permission" not in fallback_text, fallback_text
             assert "request_not_ok" not in fallback_text, fallback_text

@@ -5,6 +5,7 @@ import csv
 import json
 import subprocess
 import tarfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.reporting.v5_bundle_exporter import (
@@ -48,6 +49,50 @@ def test_bundle_export_fill_dedupe_uses_normalized_symbol() -> None:
 
     assert len(deduped) == 1
     assert deduped[0]["symbol"] == "BNB/USDT"
+
+
+def test_bundle_export_windows_raw_quant_lab_jsonl(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    reports = root / "reports"
+    out = tmp_path / "bundles"
+    reports.mkdir(parents=True)
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    recent = (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    old = (now - timedelta(days=10)).isoformat().replace("+00:00", "Z")
+    (reports / "quant_lab_usage.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"ts_utc": old, "run_id": "old_usage", "event_type": "health_check"}),
+                json.dumps({"ts_utc": recent, "run_id": "recent_usage", "event_type": "health_check"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (reports / "quant_lab_requests.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"timestamp": old, "run_id": "old_request", "endpoint_path": "/v1/health"}),
+                json.dumps({"timestamp": recent, "run_id": "recent_request", "endpoint_path": "/v1/health"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    bundle = export_v5_bundle(reports_dir=reports, out_dir=out, window_hours=72)
+
+    with tarfile.open(bundle, "r:gz") as tf:
+        usage_rows = [
+            json.loads(line)
+            for line in tf.extractfile("raw/quant_lab/quant_lab_usage.jsonl").read().decode("utf-8").splitlines()
+        ]
+        request_rows = [
+            json.loads(line)
+            for line in tf.extractfile("raw/quant_lab/quant_lab_requests.jsonl").read().decode("utf-8").splitlines()
+        ]
+    assert [row["run_id"] for row in usage_rows] == ["recent_usage"]
+    assert [row["run_id"] for row in request_rows] == ["recent_request"]
 
 
 def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
