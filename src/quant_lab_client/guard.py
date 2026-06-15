@@ -521,16 +521,30 @@ class QuantLabGuard:
         would_be_blocked_by_no_live_modes = bool(would_have_opened_live and no_live_modes)
         would_be_blocked_by_cost_trust = bool(would_have_opened_live and untrusted_live)
         would_be_blocked_by_whitelist = bool(would_have_opened_live and not whitelist_match and (untrusted_live or no_live_modes))
-        guard_condition = bool(
-            would_be_blocked_by_no_live_modes
-            or would_be_blocked_by_cost_trust
-            or would_be_blocked_by_whitelist
+        if mode == "block_non_whitelist_only":
+            guard_condition = bool(would_be_blocked_by_whitelist)
+        elif mode == "block_all_untrusted_open":
+            guard_condition = bool(would_be_blocked_by_cost_trust or would_be_blocked_by_no_live_modes)
+        else:
+            guard_condition = bool(
+                would_be_blocked_by_no_live_modes
+                or would_be_blocked_by_cost_trust
+                or would_be_blocked_by_whitelist
+            )
+        guard_enforced = bool(
+            enabled
+            and self.apply_cost_gate
+            and mode in {"block_non_whitelist_only", "block_all_untrusted_open"}
         )
-        guard_enforced = False
-        blocked = False
+        blocked = bool(guard_enforced and guard_condition)
         before = "BLOCKED_COST_GATE" if cost_filtered_before_guard else "ALLOW"
-        after = before
-        cost_trust_exception = bool(would_have_opened_live and whitelist_match and (untrusted_live or no_live_modes))
+        after = "BLOCKED_COST_TRUST_GUARD" if blocked else before
+        cost_trust_exception = bool(
+            mode == "block_non_whitelist_only"
+            and would_have_opened_live
+            and whitelist_match
+            and (untrusted_live or no_live_modes)
+        )
         return {
             "event_type": "live_guard_impact",
             "ts_utc": utc_now_iso(),
@@ -543,9 +557,9 @@ class QuantLabGuard:
             "would_be_blocked_by_quant_lab_no_live_modes": would_be_blocked_by_no_live_modes,
             "would_be_blocked_by_cost_trust_guard": would_be_blocked_by_cost_trust,
             "would_be_blocked_by_shadow_live_whitelist": would_be_blocked_by_whitelist,
-            "blocked_by_quant_lab_no_live_modes": False,
+            "blocked_by_quant_lab_no_live_modes": bool(blocked and would_be_blocked_by_no_live_modes),
             "blocked_by_cost_trust_guard": blocked,
-            "blocked_by_shadow_live_whitelist": False,
+            "blocked_by_shadow_live_whitelist": bool(blocked and would_be_blocked_by_whitelist),
             "whitelist_strategy_match": whitelist_match,
             "cost_trust_exception": cost_trust_exception,
             "paper_or_shadow_bypassed": bool(paper_or_shadow),
@@ -555,7 +569,7 @@ class QuantLabGuard:
             "cost_trust_block_reasons": ";".join(dict.fromkeys(reasons)),
             "raw_permission_decision": raw_permission,
             "allowed_live_modes": json.dumps(allowed_live_modes) if allowed_live_modes is not None else "",
-            "final_decision_actual": before,
+            "final_decision_actual": after,
             "final_decision_before_guard": before,
             "final_decision_after_guard": after,
             "guard_mode": mode,
@@ -1350,9 +1364,9 @@ class QuantLabGuard:
                 cost_filtered_before_guard=cost_filtered_before_guard,
                 cfg=cfg,
             )
-            live_guard_blocked = False
-            actually_filtered = bool(cost_filtered_before_guard)
-            filter_reason = gate.reason
+            live_guard_blocked = bool(live_guard_row.get("blocked_by_cost_trust_guard"))
+            actually_filtered = bool(cost_filtered_before_guard or live_guard_blocked)
+            filter_reason = "cost_trust_guard_blocked" if live_guard_blocked and not cost_filtered_before_guard else gate.reason
             degraded_cost_model = _degraded_cost_model(estimate)
             fallback_used_for_cost_model = bool(fallback_used or degraded_cost_model)
             required_edge_bps = estimate.required_edge_bps if estimate.required_edge_bps is not None else gate.min_required_edge_bps

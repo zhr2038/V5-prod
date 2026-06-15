@@ -350,10 +350,46 @@ def test_live_cost_trust_guard_block_mode_still_observe_only(tmp_path: Path) -> 
     assert "strategy_not_in_canary_whitelist" in impact["cost_trust_block_reasons"]
 
 
+def test_live_cost_trust_guard_blocks_non_whitelist_in_cost_mode(tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "cost_only"
+    cfg.quant_lab.live_cost_trust_guard.enabled = True
+    cfg.quant_lab.live_cost_trust_guard.mode = "block_non_whitelist_only"
+    guard = _guard(
+        tmp_path,
+        cfg,
+        _Client(permission="ALLOW", cost_trusted_for_live=False, allowed_live_modes=[]),
+    )
+    guard.check_startup_permission(cfg, "run-1")
+
+    kept, rows = guard.enrich_orders_with_cost(
+        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 80, "strategy_candidate": "f3_dominant_entry"})],
+        "normal",
+        cfg,
+    )
+
+    assert kept == []
+    assert rows[0]["filter_reason"] == "cost_trust_guard_blocked"
+    assert rows[0]["actually_filtered"] is True
+    assert rows[0]["actually_filtered_by_cost"] is False
+    assert rows[0]["actually_filtered_by_live_guard"] is True
+    assert rows[0]["blocked_by_cost_trust_guard"] is True
+    impact = guard.live_guard_rows[-1]
+    assert impact["final_decision_before_guard"] == "ALLOW"
+    assert impact["final_decision_after_guard"] == "BLOCKED_COST_TRUST_GUARD"
+    assert impact["final_decision_actual"] == "BLOCKED_COST_TRUST_GUARD"
+    assert impact["guard_enforced"] is True
+    assert impact["blocked_by_cost_trust_guard"] is True
+    assert impact["blocked_by_quant_lab_no_live_modes"] is True
+    assert impact["blocked_by_shadow_live_whitelist"] is True
+    assert guard.summary_payload()["live_guard_actual_block_count"] == 1
+
+
 def test_live_cost_trust_guard_allows_btc_strict_probe_exception(tmp_path: Path) -> None:
     cfg = AppConfig()
     cfg.quant_lab.enabled = True
-    cfg.quant_lab.mode = "shadow"
+    cfg.quant_lab.mode = "cost_only"
     cfg.quant_lab.live_cost_trust_guard.enabled = True
     cfg.quant_lab.live_cost_trust_guard.mode = "block_non_whitelist_only"
     guard = _guard(
@@ -380,6 +416,7 @@ def test_live_cost_trust_guard_allows_btc_strict_probe_exception(tmp_path: Path)
 
     assert len(kept) == 1
     impact = guard.live_guard_rows[-1]
+    assert impact["guard_enforced"] is True
     assert impact["whitelist_strategy_match"] is True
     assert impact["cost_trust_exception"] is True
     assert impact["would_be_blocked_by_shadow_live_whitelist"] is False
@@ -389,7 +426,7 @@ def test_live_cost_trust_guard_allows_btc_strict_probe_exception(tmp_path: Path)
 def test_live_cost_trust_guard_never_blocks_close_or_paper_shadow(tmp_path: Path) -> None:
     cfg = AppConfig()
     cfg.quant_lab.enabled = True
-    cfg.quant_lab.mode = "shadow"
+    cfg.quant_lab.mode = "cost_only"
     cfg.quant_lab.live_cost_trust_guard.enabled = True
     cfg.quant_lab.live_cost_trust_guard.mode = "block_all_untrusted_open"
     guard = _guard(
@@ -412,9 +449,11 @@ def test_live_cost_trust_guard_never_blocks_close_or_paper_shadow(tmp_path: Path
     close_impact, paper_impact = guard.live_guard_rows[-2:]
     assert close_impact["blocked_by_cost_trust_guard"] is False
     assert close_impact["would_be_blocked_by_cost_trust_guard"] is False
+    assert close_impact["guard_enforced"] is True
     assert "exit_bypass" in close_impact["cost_trust_block_reasons"]
     assert paper_impact["blocked_by_cost_trust_guard"] is False
     assert paper_impact["would_be_blocked_by_cost_trust_guard"] is False
+    assert paper_impact["guard_enforced"] is True
     assert paper_impact["paper_or_shadow_bypassed"] is True
 
 
