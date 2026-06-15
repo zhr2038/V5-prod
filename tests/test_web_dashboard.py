@@ -160,6 +160,88 @@ def test_quant_lab_proxy_fetch_uses_configured_backend_and_token(monkeypatch):
     assert payload["proxy"]["source"] == "v5_local_proxy"
 
 
+def test_quant_lab_status_api_prefers_deep_health(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+    paths = []
+
+    def fake_proxy(path, *args, **kwargs):
+        paths.append(path)
+        return {
+            "available": True,
+            "status": "warning",
+            "warnings": ["cost_health_warning"],
+            "cost_health": {"status": "warning"},
+            "proxy": {"upstream_path": path},
+        }
+
+    monkeypatch.setattr(module, "_quant_lab_proxy_fetch", fake_proxy)
+    monkeypatch.setattr(
+        module,
+        "_load_quant_lab_api_status",
+        lambda *_args, **_kwargs: {
+            "status": "warning",
+            "detail": "deep health warning",
+            "request_metrics": {"available": True},
+        },
+    )
+    monkeypatch.setattr(module, "load_config", lambda: {"quant_lab": {"enabled": True, "mode": "shadow"}})
+    monkeypatch.setattr(module, "_resolve_dashboard_runtime_paths", lambda _config: None)
+
+    response = client.get("/api/quant_lab/status")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert paths == ["/v1/health/deep"]
+    assert payload["status"] == "warning"
+    assert payload["warnings"] == ["cost_health_warning"]
+    assert payload["request_status"] == "warning"
+
+
+def test_quant_lab_status_api_falls_back_to_light_health_when_deep_missing(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+    paths = []
+
+    def fake_proxy(path, *args, **kwargs):
+        paths.append(path)
+        if path == "/v1/health/deep":
+            return {
+                "available": False,
+                "status": "degraded",
+                "reason": "quant_lab_upstream_http_error",
+                "proxy": {"upstream_path": path, "upstream_status_code": 404},
+            }
+        return {
+            "available": True,
+            "status": "ok",
+            "service": "quant-lab",
+            "mode": "read-only",
+            "proxy": {"upstream_path": path},
+        }
+
+    monkeypatch.setattr(module, "_quant_lab_proxy_fetch", fake_proxy)
+    monkeypatch.setattr(
+        module,
+        "_load_quant_lab_api_status",
+        lambda *_args, **_kwargs: {
+            "status": "healthy",
+            "detail": "light health fallback",
+            "request_metrics": {"available": True},
+        },
+    )
+    monkeypatch.setattr(module, "load_config", lambda: {"quant_lab": {"enabled": True, "mode": "shadow"}})
+    monkeypatch.setattr(module, "_resolve_dashboard_runtime_paths", lambda _config: None)
+
+    response = client.get("/api/quant_lab/status")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert paths == ["/v1/health/deep", "/v1/health"]
+    assert payload["status"] == "ok"
+    assert payload["detail_source"] == "health_fallback"
+
+
 def test_quant_lab_cost_estimate_route_is_local_proxy(monkeypatch):
     module = load_web_dashboard_module()
     module._QUANT_LAB_PROXY_CACHE.clear()
@@ -6277,6 +6359,55 @@ def test_quant_lab_status_api_exposes_local_request_latency_metrics(monkeypatch,
     assert payload["request_metrics"]["latest_endpoint"] == "/v1/health"
     assert payload["request_metrics"]["latest_latency_ms"] == pytest.approx(90.0)
     assert payload["request_metrics"]["p95_latency_ms"] == pytest.approx(299.0)
+
+
+def test_quant_lab_api_status_marks_deep_health_warning(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc)
+    (reports_dir / "quant_lab_requests.jsonl").write_text(
+        json.dumps(
+            {
+                "endpoint_path": "/v1/health/deep",
+                "success": True,
+                "status_code": 200,
+                "latency_ms": 95.0,
+                "response_summary": {"status": "warning", "warnings": ["cost_health_warning"]},
+                "ts_utc": now.isoformat().replace("+00:00", "Z"),
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runtime_paths = module.DashboardRuntimePaths(
+        reports_dir=reports_dir,
+        orders_db=reports_dir / "orders.sqlite",
+        fills_db=reports_dir / "fills.sqlite",
+        positions_db=reports_dir / "positions.sqlite",
+        kill_switch_path=reports_dir / "kill_switch.json",
+        reconcile_status_path=reports_dir / "reconcile_status.json",
+        runs_dir=reports_dir / "runs",
+        auto_risk_guard_path=reports_dir / "auto_risk_guard.json",
+        auto_risk_eval_path=reports_dir / "auto_risk_eval.json",
+        telemetry_db=reports_dir / "api_telemetry.sqlite",
+    )
+    config = {
+        "quant_lab": {
+            "enabled": True,
+            "mode": "shadow",
+            "request_log_path": "reports/quant_lab_requests.jsonl",
+        }
+    }
+
+    status = module._load_quant_lab_api_status(config, runtime_paths)
+
+    assert status["status"] == "warning"
+    assert "/v1/health/deep" in status["detail"]
+    assert status["request_metrics"]["latest_service_status"] == "warning"
 
 
 def test_health_api_error_response_hides_internal_paths(monkeypatch):

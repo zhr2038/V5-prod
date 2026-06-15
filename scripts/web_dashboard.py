@@ -2828,8 +2828,11 @@ def _load_quant_lab_api_status(
         status = 'warning'
 
     service_status = str(metrics.get('latest_service_status') or '').strip().lower()
-    if latest_endpoint == '/v1/health' and service_status and service_status not in {'ok', 'healthy', 'ready'}:
-        status = 'critical'
+    if latest_endpoint in {'/v1/health', '/v1/health/deep'} and service_status:
+        if service_status in {'critical', 'missing', 'degraded', 'error'}:
+            status = 'critical'
+        elif service_status in {'warning', 'stale'} and status == 'healthy':
+            status = 'warning'
 
     detail_parts = [f'近{int(lookback_minutes)}m {success_count}/{total}成功']
     if p95_latency_ms is not None:
@@ -7881,7 +7884,11 @@ def api_shadow_ml_overlay():
 @_cache_json_response(10.0)
 def api_quant_lab_status():
     try:
-        payload = _quant_lab_proxy_fetch('/v1/health', ttl_seconds=10.0)
+        payload = _quant_lab_proxy_fetch('/v1/health/deep', ttl_seconds=10.0)
+        if not payload.get('available') and payload.get('reason') == 'quant_lab_upstream_http_error':
+            fallback = _quant_lab_proxy_fetch('/v1/health', ttl_seconds=10.0)
+            fallback['detail_source'] = 'health_fallback'
+            payload = fallback
         try:
             config = load_config()
             runtime_paths = _resolve_dashboard_runtime_paths(config)
@@ -7900,7 +7907,7 @@ def api_quant_lab_status():
             )
         return jsonify(payload)
     except Exception as exc:
-        return jsonify(_quant_lab_proxy_degraded('quant_lab_proxy_internal_error', path='/v1/health', detail=str(exc)))
+        return jsonify(_quant_lab_proxy_degraded('quant_lab_proxy_internal_error', path='/v1/health/deep', detail=str(exc)))
 
 
 @app.route('/api/quant_lab/live_permission')
