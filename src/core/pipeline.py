@@ -821,6 +821,113 @@ class V5Pipeline:
         return V5Pipeline._alpha6_volume_confirm(signal)
 
     @staticmethod
+    def _snapshot_bucket_float(bucket: Mapping[str, Any], *keys: str) -> Optional[float]:
+        for key in keys:
+            value = _float_or_none(bucket.get(key))
+            if value is not None:
+                return value
+        return None
+
+    @classmethod
+    def _alpha_factor_context_from_snapshot(
+        cls,
+        alpha: AlphaSnapshot,
+        *,
+        base_rank_map: Mapping[str, int],
+        final_rank_map: Mapping[str, int],
+    ) -> Dict[str, Dict[str, Any]]:
+        symbols = sorted(
+            set((getattr(alpha, "scores", {}) or {}).keys())
+            | set((getattr(alpha, "raw_scores", {}) or {}).keys())
+            | set((getattr(alpha, "base_scores", {}) or {}).keys())
+            | set((getattr(alpha, "raw_factors", {}) or {}).keys())
+            | set((getattr(alpha, "z_factors", {}) or {}).keys())
+            | set((getattr(alpha, "ml_overlay_scores", {}) or {}).keys())
+            | set((getattr(alpha, "ml_overlay_raw_scores", {}) or {}).keys())
+        )
+        scores = dict(getattr(alpha, "scores", {}) or {})
+        raw_scores = dict(getattr(alpha, "raw_scores", {}) or {})
+        base_scores = dict(getattr(alpha, "base_scores", {}) or {})
+        ml_overlay_scores = dict(getattr(alpha, "ml_overlay_scores", {}) or {})
+        ml_overlay_raw_scores = dict(getattr(alpha, "ml_overlay_raw_scores", {}) or {})
+        ml_attribution_scores = dict(getattr(alpha, "ml_attribution_scores", {}) or {})
+        raw_factors_by_symbol = dict(getattr(alpha, "raw_factors", {}) or {})
+        z_factors_by_symbol = dict(getattr(alpha, "z_factors", {}) or {})
+
+        out: Dict[str, Dict[str, Any]] = {}
+        for sym in symbols:
+            raw_factors = {
+                str(key): float(value)
+                for key, value in dict(raw_factors_by_symbol.get(sym) or {}).items()
+                if _float_or_none(value) is not None
+            }
+            z_factors = {
+                str(key): float(value)
+                for key, value in dict(z_factors_by_symbol.get(sym) or {}).items()
+                if _float_or_none(value) is not None
+            }
+            final_score = _float_or_none(scores.get(sym))
+            base_score = _float_or_none(base_scores.get(sym))
+            row: Dict[str, Any] = {
+                "symbol": sym,
+                "raw_factors": raw_factors,
+                "z_factors": z_factors,
+            }
+            if final_score is not None:
+                row["score"] = float(final_score)
+                row["final_score"] = float(final_score)
+                row["display_score"] = float(final_score)
+                row["rank"] = int(final_rank_map.get(sym, 0) or 0) or None
+            if raw_scores.get(sym) is not None:
+                row["raw_score"] = float(raw_scores.get(sym))
+            if base_score is not None:
+                row["base_score"] = float(base_score)
+                row["base_rank"] = int(base_rank_map.get(sym, 0) or 0) or None
+            if final_score is not None and base_score is not None:
+                row["score_delta"] = float(final_score - base_score)
+            if row.get("rank") is not None and row.get("base_rank") is not None:
+                row["rank_delta"] = int(row["base_rank"]) - int(row["rank"])
+            if ml_attribution_scores.get(sym) is not None:
+                row["ml_score"] = float(ml_attribution_scores.get(sym))
+            if ml_overlay_scores.get(sym) is not None:
+                row["ml_overlay_score"] = float(ml_overlay_scores.get(sym))
+            if ml_overlay_raw_scores.get(sym) is not None:
+                row["ml_pred_zscore"] = float(ml_overlay_raw_scores.get(sym))
+            ml_pred_raw = cls._snapshot_bucket_float(raw_factors, "ml_pred_raw")
+            if ml_pred_raw is not None:
+                row["ml_pred_raw"] = float(ml_pred_raw)
+
+            for field, aliases in {
+                "f1_mom_5d": ("f1_mom_5d",),
+                "f2_mom_20d": ("f2_mom_20d",),
+                "f3_vol_adj_ret": ("f3_vol_adj_ret", "f3_vol_adj_ret_20d"),
+                "f4_volume_expansion": ("f4_volume_expansion",),
+                "f5_rsi_trend_confirm": ("f5_rsi_trend_confirm",),
+            }.items():
+                value = cls._snapshot_bucket_float(z_factors, *aliases)
+                if value is None:
+                    value = cls._snapshot_bucket_float(raw_factors, *aliases)
+                if value is not None:
+                    row[field] = float(value)
+
+            alpha6_score = cls._snapshot_bucket_float(
+                z_factors,
+                "alpha6_display_score",
+                "alpha6_relative_score",
+                "alpha6_final_score",
+            )
+            if alpha6_score is None:
+                alpha6_score = cls._snapshot_bucket_float(
+                    raw_factors,
+                    "alpha6_relative_score",
+                    "alpha6_final_score",
+                )
+            if alpha6_score is not None:
+                row["alpha6_score"] = float(alpha6_score)
+            out[sym] = {key: value for key, value in row.items() if value is not None}
+        return out
+
+    @staticmethod
     def _rolling_close_high_excluding_latest(
         series: Optional[MarketSeries],
         lookback_hours: int,
@@ -4897,6 +5004,12 @@ class V5Pipeline:
             ml_overlay_raw_scores = dict(getattr(alpha, "ml_overlay_raw_scores", {}) or {})
             base_rank_map = self._score_rank_map(base_scores)
             final_rank_map = self._score_rank_map(alpha.scores)
+            alpha_factor_snapshot = self._alpha_factor_context_from_snapshot(
+                alpha,
+                base_rank_map=base_rank_map,
+                final_rank_map=final_rank_map,
+            )
+            audit.alpha_factor_snapshot = alpha_factor_snapshot
             audit.ml_signal_overview = self._build_ml_audit_overview(
                 alpha,
                 impact_summary=ml_impact_summary,
@@ -4943,10 +5056,14 @@ class V5Pipeline:
                 except Exception as e:
                     audit.add_note(f"Strategy signal audit error: {str(e)[:50]}")
             
-            audit.top_scores = [
-                {
+            audit.top_scores = []
+            for idx, (sym, score) in enumerate(sorted_scores[:10]):
+                row = dict(alpha_factor_snapshot.get(sym, {}))
+                row.update(
+                    {
                     "symbol": sym,
                     "score": score,
+                    "final_score": score,
                     "display_score": score,
                     "raw_score": float(raw_scores.get(sym, score)),
                     "base_score": float(base_scores.get(sym, 0.0)),
@@ -4956,9 +5073,9 @@ class V5Pipeline:
                     "base_rank": int(base_rank_map.get(sym, idx + 1)),
                     "rank": idx + 1,
                     "rank_delta": int(base_rank_map.get(sym, idx + 1)) - int(final_rank_map.get(sym, idx + 1)),
-                }
-                for idx, (sym, score) in enumerate(sorted_scores[:10])
-            ]
+                    }
+                )
+                audit.top_scores.append(row)
             audit.counts["scored"] = len(alpha.scores)
 
         # Compute *raw* equity (for reporting / performance).

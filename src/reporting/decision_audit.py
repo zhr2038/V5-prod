@@ -93,6 +93,7 @@ class DecisionAudit:
     
     # 详细数据
     top_scores: List[Dict[str, Any]] = field(default_factory=list)
+    alpha_factor_snapshot: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     targets_pre_risk: Dict[str, float] = field(default_factory=dict)
     targets_post_risk: Dict[str, float] = field(default_factory=dict)
     
@@ -238,6 +239,7 @@ def load_decision_audit(run_dir: str) -> Optional[DecisionAudit]:
     # 恢复其他字段
     audit.counts = data.get("counts", {})
     audit.top_scores = data.get("top_scores", [])
+    audit.alpha_factor_snapshot = data.get("alpha_factor_snapshot", {}) or {}
     audit.targets_pre_risk = data.get("targets_pre_risk", {})
     audit.targets_post_risk = data.get("targets_post_risk", {})
     audit.router_decisions = data.get("router_decisions", [])

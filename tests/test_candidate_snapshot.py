@@ -1016,6 +1016,71 @@ def test_candidate_snapshot_maps_specific_btc_leadership_candidates() -> None:
     assert by_symbol["ETH/USDT"]["strategy_candidate"] == "portfolio_trend_following"
 
 
+def test_candidate_snapshot_uses_alpha_factor_context_without_reclassifying_no_signal() -> None:
+    audit = SimpleNamespace(
+        top_scores=[],
+        alpha_factor_snapshot={
+            "ETH/USDT": {
+                "final_score": 0.62,
+                "rank": 3,
+                "z_factors": {
+                    "f1_mom_5d": 0.11,
+                    "f2_mom_20d": 0.22,
+                    "f3_vol_adj_ret_20d": 1.30,
+                    "f4_volume_expansion": 0.44,
+                    "f5_rsi_trend_confirm": 0.55,
+                    "alpha6_display_score": 0.66,
+                },
+                "ml_overlay_score": 0.07,
+            },
+            "BNB/USDT": {
+                "final_score": 0.51,
+                "z_factors": {
+                    "f1_mom_5d": 0.10,
+                    "f2_mom_20d": 0.20,
+                    "f3_vol_adj_ret_20d": 2.40,
+                    "f4_volume_expansion": 1.10,
+                    "f5_rsi_trend_confirm": 0.30,
+                },
+            },
+        },
+        targets_pre_risk={"ETH/USDT": 0.0, "BNB/USDT": 0.0},
+        targets_post_risk={"ETH/USDT": 0.0, "BNB/USDT": 0.0},
+        router_decisions=[],
+        target_execution_explain=[],
+        strategy_signals=[
+            {"strategy": "TrendFollowing", "signals": [{"symbol": "ETH/USDT", "side": "buy", "score": 0.62}]}
+        ],
+        quant_lab={},
+    )
+
+    rows = build_candidate_snapshot_rows(
+        run_id="run_alpha_context",
+        ts_utc="2026-05-15T00:00:00Z",
+        symbols=["ETH/USDT", "BNB/USDT"],
+        audit=audit,
+        local_cost_bps=30.0,
+        local_cost_model_version="v5_local_execution.cost_aware_roundtrip_cost_bps",
+    )
+    by_symbol = {row["symbol"]: row for row in rows}
+
+    eth = by_symbol["ETH/USDT"]
+    assert eth["strategy_candidate"] == "portfolio_trend_following"
+    assert eth["final_score"] == 0.62
+    assert eth["rank"] == 3
+    assert eth["f1_mom_5d"] == 0.11
+    assert eth["f3_vol_adj_ret"] == 1.30
+    assert eth["alpha6_score"] == 0.66
+    assert eth["ml_score"] == 0.07
+
+    bnb = by_symbol["BNB/USDT"]
+    assert bnb["no_signal_reason"] == "no_signal"
+    assert bnb["eligible_before_filters"] == "false"
+    assert bnb["final_score"] is None
+    assert bnb["f3_vol_adj_ret"] is None
+    assert bnb["strategy_candidate"] == "portfolio_trend_following"
+
+
 def test_candidate_snapshot_classifies_f3_and_f4_candidates() -> None:
     audit = SimpleNamespace(
         top_scores=[

@@ -268,6 +268,7 @@ def build_candidate_snapshot_rows(
         target_weights_after_risk or getattr(audit, "targets_post_risk", {}) or {}
     )
     top_scores = _symbol_map(getattr(audit, "top_scores", []) or [])
+    alpha_factor_snapshot = getattr(audit, "alpha_factor_snapshot", {}) or {}
     explain_rows = _symbol_map(getattr(audit, "target_execution_explain", []) or [])
     router_decisions = _router_decisions_by_symbol(getattr(audit, "router_decisions", []) or [])
     strategy_lookup = _strategy_signal_lookup(getattr(audit, "strategy_signals", []) or [])
@@ -297,6 +298,7 @@ def build_candidate_snapshot_rows(
     rows: list[dict[str, Any]] = []
     for symbol in all_symbols:
         top = top_scores.get(symbol, {})
+        alpha_context = _lookup_symbol_mapping(alpha_factor_snapshot, symbol)
         explain = explain_rows.get(symbol, {})
         strategy_signals = strategy_lookup.get(symbol, {})
         alpha6 = strategy_signals.get("Alpha6Factor", {})
@@ -340,6 +342,15 @@ def build_candidate_snapshot_rows(
         current_weight = _current_weight(position, candidate_price, equity_usdt)
         target_raw = _float_or_none(target_weights_raw.get(symbol))
         target_after = _float_or_none(target_weights_after_risk.get(symbol))
+        candidate_context_allowed = (
+            symbol in top_scores
+            or symbol in explain_rows
+            or bool(strategy_signals)
+            or abs(float(target_raw or 0.0)) > 0.0
+            or abs(float(target_after or 0.0)) > 0.0
+            or bool(router_decisions.get(symbol))
+            or order is not None
+        )
         block_reason = _block_reason(router_decisions.get(symbol, []))
         final_decision = _final_decision(
             order=order,
@@ -347,37 +358,80 @@ def build_candidate_snapshot_rows(
             target_weight=target_after,
             current_weight=current_weight,
         )
-        final_score = _first_float(top.get("final_score"), top.get("score"), explain.get("final_score"))
-        alpha6_score = _first_float(
+        alpha_context_sources = (alpha_context,) if candidate_context_allowed else ()
+        final_score = _first_float(
+            top.get("final_score"),
+            top.get("score"),
+            explain.get("final_score"),
+            *(context.get("final_score") for context in alpha_context_sources),
+            *(context.get("score") for context in alpha_context_sources),
+        )
+        alpha6_score_for_strategy = _first_float(
             explain.get("alpha6_score"),
             alpha6.get("score"),
             alpha6.get("raw_score"),
             _find_nested(top, "alpha6_score"),
         )
-        f1_mom_5d = _first_float(
+        alpha6_score = _first_float(
+            alpha6_score_for_strategy,
+            *(
+                _find_nested_any(
+                    context,
+                    "alpha6_score",
+                    "alpha6_display_score",
+                    "alpha6_relative_score",
+                    "alpha6_final_score",
+                )
+                for context in alpha_context_sources
+            ),
+        )
+        f1_for_strategy = _first_float(
             _find_nested(top, "f1_mom_5d"),
             _find_nested(alpha6, "f1_mom_5d"),
             _find_nested(explain, "f1_mom_5d"),
         )
-        f2_mom_20d = _first_float(
+        f1_mom_5d = _first_float(
+            f1_for_strategy,
+            *(_find_nested(context, "f1_mom_5d") for context in alpha_context_sources),
+        )
+        f2_for_strategy = _first_float(
             _find_nested(top, "f2_mom_20d"),
             _find_nested(alpha6, "f2_mom_20d"),
             _find_nested(explain, "f2_mom_20d"),
         )
-        f3_vol_adj_ret = _first_float(
-            _find_nested(top, "f3_vol_adj_ret"),
-            _find_nested(alpha6, "f3_vol_adj_ret"),
-            _find_nested(explain, "f3_vol_adj_ret"),
+        f2_mom_20d = _first_float(
+            f2_for_strategy,
+            *(_find_nested(context, "f2_mom_20d") for context in alpha_context_sources),
         )
-        f4_volume_expansion = _first_float(
+        f3_for_strategy = _first_float(
+            _find_nested_any(top, "f3_vol_adj_ret", "f3_vol_adj_ret_20d"),
+            _find_nested_any(alpha6, "f3_vol_adj_ret", "f3_vol_adj_ret_20d"),
+            _find_nested_any(explain, "f3_vol_adj_ret", "f3_vol_adj_ret_20d"),
+        )
+        f3_vol_adj_ret = _first_float(
+            f3_for_strategy,
+            *(
+                _find_nested_any(context, "f3_vol_adj_ret", "f3_vol_adj_ret_20d")
+                for context in alpha_context_sources
+            ),
+        )
+        f4_for_strategy = _first_float(
             explain.get("f4_volume_expansion"),
             _find_nested(top, "f4_volume_expansion"),
             _find_nested(alpha6, "f4_volume_expansion"),
         )
-        f5_rsi_trend_confirm = _first_float(
+        f4_volume_expansion = _first_float(
+            f4_for_strategy,
+            *(_find_nested(context, "f4_volume_expansion") for context in alpha_context_sources),
+        )
+        f5_for_strategy = _first_float(
             explain.get("f5_rsi_trend_confirm"),
             _find_nested(top, "f5_rsi_trend_confirm"),
             _find_nested(alpha6, "f5_rsi_trend_confirm"),
+        )
+        f5_rsi_trend_confirm = _first_float(
+            f5_for_strategy,
+            *(_find_nested(context, "f5_rsi_trend_confirm") for context in alpha_context_sources),
         )
         alpha6_side = _first(
             explain.get("alpha6_side"),
@@ -393,12 +447,12 @@ def build_candidate_snapshot_rows(
             strategy_signals=strategy_signals,
             block_reason=block_reason,
             final_decision=final_decision,
-            f1_mom_5d=f1_mom_5d,
-            f2_mom_20d=f2_mom_20d,
-            f3_vol_adj_ret=f3_vol_adj_ret,
-            f4_volume_expansion=f4_volume_expansion,
-            f5_rsi_trend_confirm=f5_rsi_trend_confirm,
-            alpha6_score=alpha6_score,
+            f1_mom_5d=f1_for_strategy,
+            f2_mom_20d=f2_for_strategy,
+            f3_vol_adj_ret=f3_for_strategy,
+            f4_volume_expansion=f4_for_strategy,
+            f5_rsi_trend_confirm=f5_for_strategy,
+            alpha6_score=alpha6_score_for_strategy,
             alpha6_side=alpha6_side,
         )
         expected_edge, expected_edge_source = _first_float_with_source(
@@ -618,7 +672,12 @@ def build_candidate_snapshot_rows(
             "target_weight_raw": target_raw,
             "target_weight_after_risk": target_after,
             "final_score": final_score,
-            "rank": _first(top.get("rank"), top.get("selected_rank"), explain.get("selected_rank")),
+            "rank": _first(
+                top.get("rank"),
+                top.get("selected_rank"),
+                explain.get("selected_rank"),
+                *(context.get("rank") for context in alpha_context_sources),
+            ),
             "f1_mom_5d": f1_mom_5d,
             "f2_mom_20d": f2_mom_20d,
             "f3_vol_adj_ret": f3_vol_adj_ret,
@@ -632,6 +691,10 @@ def build_candidate_snapshot_rows(
                 top.get("ml_pred_raw"),
                 top.get("ml_pred_zscore"),
                 _find_nested(top, "ml_overlay_score"),
+                *(_find_nested(context, "ml_score") for context in alpha_context_sources),
+                *(_find_nested(context, "ml_overlay_score") for context in alpha_context_sources),
+                *(_find_nested(context, "ml_pred_raw") for context in alpha_context_sources),
+                *(_find_nested(context, "ml_pred_zscore") for context in alpha_context_sources),
             ),
             "mean_reversion_score": _first_float(mean_reversion.get("score"), mean_reversion.get("raw_score")),
             "expected_edge_bps": expected_edge,
@@ -1653,6 +1716,14 @@ def _find_nested(obj: Any, key: str) -> Any:
             found = _find_nested(value, key)
             if found not in (None, ""):
                 return found
+    return None
+
+
+def _find_nested_any(obj: Any, *keys: str) -> Any:
+    for key in keys:
+        found = _find_nested(obj, key)
+        if found not in (None, ""):
+            return found
     return None
 
 
