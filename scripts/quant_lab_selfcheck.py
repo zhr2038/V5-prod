@@ -46,6 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     client = QuantLabClient.from_config(qcfg, run_id="selfcheck", phase="selfcheck", mode=mode_resolution.mode.value)
     health = client.get_health()
+    deep_health = client.get_deep_health()
     permission = client.get_live_permission(strategy=qcfg.strategy_name, version=qcfg.strategy_version)
     cost = client.estimate_cost(
         symbol=args.symbol,
@@ -57,6 +58,13 @@ def main(argv: list[str] | None = None) -> int:
     gate = apply_quant_lab_cost_gate(order, cost, cfg)
     payload = {
         "health": health.status,
+        "deep_health": {
+            "status": deep_health.status,
+            "warnings": deep_health.warnings,
+            "data_health": deep_health.data_health,
+            "cost_health": deep_health.cost_health,
+            "risk_permission_dependency_meta": deep_health.risk_permission_dependency_meta,
+        },
         "mode": mode_resolution.mode.value,
         "mode_source": mode_resolution.mode_source,
         "service": health.service,

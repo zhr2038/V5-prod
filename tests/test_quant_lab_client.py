@@ -416,6 +416,61 @@ def test_quant_lab_health_accepts_healthy_status(tmp_path: Path) -> None:
     assert client.get_health().status == "healthy"
 
 
+def test_quant_lab_deep_health_warning_is_visible_not_fatal(tmp_path: Path) -> None:
+    class WarningHTTP(_HTTP):
+        def get(self, url, params=None, headers=None, timeout=None):
+            if url.endswith("/v1/health/deep"):
+                return _Response(
+                    {
+                        "status": "warning",
+                        "service": "quant-lab",
+                        "mode": "read-only",
+                        "warnings": ["cost_health_warning"],
+                        "cost_health": {"status": "warning"},
+                        "data_health": {"status": "ok"},
+                        "risk_permission_dependency_meta": {"status": "ok"},
+                    }
+                )
+            return super().get(url, params=params, headers=headers, timeout=timeout)
+
+    client = QuantLabClient(
+        base_url="http://quant-lab.local",
+        http_client=WarningHTTP(),
+        request_log_path=tmp_path / "r.jsonl",
+    )
+
+    health = client.get_deep_health()
+
+    assert health.status == "warning"
+    assert health.warnings == ["cost_health_warning"]
+    assert health.cost_health == {"status": "warning"}
+
+
+def test_quant_lab_deep_health_critical_fails_fast(tmp_path: Path) -> None:
+    class CriticalHTTP(_HTTP):
+        def get(self, url, params=None, headers=None, timeout=None):
+            if url.endswith("/v1/health/deep"):
+                return _Response(
+                    {
+                        "status": "critical",
+                        "service": "quant-lab",
+                        "mode": "read-only",
+                        "warnings": ["data_health_critical"],
+                        "data_health": {"status": "critical"},
+                    }
+                )
+            return super().get(url, params=params, headers=headers, timeout=timeout)
+
+    client = QuantLabClient(
+        base_url="http://quant-lab.local",
+        http_client=CriticalHTTP(),
+        request_log_path=tmp_path / "r.jsonl",
+    )
+
+    with pytest.raises(QuantLabValidationError, match="/v1/health/deep status"):
+        client.get_deep_health()
+
+
 def test_gate_decision_string_false_passed_stays_false() -> None:
     decision = GateDecision.from_payload(
         {

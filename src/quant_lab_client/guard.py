@@ -972,7 +972,11 @@ class QuantLabGuard:
     def refresh_permission(self, *, include_health: bool = True) -> str:
         if include_health and self.client is not None and bool(_get_cfg(self.cfg, "enabled", True)):
             try:
-                self.client.get_health()
+                health = self.client.get_health()
+                deep_health = None
+                deep_health_getter = getattr(self.client, "get_deep_health", None)
+                if callable(deep_health_getter):
+                    deep_health = deep_health_getter()
                 self._emit_usage(
                     {
                         "event_type": "health_check",
@@ -981,7 +985,24 @@ class QuantLabGuard:
                         "endpoint_path": "/v1/health",
                         "success": True,
                         "fallback_used": False,
-                        "status": "ok",
+                        "status": getattr(health, "status", "ok"),
+                        "deep_health_status": getattr(deep_health, "status", None),
+                        "deep_health_warnings": list(getattr(deep_health, "warnings", []) or []),
+                        "deep_cost_health_status": (
+                            getattr(deep_health, "cost_health", {}) or {}
+                        ).get("status")
+                        if deep_health is not None
+                        else None,
+                        "deep_data_health_status": (
+                            getattr(deep_health, "data_health", {}) or {}
+                        ).get("status")
+                        if deep_health is not None
+                        else None,
+                        "deep_risk_dependency_status": (
+                            getattr(deep_health, "risk_permission_dependency_meta", {}) or {}
+                        ).get("status")
+                        if deep_health is not None
+                        else None,
                     }
                 )
             except Exception as exc:

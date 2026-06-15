@@ -26,6 +26,7 @@ class _Client:
         cost_model_version="cost_bucket_daily:2026-05-11",
         cost_trusted_for_live=None,
         allowed_live_modes=None,
+        deep_health_status="ok",
     ) -> None:
         self.permission = permission
         self.fail_health = fail_health
@@ -37,6 +38,7 @@ class _Client:
         self.cost_model_version = cost_model_version
         self.cost_trusted_for_live = cost_trusted_for_live
         self.allowed_live_modes = allowed_live_modes
+        self.deep_health_status = deep_health_status
         self.run_id = "r"
         self.cost_kwargs = []
         self.permission_calls = 0
@@ -45,6 +47,18 @@ class _Client:
         if self.fail_health:
             raise RuntimeError("health unavailable secret-token")
         return SimpleNamespace(status="ok", mode="read-only")
+
+    def get_deep_health(self):
+        if self.deep_health_status == "critical":
+            raise RuntimeError("deep health critical secret-token")
+        return SimpleNamespace(
+            status=self.deep_health_status,
+            mode="read-only",
+            warnings=["cost_health_warning"] if self.deep_health_status == "warning" else [],
+            cost_health={"status": self.deep_health_status},
+            data_health={"status": "ok"},
+            risk_permission_dependency_meta={"status": "ok"},
+        )
 
     def get_live_permission(self, *, strategy: str, version: str):
         self.permission_calls += 1
@@ -187,6 +201,46 @@ def test_refresh_permission_health_failure_uses_fail_policy_without_permission_c
     assert rows[-1]["endpoint_path"] == "/v1/health"
     assert rows[-1]["permission"] == "SELL_ONLY"
     assert "secret-token" not in (tmp_path / "usage.jsonl").read_text(encoding="utf-8")
+
+
+def test_refresh_permission_deep_health_failure_uses_fail_policy_without_permission_call(tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "enforce"
+    cfg.quant_lab.fail_policy = "sell_only"
+    client = _Client(permission="ALLOW", deep_health_status="critical")
+    guard = _guard(tmp_path, cfg, client)
+
+    decision = guard.refresh_permission(include_health=True)
+
+    assert decision == "SELL_ONLY"
+    assert client.permission_calls == 0
+    assert guard.permission_result.fallback_used is True
+    assert guard.permission_result.fallback_reason == "quant_lab_health_unavailable_sell_only"
+    rows = [json.loads(line) for line in (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["event_type"] == "health_check"
+    assert rows[0]["success"] is False
+    assert rows[-1]["event_type"] == "fallback"
+    assert "secret-token" not in (tmp_path / "usage.jsonl").read_text(encoding="utf-8")
+
+
+def test_refresh_permission_records_deep_health_warning(tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "shadow"
+    client = _Client(permission="ALLOW", deep_health_status="warning")
+    guard = _guard(tmp_path, cfg, client)
+
+    decision = guard.refresh_permission(include_health=True)
+
+    assert decision == "ALLOW"
+    rows = [json.loads(line) for line in (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
+    health_row = rows[0]
+    assert health_row["event_type"] == "health_check"
+    assert health_row["success"] is True
+    assert health_row["deep_health_status"] == "warning"
+    assert health_row["deep_health_warnings"] == ["cost_health_warning"]
+    assert health_row["deep_cost_health_status"] == "warning"
 
 
 def test_guard_cost_fallback_to_local(tmp_path: Path) -> None:

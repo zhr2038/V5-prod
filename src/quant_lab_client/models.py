@@ -80,6 +80,10 @@ class QuantLabHealth:
     status: str = ""
     service: str = ""
     mode: str = ""
+    data_health: Dict[str, Any] = field(default_factory=dict)
+    cost_health: Dict[str, Any] = field(default_factory=dict)
+    risk_permission_dependency_meta: Dict[str, Any] = field(default_factory=dict)
+    warnings: List[Any] = field(default_factory=list)
 
     @classmethod
     def from_payload(cls, payload: Any) -> "QuantLabHealth":
@@ -88,6 +92,12 @@ class QuantLabHealth:
             status=str(data.get("status") or ""),
             service=str(data.get("service") or ""),
             mode=str(data.get("mode") or ""),
+            data_health=dict(data.get("data_health") or {}) if isinstance(data.get("data_health"), Mapping) else {},
+            cost_health=dict(data.get("cost_health") or {}) if isinstance(data.get("cost_health"), Mapping) else {},
+            risk_permission_dependency_meta=dict(data.get("risk_permission_dependency_meta") or {})
+            if isinstance(data.get("risk_permission_dependency_meta"), Mapping)
+            else {},
+            warnings=_list(data, "warnings"),
         )
 
     def to_dict(self) -> Dict[str, Any]:

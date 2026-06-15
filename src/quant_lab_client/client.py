@@ -264,6 +264,7 @@ def summarize_response(payload: Any) -> Dict[str, Any]:
         "status",
         "service",
         "mode",
+        "warnings",
         "permission",
         "decision",
         "allowed_modes",
@@ -955,11 +956,34 @@ class QuantLabClient:
     def get_health(self) -> QuantLabHealth:
         response = self.get_json("/v1/health")
         health = QuantLabHealth.from_payload(response.data)
-        if str(health.status or "").strip().lower() not in {"ok", "healthy"}:
-            raise QuantLabValidationError(f"quant-lab health status is not ok: {health.status!r}")
-        if str(health.mode).lower() != "read-only":
-            raise QuantLabValidationError(f"quant-lab health mode must be read-only, got {health.mode!r}")
+        self._validate_health(health, endpoint="/v1/health", allow_warning=False)
         return health
+
+    def get_deep_health(self) -> QuantLabHealth:
+        response = self.get_json("/v1/health/deep")
+        health = QuantLabHealth.from_payload(response.data)
+        self._validate_health(health, endpoint="/v1/health/deep", allow_warning=True)
+        return health
+
+    @staticmethod
+    def _validate_health(
+        health: QuantLabHealth,
+        *,
+        endpoint: str,
+        allow_warning: bool,
+    ) -> None:
+        allowed_status = {"ok", "healthy"}
+        if allow_warning:
+            allowed_status.add("warning")
+        status_text = str(health.status or "").strip().lower()
+        if status_text not in allowed_status:
+            raise QuantLabValidationError(
+                f"quant-lab {endpoint} status is not ok: {health.status!r}"
+            )
+        if str(health.mode).lower() != "read-only":
+            raise QuantLabValidationError(
+                f"quant-lab {endpoint} mode must be read-only, got {health.mode!r}"
+            )
 
     def get_live_permission(
         self,
