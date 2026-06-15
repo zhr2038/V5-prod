@@ -793,6 +793,16 @@ def fixture_final_score_alpha6_conflict_root(root):
         writer = csv.DictWriter(fh, fieldnames=list(candidate))
         writer.writeheader()
         writer.writerow(candidate)
+    write_text(
+        root / "reports/candidate_snapshot.csv",
+        "\n".join(
+            [
+                "candidate_id,run_id,ts_utc,symbol,regime_state,final_score,rank,f3_vol_adj_ret,f4_volume_expansion,f5_rsi_trend_confirm,alpha6_score,alpha6_side,expected_edge_bps,required_edge_bps,cost_bps,cost_gate_verified,final_decision,no_signal_reason,block_reason,strategy_candidate",
+                f"{candidate['candidate_id']},{run_id},{iso(ts)},BNB/USDT,Trending,,1,,,,,,180,45,30,true,no_order,legacy_aggregate_row,legacy_aggregate_row,f3_dominant_entry",
+            ]
+        )
+        + "\n",
+    )
 
     outcome_path = root / "reports/summaries/skipped_candidate_outcomes.csv"
     outcome_path.parent.mkdir(parents=True, exist_ok=True)
@@ -6050,6 +6060,12 @@ def main():
             assert candidate["latest_px"] == "642.3", candidate
             assert candidate["current_px"] == "642.3", candidate
             assert candidate["price_source"] == "decision_audit.current_px", candidate
+            assert candidate["final_score"] == "-0.17", candidate
+            assert candidate["f3_vol_adj_ret"] == "0.91", candidate
+            assert candidate["f4_volume_expansion"] == "5.82", candidate
+            assert candidate["f5_rsi_trend_confirm"] == "0.832", candidate
+            assert candidate["alpha6_score"] == "0.994", candidate
+            assert candidate["no_signal_reason"] == "final_score_negative", candidate
             assert len(price_obs_rows) == 1, price_obs_rows
             assert int(price_obs_rows[0]["price_observable_rows"]) >= 1, price_obs_rows
             assert price_obs_rows[0]["live_order_effect"] == "none", price_obs_rows

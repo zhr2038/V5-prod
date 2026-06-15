@@ -1375,11 +1375,10 @@ def merge_candidate_snapshot_reports():
                     price_by_run_symbol.setdefault((run_id, symbol), (price, f"decision_audit.{field}"))
                     break
 
-    paths = []
+    paths = list(sorted((OUT / "raw" / "recent_runs").glob("*/candidate_snapshot.csv")))
     aggregate = OUT / "raw" / "reports" / "candidate_snapshot.csv"
     if aggregate.is_file():
         paths.append(aggregate)
-    paths.extend(sorted((OUT / "raw" / "recent_runs").glob("*/candidate_snapshot.csv")))
     rows = []
     fields = list(CANDIDATE_SNAPSHOT_FIELDS)
     seen = set()
@@ -1422,7 +1421,7 @@ def merge_candidate_snapshot_reports():
             writer.writeheader()
             for row in rows:
                 writer.writerow({field: row.get(field, "") for field in fields})
-    copied_sources["raw/reports/candidate_snapshot.csv"] = "merged reports/candidate_snapshot.csv + raw/recent_runs/*/candidate_snapshot.csv"
+    copied_sources["raw/reports/candidate_snapshot.csv"] = "merged raw/recent_runs/*/candidate_snapshot.csv + reports/candidate_snapshot.csv"
     copied_sources["summaries/candidate_snapshot.csv"] = copied_sources["raw/reports/candidate_snapshot.csv"]
     notes.append(f"merged candidate_snapshot rows={len(rows)} from sources={len(paths)}")
     return len(rows)
