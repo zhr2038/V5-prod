@@ -117,6 +117,7 @@ def test_install_systemd_user_production_only_supports_shadow_root_and_required_
             "/srv/shadow-runtime",
             "--enable-prod-timer",
             "--enable-event-driven-timer",
+            "--restart-web-dashboard",
         ]
     )
     subprocess.run(
@@ -142,6 +143,7 @@ def test_install_systemd_user_production_only_supports_shadow_root_and_required_
     assert "/srv/shadow-runtime" in shadow_unit
     assert "--user enable --now v5-trade-monitor.timer" in systemctl_calls
     assert "--user enable --now v5-spread-rollup.timer" in systemctl_calls
+    assert "--user restart v5-web-dashboard.service" in systemctl_calls
     assert "--user enable --now v5-shadow-tuned-xgboost.user.timer" not in systemctl_calls
     assert "--user disable --now v5-shadow-tuned-xgboost.user.timer" in systemctl_calls
     assert "--user disable --now v5-shadow-tuned-xgboost.user.service" in systemctl_calls
