@@ -395,6 +395,27 @@ def test_quant_lab_health_requires_read_only(tmp_path: Path) -> None:
         client.get_health()
 
 
+def test_quant_lab_health_requires_ok_status(tmp_path: Path) -> None:
+    class BadHTTP(_HTTP):
+        def get(self, url, params=None, headers=None, timeout=None):
+            return _Response({"status": "critical", "service": "quant-lab", "mode": "read-only"})
+
+    client = QuantLabClient(base_url="http://quant-lab.local", http_client=BadHTTP(), request_log_path=tmp_path / "r.jsonl")
+
+    with pytest.raises(QuantLabValidationError, match="health status"):
+        client.get_health()
+
+
+def test_quant_lab_health_accepts_healthy_status(tmp_path: Path) -> None:
+    class HealthyHTTP(_HTTP):
+        def get(self, url, params=None, headers=None, timeout=None):
+            return _Response({"status": "healthy", "service": "quant-lab", "mode": "read-only"})
+
+    client = QuantLabClient(base_url="http://quant-lab.local", http_client=HealthyHTTP(), request_log_path=tmp_path / "r.jsonl")
+
+    assert client.get_health().status == "healthy"
+
+
 def test_gate_decision_string_false_passed_stays_false() -> None:
     decision = GateDecision.from_payload(
         {

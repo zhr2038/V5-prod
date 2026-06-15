@@ -955,6 +955,8 @@ class QuantLabClient:
     def get_health(self) -> QuantLabHealth:
         response = self.get_json("/v1/health")
         health = QuantLabHealth.from_payload(response.data)
+        if str(health.status or "").strip().lower() not in {"ok", "healthy"}:
+            raise QuantLabValidationError(f"quant-lab health status is not ok: {health.status!r}")
         if str(health.mode).lower() != "read-only":
             raise QuantLabValidationError(f"quant-lab health mode must be read-only, got {health.mode!r}")
         return health
