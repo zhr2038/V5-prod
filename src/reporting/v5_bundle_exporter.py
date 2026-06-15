@@ -1468,10 +1468,22 @@ def _build_permission_audit_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, A
     out: list[Dict[str, Any]] = []
     for row in rows:
         event_kind = _event_kind(row)
+        has_deep_health_audit = any(
+            row.get(field) not in (None, "", [], {})
+            for field in (
+                "deep_health_status",
+                "deep_cost_health_status",
+                "deep_cost_fallback_ratio",
+                "deep_cost_hard_fallback_ratio",
+                "deep_cost_soft_fallback_ratio",
+                "deep_cost_warnings",
+            )
+        )
         if event_kind not in permission_events and not (
             row.get("raw_permission_decision")
             or row.get("effective_permission_decision")
             or row.get("remote_permission_status")
+            or has_deep_health_audit
         ):
             continue
         raw_permission = row.get("raw_permission_decision") or row.get("quant_lab_permission") or row.get("permission") or ""

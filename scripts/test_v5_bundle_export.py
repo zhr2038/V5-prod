@@ -855,6 +855,29 @@ def fixture_quant_lab_summary_root(root):
 
     usage_rows = [
         {
+            "ts": iso(window_end - 1),
+            "run_id": run_id,
+            "event_type": "health_check",
+            "mode": "shadow",
+            "local_mode": "shadow",
+            "endpoint_path": "/v1/health",
+            "success": True,
+            "deep_health_status": "warning",
+            "deep_health_warnings": ["cost_health_warning"],
+            "deep_cost_health_status": "warning",
+            "deep_cost_fallback_ratio": 1.0,
+            "deep_cost_hard_fallback_ratio": 0.0,
+            "deep_cost_soft_fallback_ratio": 1.0,
+            "deep_cost_actual_rows": 0,
+            "deep_cost_mixed_rows": 0,
+            "deep_cost_proxy_rows": 33,
+            "deep_cost_global_default_rows": 0,
+            "deep_cost_proxy_only_count": 33,
+            "deep_cost_symbols_missing": ["ALLO-USDT", "BCH-USDT"],
+            "deep_cost_warnings": ["soft_fallback_ratio_gt_0.5", "all_rows_public_spread_proxy"],
+            "contract_version": "v5.quant_lab.telemetry.v2",
+        },
+        {
             "ts": iso(window_end - 48 * 3600),
             "run_id": "legacy_bnb_cost",
             "event_type": "cost_estimate",
@@ -4290,6 +4313,11 @@ def main():
                         tf.extractfile(extract_member(tf, "summaries/live_guard_impact.csv")).read().decode().splitlines()
                     )
                 )
+                permission_audit_rows = list(
+                    csv.DictReader(
+                        tf.extractfile(extract_member(tf, "summaries/quant_lab_permission_audit.csv")).read().decode().splitlines()
+                    )
+                )
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 readiness = json.loads(tf.extractfile(extract_member(tf, "summaries/enforce_readiness_snapshot.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
@@ -4300,6 +4328,19 @@ def main():
             assert len(fallback_rows) == 2, fallback_rows
             assert any(row["diagnosis"] == "quant_lab_unavailable_sell_only" for row in fallback_rows), fallback_rows
             assert any(row["diagnosis"] == "quant_lab_request_local_fallback" for row in fallback_rows), fallback_rows
+            deep_health_rows = [
+                row for row in permission_audit_rows if row.get("deep_cost_health_status") == "warning"
+            ]
+            assert deep_health_rows, permission_audit_rows
+            deep_health = deep_health_rows[0]
+            assert deep_health["event_type"] == "health_check", deep_health
+            assert deep_health["deep_health_status"] == "warning", deep_health
+            assert deep_health["deep_health_warnings"] == '["cost_health_warning"]', deep_health
+            assert deep_health["deep_cost_hard_fallback_ratio"] == "0.0", deep_health
+            assert deep_health["deep_cost_soft_fallback_ratio"] == "1.0", deep_health
+            assert deep_health["deep_cost_proxy_rows"] == "33", deep_health
+            assert deep_health["deep_cost_symbols_missing"] == '["ALLO-USDT", "BCH-USDT"]', deep_health
+            assert "soft_fallback_ratio_gt_0.5" in deep_health["deep_cost_warnings"], deep_health
             assert window["quant_lab_request_success_count"] == 3, window
             assert window["quant_lab_request_error_count"] == 2, window
             assert window["quant_lab_actual_fallback_count"] == 2, window

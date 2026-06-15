@@ -10875,7 +10875,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         event_type = str(row.get("event_type") or not_obs)
         event_kind = quant_lab_event_kind(row)
         source = "reports/quant_lab_usage.jsonl"
-        if event_kind in {"permission", "order_filter", "run_summary", "live_permission", "filter_order", "final_permission"}:
+        has_deep_health_audit = any(
+            first_observed(row.get(field), not_obs) != not_obs
+            for field in (
+                "deep_health_status",
+                "deep_cost_health_status",
+                "deep_cost_fallback_ratio",
+                "deep_cost_hard_fallback_ratio",
+                "deep_cost_soft_fallback_ratio",
+                "deep_cost_warnings",
+            )
+        )
+        if event_kind in {"permission", "order_filter", "run_summary", "live_permission", "filter_order", "final_permission"} or has_deep_health_audit:
             raw_permission_decision = first_observed(
                 row.get("raw_permission_decision"),
                 row.get("quant_lab_permission"),
@@ -10933,6 +10944,19 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "remote_permission_telemetry_latest_ts": flatten_value(row.get("remote_permission_telemetry_latest_ts") or not_obs),
                 "remote_permission_contract_version": flatten_value(first_observed(row.get("remote_permission_contract_version"), row.get("contract_version"), not_obs)),
                 "permission_contract_violation": bool_observed(row.get("permission_contract_violation")),
+                "deep_health_status": flatten_value(row.get("deep_health_status") or not_obs),
+                "deep_health_warnings": flatten_value(row.get("deep_health_warnings") or not_obs),
+                "deep_cost_health_status": flatten_value(row.get("deep_cost_health_status") or not_obs),
+                "deep_cost_fallback_ratio": flatten_value(row.get("deep_cost_fallback_ratio") if row.get("deep_cost_fallback_ratio") is not None else not_obs),
+                "deep_cost_hard_fallback_ratio": flatten_value(row.get("deep_cost_hard_fallback_ratio") if row.get("deep_cost_hard_fallback_ratio") is not None else not_obs),
+                "deep_cost_soft_fallback_ratio": flatten_value(row.get("deep_cost_soft_fallback_ratio") if row.get("deep_cost_soft_fallback_ratio") is not None else not_obs),
+                "deep_cost_actual_rows": flatten_value(row.get("deep_cost_actual_rows") if row.get("deep_cost_actual_rows") is not None else not_obs),
+                "deep_cost_mixed_rows": flatten_value(row.get("deep_cost_mixed_rows") if row.get("deep_cost_mixed_rows") is not None else not_obs),
+                "deep_cost_proxy_rows": flatten_value(row.get("deep_cost_proxy_rows") if row.get("deep_cost_proxy_rows") is not None else not_obs),
+                "deep_cost_global_default_rows": flatten_value(row.get("deep_cost_global_default_rows") if row.get("deep_cost_global_default_rows") is not None else not_obs),
+                "deep_cost_proxy_only_count": flatten_value(row.get("deep_cost_proxy_only_count") if row.get("deep_cost_proxy_only_count") is not None else not_obs),
+                "deep_cost_symbols_missing": flatten_value(row.get("deep_cost_symbols_missing") or not_obs),
+                "deep_cost_warnings": flatten_value(row.get("deep_cost_warnings") or not_obs),
                 "contract_version": flatten_value(row.get("contract_version") or row.get("remote_permission_contract_version") or not_obs),
                 "permission_decision": flatten_value(first_observed(row.get("permission_decision"), raw_permission_decision, not_obs)),
                 "effective_decision": flatten_value(first_observed(row.get("effective_decision"), effective_permission_decision, not_obs)),
@@ -11563,7 +11587,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     write_csv(
         "summaries/quant_lab_permission_audit.csv",
         quant_lab_permission_audit_rows,
-        ["source", "run_id", "ts_utc", "event_type", "event_id", "request_id", "original_request_id", "original_event_id", "endpoint_path", "status_code", "success", "latency_ms", "error_type", "error_message_short", "mode", "local_mode", "permission_gate_enforced", "raw_permission_decision", "raw_permission_status", "raw_permission_enforceable", "effective_permission_decision", "would_block_if_enforced", "shadow_override_reason", "fallback_used", "fallback_reason", "remote_permission_as_of_ts", "remote_permission_expires_at", "remote_permission_status", "remote_permission_source_bundle_ts", "remote_permission_telemetry_latest_ts", "remote_permission_contract_version", "permission_contract_violation", "contract_version", "symbol", "side", "intent", "filtered", "filter_reason", "diagnosis", "raw_json"],
+        ["source", "run_id", "ts_utc", "event_type", "event_id", "request_id", "original_request_id", "original_event_id", "endpoint_path", "status_code", "success", "latency_ms", "error_type", "error_message_short", "mode", "local_mode", "permission_gate_enforced", "raw_permission_decision", "raw_permission_status", "raw_permission_enforceable", "effective_permission_decision", "would_block_if_enforced", "shadow_override_reason", "fallback_used", "fallback_reason", "remote_permission_as_of_ts", "remote_permission_expires_at", "remote_permission_status", "remote_permission_source_bundle_ts", "remote_permission_telemetry_latest_ts", "remote_permission_contract_version", "permission_contract_violation", "deep_health_status", "deep_health_warnings", "deep_cost_health_status", "deep_cost_fallback_ratio", "deep_cost_hard_fallback_ratio", "deep_cost_soft_fallback_ratio", "deep_cost_actual_rows", "deep_cost_mixed_rows", "deep_cost_proxy_rows", "deep_cost_global_default_rows", "deep_cost_proxy_only_count", "deep_cost_symbols_missing", "deep_cost_warnings", "contract_version", "symbol", "side", "intent", "filtered", "filter_reason", "diagnosis", "raw_json"],
     )
     write_csv(
         "summaries/quant_lab_mode_audit.csv",

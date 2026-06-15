@@ -85,6 +85,32 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
     (reports / "quant_lab_usage.jsonl").write_text(
         json.dumps(
             {
+                "ts": "2026-05-11T12:59:58Z",
+                "run_id": "r1",
+                "event_type": "health_check",
+                "mode": "shadow",
+                "local_mode": "shadow",
+                "endpoint_path": "/v1/health",
+                "success": True,
+                "deep_health_status": "warning",
+                "deep_health_warnings": ["cost_health_warning"],
+                "deep_cost_health_status": "warning",
+                "deep_cost_fallback_ratio": 1.0,
+                "deep_cost_hard_fallback_ratio": 0.0,
+                "deep_cost_soft_fallback_ratio": 1.0,
+                "deep_cost_actual_rows": 0,
+                "deep_cost_mixed_rows": 0,
+                "deep_cost_proxy_rows": 33,
+                "deep_cost_global_default_rows": 0,
+                "deep_cost_proxy_only_count": 33,
+                "deep_cost_symbols_missing": ["ALLO-USDT", "BCH-USDT"],
+                "deep_cost_warnings": ["soft_fallback_ratio_gt_0.5", "all_rows_public_spread_proxy"],
+                "contract_version": "v5.quant_lab.telemetry.v2",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
                 "ts": "2026-05-11T12:59:59Z",
                 "run_id": "r1",
                 "event_type": "live_permission",
@@ -118,19 +144,6 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
                 "remote_permission_telemetry_latest_ts": "2026-05-11T12:57:00Z",
                 "remote_permission_contract_version": "v5.quant_lab.telemetry.v2",
                 "permission_contract_violation": False,
-                "deep_health_status": "warning",
-                "deep_health_warnings": ["cost_health_warning"],
-                "deep_cost_health_status": "warning",
-                "deep_cost_fallback_ratio": 1.0,
-                "deep_cost_hard_fallback_ratio": 0.0,
-                "deep_cost_soft_fallback_ratio": 1.0,
-                "deep_cost_actual_rows": 0,
-                "deep_cost_mixed_rows": 0,
-                "deep_cost_proxy_rows": 33,
-                "deep_cost_global_default_rows": 0,
-                "deep_cost_proxy_only_count": 33,
-                "deep_cost_symbols_missing": ["ALLO-USDT", "BCH-USDT"],
-                "deep_cost_warnings": ["soft_fallback_ratio_gt_0.5", "all_rows_public_spread_proxy"],
                 "contract_version": "v5.quant_lab.telemetry.v2",
             }
         )
@@ -344,15 +357,15 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "ALLOW" in compliance
         assert "ACTIVE_ABORT" in permission_audit
         assert "quant_lab_shadow_mode" in permission_audit
-        assert permission_audit_rows[0]["deep_health_status"] == "warning"
-        assert permission_audit_rows[0]["deep_health_warnings"] == "cost_health_warning"
-        assert permission_audit_rows[0]["deep_cost_health_status"] == "warning"
-        assert permission_audit_rows[0]["deep_cost_hard_fallback_ratio"] == "0.0"
-        assert permission_audit_rows[0]["deep_cost_soft_fallback_ratio"] == "1.0"
-        assert permission_audit_rows[0]["deep_cost_proxy_rows"] == "33"
-        assert permission_audit_rows[0]["deep_cost_proxy_only_count"] == "33"
-        assert permission_audit_rows[0]["deep_cost_symbols_missing"] == "ALLO-USDT;BCH-USDT"
-        assert permission_audit_rows[0]["deep_cost_warnings"] == "soft_fallback_ratio_gt_0.5;all_rows_public_spread_proxy"
+        deep_health_row = next(row for row in permission_audit_rows if row["deep_cost_health_status"] == "warning")
+        assert deep_health_row["deep_health_status"] == "warning"
+        assert deep_health_row["deep_health_warnings"] == "cost_health_warning"
+        assert deep_health_row["deep_cost_hard_fallback_ratio"] == "0.0"
+        assert deep_health_row["deep_cost_soft_fallback_ratio"] == "1.0"
+        assert deep_health_row["deep_cost_proxy_rows"] == "33"
+        assert deep_health_row["deep_cost_proxy_only_count"] == "33"
+        assert deep_health_row["deep_cost_symbols_missing"] == "ALLO-USDT;BCH-USDT"
+        assert deep_health_row["deep_cost_warnings"] == "soft_fallback_ratio_gt_0.5;all_rows_public_spread_proxy"
         assert "quant_lab_requested_mode" in mode_audit.splitlines()[0]
         assert "enforce_readiness_status" in mode_audit.splitlines()[0]
         assert "enforce" in mode_audit
