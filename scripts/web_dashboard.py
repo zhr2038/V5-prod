@@ -2761,6 +2761,8 @@ def _summarize_quant_lab_api_requests(
         key=lambda row: float(_coerce_timestamp_epoch(row.get('ts_utc') or row.get('ts') or row.get('timestamp')) or float('-inf')),
     )
     latest_summary = latest.get('response_summary') if isinstance(latest.get('response_summary'), dict) else {}
+    latest_warnings_raw = latest_summary.get('warnings') if isinstance(latest_summary.get('warnings'), list) else []
+    latest_warnings = [str(item) for item in latest_warnings_raw if str(item).strip()]
     latest_latency = None
     try:
         latest_latency = float(latest.get('latency_ms')) if latest.get('latency_ms') not in (None, '') else None
@@ -2783,6 +2785,7 @@ def _summarize_quant_lab_api_requests(
         'latest_endpoint': str(latest.get('endpoint_path') or '--'),
         'latest_status_code': _status_code(latest),
         'latest_service_status': str(latest_summary.get('status') or ''),
+        'latest_service_warnings': latest_warnings,
         'latest_latency_ms': latest_latency,
         'latest_ts_utc': str(latest.get('ts_utc') or latest.get('ts') or latest.get('timestamp') or ''),
     }
@@ -2844,6 +2847,55 @@ def _load_quant_lab_api_status(
     return {'name': '中台 API', 'status': status, 'detail': ' · '.join(detail_parts), 'request_metrics': metrics}
 
 
+def _quant_lab_live_cost_warning_is_advisory(live_health: Dict[str, Any]) -> bool:
+    if not isinstance(live_health, dict) or live_health.get('available') is False:
+        return False
+
+    live_status = str(live_health.get('status') or '').strip().lower()
+    health_status = str(live_health.get('health_status') or '').strip().lower()
+    if live_status != 'warning' or health_status not in {'warning', 'stale'}:
+        return False
+    if str(live_health.get('reason') or '').strip():
+        return False
+
+    warnings_raw = live_health.get('warnings') if isinstance(live_health.get('warnings'), list) else []
+    warnings = {str(item).strip() for item in warnings_raw if str(item).strip()}
+    if warnings != {'cost_health_warning'}:
+        return False
+
+    cost_health = live_health.get('cost_health') if isinstance(live_health.get('cost_health'), dict) else {}
+    live_coverage = (
+        cost_health.get('live_universe_cost_coverage')
+        if isinstance(cost_health.get('live_universe_cost_coverage'), dict)
+        else {}
+    )
+    coverage_status = str(live_coverage.get('coverage_status') or live_coverage.get('status') or '').strip().upper()
+    if coverage_status != 'PASS':
+        return False
+    missing_symbols = live_coverage.get('missing_symbols')
+    return not missing_symbols
+
+
+def _quant_lab_request_warning_is_live_cost_advisory(request_check: Dict[str, Any]) -> bool:
+    metrics = request_check.get('request_metrics') if isinstance(request_check, dict) else {}
+    if not isinstance(metrics, dict) or not metrics.get('available'):
+        return False
+    if int(metrics.get('error_count') or 0) > 0 or int(metrics.get('fallback_count') or 0) > 0:
+        return False
+    try:
+        if float(metrics.get('p95_latency_ms') or 0.0) >= 2500.0:
+            return False
+    except (TypeError, ValueError):
+        return False
+    latest_endpoint = str(metrics.get('latest_endpoint') or '').strip()
+    latest_service_status = str(metrics.get('latest_service_status') or '').strip().lower()
+    if latest_endpoint not in {'/v1/health', '/v1/health/deep'} or latest_service_status not in {'warning', 'stale'}:
+        return False
+    latest_warnings_raw = metrics.get('latest_service_warnings') if isinstance(metrics.get('latest_service_warnings'), list) else []
+    latest_warnings = {str(item).strip() for item in latest_warnings_raw if str(item).strip()}
+    return latest_warnings == {'cost_health_warning'}
+
+
 def _load_quant_lab_live_health_status(config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     quant_lab_cfg = config.get('quant_lab', {}) if isinstance(config, dict) else {}
     if not isinstance(quant_lab_cfg, dict) or 'enabled' not in quant_lab_cfg:
@@ -2884,6 +2936,13 @@ def _load_quant_lab_live_health_status(config: Dict[str, Any]) -> Optional[Dict[
     warnings = [str(item) for item in warnings_raw if str(item).strip()]
     proxy_meta = payload.get('proxy') if isinstance(payload.get('proxy'), dict) else {}
     upstream_path = str(proxy_meta.get('upstream_path') or '').strip()
+    cost_health = payload.get('cost_health') if isinstance(payload.get('cost_health'), dict) else {}
+    live_coverage = (
+        cost_health.get('live_universe_cost_coverage')
+        if isinstance(cost_health.get('live_universe_cost_coverage'), dict)
+        else {}
+    )
+    live_coverage_status = str(live_coverage.get('coverage_status') or live_coverage.get('status') or '').strip().upper()
 
     status = 'healthy'
     if not available:
@@ -2906,6 +2965,8 @@ def _load_quant_lab_live_health_status(config: Dict[str, Any]) -> Optional[Dict[
         detail_parts.append(f'warnings {", ".join(warnings[:3])}')
     if len(warnings) > 3:
         detail_parts.append(f'+{len(warnings) - 3}')
+    if live_coverage_status:
+        detail_parts.append(f'live coverage {live_coverage_status}')
 
     live_health = {
         'status': status,
@@ -2916,8 +2977,9 @@ def _load_quant_lab_live_health_status(config: Dict[str, Any]) -> Optional[Dict[
         'warnings': warnings,
         'proxy': proxy_meta,
     }
-    if isinstance(payload.get('cost_health'), dict):
-        live_health['cost_health'] = payload.get('cost_health')
+    if cost_health:
+        live_health['cost_health'] = cost_health
+    live_health['advisory_cost_warning'] = _quant_lab_live_cost_warning_is_advisory(live_health)
     if payload.get('detail_source'):
         live_health['detail_source'] = payload.get('detail_source')
     return live_health
@@ -2934,10 +2996,15 @@ def _merge_quant_lab_live_health_status(
     merged.setdefault('name', '中台 API')
     current_status = str(merged.get('status') or 'warning').strip().lower()
     live_status = str(live_health.get('status') or '').strip().lower()
+    advisory_cost_warning = bool(live_health.get('advisory_cost_warning')) or _quant_lab_live_cost_warning_is_advisory(live_health)
     if live_status == 'critical':
         merged['status'] = 'critical'
     elif live_status == 'warning' and current_status != 'critical':
-        merged['status'] = 'warning'
+        if advisory_cost_warning:
+            if current_status == 'warning' and _quant_lab_request_warning_is_live_cost_advisory(merged):
+                merged['status'] = 'healthy'
+        else:
+            merged['status'] = 'warning'
 
     detail = str(merged.get('detail') or '').strip()
     live_detail = str(live_health.get('detail') or '').strip()
