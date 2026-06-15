@@ -2844,6 +2844,109 @@ def _load_quant_lab_api_status(
     return {'name': '中台 API', 'status': status, 'detail': ' · '.join(detail_parts), 'request_metrics': metrics}
 
 
+def _load_quant_lab_live_health_status(config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    quant_lab_cfg = config.get('quant_lab', {}) if isinstance(config, dict) else {}
+    if not isinstance(quant_lab_cfg, dict) or 'enabled' not in quant_lab_cfg:
+        return None
+
+    mode = str(quant_lab_cfg.get('mode') or 'unknown').strip() or 'unknown'
+    if not _dashboard_to_bool(quant_lab_cfg.get('enabled')) or mode == 'local_only':
+        return None
+
+    try:
+        payload = _quant_lab_proxy_fetch('/v1/health/deep', ttl_seconds=10.0)
+        if not payload.get('available') and payload.get('reason') == 'quant_lab_upstream_http_error':
+            fallback = _quant_lab_proxy_fetch('/v1/health', ttl_seconds=10.0)
+            fallback['detail_source'] = 'health_fallback'
+            payload = fallback
+    except Exception as exc:
+        return {
+            'status': 'warning',
+            'health_status': '',
+            'available': False,
+            'reason': 'quant_lab_live_health_error',
+            'detail': f"deep health unavailable · {_sanitize_public_error_text(exc, default='health unavailable')}",
+        }
+
+    if not isinstance(payload, dict):
+        return {
+            'status': 'warning',
+            'health_status': '',
+            'available': False,
+            'reason': 'quant_lab_live_health_invalid_payload',
+            'detail': 'deep health invalid payload',
+        }
+
+    available = payload.get('available') is not False
+    health_status = str(payload.get('status') or '').strip().lower()
+    reason = str(payload.get('reason') or '').strip()
+    warnings_raw = payload.get('warnings') if isinstance(payload.get('warnings'), list) else []
+    warnings = [str(item) for item in warnings_raw if str(item).strip()]
+    proxy_meta = payload.get('proxy') if isinstance(payload.get('proxy'), dict) else {}
+    upstream_path = str(proxy_meta.get('upstream_path') or '').strip()
+
+    status = 'healthy'
+    if not available:
+        status = 'critical' if reason in {
+            'quant_lab_proxy_timeout',
+            'quant_lab_proxy_unavailable',
+            'quant_lab_upstream_http_error',
+        } else 'warning'
+    elif health_status in {'critical', 'missing', 'degraded', 'error'}:
+        status = 'critical'
+    elif health_status in {'warning', 'stale'}:
+        status = 'warning'
+
+    detail_parts = [f'deep {health_status or ("available" if available else "unavailable")}']
+    if upstream_path and upstream_path != '/v1/health/deep':
+        detail_parts.append(upstream_path)
+    if reason:
+        detail_parts.append(reason)
+    if warnings:
+        detail_parts.append(f'warnings {", ".join(warnings[:3])}')
+    if len(warnings) > 3:
+        detail_parts.append(f'+{len(warnings) - 3}')
+
+    live_health = {
+        'status': status,
+        'health_status': health_status,
+        'available': available,
+        'reason': reason,
+        'detail': ' · '.join(detail_parts),
+        'warnings': warnings,
+        'proxy': proxy_meta,
+    }
+    if isinstance(payload.get('cost_health'), dict):
+        live_health['cost_health'] = payload.get('cost_health')
+    if payload.get('detail_source'):
+        live_health['detail_source'] = payload.get('detail_source')
+    return live_health
+
+
+def _merge_quant_lab_live_health_status(
+    request_check: Dict[str, Any],
+    live_health: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if not live_health:
+        return request_check
+
+    merged = dict(request_check or {})
+    merged.setdefault('name', '中台 API')
+    current_status = str(merged.get('status') or 'warning').strip().lower()
+    live_status = str(live_health.get('status') or '').strip().lower()
+    if live_status == 'critical':
+        merged['status'] = 'critical'
+    elif live_status == 'warning' and current_status != 'critical':
+        merged['status'] = 'warning'
+
+    detail = str(merged.get('detail') or '').strip()
+    live_detail = str(live_health.get('detail') or '').strip()
+    if live_detail and live_detail not in detail:
+        merged['detail'] = f'{detail} · {live_detail}' if detail else live_detail
+    merged['deep_health'] = live_health
+    return merged
+
+
 def _quant_lab_proxy_cache_key(path: str, params: Dict[str, Any]) -> tuple[str, tuple[tuple[str, str], ...]]:
     clean_params = {
         str(key): str(value)
@@ -8096,6 +8199,10 @@ def api_health():
         # 4. 检查 quant-lab 中台 API（只读，基于请求审计日志）
         try:
             quant_lab_check = _load_quant_lab_api_status(config, runtime_paths)
+            quant_lab_check = _merge_quant_lab_live_health_status(
+                quant_lab_check,
+                _load_quant_lab_live_health_status(config),
+            )
             checks.append(quant_lab_check)
             if quant_lab_check.get('status') == 'critical':
                 overall_status = 'critical'

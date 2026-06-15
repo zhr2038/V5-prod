@@ -6119,6 +6119,7 @@ def test_health_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path)
     monkeypatch.setattr(module, "WORKSPACE", tmp_path)
     monkeypatch.setattr(module, "_pick_timer_name", lambda: "v5-prod.user.timer")
     monkeypatch.setattr(module, "_get_timer_state", lambda _name: {"active": True, "error": None})
+    monkeypatch.setattr(module, "_load_quant_lab_live_health_status", lambda _config: None)
     monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT", raising=False)
     monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX", raising=False)
     monkeypatch.setenv("EXCHANGE_API_KEY", "ambient-key")
@@ -6154,6 +6155,7 @@ def test_health_api_does_not_treat_disabled_ml_promotion_as_critical(monkeypatch
     monkeypatch.setattr(module, "_pick_timer_name", lambda: "v5-prod.user.timer")
     monkeypatch.setattr(module, "_get_timer_state", lambda _name: {"active": True, "error": None})
     monkeypatch.setattr(module, "_load_quant_lab_api_status", lambda *_args, **_kwargs: {"name": "quant-lab API", "status": "healthy", "detail": "disabled"})
+    monkeypatch.setattr(module, "_load_quant_lab_live_health_status", lambda _config: None)
     monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT", raising=False)
     monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX", raising=False)
 
@@ -6262,6 +6264,7 @@ def test_health_api_includes_quant_lab_api_status(monkeypatch, tmp_path):
     monkeypatch.setattr(module, "_dashboard_live_account_enabled", lambda: True)
     monkeypatch.setattr(module, "_load_workspace_exchange_creds", lambda: ("k", "s", "p"))
     monkeypatch.setattr(module, "_load_okx_account_balance", lambda *_args: {"code": "0", "data": []})
+    monkeypatch.setattr(module, "_load_quant_lab_live_health_status", lambda _config: None)
 
     response = client.get("/api/health")
 
@@ -6276,6 +6279,94 @@ def test_health_api_includes_quant_lab_api_status(monkeypatch, tmp_path):
     assert quant_lab["request_metrics"]["success_count"] == 2
     assert quant_lab["request_metrics"]["p95_latency_ms"] == pytest.approx(118.0)
     assert quant_lab["request_metrics"]["latest_latency_ms"] == pytest.approx(80.0)
+
+
+def test_health_api_reflects_quant_lab_deep_health_warning(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    orders_db = reports_dir / "orders.sqlite"
+    conn = sqlite3.connect(str(orders_db))
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE orders (inst_id TEXT)")
+    cur.execute("INSERT INTO orders(inst_id) VALUES ('BTC-USDT')")
+    conn.commit()
+    conn.close()
+
+    now = datetime.now(timezone.utc)
+    (reports_dir / "quant_lab_requests.jsonl").write_text(
+        json.dumps(
+            {
+                "endpoint_path": "/v1/risk/live-permission",
+                "success": True,
+                "status_code": 200,
+                "latency_ms": 80.0,
+                "response_summary": {"permission": "ABORT"},
+                "ts_utc": now.isoformat().replace("+00:00", "Z"),
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    runtime_paths = module.DashboardRuntimePaths(
+        reports_dir=reports_dir,
+        orders_db=orders_db,
+        fills_db=reports_dir / "fills.sqlite",
+        positions_db=reports_dir / "positions.sqlite",
+        kill_switch_path=reports_dir / "kill_switch.json",
+        reconcile_status_path=reports_dir / "reconcile_status.json",
+        runs_dir=reports_dir / "runs",
+        auto_risk_guard_path=reports_dir / "auto_risk_guard.json",
+        auto_risk_eval_path=reports_dir / "auto_risk_eval.json",
+        telemetry_db=reports_dir / "api_telemetry.sqlite",
+    )
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "quant_lab": {
+                "enabled": True,
+                "mode": "shadow",
+                "request_log_path": "reports/quant_lab_requests.jsonl",
+            }
+        },
+    )
+    monkeypatch.setattr(module, "_resolve_dashboard_runtime_paths", lambda _config: runtime_paths)
+    monkeypatch.setattr(module, "_pick_timer_name", lambda: "v5-prod.user.timer")
+    monkeypatch.setattr(module, "_get_timer_state", lambda _name: {"active": True, "error": None})
+    monkeypatch.setattr(module, "_dashboard_live_account_enabled", lambda: True)
+    monkeypatch.setattr(module, "_load_workspace_exchange_creds", lambda: ("k", "s", "p"))
+    monkeypatch.setattr(module, "_load_okx_account_balance", lambda *_args: {"code": "0", "data": []})
+    monkeypatch.setattr(
+        module,
+        "_quant_lab_proxy_fetch",
+        lambda *_args, **_kwargs: {
+            "available": True,
+            "status": "warning",
+            "warnings": ["cost_health_warning"],
+            "cost_health": {"status": "warning"},
+            "proxy": {"upstream_path": "/v1/health/deep"},
+        },
+    )
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    quant_lab = next(check for check in payload["checks"] if check.get("name") == "中台 API")
+    assert payload["status"] == "warning"
+    assert payload["warning_count"] >= 1
+    assert quant_lab["status"] == "warning"
+    assert quant_lab["request_metrics"]["total"] == 1
+    assert quant_lab["deep_health"]["health_status"] == "warning"
+    assert quant_lab["deep_health"]["warnings"] == ["cost_health_warning"]
 
 
 def test_quant_lab_status_api_exposes_local_request_latency_metrics(monkeypatch, tmp_path):
