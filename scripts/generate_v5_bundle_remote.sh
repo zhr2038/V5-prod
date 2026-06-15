@@ -8566,9 +8566,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                     row.get("entry_vs_pre_24h_high_bps"),
                     not_obs,
                 ),
-                "anti_chase_flag": bool_observed(
-                    btc_probe_anti_chase_flag(row)
-                ),
+                "anti_chase_flag": btc_probe_anti_chase_flag(row),
                 "entry_quality_status": btc_probe_entry_quality_status(row, expected_edge, final_score),
             })
         out.sort(key=lambda item: (flatten_value(item.get("entry_ts")), flatten_value(item.get("run_id"))))

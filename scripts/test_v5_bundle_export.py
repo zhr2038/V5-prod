@@ -3415,6 +3415,7 @@ def fixture_btc_probe_entry_quality_nested_router_root(
     alpha6_score=0.396,
     alpha6_side="buy",
     alias_fields=False,
+    quality_guard_fields=True,
 ):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -3453,6 +3454,9 @@ def fixture_btc_probe_entry_quality_nested_router_root(
         "selection_mode": "priority",
         "anti_chase_flag": False,
     }
+    if not quality_guard_fields:
+        router_decision.pop("same_symbol_reentry_bypass", None)
+        router_decision.pop("anti_chase_flag", None)
     if alias_fields:
         router_decision.pop("alpha6_score", None)
         router_decision.pop("alpha6_side", None)
@@ -5756,6 +5760,32 @@ def main():
             assert row["same_symbol_reentry_bypass"] == "probe_stop_loss_reentry_after_loss", row
             assert row["anti_chase_flag"] == "true", row
             assert row["entry_quality_status"] == "invalid_negative_edge_reentry_after_loss", row
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-btc-probe-entry-quality-missing-guards-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_btc_probe_entry_quality_nested_router_root(
+            root,
+            quality_guard_fields=False,
+        )
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(
+                    csv.DictReader(
+                        tf.extractfile(
+                            extract_member(tf, "summaries/btc_probe_entry_quality_audit.csv")
+                        ).read().decode().splitlines()
+                    )
+                )
+            assert len(rows) == 1, rows
+            row = rows[0]
+            assert row["same_symbol_reentry_bypass"] == "not_observable", row
+            assert row["anti_chase_flag"] == "not_observable", row
+            assert row["entry_quality_status"] == "invalid_negative_expected_edge", row
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
