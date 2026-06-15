@@ -104,6 +104,20 @@ def test_risk_permission_response_contract_fields_are_parsed() -> None:
     assert permission.contract_version == "fixture.contract.v1"
 
 
+def test_risk_permission_string_false_enforceable_stays_false() -> None:
+    permission = RiskPermission.from_payload(
+        {
+            "strategy": "v5",
+            "version": "5.0.0",
+            "permission_status": "ACTIVE_ALLOW",
+            "permission": "ALLOW",
+            "enforceable": "false",
+        }
+    )
+
+    assert permission.enforceable is False
+
+
 def test_shadow_active_abort_effective_allow_with_would_block(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path, "shadow")
     guard = _guard(tmp_path, cfg, _PermissionClient(permission="ABORT", permission_status="ACTIVE_ABORT"))

@@ -9,6 +9,7 @@ import pytest
 
 from src.quant_lab_client.client import QuantLabClient
 from src.quant_lab_client.exceptions import QuantLabValidationError
+from src.quant_lab_client.models import GateDecision
 
 
 class _Response:
@@ -392,6 +393,18 @@ def test_quant_lab_health_requires_read_only(tmp_path: Path) -> None:
 
     with pytest.raises(QuantLabValidationError):
         client.get_health()
+
+
+def test_gate_decision_string_false_passed_stays_false() -> None:
+    decision = GateDecision.from_payload(
+        {
+            "alpha_id": "v5.core",
+            "status": "QUARANTINE",
+            "passed": "false",
+        }
+    )
+
+    assert decision.passed is False
 
 
 def test_https_with_token_sends_authorization(tmp_path: Path) -> None:
