@@ -977,6 +977,19 @@ class QuantLabGuard:
                 deep_health_getter = getattr(self.client, "get_deep_health", None)
                 if callable(deep_health_getter):
                     deep_health = deep_health_getter()
+                deep_cost_health = getattr(deep_health, "cost_health", {}) if deep_health is not None else {}
+                if not isinstance(deep_cost_health, dict):
+                    deep_cost_health = {}
+                deep_data_health = getattr(deep_health, "data_health", {}) if deep_health is not None else {}
+                if not isinstance(deep_data_health, dict):
+                    deep_data_health = {}
+                deep_risk_dependency = (
+                    getattr(deep_health, "risk_permission_dependency_meta", {})
+                    if deep_health is not None
+                    else {}
+                )
+                if not isinstance(deep_risk_dependency, dict):
+                    deep_risk_dependency = {}
                 self._emit_usage(
                     {
                         "event_type": "health_check",
@@ -988,21 +1001,19 @@ class QuantLabGuard:
                         "status": getattr(health, "status", "ok"),
                         "deep_health_status": getattr(deep_health, "status", None),
                         "deep_health_warnings": list(getattr(deep_health, "warnings", []) or []),
-                        "deep_cost_health_status": (
-                            getattr(deep_health, "cost_health", {}) or {}
-                        ).get("status")
-                        if deep_health is not None
-                        else None,
-                        "deep_data_health_status": (
-                            getattr(deep_health, "data_health", {}) or {}
-                        ).get("status")
-                        if deep_health is not None
-                        else None,
-                        "deep_risk_dependency_status": (
-                            getattr(deep_health, "risk_permission_dependency_meta", {}) or {}
-                        ).get("status")
-                        if deep_health is not None
-                        else None,
+                        "deep_cost_health_status": deep_cost_health.get("status"),
+                        "deep_cost_fallback_ratio": deep_cost_health.get("fallback_ratio"),
+                        "deep_cost_hard_fallback_ratio": deep_cost_health.get("hard_fallback_ratio"),
+                        "deep_cost_soft_fallback_ratio": deep_cost_health.get("soft_fallback_ratio"),
+                        "deep_cost_actual_rows": deep_cost_health.get("actual_rows"),
+                        "deep_cost_mixed_rows": deep_cost_health.get("mixed_rows"),
+                        "deep_cost_proxy_rows": deep_cost_health.get("proxy_rows"),
+                        "deep_cost_global_default_rows": deep_cost_health.get("global_default_rows"),
+                        "deep_cost_proxy_only_count": deep_cost_health.get("proxy_only_count"),
+                        "deep_cost_symbols_missing": deep_cost_health.get("symbols_missing_cost"),
+                        "deep_cost_warnings": deep_cost_health.get("warnings"),
+                        "deep_data_health_status": deep_data_health.get("status"),
+                        "deep_risk_dependency_status": deep_risk_dependency.get("status"),
                     }
                 )
             except Exception as exc:

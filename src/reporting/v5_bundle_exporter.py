@@ -205,6 +205,19 @@ PERMISSION_AUDIT_FIELDS = (
     "remote_permission_telemetry_latest_ts",
     "remote_permission_contract_version",
     "permission_contract_violation",
+    "deep_health_status",
+    "deep_health_warnings",
+    "deep_cost_health_status",
+    "deep_cost_fallback_ratio",
+    "deep_cost_hard_fallback_ratio",
+    "deep_cost_soft_fallback_ratio",
+    "deep_cost_actual_rows",
+    "deep_cost_mixed_rows",
+    "deep_cost_proxy_rows",
+    "deep_cost_global_default_rows",
+    "deep_cost_proxy_only_count",
+    "deep_cost_symbols_missing",
+    "deep_cost_warnings",
     "fallback_used",
     "fallback_reason",
     "event_type",
@@ -701,6 +714,14 @@ def _csv_null(value: Any) -> Any:
     if value is None or value == "":
         return "null"
     return value
+
+
+def _csv_join(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, (list, tuple, set)):
+        return ";".join(str(item) for item in value if item not in (None, ""))
+    return str(value)
 
 
 def _build_trade_bundle_rows(reports: Path) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]], list[Dict[str, Any]]]:
@@ -1490,6 +1511,19 @@ def _build_permission_audit_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, A
                 "remote_permission_telemetry_latest_ts": row.get("remote_permission_telemetry_latest_ts", ""),
                 "remote_permission_contract_version": row.get("remote_permission_contract_version", ""),
                 "permission_contract_violation": str(_truthy(row.get("permission_contract_violation"))).lower(),
+                "deep_health_status": row.get("deep_health_status", ""),
+                "deep_health_warnings": _csv_join(row.get("deep_health_warnings")),
+                "deep_cost_health_status": row.get("deep_cost_health_status", ""),
+                "deep_cost_fallback_ratio": row.get("deep_cost_fallback_ratio", ""),
+                "deep_cost_hard_fallback_ratio": row.get("deep_cost_hard_fallback_ratio", ""),
+                "deep_cost_soft_fallback_ratio": row.get("deep_cost_soft_fallback_ratio", ""),
+                "deep_cost_actual_rows": row.get("deep_cost_actual_rows", ""),
+                "deep_cost_mixed_rows": row.get("deep_cost_mixed_rows", ""),
+                "deep_cost_proxy_rows": row.get("deep_cost_proxy_rows", ""),
+                "deep_cost_global_default_rows": row.get("deep_cost_global_default_rows", ""),
+                "deep_cost_proxy_only_count": row.get("deep_cost_proxy_only_count", ""),
+                "deep_cost_symbols_missing": _csv_join(row.get("deep_cost_symbols_missing")),
+                "deep_cost_warnings": _csv_join(row.get("deep_cost_warnings")),
                 "fallback_used": str(_truthy(row.get("fallback_used"))).lower(),
                 "fallback_reason": row.get("fallback_reason", ""),
                 "event_type": "permission_audit",

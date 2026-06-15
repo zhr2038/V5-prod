@@ -55,7 +55,19 @@ class _Client:
             status=self.deep_health_status,
             mode="read-only",
             warnings=["cost_health_warning"] if self.deep_health_status == "warning" else [],
-            cost_health={"status": self.deep_health_status},
+            cost_health={
+                "status": self.deep_health_status,
+                "fallback_ratio": 1.0 if self.deep_health_status == "warning" else 0.0,
+                "hard_fallback_ratio": 0.0,
+                "soft_fallback_ratio": 1.0 if self.deep_health_status == "warning" else 0.0,
+                "actual_rows": 0 if self.deep_health_status == "warning" else 3,
+                "mixed_rows": 0,
+                "proxy_rows": 33 if self.deep_health_status == "warning" else 0,
+                "global_default_rows": 0,
+                "proxy_only_count": 33 if self.deep_health_status == "warning" else 0,
+                "symbols_missing_cost": ["ALLO-USDT"] if self.deep_health_status == "warning" else [],
+                "warnings": ["soft_fallback_ratio_gt_0.5"] if self.deep_health_status == "warning" else [],
+            },
             data_health={"status": "ok"},
             risk_permission_dependency_meta={"status": "ok"},
         )
@@ -241,6 +253,14 @@ def test_refresh_permission_records_deep_health_warning(tmp_path: Path) -> None:
     assert health_row["deep_health_status"] == "warning"
     assert health_row["deep_health_warnings"] == ["cost_health_warning"]
     assert health_row["deep_cost_health_status"] == "warning"
+    assert health_row["deep_cost_fallback_ratio"] == 1.0
+    assert health_row["deep_cost_hard_fallback_ratio"] == 0.0
+    assert health_row["deep_cost_soft_fallback_ratio"] == 1.0
+    assert health_row["deep_cost_actual_rows"] == 0
+    assert health_row["deep_cost_proxy_rows"] == 33
+    assert health_row["deep_cost_proxy_only_count"] == 33
+    assert health_row["deep_cost_symbols_missing"] == ["ALLO-USDT"]
+    assert health_row["deep_cost_warnings"] == ["soft_fallback_ratio_gt_0.5"]
 
 
 def test_guard_cost_fallback_to_local(tmp_path: Path) -> None:

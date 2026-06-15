@@ -118,6 +118,19 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
                 "remote_permission_telemetry_latest_ts": "2026-05-11T12:57:00Z",
                 "remote_permission_contract_version": "v5.quant_lab.telemetry.v2",
                 "permission_contract_violation": False,
+                "deep_health_status": "warning",
+                "deep_health_warnings": ["cost_health_warning"],
+                "deep_cost_health_status": "warning",
+                "deep_cost_fallback_ratio": 1.0,
+                "deep_cost_hard_fallback_ratio": 0.0,
+                "deep_cost_soft_fallback_ratio": 1.0,
+                "deep_cost_actual_rows": 0,
+                "deep_cost_mixed_rows": 0,
+                "deep_cost_proxy_rows": 33,
+                "deep_cost_global_default_rows": 0,
+                "deep_cost_proxy_only_count": 33,
+                "deep_cost_symbols_missing": ["ALLO-USDT", "BCH-USDT"],
+                "deep_cost_warnings": ["soft_fallback_ratio_gt_0.5", "all_rows_public_spread_proxy"],
                 "contract_version": "v5.quant_lab.telemetry.v2",
             }
         )
@@ -301,6 +314,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         readiness_snapshot = json.loads(tf.extractfile("summaries/enforce_readiness_snapshot.json").read().decode("utf-8"))
         trade_metrics = list(csv.DictReader(tf.extractfile("summaries/trade_metrics.csv").read().decode("utf-8").splitlines()))
         fill_metrics = list(csv.DictReader(tf.extractfile("summaries/fill_metrics.csv").read().decode("utf-8").splitlines()))
+        permission_audit_rows = list(csv.DictReader(permission_audit.splitlines()))
         candidate_snapshot = list(csv.DictReader(tf.extractfile("summaries/candidate_snapshot.csv").read().decode("utf-8").splitlines()))
         raw_candidate_snapshot = list(csv.DictReader(tf.extractfile("raw/reports/candidate_snapshot.csv").read().decode("utf-8").splitlines()))
         order_lifecycle = list(csv.DictReader(tf.extractfile("summaries/order_lifecycle.csv").read().decode("utf-8").splitlines()))
@@ -323,11 +337,22 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "remote_permission_source_bundle_ts" in compliance.splitlines()[0]
         assert "remote_permission_contract_version" in compliance.splitlines()[0]
         assert "permission_contract_violation" in compliance.splitlines()[0]
+        assert "deep_cost_hard_fallback_ratio" in permission_audit.splitlines()[0]
+        assert "deep_cost_soft_fallback_ratio" in permission_audit.splitlines()[0]
         assert "shadow" in compliance
         assert "ABORT" in compliance
         assert "ALLOW" in compliance
         assert "ACTIVE_ABORT" in permission_audit
         assert "quant_lab_shadow_mode" in permission_audit
+        assert permission_audit_rows[0]["deep_health_status"] == "warning"
+        assert permission_audit_rows[0]["deep_health_warnings"] == "cost_health_warning"
+        assert permission_audit_rows[0]["deep_cost_health_status"] == "warning"
+        assert permission_audit_rows[0]["deep_cost_hard_fallback_ratio"] == "0.0"
+        assert permission_audit_rows[0]["deep_cost_soft_fallback_ratio"] == "1.0"
+        assert permission_audit_rows[0]["deep_cost_proxy_rows"] == "33"
+        assert permission_audit_rows[0]["deep_cost_proxy_only_count"] == "33"
+        assert permission_audit_rows[0]["deep_cost_symbols_missing"] == "ALLO-USDT;BCH-USDT"
+        assert permission_audit_rows[0]["deep_cost_warnings"] == "soft_fallback_ratio_gt_0.5;all_rows_public_spread_proxy"
         assert "quant_lab_requested_mode" in mode_audit.splitlines()[0]
         assert "enforce_readiness_status" in mode_audit.splitlines()[0]
         assert "enforce" in mode_audit
