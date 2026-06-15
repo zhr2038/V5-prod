@@ -971,6 +971,7 @@ class QuantLabGuard:
                     }
                 )
             except Exception as exc:
+                self.request_error_count += 1
                 self._emit_usage(
                     {
                         "event_type": "health_check",
@@ -982,6 +983,85 @@ class QuantLabGuard:
                         "error_message_sanitized": str(sanitize_quant_lab_obj(str(exc)[:300])),
                     }
                 )
+                qcfg = _ql_cfg(self.cfg)
+                self._apply_enforce_readiness(None)
+                readiness = self.mode_resolution.enforce_readiness
+                fail_policy = str(getattr(qcfg, "fail_policy", "sell_only") or "sell_only").lower()
+                action = _fail_policy_action(fail_policy)
+                permission = ALLOW if action == ALLOW_LOCAL else action
+                effective_permission = permission if self.apply_permission_gate else ALLOW
+                request_id = f"{self.run_id or 'run'}:health"
+                result = QuantLabGuardResult(
+                    enabled=True,
+                    permission=permission,
+                    allowed_modes=["local"] if action == ALLOW_LOCAL else [permission.lower()],
+                    reasons=["quant_lab_health_unavailable"],
+                    fallback_used=True,
+                    fallback_reason=f"quant_lab_health_unavailable_{fail_policy}",
+                    response_ts=utc_now_iso(),
+                    error_type=type(exc).__name__,
+                    error_message_sanitized=str(sanitize_quant_lab_obj(str(exc)[:300])),
+                    mode=self.mode.value,
+                    mode_source=self.mode_resolution.mode_source,
+                    mode_override_path=self.mode_resolution.override_path,
+                    called_api=True,
+                    apply_permission_gate=self.apply_permission_gate,
+                    apply_cost_gate=self.apply_cost_gate,
+                    permission_gate_enforced=self.apply_permission_gate,
+                    cost_gate_enforced=self.apply_cost_gate,
+                    raw_permission_decision="UNAVAILABLE",
+                    local_mode=self.mode.value,
+                    effective_permission_decision=effective_permission,
+                    would_block_if_enforced=_permission_would_block(permission),
+                    remote_permission_as_of_ts=None,
+                    remote_permission_expires_at=None,
+                    remote_permission_status="unavailable",
+                    contract_version=CONTRACT_VERSION,
+                    request_id=request_id,
+                    quant_lab_requested_mode=(self.mode_resolution.requested_mode or self.mode).value,
+                    quant_lab_effective_mode=self.mode.value,
+                    enforce_readiness_status=readiness.status if readiness is not None else None,
+                    enforce_blocked_reasons=list(readiness.reasons) if readiness is not None else [],
+                    enforce_blocked_reason=";".join(readiness.reasons) if readiness is not None and readiness.reasons else None,
+                    contract_version_match=readiness.contract_version_match if readiness is not None else None,
+                    telemetry_schema_version_match=readiness.telemetry_schema_version_match if readiness is not None else None,
+                )
+                self.permission_result = result
+                self._emit_usage(
+                    {
+                        "event_type": EVENT_TYPE_FALLBACK,
+                        "legacy_event_type": "fallback",
+                        "request_id": request_id,
+                        "original_request_id": request_id,
+                        "endpoint": "/v1/health",
+                        "endpoint_path": "/v1/health",
+                        "status": "error",
+                        "success": False,
+                        "permission": result.permission,
+                        "quant_lab_permission": result.permission,
+                        "raw_permission_decision": "UNAVAILABLE",
+                        "local_mode": self.mode.value,
+                        "final_permission": effective_permission,
+                        "effective_permission_decision": effective_permission,
+                        "would_block_if_enforced": result.would_block_if_enforced,
+                        "fallback_used": True,
+                        "fallback_reason": result.fallback_reason,
+                        "remote_permission_as_of_ts": None,
+                        "remote_permission_expires_at": None,
+                        "remote_permission_status": "unavailable",
+                        "contract_version": CONTRACT_VERSION,
+                        "quant_lab_requested_mode": result.quant_lab_requested_mode,
+                        "quant_lab_effective_mode": result.quant_lab_effective_mode,
+                        "enforce_readiness_status": result.enforce_readiness_status,
+                        "enforce_blocked_reasons": result.enforce_blocked_reasons,
+                        "enforce_blocked_reason": result.enforce_blocked_reason,
+                        "contract_version_match": result.contract_version_match,
+                        "telemetry_schema_version_match": result.telemetry_schema_version_match,
+                        "error_type": result.error_type,
+                        "error_message_sanitized": result.error_message_sanitized,
+                    }
+                )
+                return result.permission
         return self.check_startup_permission(self.cfg, self.run_id).permission
 
     def filter_orders_by_permission(

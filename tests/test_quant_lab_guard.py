@@ -17,6 +17,7 @@ class _Client:
         self,
         *,
         permission="SELL_ONLY",
+        fail_health=False,
         fail_permission=False,
         fail_cost=False,
         cost_source="public_spread_proxy",
@@ -27,6 +28,7 @@ class _Client:
         allowed_live_modes=None,
     ) -> None:
         self.permission = permission
+        self.fail_health = fail_health
         self.fail_permission = fail_permission
         self.fail_cost = fail_cost
         self.cost_source = cost_source
@@ -37,11 +39,15 @@ class _Client:
         self.allowed_live_modes = allowed_live_modes
         self.run_id = "r"
         self.cost_kwargs = []
+        self.permission_calls = 0
 
     def get_health(self):
+        if self.fail_health:
+            raise RuntimeError("health unavailable secret-token")
         return SimpleNamespace(status="ok", mode="read-only")
 
     def get_live_permission(self, *, strategy: str, version: str):
+        self.permission_calls += 1
         if self.fail_permission:
             raise RuntimeError("unavailable secret-token")
         return RiskPermission(
@@ -157,6 +163,30 @@ def test_guard_unavailable_fail_policies(tmp_path: Path) -> None:
         result = guard.check_startup_permission(cfg, "run-1")
         assert result.permission == expected
         assert result.fallback_used is fallback
+
+
+def test_refresh_permission_health_failure_uses_fail_policy_without_permission_call(tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "enforce"
+    cfg.quant_lab.fail_policy = "sell_only"
+    client = _Client(permission="ALLOW", fail_health=True)
+    guard = _guard(tmp_path, cfg, client)
+
+    decision = guard.refresh_permission(include_health=True)
+
+    assert decision == "SELL_ONLY"
+    assert client.permission_calls == 0
+    assert guard.permission_result.fallback_used is True
+    assert guard.permission_result.fallback_reason == "quant_lab_health_unavailable_sell_only"
+    assert guard.permission_result.reasons == ["quant_lab_health_unavailable"]
+    rows = [json.loads(line) for line in (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["event_type"] == "health_check"
+    assert rows[0]["success"] is False
+    assert rows[-1]["event_type"] == "fallback"
+    assert rows[-1]["endpoint_path"] == "/v1/health"
+    assert rows[-1]["permission"] == "SELL_ONLY"
+    assert "secret-token" not in (tmp_path / "usage.jsonl").read_text(encoding="utf-8")
 
 
 def test_guard_cost_fallback_to_local(tmp_path: Path) -> None:

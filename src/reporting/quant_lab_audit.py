@@ -64,6 +64,8 @@ SECRET_VALUE_MARKERS = (
     "OK-ACCESS-KEY",
     "OK-ACCESS-PASSPHRASE",
     "OK-ACCESS-SIGN",
+    "secret-token",
+    "super-secret-token",
 )
 
 NON_SECRET_EXACT_KEYS = {
