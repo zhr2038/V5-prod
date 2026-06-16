@@ -33,7 +33,9 @@ class QuantLabGuardResult:
     enabled: bool
     permission: str
     allowed_modes: List[Any] = field(default_factory=list)
+    allowed_live_modes: Optional[List[Any]] = None
     reasons: List[Any] = field(default_factory=list)
+    live_block_reasons: List[Any] = field(default_factory=list)
     cost_model_version: Optional[str] = None
     gate_version: Optional[str] = None
     fallback_used: bool = False
@@ -526,6 +528,7 @@ class QuantLabGuard:
         raw_allowed_live_modes = _first_present(
             raw_response.get("allowed_live_modes"),
             raw_response.get("live_modes"),
+            self.permission_result.allowed_live_modes,
             dict(meta.get("quant_lab") or {}).get("allowed_live_modes"),
         )
         allowed_live_modes = _list_value(raw_allowed_live_modes)
@@ -613,7 +616,8 @@ class QuantLabGuard:
         self.local_preflight_permission = str(local_preflight_permission or "")
         self.final_permission = str(final_permission or "")
         raw_permission = self.permission_result.raw_permission_decision or self.permission_result.permission
-        would_block = _permission_would_block(raw_permission)
+        live_modes_empty = self.permission_result.allowed_live_modes == []
+        would_block = _permission_would_block(raw_permission) or live_modes_empty
         self._emit_usage(
             {
                 "event_type": "final_permission",
@@ -649,6 +653,9 @@ class QuantLabGuard:
                 "enforce_blocked_reason": self.permission_result.enforce_blocked_reason,
                 "contract_version_match": self.permission_result.contract_version_match,
                 "telemetry_schema_version_match": self.permission_result.telemetry_schema_version_match,
+                "allowed_live_modes": self.permission_result.allowed_live_modes,
+                "live_block_reasons": self.permission_result.live_block_reasons,
+                "live_modes_empty": live_modes_empty,
                 "success": True,
                 "enforced": self.apply_permission_gate,
                 "hypothetical": not self.apply_permission_gate,
@@ -818,6 +825,14 @@ class QuantLabGuard:
             )
             shadow_override_reason = "quant_lab_shadow_mode" if not self.apply_permission_gate else None
             reasons = list(permission.risk_reason_codes or permission.reasons or [])
+            live_block_reasons = list(permission.live_block_reasons or [])
+            live_modes_empty = raw_permission == ALLOW and permission.allowed_live_modes == []
+            if live_modes_empty:
+                permission_reason = "remote_permission_allowed_live_modes_empty"
+                if self.apply_permission_gate:
+                    effective_permission = SELL_ONLY
+                if "quant_lab_allowed_live_modes_empty" not in live_block_reasons:
+                    live_block_reasons.append("quant_lab_allowed_live_modes_empty")
             if permission_reason and permission_reason not in reasons:
                 reasons.append(permission_reason)
             readiness = self.mode_resolution.enforce_readiness
@@ -831,7 +846,9 @@ class QuantLabGuard:
                 enabled=True,
                 permission=effective_permission if self.apply_permission_gate else raw_permission,
                 allowed_modes=list(permission.allowed_modes or []),
+                allowed_live_modes=permission.allowed_live_modes,
                 reasons=reasons,
+                live_block_reasons=live_block_reasons,
                 cost_model_version=permission.cost_model_version,
                 gate_version=permission.gate_version,
                 fallback_used=False,
@@ -849,7 +866,7 @@ class QuantLabGuard:
                 raw_permission_enforceable=permission.enforceable,
                 local_mode=self.mode.value,
                 effective_permission_decision=effective_permission,
-                would_block_if_enforced=_permission_would_block(raw_permission),
+                would_block_if_enforced=_permission_would_block(raw_permission) or live_modes_empty,
                 shadow_override_reason=shadow_override_reason,
                 remote_permission_as_of_ts=permission.as_of_ts or permission.created_at,
                 remote_permission_expires_at=permission.expires_at,
@@ -911,6 +928,8 @@ class QuantLabGuard:
                     "contract_version_match": result.contract_version_match,
                     "telemetry_schema_version_match": result.telemetry_schema_version_match,
                     "allowed_modes": result.allowed_modes,
+                    "allowed_live_modes": result.allowed_live_modes,
+                    "live_block_reasons": result.live_block_reasons,
                     "max_gross_exposure_usdt": permission.max_gross_exposure_usdt,
                     "max_single_order_usdt": permission.max_single_order_usdt,
                     "risk_reason_codes": list(permission.risk_reason_codes or []),
@@ -1171,6 +1190,9 @@ class QuantLabGuard:
             elif permission == SELL_ONLY and not _is_sell_or_close(order):
                 would_filter = True
                 reason = "quant_lab_sell_only"
+            elif self.permission_result.allowed_live_modes == [] and not _is_sell_or_close(order):
+                would_filter = True
+                reason = "quant_lab_allowed_live_modes_empty"
             if self.apply_permission_gate:
                 actually_filtered = would_filter
             meta = dict(getattr(order, "meta", None) or {})
@@ -1197,6 +1219,8 @@ class QuantLabGuard:
                     "remote_permission_contract_version": self.permission_result.remote_permission_contract_version,
                     "permission_contract_violation": self.permission_result.permission_contract_violation,
                     "contract_version": self.permission_result.contract_version,
+                    "allowed_live_modes": self.permission_result.allowed_live_modes,
+                    "live_block_reasons": self.permission_result.live_block_reasons,
                     "permission_gate_enforced": self.apply_permission_gate,
                     "cost_gate_enforced": self.apply_cost_gate,
                     "would_filter_by_permission": would_filter,
@@ -1237,6 +1261,8 @@ class QuantLabGuard:
                 "remote_permission_contract_version": self.permission_result.remote_permission_contract_version,
                 "permission_contract_violation": self.permission_result.permission_contract_violation,
                 "contract_version": self.permission_result.contract_version,
+                "allowed_live_modes": self.permission_result.allowed_live_modes,
+                "live_block_reasons": self.permission_result.live_block_reasons,
                 "would_filter": would_filter,
                 "would_filter_by_permission": would_filter,
                 "order_filtered": actually_filtered,
@@ -1556,6 +1582,8 @@ class QuantLabGuard:
                     "remote_permission_telemetry_latest_ts": self.permission_result.remote_permission_telemetry_latest_ts,
                     "remote_permission_contract_version": self.permission_result.remote_permission_contract_version,
                     "permission_contract_violation": self.permission_result.permission_contract_violation,
+                    "allowed_live_modes": self.permission_result.allowed_live_modes,
+                    "live_block_reasons": self.permission_result.live_block_reasons,
                     "request_symbol": original_symbol,
                     "normalized_symbol": normalized_symbol,
                     "response_symbol": estimate.symbol,
@@ -1666,7 +1694,9 @@ class QuantLabGuard:
         permission_rows = [
             row
             for row in self.filtered_orders
-            if str(row.get("filter_reason", "")).startswith("quant_lab_sell") or row.get("filter_reason") == "quant_lab_abort"
+            if str(row.get("filter_reason", "")).startswith("quant_lab_sell")
+            or row.get("filter_reason") == "quant_lab_abort"
+            or row.get("filter_reason") == "quant_lab_allowed_live_modes_empty"
         ]
         would_filter_by_permission = len([row for row in permission_rows if row.get("would_filter") or row.get("would_filter_by_permission")])
         filtered_by_permission = len([row for row in permission_rows if row.get("actually_filtered") or row.get("order_filtered")])
@@ -1721,6 +1751,8 @@ class QuantLabGuard:
                 "permission_contract_violation": permission.permission_contract_violation,
                 "contract_version": permission.contract_version,
                 "allowed_modes": permission.allowed_modes,
+                "allowed_live_modes": permission.allowed_live_modes,
+                "live_block_reasons": permission.live_block_reasons,
                 "risk_permission_reasons": permission.reasons,
                 "cost_model_version": permission.cost_model_version
                 or next((row.get("cost_model_version") for row in self.cost_rows if row.get("cost_model_version")), None),

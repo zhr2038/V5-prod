@@ -19,11 +19,15 @@ class _PermissionClient:
         permission_status: str,
         expires_at: str = "2999-01-01T00:00:00Z",
         enforceable: bool | None = True,
+        allowed_live_modes: list | None = None,
+        live_block_reasons: list | None = None,
     ) -> None:
         self.permission = permission
         self.permission_status = permission_status
         self.expires_at = expires_at
         self.enforceable = enforceable
+        self.allowed_live_modes = allowed_live_modes
+        self.live_block_reasons = list(live_block_reasons or [])
         self.run_id = "permission-contract-run"
         self.permission_calls = 0
 
@@ -40,6 +44,7 @@ class _PermissionClient:
             status=self.permission_status,
             enforceable=self.enforceable,
             allowed_modes=["sell_only"] if self.permission == "SELL_ONLY" else [],
+            allowed_live_modes=self.allowed_live_modes,
             max_gross_exposure_usdt=1000.0,
             max_single_order_usdt=100.0,
             as_of_ts="2026-05-14T00:00:00Z",
@@ -48,6 +53,7 @@ class _PermissionClient:
             source_bundle_ts="2026-05-13T23:55:00Z",
             telemetry_latest_ts="2026-05-13T23:56:00Z",
             risk_reason_codes=[self.permission_status.lower()],
+            live_block_reasons=self.live_block_reasons,
             contract_version="fixture.contract.v1",
         )
 
@@ -89,6 +95,8 @@ def test_risk_permission_response_contract_fields_are_parsed() -> None:
             "source_bundle_ts": "2026-05-13T23:55:00Z",
             "telemetry_latest_ts": "2026-05-13T23:56:00Z",
             "risk_reason_codes": ["required_alpha_gate_quarantine"],
+            "allowed_live_modes": [],
+            "live_block_reasons": ["middle_layer_read_only"],
             "contract_version": "fixture.contract.v1",
         }
     )
@@ -103,7 +111,38 @@ def test_risk_permission_response_contract_fields_are_parsed() -> None:
     assert permission.source_bundle_ts == "2026-05-13T23:55:00Z"
     assert permission.telemetry_latest_ts == "2026-05-13T23:56:00Z"
     assert permission.risk_reason_codes == ["required_alpha_gate_quarantine"]
+    assert permission.allowed_live_modes == []
+    assert permission.live_block_reasons == ["middle_layer_read_only"]
     assert permission.contract_version == "fixture.contract.v1"
+
+
+def test_missing_allowed_live_modes_preserves_legacy_unknown() -> None:
+    permission = RiskPermission.from_payload(
+        {
+            "strategy": "v5",
+            "version": "5.0.0",
+            "permission_status": "ACTIVE_ALLOW",
+            "permission": "ALLOW",
+            "enforceable": True,
+        }
+    )
+
+    assert permission.allowed_live_modes is None
+
+
+def test_null_allowed_live_modes_preserves_legacy_unknown() -> None:
+    permission = RiskPermission.from_payload(
+        {
+            "strategy": "v5",
+            "version": "5.0.0",
+            "permission_status": "ACTIVE_ALLOW",
+            "permission": "ALLOW",
+            "enforceable": True,
+            "allowed_live_modes": None,
+        }
+    )
+
+    assert permission.allowed_live_modes is None
 
 
 def test_risk_permission_string_false_enforceable_stays_false() -> None:
@@ -158,6 +197,59 @@ def test_enforce_active_sell_only_allows_close_and_blocks_open(tmp_path: Path) -
 
     assert result.effective_permission_decision == "SELL_ONLY"
     assert [order.side for order in kept] == ["sell"]
+
+
+def test_enforce_active_allow_with_empty_live_modes_degrades_to_sell_only(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, "enforce")
+    guard = _guard(
+        tmp_path,
+        cfg,
+        _PermissionClient(
+            permission="ALLOW",
+            permission_status="ACTIVE_ALLOW",
+            allowed_live_modes=[],
+            live_block_reasons=["middle_layer_read_only"],
+        ),
+    )
+
+    result = guard.check_startup_permission(cfg, "permission-contract-run")
+    kept = guard.filter_orders_by_permission([_buy(), _close()], result)
+
+    assert result.raw_permission_decision == "ALLOW"
+    assert result.effective_permission_decision == "SELL_ONLY"
+    assert result.permission == "SELL_ONLY"
+    assert result.allowed_live_modes == []
+    assert result.would_block_if_enforced is True
+    assert "remote_permission_allowed_live_modes_empty" in result.reasons
+    assert "quant_lab_allowed_live_modes_empty" in result.live_block_reasons
+    assert [order.side for order in kept] == ["sell"]
+    assert guard.filtered_orders[0]["filter_reason"] == "quant_lab_sell_only"
+
+
+def test_shadow_active_allow_with_empty_live_modes_audits_would_block(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, "shadow")
+    guard = _guard(
+        tmp_path,
+        cfg,
+        _PermissionClient(
+            permission="ALLOW",
+            permission_status="ACTIVE_ALLOW",
+            allowed_live_modes=[],
+        ),
+    )
+
+    result = guard.check_startup_permission(cfg, "permission-contract-run")
+    kept = guard.filter_orders_by_permission([_buy(), _close()], result)
+
+    assert result.raw_permission_decision == "ALLOW"
+    assert result.effective_permission_decision == "ALLOW"
+    assert result.permission == "ALLOW"
+    assert result.would_block_if_enforced is True
+    assert "remote_permission_allowed_live_modes_empty" in result.reasons
+    assert [order.side for order in kept] == ["buy", "sell"]
+    assert kept[0].meta["quant_lab"]["would_block_if_enforced"] is True
+    assert kept[0].meta["quant_lab"]["filter_reason"] == "quant_lab_allowed_live_modes_empty"
+    assert kept[0].meta["quant_lab"]["order_filtered"] is False
 
 
 def test_enforce_stale_abort_treats_as_sell_only(tmp_path: Path) -> None:

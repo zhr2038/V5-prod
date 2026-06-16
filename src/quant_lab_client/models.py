@@ -57,6 +57,15 @@ def _list(data: Mapping[str, Any], key: str) -> List[Any]:
     return [value]
 
 
+def _optional_list(data: Mapping[str, Any], key: str) -> Optional[List[Any]]:
+    if key not in data:
+        return None
+    value = data.get(key)
+    if value in (None, ""):
+        return None
+    return _list(data, key)
+
+
 _QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "BTC", "ETH", "OKB")
 
 
@@ -110,6 +119,7 @@ class RiskPermission:
     version: str = ""
     permission: str = "ABORT"
     allowed_modes: List[Any] = field(default_factory=list)
+    allowed_live_modes: Optional[List[Any]] = None
     max_gross_exposure: Optional[float] = None
     max_single_weight: Optional[float] = None
     max_gross_exposure_usdt: Optional[float] = None
@@ -119,6 +129,7 @@ class RiskPermission:
     gate_version: Optional[str] = None
     reasons: List[Any] = field(default_factory=list)
     risk_reason_codes: List[Any] = field(default_factory=list)
+    live_block_reasons: List[Any] = field(default_factory=list)
     created_at: Optional[str] = None
     as_of_ts: Optional[str] = None
     expires_at: Optional[str] = None
@@ -144,6 +155,7 @@ class RiskPermission:
             version=str(data.get("version") or ""),
             permission=str(raw_permission or "ABORT").upper(),
             allowed_modes=_list(data, "allowed_modes"),
+            allowed_live_modes=_optional_list(data, "allowed_live_modes"),
             max_gross_exposure=_float(data, "max_gross_exposure"),
             max_single_weight=_float(data, "max_single_weight"),
             max_gross_exposure_usdt=_first_float(data, "max_gross_exposure_usdt", "max_gross_exposure"),
@@ -153,6 +165,7 @@ class RiskPermission:
             gate_version=str(data.get("gate_version") or "") or None,
             reasons=_list(data, "reasons") or _list(data, "reason"),
             risk_reason_codes=_list(data, "risk_reason_codes") or _list(data, "reason_codes"),
+            live_block_reasons=_list(data, "live_block_reasons"),
             created_at=str(data.get("created_at") or data.get("as_of_ts") or data.get("ts") or "") or None,
             as_of_ts=str(data.get("as_of_ts") or data.get("created_at") or data.get("ts") or "") or None,
             expires_at=str(data.get("expires_at") or data.get("permission_expires_at") or "") or None,

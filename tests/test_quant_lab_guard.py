@@ -26,6 +26,8 @@ class _Client:
         cost_model_version="cost_bucket_daily:2026-05-11",
         cost_trusted_for_live=None,
         allowed_live_modes=None,
+        permission_allowed_live_modes=None,
+        permission_live_block_reasons=None,
         deep_health_status="ok",
     ) -> None:
         self.permission = permission
@@ -38,6 +40,8 @@ class _Client:
         self.cost_model_version = cost_model_version
         self.cost_trusted_for_live = cost_trusted_for_live
         self.allowed_live_modes = allowed_live_modes
+        self.permission_allowed_live_modes = permission_allowed_live_modes
+        self.permission_live_block_reasons = list(permission_live_block_reasons or [])
         self.deep_health_status = deep_health_status
         self.run_id = "r"
         self.cost_kwargs = []
@@ -81,7 +85,9 @@ class _Client:
             version=version,
             permission=self.permission,
             allowed_modes=[self.permission.lower()],
+            allowed_live_modes=self.permission_allowed_live_modes,
             reasons=["required_alpha_gate_quarantine"] if self.permission == "SELL_ONLY" else [],
+            live_block_reasons=self.permission_live_block_reasons,
             cost_model_version="cost_bucket_daily:2026-05-11",
             gate_version="bootstrap.quarantine.v1",
         )
@@ -458,6 +464,41 @@ def test_live_cost_trust_guard_blocks_non_whitelist_in_cost_mode(tmp_path: Path)
     assert impact["blocked_by_quant_lab_no_live_modes"] is True
     assert impact["blocked_by_shadow_live_whitelist"] is True
     assert guard.summary_payload()["live_guard_actual_block_count"] == 1
+
+
+def test_live_cost_trust_guard_uses_permission_live_modes_when_cost_payload_omits_them(tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "cost_only"
+    cfg.quant_lab.live_cost_trust_guard.enabled = True
+    cfg.quant_lab.live_cost_trust_guard.mode = "block_non_whitelist_only"
+    guard = _guard(
+        tmp_path,
+        cfg,
+        _Client(
+            permission="ALLOW",
+            cost_trusted_for_live=True,
+            permission_allowed_live_modes=[],
+            permission_live_block_reasons=["middle_layer_read_only"],
+        ),
+    )
+    guard.check_startup_permission(cfg, "run-1")
+
+    kept, rows = guard.enrich_orders_with_cost(
+        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 80, "strategy_candidate": "f3_dominant_entry"})],
+        "normal",
+        cfg,
+    )
+
+    assert kept == []
+    assert rows[0]["filter_reason"] == "cost_trust_guard_blocked"
+    impact = guard.live_guard_rows[-1]
+    assert impact["allowed_live_modes"] == "[]"
+    assert impact["cost_trusted_for_live"] is True
+    assert impact["would_be_blocked_by_quant_lab_no_live_modes"] is True
+    assert impact["would_be_blocked_by_cost_trust_guard"] is False
+    assert impact["blocked_by_quant_lab_no_live_modes"] is True
+    assert "quant_lab_allowed_live_modes_empty" in impact["cost_trust_block_reasons"]
 
 
 def test_live_cost_trust_guard_allows_btc_strict_probe_exception(tmp_path: Path) -> None:
