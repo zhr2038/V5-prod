@@ -20,6 +20,18 @@ def test_v5_bundle_export_script_writes_lightweight_report_index() -> None:
     assert 'write_text("raw/large/.noindex"' in script
 
 
+def test_v5_bundle_export_script_includes_bottom_zone_paper_summaries() -> None:
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "scripts" / "generate_v5_bundle_remote.sh").read_text(encoding="utf-8")
+
+    assert "REPORT_BOTTOM_ZONE_PAPER_RUN_FIELDS" in script
+    assert "REPORT_BOTTOM_ZONE_PAPER_DAILY_FIELDS" in script
+    assert '"reports/summaries/bottom_zone_probe_paper_runs.csv"' in script
+    assert '"summaries/bottom_zone_probe_paper_runs.csv"' in script
+    assert '"reports/summaries/bottom_zone_probe_paper_daily.csv"' in script
+    assert '"summaries/bottom_zone_probe_paper_daily.csv"' in script
+
+
 def test_v5_bundle_export_script_regression() -> None:
     root = Path(__file__).resolve().parents[1]
     proc = subprocess.run(
