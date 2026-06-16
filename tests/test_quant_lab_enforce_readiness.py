@@ -107,6 +107,19 @@ def test_readiness_contract_version_mismatch_blocks_enforce(tmp_path: Path) -> N
     assert "contract_version_mismatch" in result.reasons
 
 
+def test_readiness_blocks_unknown_active_permission_status(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, _ready_snapshot())
+
+    result = evaluate_enforce_readiness(
+        cfg.quant_lab,
+        readiness_payload=_ready_snapshot(remote_permission_status="ACTIVE_UNKNOWN"),
+    )
+
+    assert result.status == "BLOCKED"
+    assert result.remote_permission_status == "ACTIVE_UNKNOWN"
+    assert "remote_permission_not_active" in result.reasons
+
+
 def test_readiness_high_global_default_cost_blocks_enforce(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path, _ready_snapshot(global_default_cost_count=1))
 

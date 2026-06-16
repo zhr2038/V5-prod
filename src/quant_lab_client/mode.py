@@ -22,6 +22,7 @@ class QuantLabMode(str, Enum):
 STRICT_PERMISSION_MODES = {QuantLabMode.PERMISSION_ONLY, QuantLabMode.ENFORCE}
 CONTRACT_VERSION = "v5.quant_lab.telemetry.v2"
 TELEMETRY_SCHEMA_VERSION = "1.0.0"
+_ACTIVE_PERMISSION_STATUSES = {"ACTIVE_ALLOW", "ACTIVE_SELL_ONLY", "ACTIVE_ABORT"}
 
 
 @dataclass
@@ -230,7 +231,7 @@ def evaluate_enforce_readiness(
     )
     expires_dt = _parse_utc(permission_expires_at)
 
-    if not permission_status_text.startswith("ACTIVE_"):
+    if permission_status_text not in _ACTIVE_PERMISSION_STATUSES:
         reasons.append("remote_permission_not_active")
     if expires_dt is None:
         reasons.append("remote_permission_expiry_missing")
