@@ -6284,7 +6284,11 @@ class V5Pipeline:
                 current_auto_risk_level=current_auto_risk_level,
                 regime_state_str=str(regime.state.value if hasattr(regime.state, "value") else regime.state),
             )
-            impulse_still_active = bool(probe_context.get("active"))
+            impulse_still_active = (
+                bool(getattr(self.cfg.execution, "market_impulse_probe_enabled", True))
+                and bool(getattr(self.cfg.execution, "market_impulse_probe_live_enabled", False))
+                and bool(probe_context.get("active"))
+            )
             for p in active_positions:
                 probe_payload = probe_state.get(p.symbol)
                 if not isinstance(probe_payload, dict):

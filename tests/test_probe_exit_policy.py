@@ -616,6 +616,59 @@ def test_probe_exit_disabled_allows_legacy_market_impulse_time_stop_fallback(tmp
     assert audit.counts["probe_time_stop_count"] == 0
 
 
+def test_market_impulse_time_stop_ignores_shadow_when_live_disabled(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    cfg.execution.probe_exit_enabled = False
+    cfg.execution.market_impulse_probe_enabled = False
+    cfg.execution.market_impulse_probe_live_enabled = False
+    cfg.execution.market_impulse_probe_only_in_protect = True
+    cfg.execution.market_impulse_probe_min_trend_buy_count = 1
+    cfg.execution.market_impulse_probe_min_btc_trend_score = 0.60
+    cfg.execution.market_impulse_probe_min_symbol_trend_score = 0.60
+    cfg.execution.market_impulse_probe_time_stop_hours = 4
+    cfg.diagnostics.market_impulse_selection_shadow_enabled = True
+    _write_market_impulse_probe_state(cfg, entry_ts="2026-04-25T03:00:00Z", time_stop_hours=4)
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe._load_current_auto_risk_level = lambda: "PROTECT"
+    pipe.alpha_engine.get_latest_strategy_signal_payload = lambda: {
+        "strategies": [
+            {
+                "strategy": "TrendFollowing",
+                "signals": [
+                    {
+                        "symbol": "BTC/USDT",
+                        "side": "buy",
+                        "score": 0.90,
+                        "metadata": {"adx": 35.0},
+                    }
+                ],
+            }
+        ]
+    }
+    position = _probe_position(
+        entry_ts="2026-04-25T03:00:00Z",
+        probe=False,
+        probe_type="market_impulse_probe",
+    )
+    position.unrealized_pnl_pct = 0.01
+    audit = DecisionAudit(run_id="market-impulse-shadow-disabled-live")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series(100.05)},
+        positions=[position],
+        cash_usdt=100.0,
+        equity_peak_usdt=200.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    order = _single_exit(out)
+    assert order.meta["reason"] == "market_impulse_probe_time_stop"
+    assert order.meta["impulse_still_active"] is False
+    assert audit.counts["market_impulse_probe_time_stop_count"] == 1
+
+
 def test_non_probe_position_is_not_affected(tmp_path: Path) -> None:
     out, audit = _run_exit_case(tmp_path, _probe_position(probe=False), _series(100.80))
 
