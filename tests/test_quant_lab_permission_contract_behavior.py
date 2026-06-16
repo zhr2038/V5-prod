@@ -191,3 +191,25 @@ def test_expired_active_abort_marks_contract_violation_and_treats_expired(tmp_pa
     assert result.effective_permission_decision == "SELL_ONLY"
     assert "remote_permission_not_fresh" in result.reasons
     assert [order.side for order in kept] == ["sell"]
+
+
+def test_enforce_missing_permission_status_and_expiry_degrades_allow(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, "enforce")
+    guard = _guard(
+        tmp_path,
+        cfg,
+        _PermissionClient(
+            permission="ALLOW",
+            permission_status="",
+            expires_at="",
+        ),
+    )
+
+    result = guard.check_startup_permission(cfg, "permission-contract-run")
+    kept = guard.filter_orders_by_permission([_buy(), _close()], result)
+
+    assert result.permission_contract_violation is True
+    assert result.remote_permission_status == "MISSING_PERMISSION_STATUS"
+    assert result.effective_permission_decision == "SELL_ONLY"
+    assert "remote_permission_status_incomplete" in result.reasons
+    assert [order.side for order in kept] == ["sell"]

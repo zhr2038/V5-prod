@@ -227,20 +227,32 @@ def _status_upper(status: Optional[str]) -> str:
     return str(status or "").strip().upper()
 
 
+_ACTIVE_PERMISSION_STATUSES = {"ACTIVE_ALLOW", "ACTIVE_SELL_ONLY", "ACTIVE_ABORT"}
+
+
 def _permission_not_fresh(status: Optional[str], expires_at: Optional[str]) -> Tuple[bool, bool, Optional[str], str]:
     status_u = _status_upper(status)
     expired_by_time = False
     contract_violation = False
     reason = None
+    expires_text = str(expires_at or "").strip()
     expires_dt = _parse_utc(expires_at)
-    if expires_dt is not None and expires_dt <= datetime.now(timezone.utc):
-        expired_by_time = True
-        reason = "remote_permission_not_fresh"
-        if status_u.startswith("ACTIVE"):
-            contract_violation = True
     if status_u.startswith("STALE") or status_u.startswith("EXPIRED") or status_u == "NO_FRESH_PERMISSION":
         reason = "remote_permission_not_fresh"
         return True, contract_violation, reason, status_u
+    if status_u not in _ACTIVE_PERMISSION_STATUSES:
+        reason = "remote_permission_status_incomplete"
+        return True, True, reason, status_u or "MISSING_PERMISSION_STATUS"
+    if not expires_text:
+        reason = "remote_permission_expiry_missing"
+        return True, True, reason, status_u
+    if expires_dt is None:
+        reason = "remote_permission_expiry_invalid"
+        return True, True, reason, status_u
+    if expires_dt <= datetime.now(timezone.utc):
+        expired_by_time = True
+        reason = "remote_permission_not_fresh"
+        contract_violation = True
     if expired_by_time:
         return True, contract_violation, reason, f"EXPIRED_{status_u}" if status_u else "EXPIRED"
     return False, contract_violation, reason, status_u
@@ -252,6 +264,12 @@ def _effective_permission_for_mode(raw_permission: str, status: Optional[str], e
         return ALLOW, False, "quant_lab_shadow_mode", _status_upper(status)
     not_fresh, contract_violation, reason, effective_status = _permission_not_fresh(status, expires_at)
     if not_fresh:
+        if raw == ABORT and reason in {
+            "remote_permission_status_incomplete",
+            "remote_permission_expiry_missing",
+            "remote_permission_expiry_invalid",
+        }:
+            return ABORT, contract_violation, reason, effective_status
         return SELL_ONLY, contract_violation, reason, effective_status
     return raw, contract_violation, None, effective_status
 
