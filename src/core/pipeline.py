@@ -3128,7 +3128,9 @@ class V5Pipeline:
         require_feature_enabled: bool = True,
     ) -> Dict[str, Any]:
         enabled = bool(getattr(self.cfg.execution, "market_impulse_probe_enabled", True))
-        live_enabled = bool(getattr(self.cfg.execution, "market_impulse_probe_live_enabled", False))
+        configured_live_enabled = bool(getattr(self.cfg.execution, "market_impulse_probe_live_enabled", False))
+        forward_test_live_ready = self._market_impulse_probe_forward_test_live_ready()
+        live_enabled = self._market_impulse_probe_effective_live_enabled()
         selection_mode = self._market_impulse_probe_selection_mode(
             getattr(self.cfg.execution, "market_impulse_probe_selection_mode", "composite")
         )
@@ -3147,6 +3149,13 @@ class V5Pipeline:
                 "selection_mode": selection_mode,
                 "feature_enabled": bool(enabled),
                 "live_enabled": bool(live_enabled),
+                "configured_live_enabled": bool(configured_live_enabled),
+                "forward_test_live_ready": bool(forward_test_live_ready),
+                "live_disabled_reason": (
+                    "market_impulse_probe_forward_test_not_ready"
+                    if configured_live_enabled and not forward_test_live_ready
+                    else None
+                ),
             }
             if shadow_enabled:
                 payload["shadow_selection"] = self._market_impulse_probe_shadow_selection(
@@ -3224,6 +3233,13 @@ class V5Pipeline:
             "selection_mode": selection_mode,
             "feature_enabled": bool(enabled),
             "live_enabled": bool(live_enabled),
+            "configured_live_enabled": bool(configured_live_enabled),
+            "forward_test_live_ready": bool(forward_test_live_ready),
+            "live_disabled_reason": (
+                "market_impulse_probe_forward_test_not_ready"
+                if configured_live_enabled and not forward_test_live_ready
+                else None
+            ),
         }
         if shadow_enabled:
             payload["shadow_selection"] = self._market_impulse_probe_shadow_selection(
@@ -3234,6 +3250,16 @@ class V5Pipeline:
                 selection_mode=selection_mode,
             )
         return payload
+
+    def _market_impulse_probe_forward_test_live_ready(self) -> bool:
+        return bool(
+            getattr(self.cfg.execution, "market_impulse_probe_forward_test_live_ready", False)
+        )
+
+    def _market_impulse_probe_effective_live_enabled(self) -> bool:
+        return bool(getattr(self.cfg.execution, "market_impulse_probe_live_enabled", False)) and (
+            self._market_impulse_probe_forward_test_live_ready()
+        )
 
     def _market_impulse_probe_quality_filter_decision(
         self,
@@ -6286,7 +6312,7 @@ class V5Pipeline:
             )
             impulse_still_active = (
                 bool(getattr(self.cfg.execution, "market_impulse_probe_enabled", True))
-                and bool(getattr(self.cfg.execution, "market_impulse_probe_live_enabled", False))
+                and self._market_impulse_probe_effective_live_enabled()
                 and bool(probe_context.get("active"))
             )
             for p in active_positions:
@@ -8194,14 +8220,49 @@ class V5Pipeline:
                 market_impulse_probe_context.get("shadow_selection") or {}
             )
 
+        market_impulse_live_configured = bool(
+            getattr(self.cfg.execution, "market_impulse_probe_live_enabled", False)
+        )
+        market_impulse_forward_ready = self._market_impulse_probe_forward_test_live_ready()
+        market_impulse_live_enabled = self._market_impulse_probe_effective_live_enabled()
+        market_impulse_context_active = bool(market_impulse_probe_context.get("active"))
+        if (
+            audit
+            and market_impulse_live_configured
+            and not market_impulse_forward_ready
+            and market_impulse_context_active
+        ):
+            audit.counts["market_impulse_probe_blocked_count"] = int(
+                audit.counts.get("market_impulse_probe_blocked_count", 0) or 0
+            ) + 1
+            audit.counts["market_impulse_probe_forward_test_block_count"] = int(
+                audit.counts.get("market_impulse_probe_forward_test_block_count", 0) or 0
+            ) + 1
+            router_decisions.append(
+                {
+                    "symbol": market_impulse_probe_context.get("selected_live")
+                    or (
+                        (market_impulse_probe_context.get("candidates") or [{}])[0].get("symbol")
+                        if market_impulse_probe_context.get("candidates")
+                        else None
+                    ),
+                    "action": "skip",
+                    "reason": "market_impulse_probe_forward_test_not_ready",
+                    "market_impulse_probe": True,
+                    "market_impulse_probe_live_enabled_configured": True,
+                    "market_impulse_probe_forward_test_live_ready": False,
+                    "required_forward_test_recommendation": "FORWARD_VALIDATION_PASS",
+                }
+            )
+
         if (
             bool(getattr(self.cfg.execution, "market_impulse_probe_enabled", True))
-            and bool(getattr(self.cfg.execution, "market_impulse_probe_live_enabled", False))
+            and market_impulse_live_enabled
             and (not bool(getattr(self.cfg.execution, "market_impulse_probe_only_in_protect", True)) or protect_entry_gate_active)
             and not is_risk_off_close_only
             and not active_positions
             and not any(str(getattr(order, "side", "")).lower() == "buy" for order in rebalance_orders)
-            and bool(market_impulse_probe_context.get("active"))
+            and market_impulse_context_active
         ):
             probe_cooldown_until_ms = max(
                 [int((payload or {}).get("cooldown_until_ms") or 0) for payload in (probe_state or {}).values()]

@@ -512,6 +512,14 @@ def test_live_prod_disables_ml_live_path() -> None:
     assert cfg.execution.ml_research_use_stable_universe is False
 
 
+def test_live_prod_keeps_market_impulse_probe_live_disabled() -> None:
+    cfg = load_config(str(ROOT / "configs" / "live_prod.yaml"), env_path=None)
+
+    assert cfg.execution.market_impulse_probe_enabled is False
+    assert cfg.execution.market_impulse_probe_live_enabled is False
+    assert cfg.execution.market_impulse_probe_forward_test_live_ready is False
+
+
 def test_write_effective_live_config_recovers_not_observable_release_start(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

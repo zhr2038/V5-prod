@@ -781,6 +781,10 @@ class ExecutionConfig(BaseModel):
         default=False,
         description="Allow market impulse probe to emit real OPEN_LONG orders. Keep false for shadow-only observation.",
     )
+    market_impulse_probe_forward_test_live_ready: bool = Field(
+        default=False,
+        description="Require explicit positive forward-test readiness before market impulse probe live orders can be emitted.",
+    )
     market_impulse_probe_only_in_protect: bool = Field(
         default=True,
         description="Restrict market impulse probe entries to PROTECT risk level",

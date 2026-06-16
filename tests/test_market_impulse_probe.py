@@ -187,6 +187,7 @@ def _base_cfg(tmp_path: Path) -> AppConfig:
     cfg.execution.negative_expectancy_fast_fail_open_block_enabled = False
     cfg.execution.market_impulse_probe_enabled = True
     cfg.execution.market_impulse_probe_live_enabled = True
+    cfg.execution.market_impulse_probe_forward_test_live_ready = True
     cfg.execution.market_impulse_probe_only_in_protect = True
     cfg.execution.market_impulse_probe_min_trend_buy_count = 3
     cfg.execution.market_impulse_probe_require_btc_trend_buy = True
@@ -564,6 +565,44 @@ def test_market_impulse_probe_live_gate_blocks_negative_edge_and_final_score(tmp
     assert decision["market_impulse_probe_live_gate_block_reason"] == "expected_edge_below_market_impulse_probe_min"
     assert decision["expected_edge_bps"] == pytest.approx(-146.13)
     assert decision["final_score"] == pytest.approx(-0.741)
+
+
+def test_market_impulse_probe_live_requires_forward_test_ready(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.market_impulse_probe_forward_test_live_ready = False
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    payload = _strategy_payload(
+        {
+            "BTC/USDT": ("buy", 0.90, None),
+            "ETH/USDT": ("buy", 0.82, None),
+            "SOL/USDT": ("buy", 0.78, None),
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    audit = DecisionAudit(run_id="market-impulse-forward-test-not-ready")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    assert audit.market_impulse_shadow_selection["selected_by_priority"] == "BTC/USDT"
+    assert audit.counts["market_impulse_probe_forward_test_block_count"] == 1
+    decision = next(
+        d
+        for d in audit.router_decisions
+        if d.get("reason") == "market_impulse_probe_forward_test_not_ready"
+    )
+    assert decision["market_impulse_probe_live_enabled_configured"] is True
+    assert decision["market_impulse_probe_forward_test_live_ready"] is False
+    assert decision["required_forward_test_recommendation"] == "FORWARD_VALIDATION_PASS"
 
 
 def test_market_impulse_composite_selection_does_not_pick_negative_edge_btc(tmp_path: Path) -> None:

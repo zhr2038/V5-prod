@@ -529,6 +529,7 @@ execution:
   protect_replacement_hold_min_score: 0.10
   market_impulse_probe_enabled: false
   market_impulse_probe_live_enabled: false
+  market_impulse_probe_forward_test_live_ready: false
   market_impulse_probe_only_in_protect: true
   market_impulse_probe_min_trend_buy_count: 3
   market_impulse_probe_require_btc_trend_buy: true
