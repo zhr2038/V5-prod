@@ -1336,6 +1336,10 @@ def _permission_status_stale(row: Mapping[str, Any]) -> bool:
     return status.startswith("STALE") or status.startswith("EXPIRED") or status == "NO_FRESH_PERMISSION"
 
 
+def _permission_not_enforceable(row: Mapping[str, Any]) -> bool:
+    return str(row.get("raw_permission_enforceable")).strip().lower() in {"false", "0", "no", "off"}
+
+
 def _build_compliance_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
     by_run: Dict[str, Dict[str, Any]] = {}
     for row in rows:
@@ -2034,6 +2038,10 @@ def _issues(rows: list[Dict[str, Any]], request_rows: list[Dict[str, Any]], cost
         add("quant_lab_permission_sell_only", "medium", "latest quant-lab permission is SELL_ONLY")
     if any(str(row.get("violation")) == "true" for row in compliance_rows):
         add("quant_lab_gate_compliance_violation", "high", "orders violated quant-lab permission in the window")
+    if any(_truthy(row.get("permission_contract_violation")) for row in rows):
+        add("quant_lab_permission_contract_violation", "high", "quant-lab permission contract violations were observed")
+    if any(_permission_not_enforceable(row) for row in rows):
+        add("quant_lab_permission_not_enforceable", "medium", "quant-lab returned non-enforceable permission rows")
     if len([row for row in rows if _is_fallback_row(row)]) >= 3:
         add("quant_lab_cost_fallback_high", "medium", "quant-lab fallback count is elevated")
     if any(row.get("filtered") for row in cost_rows):

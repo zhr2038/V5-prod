@@ -12,6 +12,7 @@ from src.reporting.v5_bundle_exporter import (
     GIT_COMMAND_TIMEOUT_SEC,
     _dedupe_fill_rows,
     _git_command,
+    _issues,
     _normalized_symbol,
     export_v5_bundle,
 )
@@ -49,6 +50,25 @@ def test_bundle_export_fill_dedupe_uses_normalized_symbol() -> None:
 
     assert len(deduped) == 1
     assert deduped[0]["symbol"] == "BNB/USDT"
+
+
+def test_bundle_issues_flag_permission_contract_and_enforceable_failures() -> None:
+    issues = _issues(
+        rows=[
+            {
+                "event_type": "live_permission",
+                "permission_contract_violation": "true",
+                "raw_permission_enforceable": "false",
+            }
+        ],
+        request_rows=[],
+        cost_rows=[{"event_type": "cost_estimate"}],
+        compliance_rows=[],
+    )
+
+    by_code = {item["code"]: item for item in issues}
+    assert by_code["quant_lab_permission_contract_violation"]["severity"] == "high"
+    assert by_code["quant_lab_permission_not_enforceable"]["severity"] == "medium"
 
 
 def test_bundle_export_windows_raw_quant_lab_jsonl(tmp_path: Path) -> None:
