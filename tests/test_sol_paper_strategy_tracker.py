@@ -119,6 +119,55 @@ def test_paper_strategy_daily_does_not_count_string_false_entry() -> None:
     assert observed_by_horizon["48h"] == 0
 
 
+def test_paper_strategy_daily_does_not_count_not_observable_entry() -> None:
+    rows = _daily_rows(
+        [
+            {
+                "paper_date": "2026-06-16",
+                "strategy_id": "BOTTOM_ZONE_PROBE_PAPER_V1",
+                "experiment_name": "v5.bottom_zone_probe_paper",
+                "symbol": "IP/USDT",
+                "would_enter": True,
+                "would_size_usdt": 5.0,
+                "label_status": "not_observable",
+                "label_not_observable_reason": "missing_entry_px",
+            }
+        ]
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["entry_count"] == 0
+    assert row["entry_day_count"] == 0
+    assert row["not_observable_count"] == 1
+    assert row["avg_paper_pnl_bps"] is None
+
+
+def test_readiness_does_not_count_not_observable_entry_day() -> None:
+    readiness = _readiness_for_rows(
+        [
+            {
+                "paper_date": "2026-06-16",
+                "strategy_id": "BOTTOM_ZONE_PROBE_PAPER_V1",
+                "experiment_name": "v5.bottom_zone_probe_paper",
+                "symbol": "IP/USDT",
+                "would_enter": True,
+                "label_status": "not_observable",
+                "label_not_observable_reason": "missing_entry_px",
+                "extra_live_block_reasons": ["bottom_zone_probe_paper_only_no_live"],
+            }
+        ],
+        required_days=1,
+        required_entry_days=1,
+        required_coverage=0.0,
+        enable_live_experiment=False,
+        allowed_cost_sources=set(),
+    )
+
+    assert readiness["entry_day_count"] == 0
+    assert "insufficient_entry_days" in readiness["live_block_reason"]
+
+
 def test_paper_strategy_daily_does_not_count_eth_f3_alpha6_sell_legacy_true_entry() -> None:
     rows = _daily_rows(
         [

@@ -788,6 +788,12 @@ def _paper_would_enter(record: Mapping[str, Any]) -> bool:
     return _normalize_bool(record.get("would_enter")) is True
 
 
+def _paper_entry_countable(record: Mapping[str, Any]) -> bool:
+    if not _paper_would_enter(record):
+        return False
+    return str(record.get("label_status") or "").strip().lower() != "not_observable"
+
+
 def _read_candidate_snapshot(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
@@ -4836,7 +4842,7 @@ def _horizon_pnl_values(rows: Iterable[Mapping[str, Any]], horizon: int) -> list
         for value in (
             _normalize_float(row.get(f"paper_pnl_bps_{horizon}h"))
             for row in rows
-            if _paper_would_enter(row)
+            if _paper_entry_countable(row)
         )
         if value is not None
     ]
@@ -4870,7 +4876,7 @@ def _readiness_for_rows(
         {
             str(row.get("paper_date") or "")
             for row in rows
-            if str(row.get("paper_date") or "") and _paper_would_enter(row)
+            if str(row.get("paper_date") or "") and _paper_entry_countable(row)
         }
     )
     cost_mix = _cost_source_mix(rows)
@@ -4993,7 +4999,7 @@ def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         symbol = str(record.get("symbol") or "")
         paper_date = str(record.get("paper_date") or "")
         by_strategy_days[(strategy_id, symbol)].add(paper_date)
-        if _paper_would_enter(record) and paper_date:
+        if _paper_entry_countable(record) and paper_date:
             entry_days_by_strategy[(strategy_id, symbol)].add(paper_date)
             for horizon in DEFAULT_HORIZONS:
                 if _normalize_float(record.get(f"paper_pnl_bps_{horizon}h")) is not None:
@@ -5009,7 +5015,8 @@ def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ].append(record)
     out: list[dict[str, Any]] = []
     for (paper_date, strategy_id, symbol), rows in sorted(buckets.items()):
-        entry_rows = [row for row in rows if _paper_would_enter(row)]
+        would_enter_rows = [row for row in rows if _paper_would_enter(row)]
+        entry_rows = [row for row in rows if _paper_entry_countable(row)]
         values = [_normalize_float(row.get("paper_pnl_bps")) for row in entry_rows]
         usable = [value for value in values if value is not None]
         horizon_values: dict[str, list[float]] = {}
@@ -5065,7 +5072,11 @@ def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "entry_day_count": entry_day_count,
             "complete_count": sum(1 for row in entry_rows if str(row.get("label_status") or "") == "complete"),
             "pending_count": sum(1 for row in entry_rows if str(row.get("label_status") or "") == "pending"),
-            "not_observable_count": sum(1 for row in entry_rows if str(row.get("label_status") or "") == "not_observable"),
+            "not_observable_count": sum(
+                1
+                for row in would_enter_rows
+                if str(row.get("label_status") or "") == "not_observable"
+            ),
             "avg_paper_pnl_bps": round(sum(effective_usable) / len(effective_usable), 6) if effective_usable else None,
             "avg_paper_pnl_bps_by_horizon": json.dumps(horizon_avgs, sort_keys=True),
             "complete_count_by_horizon": json.dumps(horizon_complete_counts, sort_keys=True),
