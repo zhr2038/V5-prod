@@ -230,7 +230,11 @@ def _status_upper(status: Optional[str]) -> str:
 _ACTIVE_PERMISSION_STATUSES = {"ACTIVE_ALLOW", "ACTIVE_SELL_ONLY", "ACTIVE_ABORT"}
 
 
-def _permission_not_fresh(status: Optional[str], expires_at: Optional[str]) -> Tuple[bool, bool, Optional[str], str]:
+def _permission_not_fresh(
+    status: Optional[str],
+    expires_at: Optional[str],
+    enforceable: Optional[bool],
+) -> Tuple[bool, bool, Optional[str], str]:
     status_u = _status_upper(status)
     expired_by_time = False
     contract_violation = False
@@ -249,6 +253,9 @@ def _permission_not_fresh(status: Optional[str], expires_at: Optional[str]) -> T
     if expires_dt is None:
         reason = "remote_permission_expiry_invalid"
         return True, True, reason, status_u
+    if enforceable is not True:
+        reason = "remote_permission_not_enforceable"
+        return True, True, reason, status_u
     if expires_dt <= datetime.now(timezone.utc):
         expired_by_time = True
         reason = "remote_permission_not_fresh"
@@ -258,16 +265,23 @@ def _permission_not_fresh(status: Optional[str], expires_at: Optional[str]) -> T
     return False, contract_violation, reason, status_u
 
 
-def _effective_permission_for_mode(raw_permission: str, status: Optional[str], expires_at: Optional[str], apply_gate: bool) -> Tuple[str, bool, Optional[str], str]:
+def _effective_permission_for_mode(
+    raw_permission: str,
+    status: Optional[str],
+    expires_at: Optional[str],
+    enforceable: Optional[bool],
+    apply_gate: bool,
+) -> Tuple[str, bool, Optional[str], str]:
     raw = normalize_permission(raw_permission)
     if not apply_gate:
         return ALLOW, False, "quant_lab_shadow_mode", _status_upper(status)
-    not_fresh, contract_violation, reason, effective_status = _permission_not_fresh(status, expires_at)
+    not_fresh, contract_violation, reason, effective_status = _permission_not_fresh(status, expires_at, enforceable)
     if not_fresh:
         if raw == ABORT and reason in {
             "remote_permission_status_incomplete",
             "remote_permission_expiry_missing",
             "remote_permission_expiry_invalid",
+            "remote_permission_not_enforceable",
         }:
             return ABORT, contract_violation, reason, effective_status
         return SELL_ONLY, contract_violation, reason, effective_status
@@ -799,6 +813,7 @@ class QuantLabGuard:
                 raw_permission,
                 permission.permission_status or permission.status,
                 permission.expires_at,
+                permission.enforceable,
                 self.apply_permission_gate,
             )
             shadow_override_reason = "quant_lab_shadow_mode" if not self.apply_permission_gate else None

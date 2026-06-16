@@ -18,10 +18,12 @@ class _PermissionClient:
         permission: str,
         permission_status: str,
         expires_at: str = "2999-01-01T00:00:00Z",
+        enforceable: bool | None = True,
     ) -> None:
         self.permission = permission
         self.permission_status = permission_status
         self.expires_at = expires_at
+        self.enforceable = enforceable
         self.run_id = "permission-contract-run"
         self.permission_calls = 0
 
@@ -36,7 +38,7 @@ class _PermissionClient:
             permission=self.permission,
             permission_status=self.permission_status,
             status=self.permission_status,
-            enforceable=True,
+            enforceable=self.enforceable,
             allowed_modes=["sell_only"] if self.permission == "SELL_ONLY" else [],
             max_gross_exposure_usdt=1000.0,
             max_single_order_usdt=100.0,
@@ -191,6 +193,50 @@ def test_expired_active_abort_marks_contract_violation_and_treats_expired(tmp_pa
     assert result.effective_permission_decision == "SELL_ONLY"
     assert "remote_permission_not_fresh" in result.reasons
     assert [order.side for order in kept] == ["sell"]
+
+
+def test_enforce_active_allow_not_enforceable_degrades_to_sell_only(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, "enforce")
+    guard = _guard(
+        tmp_path,
+        cfg,
+        _PermissionClient(
+            permission="ALLOW",
+            permission_status="ACTIVE_ALLOW",
+            enforceable=False,
+        ),
+    )
+
+    result = guard.check_startup_permission(cfg, "permission-contract-run")
+    kept = guard.filter_orders_by_permission([_buy(), _close()], result)
+
+    assert result.permission_contract_violation is True
+    assert result.raw_permission_enforceable is False
+    assert result.effective_permission_decision == "SELL_ONLY"
+    assert "remote_permission_not_enforceable" in result.reasons
+    assert [order.side for order in kept] == ["sell"]
+
+
+def test_enforce_active_abort_not_enforceable_stays_abort(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, "enforce")
+    guard = _guard(
+        tmp_path,
+        cfg,
+        _PermissionClient(
+            permission="ABORT",
+            permission_status="ACTIVE_ABORT",
+            enforceable=False,
+        ),
+    )
+
+    result = guard.check_startup_permission(cfg, "permission-contract-run")
+    kept = guard.filter_orders_by_permission([_buy(), _close()], result)
+
+    assert result.permission_contract_violation is True
+    assert result.raw_permission_enforceable is False
+    assert result.effective_permission_decision == "ABORT"
+    assert "remote_permission_not_enforceable" in result.reasons
+    assert kept == []
 
 
 def test_enforce_missing_permission_status_and_expiry_degrades_allow(tmp_path: Path) -> None:
