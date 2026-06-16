@@ -1919,6 +1919,13 @@ def test_bottom_zone_probe_paper_advisory_generates_read_only_paper_row(tmp_path
     assert bottom["advisory_response_action"] == "paper_tracking"
     assert bottom["live_order_effect"] == "read_only_no_live_order"
     assert bottom["enable_live_experiment"] == "False"
+    bottom_runs = _read_csv(reports_dir / "summaries" / "bottom_zone_probe_paper_runs.csv")
+    assert bottom_runs[0]["strategy_id"] == "BOTTOM_ZONE_PROBE_PAPER_V1"
+    assert bottom_runs[0]["would_enter"] == "True"
+    assert bottom_runs[0]["live_order_effect"] == "read_only_no_live_order"
+    bottom_daily = _read_csv(reports_dir / "summaries" / "bottom_zone_probe_paper_daily.csv")
+    assert bottom_daily[0]["strategy_id"] == "BOTTOM_ZONE_PROBE_PAPER_V1"
+    assert bottom_daily[0]["entry_count"] == "1"
     assert cfg.symbols == ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 
 

@@ -299,6 +299,9 @@ PAPER_DAILY_FIELDS = [
 for _horizon in DEFAULT_HORIZONS:
     PAPER_DAILY_FIELDS.append(f"avg_paper_pnl_bps_{_horizon}h")
 
+BOTTOM_ZONE_PAPER_RUN_FIELDS = list(PAPER_RUN_FIELDS)
+BOTTOM_ZONE_PAPER_DAILY_FIELDS = list(PAPER_DAILY_FIELDS)
+
 PAPER_SLIPPAGE_FIELDS = [
     "strategy_id",
     "experiment_name",
@@ -364,6 +367,7 @@ STRATEGY_ADVISORY_FIELDS = [
     "response_action",
     "negative_advisory",
     "max_live_notional_usdt_ignored",
+    "live_order_effect",
 ]
 
 STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = [
@@ -947,6 +951,8 @@ def _normalize_advisory_row(row: Mapping[str, Any], *, source_path: str) -> dict
         "max_paper_notional_usdt": _normalize_float(row.get("max_paper_notional_usdt")),
         "max_live_notional_usdt": _normalize_float(row.get("max_live_notional_usdt")),
         "live_block_reasons": str(_advisory_first(row, ("live_block_reasons", "live_block_reason")) or "").strip(),
+        "live_order_effect": str(_advisory_first(row, ("live_order_effect",)) or "read_only_no_live_order").strip()
+        or "read_only_no_live_order",
         "would_block_if_enabled": _normalize_bool(
             _advisory_first(
                 row,
@@ -2460,6 +2466,7 @@ def _advisory_summary_rows(
                 "response_action": fields["advisory_response_action"],
                 "negative_advisory": fields["advisory_negative"],
                 "max_live_notional_usdt_ignored": fields["advisory_max_live_notional_usdt_ignored"],
+                "live_order_effect": row.get("live_order_effect") or "read_only_no_live_order",
             }
         )
     return out
@@ -5131,6 +5138,10 @@ def _bnb_paper_records(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]
     ]
 
 
+def _bottom_zone_records_for_summary(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [record for record in records if _is_bottom_zone_advisory(record)]
+
+
 def update_sol_paper_strategy_tracker(
     *,
     run_dir: str | Path,
@@ -5298,6 +5309,17 @@ def update_sol_paper_strategy_tracker(
         _daily_rows(bnb_records),
         PAPER_DAILY_FIELDS,
     )
+    bottom_zone_records = _bottom_zone_records_for_summary(records)
+    _write_csv(
+        summaries_dir / "bottom_zone_probe_paper_runs.csv",
+        [_row_for_csv(record, horizons) for record in bottom_zone_records],
+        fields,
+    )
+    _write_csv(
+        summaries_dir / "bottom_zone_probe_paper_daily.csv",
+        _daily_rows(bottom_zone_records),
+        PAPER_DAILY_FIELDS,
+    )
     _write_csv(
         summaries_dir / "strategy_opportunity_advisory_reader.csv",
         _advisory_summary_rows(advisory_rows, diagnostics),
@@ -5365,6 +5387,7 @@ def update_sol_paper_strategy_tracker(
         "late_breakout_failure_protect_rows": int(len(late_breakout_failure_rows)),
         "backtest_advisory_rows": int(len(backtest_advisory_rows)),
         "bnb_paper_strategy_rows": int(len(bnb_records)),
+        "bottom_zone_probe_paper_rows": int(len(bottom_zone_records)),
         "proposal_rows": int(len(proposal_rows)),
         "eth_f3_alpha6_gate_rewrites": int(eth_f3_alpha6_gate_rewrites),
         "labels_path": str(labels_path),
