@@ -504,7 +504,14 @@ class QuantLabClient:
     @staticmethod
     def _persistent_cache_enabled_for_endpoint(endpoint_path: str) -> bool:
         endpoint = "/" + str(endpoint_path or "").lstrip("/")
-        return endpoint.startswith("/v1/strategy-opportunity-advisory")
+        endpoint = endpoint.split("?", 1)[0].rstrip("/")
+        return endpoint.startswith(
+            (
+                "/v1/strategy-opportunity-advisory",
+                "/v1/strategy_opportunity_advisory",
+                "/v1/reports/strategy-opportunity-advisory",
+            )
+        )
 
     @staticmethod
     def _persistent_key_payload(

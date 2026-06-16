@@ -303,6 +303,18 @@ def test_get_json_persists_etag_cache_across_clients(tmp_path: Path) -> None:
     assert second_http.calls[0]["headers"]["If-None-Match"] == '"persisted"'
 
 
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "/v1/strategy-opportunity-advisory/v5-compact",
+        "/v1/strategy_opportunity_advisory",
+        "/v1/reports/strategy-opportunity-advisory",
+    ],
+)
+def test_strategy_advisory_endpoint_variants_are_persistent_cacheable(endpoint: str) -> None:
+    assert QuantLabClient._persistent_cache_enabled_for_endpoint(endpoint) is True
+
+
 def test_get_json_logs_segmented_latency_and_server_headers(tmp_path: Path) -> None:
     class HeaderHTTP(_HTTP):
         def get(self, url, params=None, headers=None, timeout=None):

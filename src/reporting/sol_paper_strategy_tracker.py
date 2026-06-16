@@ -1215,7 +1215,12 @@ def _read_strategy_opportunity_advisory_api(
         try:
             response = client.get_json(
                 str(endpoint),
-                params={"format": "json", "fields": "minimal", "latest_only": "true"},
+                params={
+                    "format": "json",
+                    "fields": "minimal",
+                    "latest_only": "true",
+                    "fresh_only": "true",
+                },
             )
         except Exception:
             continue

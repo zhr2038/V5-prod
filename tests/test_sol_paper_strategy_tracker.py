@@ -2649,11 +2649,13 @@ def test_strategy_advisory_stale_local_uses_api_and_updates_cache(monkeypatch: p
         ],
     )
     api_call_count = 0
+    api_params: list[dict[str, str]] = []
 
     class FakeClient:
         def get_json(self, endpoint: str, params: dict | None = None) -> SimpleNamespace:
             nonlocal api_call_count
             api_call_count += 1
+            api_params.append(dict(params or {}))
             return SimpleNamespace(
                 ok=True,
                 data={
@@ -2686,6 +2688,15 @@ def test_strategy_advisory_stale_local_uses_api_and_updates_cache(monkeypatch: p
         cache_dir=tmp_path / "cache",
     )
 
+    assert api_call_count == 1
+    assert api_params == [
+        {
+            "format": "json",
+            "fields": "minimal",
+            "latest_only": "true",
+            "fresh_only": "true",
+        }
+    ]
     assert result["advisory_rows"] == 1
     advisory = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_reader.csv")
     assert advisory[0]["advisory_source"] == "api"
