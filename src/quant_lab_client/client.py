@@ -996,10 +996,6 @@ class QuantLabClient:
     ) -> RiskPermission:
         strategy_text = str(strategy or "").strip()
         version_text = str(version or "").strip()
-        permission_cache_key = (strategy_text, version_text)
-        cached_permission = self._permission_cache.get(permission_cache_key)
-        if cached_permission is not None and cached_permission[0] > time.time():
-            return cached_permission[1]
         permission_request_id = str(request_id or "").strip() or f"{self.run_id or 'v5'}:permission:{strategy_text}:{version_text}"
         request_event = normalize_quant_lab_event(
             {
@@ -1014,18 +1010,36 @@ class QuantLabClient:
             },
             default_event_type=EVENT_TYPE_REQUEST,
         )
+        permission_params = {
+            "schema_version": request_event["schema_version"],
+            "contract_version": request_event["contract_version"],
+            "event_id": request_event["event_id"],
+            "request_id": permission_request_id,
+            "run_id": self.run_id or "",
+            "ts_utc": request_event["ts_utc"],
+            "strategy": strategy_text,
+            "version": version_text,
+        }
+        permission_cache_key = (strategy_text, version_text)
+        cached_permission = self._permission_cache.get(permission_cache_key)
+        if cached_permission is not None and cached_permission[0] > time.time():
+            cached_payload = cached_permission[1].to_dict()
+            self._log_request(
+                endpoint_path="/v1/risk/live-permission",
+                params=permission_params,
+                status_code=200,
+                latency_ms=0.0,
+                success=True,
+                error_type=None,
+                cached=True,
+                response_summary=summarize_response(cached_payload),
+                response_headers={"x-quant-lab-client-permission-cache-hit": "true"},
+                network_meta={"response_bytes": _response_byte_count(None, cached_payload), "download_ms": 0.0},
+            )
+            return cached_permission[1]
         response = self.get_json(
             "/v1/risk/live-permission",
-            params={
-                "schema_version": request_event["schema_version"],
-                "contract_version": request_event["contract_version"],
-                "event_id": request_event["event_id"],
-                "request_id": permission_request_id,
-                "run_id": self.run_id or "",
-                "ts_utc": request_event["ts_utc"],
-                "strategy": strategy_text,
-                "version": version_text,
-            },
+            params=permission_params,
         )
         permission = RiskPermission.from_payload(response.data)
         permission.permission = normalize_permission(permission.permission)

@@ -366,6 +366,19 @@ def test_live_permission_cache_uses_expires_at(tmp_path: Path) -> None:
     assert first.permission == "ALLOW"
     assert second.permission == "ALLOW"
     assert len(http.calls) == 1
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "requests.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [row["request_id"] for row in rows] == ["one", "two"]
+    assert [row["endpoint_path"] for row in rows] == [
+        "/v1/risk/live-permission",
+        "/v1/risk/live-permission",
+    ]
+    assert rows[0]["client_cache_hit"] is False
+    assert rows[1]["client_cache_hit"] is True
+    assert rows[1]["cached"] is True
+    assert rows[1]["response_summary"]["permission"] == "ALLOW"
 
 
 @pytest.mark.parametrize("symbol", ["OKX:BNB-USDT", "okx:bnb-usdt", "BNB/USDT", "BNB-USDT", "BNBUSDT"])
