@@ -6357,6 +6357,7 @@ def test_health_api_keeps_quant_lab_cost_warning_advisory_when_live_coverage_pas
                     "coverage_status": "PASS",
                     "missing_symbols": [],
                     "covered_symbols": ["BNB-USDT", "BTC-USDT", "ETH-USDT", "SOL-USDT"],
+                    "stale_actual_or_mixed_symbols": ["BNB-USDT", "SOL-USDT"],
                 },
             },
             "proxy": {"upstream_path": "/v1/health/deep"},
@@ -6375,8 +6376,10 @@ def test_health_api_keeps_quant_lab_cost_warning_advisory_when_live_coverage_pas
     assert quant_lab["request_metrics"]["latest_service_warnings"] == ["cost_health_warning"]
     assert quant_lab["deep_health"]["health_status"] == "warning"
     assert quant_lab["deep_health"]["advisory_cost_warning"] is True
+    assert quant_lab["deep_health"]["stale_actual_or_mixed_symbols"] == ["BNB-USDT", "SOL-USDT"]
     assert "warnings cost_health_warning" in quant_lab["detail"]
     assert "live coverage PASS" in quant_lab["detail"]
+    assert "stale cost anchors BNB-USDT,SOL-USDT" in quant_lab["detail"]
 
 
 def test_health_api_reflects_quant_lab_deep_health_warning(monkeypatch, tmp_path):

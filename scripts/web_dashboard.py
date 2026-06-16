@@ -2876,6 +2876,26 @@ def _quant_lab_live_cost_warning_is_advisory(live_health: Dict[str, Any]) -> boo
     return not missing_symbols
 
 
+def _quant_lab_live_stale_actual_cost_symbols(live_coverage: Dict[str, Any]) -> List[str]:
+    raw_symbols = live_coverage.get('stale_actual_or_mixed_symbols')
+    if isinstance(raw_symbols, list):
+        return sorted({str(symbol).strip() for symbol in raw_symbols if str(symbol).strip()})
+
+    detail_by_symbol = live_coverage.get('detail_by_symbol')
+    if not isinstance(detail_by_symbol, dict):
+        return []
+
+    stale_symbols = []
+    for symbol, payload in detail_by_symbol.items():
+        if not isinstance(payload, dict):
+            continue
+        if payload.get('stale_actual_or_mixed') or payload.get('latest_actual_or_mixed_stale'):
+            normalized = str(payload.get('symbol') or symbol).strip()
+            if normalized:
+                stale_symbols.append(normalized)
+    return sorted(set(stale_symbols))
+
+
 def _quant_lab_request_warning_is_live_cost_advisory(request_check: Dict[str, Any]) -> bool:
     metrics = request_check.get('request_metrics') if isinstance(request_check, dict) else {}
     if not isinstance(metrics, dict) or not metrics.get('available'):
@@ -2967,6 +2987,11 @@ def _load_quant_lab_live_health_status(config: Dict[str, Any]) -> Optional[Dict[
         detail_parts.append(f'+{len(warnings) - 3}')
     if live_coverage_status:
         detail_parts.append(f'live coverage {live_coverage_status}')
+    stale_actual_cost_symbols = _quant_lab_live_stale_actual_cost_symbols(live_coverage)
+    if stale_actual_cost_symbols:
+        rendered_symbols = ','.join(stale_actual_cost_symbols[:4])
+        suffix = f'+{len(stale_actual_cost_symbols) - 4}' if len(stale_actual_cost_symbols) > 4 else ''
+        detail_parts.append(f'stale cost anchors {rendered_symbols}{suffix}')
 
     live_health = {
         'status': status,
@@ -2977,6 +3002,8 @@ def _load_quant_lab_live_health_status(config: Dict[str, Any]) -> Optional[Dict[
         'warnings': warnings,
         'proxy': proxy_meta,
     }
+    if stale_actual_cost_symbols:
+        live_health['stale_actual_or_mixed_symbols'] = stale_actual_cost_symbols
     if cost_health:
         live_health['cost_health'] = cost_health
     live_health['advisory_cost_warning'] = _quant_lab_live_cost_warning_is_advisory(live_health)
