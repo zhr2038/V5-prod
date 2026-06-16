@@ -2588,6 +2588,7 @@ def test_risk_on_multi_buy_advisory_multi_symbol_is_not_observable_without_detai
 def test_strategy_advisory_uses_fresh_local_without_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cfg = _cfg()
     cfg.quant_lab.enabled = True
+    cfg.diagnostics.quant_lab_strategy_opportunity_advisory_api_enabled = False
     start_s = 1_779_000_000
     run_dir = tmp_path / "reports" / "runs" / "r_fresh_local"
     run_dir.mkdir(parents=True)
@@ -2627,6 +2628,102 @@ def test_strategy_advisory_uses_fresh_local_without_api(monkeypatch: pytest.Monk
     assert advisory[0]["freshness_status"] == "fresh"
     assert advisory[0]["stale_reason"] == ""
     assert advisory[0]["api_fallback_attempted"] == "False"
+
+
+def test_strategy_advisory_fresh_local_still_uses_newer_api_bottom_zone(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_fresh_local_new_api"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        tmp_path / "reports",
+        [
+            {
+                "strategy_candidate": "f4_volume_swing",
+                "symbol": "SOL/USDT",
+                "decision": "PAPER_READY",
+                "recommended_mode": "paper",
+                "max_paper_notional_usdt": "10",
+                **_fresh_meta(start_s),
+            }
+        ],
+    )
+    api_call_count = 0
+
+    class FakeClient:
+        def get_json(self, endpoint: str, params: dict | None = None) -> SimpleNamespace:
+            nonlocal api_call_count
+            api_call_count += 1
+            return SimpleNamespace(
+                ok=True,
+                headers={
+                    "x-quant-lab-advisory-dataset-generated-at": str(start_s + 120),
+                    "x-quant-lab-advisory-row-count": "2",
+                },
+                cached=False,
+                data={
+                    "rows": [
+                        {
+                            "strategy_candidate": "f4_volume_swing",
+                            "symbol": "SOL/USDT",
+                            "decision": "PAPER_READY",
+                            "recommended_mode": "paper",
+                            "max_paper_notional_usdt": 10,
+                            **_fresh_meta(start_s + 120),
+                        },
+                        {
+                            "strategy_id": "BOTTOM_ZONE_PROBE_PAPER_V1",
+                            "strategy_candidate": "v5.bottom_zone_probe_paper",
+                            "symbol": "BTC-USDT",
+                            "decision": "PAPER_READY",
+                            "recommended_mode": "paper",
+                            "would_enter": "true",
+                            "horizon_hours": "24",
+                            "max_paper_notional_usdt": 5,
+                            "max_live_notional_usdt": 0,
+                            "live_order_effect": "read_only_no_live_order",
+                            **_fresh_meta(start_s + 120),
+                        },
+                    ]
+                },
+            )
+
+    from src.quant_lab_client import client as client_mod
+
+    monkeypatch.setattr(
+        client_mod.QuantLabClient,
+        "from_config",
+        classmethod(lambda cls, *args, **kwargs: FakeClient()),
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_fresh_local_new_api", start_s + 120),
+        market_data_1h={
+            "SOL/USDT": _series("SOL/USDT", start_s + 120, {0: 100.0}),
+            "BTC/USDT": _series("BTC/USDT", start_s + 120, {0: 65000.0}),
+        },
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert api_call_count == 1
+    assert result["advisory_rows"] == 2
+    assert result["bottom_zone_probe_paper_rows"] == 1
+    advisory = _read_csv(tmp_path / "reports" / "summaries" / "strategy_opportunity_advisory_reader.csv")
+    bottom = next(row for row in advisory if row["strategy_id"] == "BOTTOM_ZONE_PROBE_PAPER_V1")
+    assert bottom["advisory_source"] == "api"
+    assert bottom["response_action"] == "paper_tracking"
+    assert bottom["max_paper_notional_usdt"] == "5.0"
+    bottom_runs = _read_csv(tmp_path / "reports" / "summaries" / "bottom_zone_probe_paper_runs.csv")
+    assert bottom_runs[0]["strategy_id"] == "BOTTOM_ZONE_PROBE_PAPER_V1"
+    assert bottom_runs[0]["would_enter"] == "True"
+    cached = _read_csv(tmp_path / "reports" / "strategy_opportunity_advisory.csv")
+    assert any(row["strategy_id"] == "BOTTOM_ZONE_PROBE_PAPER_V1" for row in cached)
 
 
 def test_strategy_advisory_stale_local_uses_api_and_updates_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

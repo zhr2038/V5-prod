@@ -1829,7 +1829,11 @@ def _read_strategy_opportunity_advisory_result(
     local_meta["latest_quant_lab_bundle_seen"] = (
         _iso_from_ms(local_bundle_seen_ms) if local_bundle_seen_ms is not None else ""
     )
-    if rows and bool(local_meta.get("advisory_fresh")):
+    qcfg = getattr(cfg, "quant_lab", None)
+    api_enabled = bool(
+        getattr(diagnostics, "quant_lab_strategy_opportunity_advisory_api_enabled", True)
+    ) and bool(qcfg is not None and getattr(qcfg, "enabled", False))
+    if rows and bool(local_meta.get("advisory_fresh")) and not api_enabled:
         local_meta["selection_reason"] = "fresh_local"
         selected_rows = _annotate_advisory_rows(rows, local_meta)
         return AdvisoryReadResult(
