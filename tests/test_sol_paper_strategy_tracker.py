@@ -16,12 +16,22 @@ from src.reporting.decision_audit import DecisionAudit
 from src.reporting.sol_paper_strategy_tracker import (
     _assess_advisory_rows,
     _daily_rows,
+    _default_advisory_api_paths,
     _readiness_for_rows,
     update_sol_paper_strategy_tracker,
 )
 
 
 CONTRACT_VERSION = "v5.quant_lab.telemetry.v2"
+
+
+def test_strategy_advisory_default_api_paths_prefer_compact_without_legacy_alias() -> None:
+    paths = _default_advisory_api_paths()
+
+    assert paths[0] == "/v1/strategy-opportunity-advisory/v5-compact"
+    assert "/v1/strategy-opportunity-advisory" in paths
+    assert "/v1/strategy_opportunity_advisory" not in paths
+    assert AppConfig().diagnostics.quant_lab_strategy_opportunity_advisory_api_paths == paths
 
 
 def _series(symbol: str, start_s: int, prices: dict[int, float]) -> MarketSeries:

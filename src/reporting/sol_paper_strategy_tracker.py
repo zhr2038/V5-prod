@@ -831,7 +831,6 @@ def _default_advisory_api_paths() -> list[str]:
     return [
         "/v1/strategy-opportunity-advisory/v5-compact",
         "/v1/strategy-opportunity-advisory",
-        "/v1/strategy_opportunity_advisory",
         "/v1/reports/strategy-opportunity-advisory",
     ]
 

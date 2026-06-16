@@ -276,7 +276,6 @@ diagnostics:
   quant_lab_strategy_opportunity_advisory_api_paths:
     - /v1/strategy-opportunity-advisory/v5-compact
     - /v1/strategy-opportunity-advisory
-    - /v1/strategy_opportunity_advisory
     - /v1/reports/strategy-opportunity-advisory
   quant_lab_strategy_opportunity_advisory_max_age_minutes: 90
   quant_lab_strategy_opportunity_advisory_require_contract_version: true
