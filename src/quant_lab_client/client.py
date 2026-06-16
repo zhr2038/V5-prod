@@ -309,6 +309,19 @@ def _permission_expires_epoch(value: Any) -> Optional[float]:
     return parsed.timestamp()
 
 
+def _permission_cache_expires_epoch(value: Any, cache_ttl_seconds: int) -> Optional[float]:
+    ttl_seconds = max(0, int(cache_ttl_seconds or 0))
+    if ttl_seconds <= 0:
+        return None
+    remote_expires_epoch = _permission_expires_epoch(value)
+    if remote_expires_epoch is None:
+        return None
+    now = time.time()
+    if remote_expires_epoch <= now:
+        return None
+    return min(remote_expires_epoch, now + float(ttl_seconds))
+
+
 @dataclass
 class QuantLabResponse:
     endpoint: str
@@ -1043,8 +1056,11 @@ class QuantLabClient:
         )
         permission = RiskPermission.from_payload(response.data)
         permission.permission = normalize_permission(permission.permission)
-        expires_epoch = _permission_expires_epoch(permission.expires_at)
-        if expires_epoch is not None and expires_epoch > time.time():
+        expires_epoch = _permission_cache_expires_epoch(
+            permission.expires_at,
+            self.cache_ttl_seconds,
+        )
+        if expires_epoch is not None:
             self._permission_cache[permission_cache_key] = (expires_epoch, permission)
         return permission
 

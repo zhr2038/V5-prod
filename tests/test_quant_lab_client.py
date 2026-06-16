@@ -7,6 +7,7 @@ from datetime import timedelta
 
 import pytest
 
+import src.quant_lab_client.client as client_module
 from src.quant_lab_client.client import QuantLabClient
 from src.quant_lab_client.exceptions import QuantLabValidationError
 from src.quant_lab_client.models import GateDecision
@@ -339,46 +340,61 @@ def test_get_json_logs_segmented_latency_and_server_headers(tmp_path: Path) -> N
     assert "resolved_host" in row
 
 
-def test_live_permission_cache_uses_expires_at(tmp_path: Path) -> None:
+def test_live_permission_cache_is_capped_by_client_ttl(tmp_path: Path, monkeypatch) -> None:
     class PermissionHTTP(_HTTP):
+        def __init__(self) -> None:
+            super().__init__()
+            self.permissions = ["ALLOW", "ABORT"]
+
         def get(self, url, params=None, headers=None, timeout=None):
             self.calls.append({"method": "GET", "url": url, "params": params, "headers": headers, "timeout": timeout})
+            permission = self.permissions[min(len(self.calls) - 1, len(self.permissions) - 1)]
             return _Response(
                 {
                     "strategy": "v5",
                     "version": "5.0.0",
-                    "permission": "ALLOW",
+                    "permission": permission,
                     "reasons": [],
                     "expires_at": "2999-01-01T00:00:00Z",
                 }
             )
 
+    now = 1_000.0
+    monkeypatch.setattr(client_module.time, "time", lambda: now)
     http = PermissionHTTP()
     client = QuantLabClient(
         base_url="https://quant-lab.local",
         http_client=http,
         request_log_path=tmp_path / "requests.jsonl",
+        cache_ttl_seconds=30,
     )
 
     first = client.get_live_permission(strategy="v5", version="5.0.0", request_id="one")
+    now = 1_029.0
     second = client.get_live_permission(strategy="v5", version="5.0.0", request_id="two")
+    now = 1_031.0
+    third = client.get_live_permission(strategy="v5", version="5.0.0", request_id="three")
 
     assert first.permission == "ALLOW"
     assert second.permission == "ALLOW"
-    assert len(http.calls) == 1
+    assert third.permission == "ABORT"
+    assert len(http.calls) == 2
     rows = [
         json.loads(line)
         for line in (tmp_path / "requests.jsonl").read_text(encoding="utf-8").splitlines()
     ]
-    assert [row["request_id"] for row in rows] == ["one", "two"]
+    assert [row["request_id"] for row in rows] == ["one", "two", "three"]
     assert [row["endpoint_path"] for row in rows] == [
+        "/v1/risk/live-permission",
         "/v1/risk/live-permission",
         "/v1/risk/live-permission",
     ]
     assert rows[0]["client_cache_hit"] is False
     assert rows[1]["client_cache_hit"] is True
+    assert rows[2]["client_cache_hit"] is False
     assert rows[1]["cached"] is True
     assert rows[1]["response_summary"]["permission"] == "ALLOW"
+    assert rows[2]["response_summary"]["permission"] == "ABORT"
 
 
 @pytest.mark.parametrize("symbol", ["OKX:BNB-USDT", "okx:bnb-usdt", "BNB/USDT", "BNB-USDT", "BNBUSDT"])
