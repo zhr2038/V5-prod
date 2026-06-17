@@ -43,6 +43,23 @@ function firstNumber(...values: unknown[]) {
   return null;
 }
 
+function firstBoolean(...values: unknown[]) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === '') continue;
+    if (typeof value === 'boolean') return value;
+    const text = String(value).trim().toLowerCase();
+    if (['true', '1', 'yes', 'y', 'on'].includes(text)) return true;
+    if (['false', '0', 'no', 'n', 'off'].includes(text)) return false;
+  }
+  return null;
+}
+
+function textArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => String(item || '').toLowerCase()).filter(Boolean)
+    : [];
+}
+
 function secondsToClock(seconds: number | null) {
   if (seconds === null) return '--';
   const safe = Math.max(0, Math.floor(seconds));
@@ -166,6 +183,7 @@ export function StatusRibbon({
     'UNKNOWN'
   ).toUpperCase();
   const qlStatusData = nestedRecord(quantLabStatus?.data);
+  const qlMode = firstText(quantLabStatus?.mode, qlStatusData.mode).toLowerCase();
   const qlFreshness = firstText(quantLabStatus?.status, qlStatusData.status, quantLabStatus?.available ? 'ok' : 'degraded');
   const qlRequestMetrics = nestedRecord(quantLabStatus?.request_metrics || qlStatusData.request_metrics);
   const qlRequestTotal = firstNumber(qlRequestMetrics.total);
@@ -179,24 +197,35 @@ export function StatusRibbon({
     ? `API 近${fmtNum(qlLookback, 0)}m ${fmtNum(qlRequestSuccess, 0)}/${fmtNum(qlRequestTotal, 0)}成功 · P95 ${fmtLatencyMs(qlP95Latency)}`
     : `API 延迟 --${qlRequestReason ? ` · ${qlRequestReason}` : ''}`;
   const ttl = ttlRemaining(quantLabPermission);
-  const allowedModesRaw = (
-    Array.isArray(quantLabPermission?.allowed_modes)
-      ? quantLabPermission?.allowed_modes
-      : Array.isArray(permissionData.allowed_modes)
-        ? permissionData.allowed_modes
-        : Array.isArray(permissionData.allowed_live_modes)
-          ? permissionData.allowed_live_modes
-          : []
-  ) as unknown[];
-  const allowedModesText = allowedModesRaw.map((item) => String(item || '').toLowerCase()).filter(Boolean);
+  const directAllowedModes = textArray(quantLabPermission?.allowed_modes);
+  const nestedAllowedModes = textArray(permissionData.allowed_modes);
+  const directLiveModes = textArray(quantLabPermission?.allowed_live_modes);
+  const nestedLiveModes = textArray(permissionData.allowed_live_modes);
+  const allowedModesText = directAllowedModes.length > 0
+    ? directAllowedModes
+    : nestedAllowedModes.length > 0
+      ? nestedAllowedModes
+      : directLiveModes.length > 0
+        ? directLiveModes
+        : nestedLiveModes;
+  const directAdvisoryModes = textArray(quantLabPermission?.allowed_advisory_modes);
+  const nestedAdvisoryModes = textArray(permissionData.allowed_advisory_modes);
+  const allowedAdvisoryModesText = directAdvisoryModes.length > 0 ? directAdvisoryModes : nestedAdvisoryModes;
   const liveOpenAllowed = allowedModesText.some((item) => item.includes('live') || item.includes('spot') || item.includes('open'));
-  const permissionSub = permission === 'ALLOW'
+  const enforceable = firstBoolean(quantLabPermission?.enforceable, permissionData.enforceable);
+  const basePermissionSub = permission === 'ALLOW'
     ? (liveOpenAllowed ? '允许开新仓' : 'ALLOW · live modes 未列明')
     : permission === 'SELL_ONLY'
       ? '仅允许减仓'
       : permission === 'ABORT'
         ? '禁止新风险'
         : '权限不可观测';
+  const advisoryOnly = permission !== 'UNKNOWN' && (
+    enforceable === false
+    || qlMode === 'shadow'
+    || (allowedAdvisoryModesText.length > 0 && allowedModesText.length === 0)
+  );
+  const permissionSub = advisoryOnly ? `建议${basePermissionSub} · 未强制` : basePermissionSub;
   const asOf = Date.parse(firstText(quantLabPermission?.as_of_ts, permissionData.as_of_ts));
   const expiresAt = Date.parse(firstText(quantLabPermission?.expires_at, permissionData.expires_at));
   const ttlWindow = Number.isFinite(asOf) && Number.isFinite(expiresAt) && expiresAt > asOf

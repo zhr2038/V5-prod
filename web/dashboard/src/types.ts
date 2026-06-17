@@ -331,6 +331,9 @@ export interface QuantLabPermissionData extends UnknownRecord {
   status?: string;
   permission_status?: string;
   allowed_modes?: unknown[];
+  allowed_advisory_modes?: unknown[];
+  allowed_live_modes?: unknown[];
+  enforceable?: boolean | string | number | null;
   max_gross_exposure?: number | null;
   max_gross_exposure_usdt?: number | null;
   max_single_order_usdt?: number | null;

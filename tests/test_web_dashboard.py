@@ -60,6 +60,15 @@ def test_status_ribbon_formats_market_volatility_as_percent_points():
     assert "fmtUnsignedPct(volatilityRatio, 2)" in source
 
 
+def test_status_ribbon_marks_quant_lab_advisory_permission_not_enforced():
+    source = STATUS_RIBBON_TSX_PATH.read_text(encoding="utf-8")
+
+    assert "allowed_advisory_modes" in source
+    assert "quantLabPermission?.enforceable" in source
+    assert "qlMode === 'shadow'" in source
+    assert "建议${basePermissionSub} · 未强制" in source
+
+
 def _utc_epoch_from_text(value: str, fmt: str) -> float:
     return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc).timestamp()
 
