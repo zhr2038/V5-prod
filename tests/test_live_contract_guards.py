@@ -332,6 +332,11 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
     out_path = main_module._write_effective_live_config(cfg)
     payload = json.loads(out_path.read_text(encoding="utf-8"))
 
+    assert payload["effective_live_config_schema_version"] == main_module.EFFECTIVE_LIVE_CONFIG_SCHEMA_VERSION
+    assert payload["generated_at_utc"].endswith("Z")
+    assert payload["git_commit"]
+    assert payload["git_branch"]
+    assert payload["source"] == "main._effective_live_config_payload"
     assert payload["symbols"] == ["BTC/USDT", "ETH/USDT"]
     assert payload["universe"]["enabled"] is False
     assert payload["universe"]["use_universe_symbols"] is False

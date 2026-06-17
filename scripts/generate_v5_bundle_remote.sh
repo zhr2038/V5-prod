@@ -2267,6 +2267,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             if any(str(key).startswith(prefix) for prefix in CONFIG_CONSUMPTION_PREFIXES)
         }
         candidate_keys = sorted(CONFIG_CONSUMPTION_FIXED_KEYS | prefix_keys)
+        effective_config_file_present = effective_config_path.is_file()
         rows = []
         for key in candidate_keys:
             pattern = key_pattern(key)
@@ -2316,6 +2317,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 diagnosis = "legacy_execution_quant_lab_inactive_top_level_authoritative"
             elif (present_live or present_effective) and consumed and consumer_category == "live_runtime":
                 diagnosis = "live_runtime_consumed"
+                if effective_config_file_present and present_live and not present_effective:
+                    add_issue(
+                        "warning",
+                        "effective_config_missing_live_runtime_key",
+                        "A live runtime config key is present in live_prod.yaml and consumed by runtime code, but is missing from effective_live_config.json.",
+                        {
+                            "config_key": key,
+                            "consumer_files": consumer_files,
+                            "diagnosis": "effective_config_may_be_stale_or_incomplete",
+                        },
+                    )
             elif (present_live or present_effective) and consumed and consumer_category == "diagnostics":
                 diagnosis = "diagnostics_consumed"
             elif present_live and not consumed:
@@ -11572,6 +11584,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if row.get("present_in_live_prod") == "true" and row.get("consumed_in_runtime_code") != "true"
         and row.get("diagnosis") not in {"intentionally_inactive", "legacy_execution_quant_lab_inactive_top_level_authoritative"}
     )
+    config_runtime_missing_effective_count = sum(
+        1 for row in config_runtime_consumption_rows
+        if effective_config_path.is_file()
+        and row.get("present_in_live_prod") == "true"
+        and row.get("present_in_effective_config") != "true"
+        and row.get("consumed_in_runtime_code") == "true"
+        and row.get("consumer_category") == "live_runtime"
+    )
 
     write_csv(
         "summaries/router_decisions.csv",
@@ -14697,6 +14717,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         ),
         "config_runtime_consumption_rows": len(config_runtime_consumption_rows),
         "config_runtime_not_consumed_count": config_runtime_not_consumed_count,
+        "config_runtime_missing_effective_count": config_runtime_missing_effective_count,
         "split_order_runtime_active": False,
         "quant_lab_compliance_rows": len(quant_lab_compliance_rows),
         "quant_lab_permission_audit_rows": len(quant_lab_permission_audit_rows),
@@ -15839,8 +15860,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "## 配置消费审计",
         f"- audited config keys: {len(config_runtime_consumption_rows)}",
         f"- live config keys not consumed in runtime: {config_runtime_not_consumed_count}",
+        f"- live runtime config keys missing from effective config: {config_runtime_missing_effective_count}",
         "- split_order_runtime_active: false",
-        f"- low issue present: {'yes' if config_runtime_not_consumed_count else 'no'}",
+        f"- config audit issue present: {'yes' if (config_runtime_not_consumed_count or config_runtime_missing_effective_count) else 'no'}",
         "",
         "## Rank exit 一致性检查",
         f"- rank_exit sell 数量: {len(rank_exit_consistency_rows)}",

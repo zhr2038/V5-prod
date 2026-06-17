@@ -5,6 +5,7 @@ import sys
 import time
 import os
 import json
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
@@ -14,6 +15,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT_STR = str(PROJECT_ROOT)
 if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
+
+EFFECTIVE_LIVE_CONFIG_SCHEMA_VERSION = "v5.effective_live_config.v1"
 
 from configs.loader import load_config
 from configs.schema import AppConfig, normalize_alpha_base_factor_mapping
@@ -901,6 +904,24 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _git_metadata_value(*args: str) -> str:
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except Exception:
+        return "not_observable"
+    if proc.returncode != 0:
+        return "not_observable"
+    value = (proc.stdout or "").splitlines()[0].strip() if proc.stdout else ""
+    return value or "not_observable"
+
+
 def _coalesce(value, default):
     return default if value is None else value
 
@@ -1598,6 +1619,11 @@ def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
         getattr(cfg.execution, "ml_research_use_stable_universe", False)
     )
     return {
+        "effective_live_config_schema_version": EFFECTIVE_LIVE_CONFIG_SCHEMA_VERSION,
+        "generated_at_utc": _utc_now().isoformat().replace("+00:00", "Z"),
+        "git_commit": _git_metadata_value("rev-parse", "HEAD"),
+        "git_branch": _git_metadata_value("rev-parse", "--abbrev-ref", "HEAD"),
+        "source": "main._effective_live_config_payload",
         "symbols": list(cfg.symbols or []),
         "ml_factor_enabled": ml_factor_enabled,
         "collect_ml_training_data": collect_ml_training_data,

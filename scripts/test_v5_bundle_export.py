@@ -1366,6 +1366,7 @@ def fixture_config_runtime_consumption_root(root):
                 "  split_interval_sec: 3.0",
                 "  same_symbol_reentry_enabled: true",
                 "  btc_leadership_probe_enabled: true",
+                "  market_impulse_probe_forward_test_live_ready: false",
                 "  protect_profit_lock_enabled: true",
                 "  swing_hold_enabled: true",
                 "  swing_min_hold_hours: 24",
@@ -1392,6 +1393,7 @@ def fixture_config_runtime_consumption_root(root):
                 "split_interval_sec: float = 0.0",
                 "same_symbol_reentry_enabled: bool = False",
                 "btc_leadership_probe_enabled: bool = False",
+                "market_impulse_probe_forward_test_live_ready: bool = False",
                 "protect_profit_lock_enabled: bool = False",
                 "swing_hold_enabled: bool = True",
                 "swing_min_hold_hours: int = 24",
@@ -1424,6 +1426,7 @@ def fixture_config_runtime_consumption_root(root):
                 "def consume(cfg):",
                 "    getattr(cfg.execution, 'same_symbol_reentry_enabled', False)",
                 "    getattr(cfg.execution, 'btc_leadership_probe_enabled', False)",
+                "    getattr(cfg.execution, 'market_impulse_probe_forward_test_live_ready', False)",
                 "    getattr(cfg.execution, 'protect_profit_lock_enabled', False)",
                 "    getattr(cfg.execution, 'swing_hold_enabled', True)",
                 "    getattr(cfg.execution, 'protect_recovery_multi_position_enabled', False)",
@@ -6249,6 +6252,10 @@ def main():
             assert by_key["same_symbol_reentry_enabled"]["consumer_category"] == "live_runtime", by_key["same_symbol_reentry_enabled"]
             assert by_key["same_symbol_reentry_enabled"]["consumer_files"] == "src/core/pipeline.py", by_key["same_symbol_reentry_enabled"]
             assert by_key["btc_leadership_probe_enabled"]["diagnosis"] == "live_runtime_consumed", by_key["btc_leadership_probe_enabled"]
+            assert by_key["market_impulse_probe_forward_test_live_ready"]["present_in_live_prod"] == "true", by_key["market_impulse_probe_forward_test_live_ready"]
+            assert by_key["market_impulse_probe_forward_test_live_ready"]["present_in_effective_config"] == "false", by_key["market_impulse_probe_forward_test_live_ready"]
+            assert by_key["market_impulse_probe_forward_test_live_ready"]["consumer_category"] == "live_runtime", by_key["market_impulse_probe_forward_test_live_ready"]
+            assert by_key["market_impulse_probe_forward_test_live_ready"]["diagnosis"] == "live_runtime_consumed", by_key["market_impulse_probe_forward_test_live_ready"]
             assert by_key["protect_profit_lock_enabled"]["diagnosis"] == "live_runtime_consumed", by_key["protect_profit_lock_enabled"]
             assert by_key["swing_hold_enabled"]["consumer_category"] == "live_runtime", by_key["swing_hold_enabled"]
             assert by_key["swing_hold_enabled"]["diagnosis"] == "live_runtime_consumed", by_key["swing_hold_enabled"]
@@ -6271,11 +6278,19 @@ def main():
                 if item.get("severity") == "low" and item.get("code") == "config_key_not_consumed"
             ]
             assert {item["evidence"]["config_key"] for item in low_issues} == set(), issues
+            effective_missing_warnings = [
+                item for item in issues["issues"]
+                if item.get("severity") == "warning" and item.get("code") == "effective_config_missing_live_runtime_key"
+            ]
+            assert {item["evidence"]["config_key"] for item in effective_missing_warnings} == {"market_impulse_probe_forward_test_live_ready"}, issues
             assert window["config_runtime_not_consumed_count"] == 0, window
+            assert window["config_runtime_missing_effective_count"] == 1, window
             assert window["split_order_runtime_active"] is False, window
             assert "## 配置消费审计" in readme, readme
             assert "live config keys not consumed in runtime: 0" in readme, readme
+            assert "live runtime config keys missing from effective config: 1" in readme, readme
             assert "split_order_runtime_active: false" in readme, readme
+            assert "config audit issue present: yes" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
