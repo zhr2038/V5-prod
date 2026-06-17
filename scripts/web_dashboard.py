@@ -2878,12 +2878,26 @@ def _quant_lab_live_cost_warning_is_advisory(live_health: Dict[str, Any]) -> boo
 
     if coverage_status != 'WARNING':
         return False
-    if cost_health.get('global_default_rows') or cost_health.get('symbols_missing_cost'):
+    if _coerce_float(cost_health.get('global_default_rows'), 0.0) > 0:
         return False
 
     detail_by_symbol = live_coverage.get('detail_by_symbol')
     if not isinstance(detail_by_symbol, dict) or not detail_by_symbol:
         return False
+
+    live_symbols = {_normalize_symbol_key(symbol) for symbol in detail_by_symbol.keys()}
+    raw_missing_cost_symbols = cost_health.get('symbols_missing_cost')
+    if isinstance(raw_missing_cost_symbols, list):
+        missing_live_symbols = {
+            _normalize_symbol_key(symbol)
+            for symbol in raw_missing_cost_symbols
+            if _normalize_symbol_key(symbol) in live_symbols
+        }
+        if missing_live_symbols:
+            return False
+    elif raw_missing_cost_symbols:
+        return False
+
     live_order_effects = {
         str(payload.get('live_order_effect') or '').strip()
         for payload in detail_by_symbol.values()

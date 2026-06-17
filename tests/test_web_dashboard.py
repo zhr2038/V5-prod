@@ -6506,7 +6506,7 @@ def test_health_api_keeps_shadow_read_only_cost_coverage_warning_advisory(monkey
             "cost_health": {
                 "status": "warning",
                 "global_default_rows": 0,
-                "symbols_missing_cost": [],
+                "symbols_missing_cost": ["ALLO-USDT", "BCH-USDT"],
                 "live_universe_cost_coverage": {
                     "coverage_status": "WARNING",
                     "missing_symbols": [],
