@@ -6434,6 +6434,118 @@ def test_health_api_keeps_quant_lab_cost_warning_advisory_when_live_coverage_pas
     assert "stale cost anchors BNB-USDT,SOL-USDT" in quant_lab["detail"]
 
 
+def test_health_api_keeps_shadow_read_only_cost_coverage_warning_advisory(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    orders_db = reports_dir / "orders.sqlite"
+    conn = sqlite3.connect(str(orders_db))
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE orders (inst_id TEXT)")
+    cur.execute("INSERT INTO orders(inst_id) VALUES ('BTC-USDT')")
+    conn.commit()
+    conn.close()
+
+    now = datetime.now(timezone.utc)
+    (reports_dir / "quant_lab_requests.jsonl").write_text(
+        json.dumps(
+            {
+                "endpoint_path": "/v1/strategy-opportunity-advisory/v5-compact",
+                "success": True,
+                "status_code": 200,
+                "latency_ms": 80.0,
+                "ts_utc": now.isoformat().replace("+00:00", "Z"),
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    runtime_paths = module.DashboardRuntimePaths(
+        reports_dir=reports_dir,
+        orders_db=orders_db,
+        fills_db=reports_dir / "fills.sqlite",
+        positions_db=reports_dir / "positions.sqlite",
+        kill_switch_path=reports_dir / "kill_switch.json",
+        reconcile_status_path=reports_dir / "reconcile_status.json",
+        runs_dir=reports_dir / "runs",
+        auto_risk_guard_path=reports_dir / "auto_risk_guard.json",
+        auto_risk_eval_path=reports_dir / "auto_risk_eval.json",
+        telemetry_db=reports_dir / "api_telemetry.sqlite",
+    )
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "quant_lab": {
+                "enabled": True,
+                "mode": "shadow",
+                "request_log_path": "reports/quant_lab_requests.jsonl",
+            }
+        },
+    )
+    monkeypatch.setattr(module, "_resolve_dashboard_runtime_paths", lambda _config: runtime_paths)
+    monkeypatch.setattr(module, "_pick_timer_name", lambda: "v5-prod.user.timer")
+    monkeypatch.setattr(module, "_get_timer_state", lambda _name: {"active": True, "error": None})
+    monkeypatch.setattr(module, "_dashboard_live_account_enabled", lambda: True)
+    monkeypatch.setattr(module, "_load_workspace_exchange_creds", lambda: ("k", "s", "p"))
+    monkeypatch.setattr(module, "_load_okx_account_balance", lambda *_args: {"code": "0", "data": []})
+    monkeypatch.setattr(
+        module,
+        "_quant_lab_proxy_fetch",
+        lambda *_args, **_kwargs: {
+            "available": True,
+            "status": "warning",
+            "warnings": ["cost_health_warning"],
+            "cost_health": {
+                "status": "warning",
+                "global_default_rows": 0,
+                "symbols_missing_cost": [],
+                "live_universe_cost_coverage": {
+                    "coverage_status": "WARNING",
+                    "missing_symbols": [],
+                    "stale_actual_or_mixed_symbols": ["BNB-USDT", "BTC-USDT"],
+                    "detail_by_symbol": {
+                        "BNB-USDT": {
+                            "symbol": "BNB-USDT",
+                            "stale_actual_or_mixed": True,
+                            "effective_cost_source": "public_spread_proxy",
+                            "live_order_effect": "read_only_no_live_order",
+                        },
+                        "BTC-USDT": {
+                            "symbol": "BTC-USDT",
+                            "stale_actual_or_mixed": True,
+                            "effective_cost_source": "public_spread_proxy",
+                            "live_order_effect": "read_only_no_live_order",
+                        },
+                    },
+                },
+            },
+            "proxy": {"upstream_path": "/v1/health/deep"},
+        },
+    )
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    quant_lab = next(check for check in payload["checks"] if check.get("name") == "中台 API")
+    assert payload["status"] == "healthy"
+    assert payload["warning_count"] == 0
+    assert quant_lab["status"] == "healthy"
+    assert quant_lab["deep_health"]["health_status"] == "warning"
+    assert quant_lab["deep_health"]["advisory_cost_warning"] is True
+    assert quant_lab["deep_health"]["stale_actual_or_mixed_symbols"] == ["BNB-USDT", "BTC-USDT"]
+    assert "live coverage WARNING" in quant_lab["detail"]
+    assert "stale cost anchors BNB-USDT,BTC-USDT" in quant_lab["detail"]
+
+
 def test_health_api_reflects_quant_lab_deep_health_warning(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
