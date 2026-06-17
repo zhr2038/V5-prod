@@ -603,6 +603,30 @@ BACKTEST_ADVISORY_READER_FIELDS = [
     "live_order_effect",
 ]
 
+FAST_MICROSTRUCTURE_STRATEGY_SHADOW_FIELDS = [
+    "run_id",
+    "ts_utc",
+    "source_path",
+    "strategy_candidate_id",
+    "strategy_candidate",
+    "feature_name",
+    "symbol",
+    "regime",
+    "horizon_hours",
+    "forward_sample_count",
+    "rank_ic",
+    "long_short_bps",
+    "p25_net_bps",
+    "hit_rate",
+    "recent_7d_score",
+    "lookback_bars",
+    "recommended_stage",
+    "review_blocking_reasons",
+    "response_action",
+    "max_live_notional_usdt_ignored",
+    "live_order_effect",
+]
+
 
 @dataclass
 class AdvisoryReadResult:
@@ -3436,6 +3460,167 @@ def _read_backtest_report_rows(*, run_path: Path, reports_dir: Path) -> list[dic
     return rows
 
 
+def _fast_microstructure_strategy_review_paths(*, run_path: Path, reports_dir: Path) -> list[Path]:
+    filename = "fast_microstructure_strategy_review.csv"
+    candidates: list[Path] = []
+    roots = (
+        reports_dir,
+        reports_dir / "raw" / "reports",
+        reports_dir / "quant_lab",
+        reports_dir / "quant_lab_latest",
+        reports_dir / "quant_lab_latest" / "reports",
+        reports_dir / "quant_lab_latest" / "raw" / "reports",
+        reports_dir / "quant_lab" / "latest" / "reports",
+        reports_dir / "quant_lab" / "latest" / "raw" / "reports",
+        reports_dir.parent / "raw" / "reports",
+        reports_dir.parent / "reports" / "quant_lab" / "latest" / "reports",
+        reports_dir.parent / "reports" / "quant_lab" / "latest" / "raw" / "reports",
+        run_path,
+        Path("/var/lib/v5-prod/raw/reports"),
+        Path("/var/lib/v5-prod/reports"),
+        Path("/var/lib/v5-prod/quant_lab_latest/reports"),
+        Path("/var/lib/v5-prod/quant_lab_latest/raw/reports"),
+        Path("/var/lib/v5-prod/quant_lab/latest/reports"),
+        Path("/var/lib/v5-prod/quant_lab/latest/raw/reports"),
+    )
+    for root in roots:
+        candidates.append(root / filename)
+    candidates.extend(
+        [
+            reports_dir / "quant_lab_latest_bundle.zip",
+            reports_dir / "quant_lab_latest_bundle.tar.gz",
+            reports_dir / "quant_lab" / "latest_bundle.zip",
+            reports_dir / "quant_lab" / "latest_bundle.tar.gz",
+            reports_dir.parent / "reports" / "quant_lab_latest_bundle.zip",
+            reports_dir.parent / "reports" / "quant_lab_latest_bundle.tar.gz",
+            reports_dir.parent / "reports" / "quant_lab" / "latest_bundle.zip",
+            reports_dir.parent / "reports" / "quant_lab" / "latest_bundle.tar.gz",
+            Path("/var/lib/v5-prod/quant_lab_latest_bundle.zip"),
+            Path("/var/lib/v5-prod/quant_lab_latest_bundle.tar.gz"),
+        ]
+    )
+    for pattern in (
+        reports_dir / "quant_lab_latest_bundle*.zip",
+        reports_dir / "quant_lab_latest_bundle*.tar.gz",
+        reports_dir / "quant_lab_expert_pack*.zip",
+        reports_dir / "quant_lab_expert_pack*.tar.gz",
+        reports_dir.parent / "reports" / "quant_lab_latest_bundle*.zip",
+        reports_dir.parent / "reports" / "quant_lab_latest_bundle*.tar.gz",
+        reports_dir.parent / "reports" / "quant_lab_expert_pack*.zip",
+        reports_dir.parent / "reports" / "quant_lab_expert_pack*.tar.gz",
+        Path("/var/lib/v5-prod/quant_lab_latest_bundle*.zip"),
+        Path("/var/lib/v5-prod/quant_lab_latest_bundle*.tar.gz"),
+        Path("/var/lib/v5-prod/quant_lab_expert_pack*.zip"),
+        Path("/var/lib/v5-prod/quant_lab_expert_pack*.tar.gz"),
+    ):
+        try:
+            candidates.extend(
+                sorted(
+                    pattern.parent.glob(pattern.name),
+                    key=lambda path: path.stat().st_mtime if path.exists() else 0,
+                    reverse=True,
+                )
+            )
+        except Exception:
+            continue
+    return list(dict.fromkeys(path.resolve() for path in candidates))
+
+
+def _read_fast_microstructure_strategy_review_rows(
+    *,
+    run_path: Path,
+    reports_dir: Path,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen_paths: set[Path] = set()
+    target = "fast_microstructure_strategy_review.csv"
+    for path in _fast_microstructure_strategy_review_paths(
+        run_path=run_path,
+        reports_dir=reports_dir,
+    ):
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        if not path.is_file():
+            continue
+        lower_name = path.name.lower()
+        if lower_name.endswith((".zip", ".tar", ".tar.gz", ".tgz")):
+            rows.extend(_read_raw_csv_path(path, target_filename=target))
+        elif lower_name == target:
+            rows.extend(_read_raw_csv_path(path, target_filename=target))
+    return rows
+
+
+def _fast_microstructure_strategy_shadow_rows(
+    review_rows: Iterable[Mapping[str, Any]],
+    *,
+    run_id: str,
+    asof_ts_ms: int,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    ts_utc = _iso_from_ms(asof_ts_ms)
+    for row in review_rows:
+        recommended_stage = str(row.get("recommended_stage") or "").strip().upper()
+        if recommended_stage != "SHADOW_REVIEW":
+            continue
+        strategy_candidate_id = str(
+            row.get("strategy_candidate_id")
+            or row.get("candidate_strategy_id")
+            or row.get("strategy_candidate")
+            or ""
+        ).strip()
+        if not strategy_candidate_id:
+            continue
+        symbol = _symbol_text(row.get("symbol"))
+        key = (
+            strategy_candidate_id,
+            symbol,
+            str(row.get("horizon_hours") or ""),
+            str(row.get("source_path") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            {
+                "run_id": run_id,
+                "ts_utc": ts_utc,
+                "source_path": str(row.get("source_path") or ""),
+                "strategy_candidate_id": strategy_candidate_id,
+                "strategy_candidate": str(
+                    row.get("strategy_candidate")
+                    or row.get("candidate_strategy_id")
+                    or strategy_candidate_id
+                ),
+                "feature_name": row.get("feature_name"),
+                "symbol": symbol,
+                "regime": row.get("regime"),
+                "horizon_hours": row.get("horizon_hours"),
+                "forward_sample_count": row.get("forward_sample_count"),
+                "rank_ic": row.get("rank_ic"),
+                "long_short_bps": row.get("long_short_bps"),
+                "p25_net_bps": row.get("p25_net_bps"),
+                "hit_rate": row.get("hit_rate"),
+                "recent_7d_score": row.get("recent_7d_score"),
+                "lookback_bars": row.get("lookback_bars"),
+                "recommended_stage": recommended_stage,
+                "review_blocking_reasons": row.get("review_blocking_reasons"),
+                "response_action": "shadow_review",
+                "max_live_notional_usdt_ignored": True,
+                "live_order_effect": "read_only_no_live_order",
+            }
+        )
+    return sorted(
+        out,
+        key=lambda row: (
+            str(row.get("strategy_candidate_id") or ""),
+            str(row.get("symbol") or ""),
+            str(row.get("horizon_hours") or ""),
+        ),
+    )
+
+
 def _backtest_advisory_reader_rows(
     report_rows: Iterable[Mapping[str, Any]],
     *,
@@ -5245,6 +5430,11 @@ def update_sol_paper_strategy_tracker(
         run_id=str(getattr(audit, "run_id", "") or ""),
         asof_ts_ms=asof_ts_ms,
     )
+    fast_microstructure_strategy_shadow_rows = _fast_microstructure_strategy_shadow_rows(
+        _read_fast_microstructure_strategy_review_rows(run_path=run_path, reports_dir=reports_dir),
+        run_id=str(getattr(audit, "run_id", "") or ""),
+        asof_ts_ms=asof_ts_ms,
+    )
     advisory_index = _advisory_by_strategy(advisory_rows)
     records_by_key = _load_existing_records(labels_path)
     new_records = _collect_candidates(
@@ -5390,6 +5580,11 @@ def update_sol_paper_strategy_tracker(
         backtest_advisory_rows,
         BACKTEST_ADVISORY_READER_FIELDS,
     )
+    _write_csv(
+        summaries_dir / "fast_microstructure_strategy_shadow.csv",
+        fast_microstructure_strategy_shadow_rows,
+        FAST_MICROSTRUCTURE_STRATEGY_SHADOW_FIELDS,
+    )
 
     return {
         "enabled": True,
@@ -5405,6 +5600,9 @@ def update_sol_paper_strategy_tracker(
         "risk_on_multi_buy_shadow_rows": int(len(risk_on_multi_buy_rows)),
         "late_breakout_failure_protect_rows": int(len(late_breakout_failure_rows)),
         "backtest_advisory_rows": int(len(backtest_advisory_rows)),
+        "fast_microstructure_strategy_shadow_rows": int(
+            len(fast_microstructure_strategy_shadow_rows)
+        ),
         "bnb_paper_strategy_rows": int(len(bnb_records)),
         "bottom_zone_probe_paper_rows": int(len(bottom_zone_records)),
         "proposal_rows": int(len(proposal_rows)),

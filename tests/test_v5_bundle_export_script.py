@@ -32,6 +32,15 @@ def test_v5_bundle_export_script_includes_bottom_zone_paper_summaries() -> None:
     assert '"summaries/bottom_zone_probe_paper_daily.csv"' in script
 
 
+def test_v5_bundle_export_script_includes_fast_microstructure_shadow_summary() -> None:
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "scripts" / "generate_v5_bundle_remote.sh").read_text(encoding="utf-8")
+
+    assert "FAST_MICROSTRUCTURE_STRATEGY_SHADOW_FIELDS" in script
+    assert '"reports/summaries/fast_microstructure_strategy_shadow.csv"' in script
+    assert '"summaries/fast_microstructure_strategy_shadow.csv"' in script
+
+
 def test_v5_bundle_export_script_regression() -> None:
     root = Path(__file__).resolve().parents[1]
     proc = subprocess.run(

@@ -2510,6 +2510,102 @@ def test_backtest_advisory_reader_is_read_only(tmp_path: Path) -> None:
     assert row["live_order_effect"] == "read_only_no_live_order"
 
 
+def test_fast_microstructure_strategy_shadow_reads_quant_lab_review(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    reports_dir = tmp_path / "reports"
+    run_dir = reports_dir / "runs" / "r_fast_micro_shadow"
+    run_dir.mkdir(parents=True)
+    review_path = reports_dir / "quant_lab" / "latest" / "reports" / "fast_microstructure_strategy_review.csv"
+    review_path.parent.mkdir(parents=True, exist_ok=True)
+    with review_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(
+            fh,
+            fieldnames=[
+                "strategy_candidate_id",
+                "feature_name",
+                "symbol",
+                "regime",
+                "horizon_hours",
+                "forward_sample_count",
+                "rank_ic",
+                "long_short_bps",
+                "p25_net_bps",
+                "hit_rate",
+                "recent_7d_score",
+                "lookback_bars",
+                "recommended_stage",
+                "review_blocking_reasons",
+                "response_action",
+                "max_live_notional_usdt",
+                "live_order_effect",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "strategy_candidate_id": "v5.fast_microstructure.hype_usdt.24h",
+                "feature_name": "order_book_imbalance",
+                "symbol": "HYPE-USDT",
+                "regime": "ALT_IMPULSE",
+                "horizon_hours": "24",
+                "forward_sample_count": "36",
+                "rank_ic": "0.19",
+                "long_short_bps": "82.5",
+                "p25_net_bps": "12.0",
+                "hit_rate": "0.67",
+                "recent_7d_score": "0.74",
+                "lookback_bars": "720",
+                "recommended_stage": "SHADOW_REVIEW",
+                "review_blocking_reasons": "",
+                "response_action": "shadow_review",
+                "max_live_notional_usdt": "999",
+                "live_order_effect": "read_only_no_live_order",
+            }
+        )
+        writer.writerow(
+            {
+                "strategy_candidate_id": "v5.fast_microstructure.sol_usdt.24h",
+                "feature_name": "order_book_imbalance",
+                "symbol": "SOL-USDT",
+                "regime": "RANGE",
+                "horizon_hours": "24",
+                "forward_sample_count": "36",
+                "rank_ic": "0.03",
+                "long_short_bps": "5.0",
+                "p25_net_bps": "-15.0",
+                "hit_rate": "0.51",
+                "recent_7d_score": "0.14",
+                "lookback_bars": "720",
+                "recommended_stage": "VALIDATION_ONLY",
+                "review_blocking_reasons": "rank_ic_below_threshold",
+                "response_action": "validation_only",
+                "max_live_notional_usdt": "0",
+                "live_order_effect": "read_only_no_live_order",
+            }
+        )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_fast_micro_shadow", start_s),
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["fast_microstructure_strategy_shadow_rows"] == 1
+    rows = _read_csv(reports_dir / "summaries" / "fast_microstructure_strategy_shadow.csv")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["strategy_candidate_id"] == "v5.fast_microstructure.hype_usdt.24h"
+    assert row["symbol"] == "HYPE/USDT"
+    assert row["recommended_stage"] == "SHADOW_REVIEW"
+    assert row["response_action"] == "shadow_review"
+    assert row["max_live_notional_usdt_ignored"] == "True"
+    assert row["live_order_effect"] == "read_only_no_live_order"
+
+
 def test_risk_on_multi_buy_reads_quant_lab_bundle_reports_member(tmp_path: Path) -> None:
     cfg = _cfg()
     cfg.quant_lab.enabled = True

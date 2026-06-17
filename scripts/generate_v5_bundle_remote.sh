@@ -109,6 +109,7 @@ CURRENT_REPORT_FILES = [
     ("reports/summaries/bnb_paper_strategy_daily.csv", "summaries/bnb_paper_strategy_daily.csv", False),
     ("reports/summaries/paper_slippage_coverage.csv", "summaries/paper_slippage_coverage.csv", False),
     ("reports/summaries/late_breakout_failure_protect_shadow.csv", "summaries/late_breakout_failure_protect_shadow.csv", False),
+    ("reports/summaries/fast_microstructure_strategy_shadow.csv", "summaries/fast_microstructure_strategy_shadow.csv", False),
     ("reports/quant_lab_usage.jsonl", "raw/reports/quant_lab_usage.jsonl", False),
     ("reports/quant_lab_requests.jsonl", "raw/reports/quant_lab_requests.jsonl", False),
 ]
@@ -405,6 +406,29 @@ BACKTEST_ADVISORY_READER_FIELDS = (
     "decision_reasons",
     "response_action",
     "negative_advisory",
+    "max_live_notional_usdt_ignored",
+    "live_order_effect",
+)
+FAST_MICROSTRUCTURE_STRATEGY_SHADOW_FIELDS = (
+    "run_id",
+    "ts_utc",
+    "source_path",
+    "strategy_candidate_id",
+    "strategy_candidate",
+    "feature_name",
+    "symbol",
+    "regime",
+    "horizon_hours",
+    "forward_sample_count",
+    "rank_ic",
+    "long_short_bps",
+    "p25_net_bps",
+    "hit_rate",
+    "recent_7d_score",
+    "lookback_bars",
+    "recommended_stage",
+    "review_blocking_reasons",
+    "response_action",
     "max_live_notional_usdt_ignored",
     "live_order_effect",
 )
@@ -1486,6 +1510,11 @@ def copy_current_reports():
             "reports/summaries/backtest_advisory_reader.csv",
             "summaries/backtest_advisory_reader.csv",
             BACKTEST_ADVISORY_READER_FIELDS,
+        ),
+        (
+            "reports/summaries/fast_microstructure_strategy_shadow.csv",
+            "summaries/fast_microstructure_strategy_shadow.csv",
+            FAST_MICROSTRUCTURE_STRATEGY_SHADOW_FIELDS,
         ),
     ):
         if (ROOT / src_rel).is_file():
