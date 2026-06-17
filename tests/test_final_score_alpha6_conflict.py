@@ -34,6 +34,25 @@ def test_final_score_alpha6_conflict_filter_matches_required_conditions() -> Non
     assert not is_final_score_alpha6_conflict_candidate(
         _base_row(final_score="0.2", final_decision="open_long")
     )
+    assert not is_final_score_alpha6_conflict_candidate(
+        _base_row(block_reason="rank_exit_target_still_positive")
+    )
+    assert not is_final_score_alpha6_conflict_candidate(
+        _base_row(block_reason="swing_atr_early_exit_guard")
+    )
+
+
+def test_final_score_alpha6_conflict_rows_exclude_non_entry_management_reasons() -> None:
+    rows = build_conflict_rows(
+        [
+            _base_row(run_id="entry_block", block_reason="negative_expectancy_fast_fail_open_block"),
+            _base_row(run_id="rank_hold", block_reason="rank_exit_target_still_positive"),
+            _base_row(run_id="atr_hold", block_reason="swing_atr_early_exit_guard"),
+        ],
+        future_net_bps={4: 120.0, 24: 240.0},
+    )
+
+    assert [row["run_id"] for row in rows] == ["entry_block"]
 
 
 def test_final_score_alpha6_conflict_rows_keep_negative_expectancy_stats() -> None:

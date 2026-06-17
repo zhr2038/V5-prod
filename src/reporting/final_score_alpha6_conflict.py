@@ -32,6 +32,16 @@ LABEL_NEAREST_MAX_SKEW_MS = 10 * 60 * 1000
 LABEL_SAME_RUN_BAR_START_MAX_SKEW_MS = 75 * 60 * 1000
 LABEL_BY_RUN_SYMBOL_KEY = ("__label_by_run_symbol__", "", "")
 LABEL_BY_SYMBOL_KEY = ("__label_by_symbol__", "", "")
+NON_ENTRY_MANAGEMENT_REASONS = {
+    "rank_exit_target_still_positive",
+    "exit_order_selected",
+    "deadband",
+    "active_probe_ignore_zero_target_close",
+    "swing_min_hold_guard",
+    "swing_atr_early_exit_guard",
+    "soft_exit_before_swing_min_hold",
+    "hold_current_no_valid_replacement",
+}
 CONFLICT_FIELDS = (
     "run_id",
     "ts_utc",
@@ -109,6 +119,37 @@ def first_observed(*values: Any, default: str = "not_observable") -> Any:
         if text and text.lower() not in {"none", "null", "nan", "not_observable"}:
             return value
     return default
+
+
+def is_non_entry_management_reason(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, (list, tuple, set)):
+        return any(is_non_entry_management_reason(item) for item in value)
+    if isinstance(value, Mapping):
+        return any(is_non_entry_management_reason(item) for item in value.values())
+    text = str(value).strip().lower()
+    if not text or text in {"none", "null", "nan", "not_observable"}:
+        return False
+    if text in NON_ENTRY_MANAGEMENT_REASONS:
+        return True
+    return any(reason in text for reason in NON_ENTRY_MANAGEMENT_REASONS)
+
+
+def has_non_entry_management_reason(row: Mapping[str, Any]) -> bool:
+    return any(
+        is_non_entry_management_reason(row.get(field))
+        for field in (
+            "block_reason",
+            "no_signal_reason",
+            "reason",
+            "source_reason",
+            "router_reason",
+            "eligibility_block_reason",
+            "min_hold_block_reason",
+            "swing_hold_block_reason",
+        )
+    )
 
 
 def label_status_for_future(value: Any) -> str:
@@ -385,6 +426,8 @@ def is_final_score_alpha6_conflict_candidate(
 ) -> bool:
     allowed = {normalize_symbol(symbol) for symbol in symbols}
     if normalize_symbol(row.get("symbol")) not in allowed:
+        return False
+    if has_non_entry_management_reason(row):
         return False
     if str(row.get("alpha6_side") or "").strip().lower() != "buy":
         return False
