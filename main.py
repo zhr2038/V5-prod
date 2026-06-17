@@ -1277,6 +1277,16 @@ MARKET_IMPULSE_PROBE_CONFIG_KEYS = (
 )
 
 
+OPEN_LONG_ENTRY_GUARD_CONFIG_KEYS = (
+    "open_long_entry_guard_enabled",
+    "open_long_max_signal_premium_pct",
+    "open_long_max_spread_bps",
+    "open_long_entry_guard_fail_open",
+    "open_long_entry_guard_fail_open_buy",
+    "open_long_entry_guard_fail_open_sell",
+)
+
+
 PROBE_EXIT_CONFIG_KEYS = (
     "probe_exit_enabled",
     "probe_take_profit_net_bps",
@@ -1396,6 +1406,15 @@ def _market_impulse_probe_effective_config(cfg: AppConfig) -> Dict[str, Any]:
     return {
         key: getattr(execution, key)
         for key in MARKET_IMPULSE_PROBE_CONFIG_KEYS
+        if hasattr(execution, key)
+    }
+
+
+def _open_long_entry_guard_effective_config(cfg: AppConfig) -> Dict[str, Any]:
+    execution = getattr(cfg, "execution", None)
+    return {
+        key: getattr(execution, key)
+        for key in OPEN_LONG_ENTRY_GUARD_CONFIG_KEYS
         if hasattr(execution, key)
     }
 
@@ -1685,6 +1704,7 @@ def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
             ),
             **_market_impulse_probe_effective_config(cfg),
             **_btc_leadership_probe_effective_config(cfg),
+            **_open_long_entry_guard_effective_config(cfg),
             **_probe_exit_effective_config(cfg),
             **_protect_profit_lock_effective_config(cfg),
             **_same_symbol_reentry_guard_effective_config(cfg),
