@@ -68,6 +68,7 @@ def fixture_root(root):
         "negative_expectancy_cooldown",
     ):
         write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_json(root / "reports/auto_risk_eval.json", {"current_level": "PROTECT", "status": "ok"})
     write_json(
         root / "reports/effective_live_config.json",
         {
@@ -81,6 +82,10 @@ def fixture_root(root):
                 "ml_research_use_stable_universe": False,
             },
         },
+    )
+    write_json(
+        root / "reports/event_candidates.json",
+        {"regime": "TRENDING", "candidates": [{"symbol": "BTC/USDT"}, {"symbol": "ETH/USDT"}]},
     )
     write_text(root / "logs/v5_runtime.log", "fixture log\n")
 
@@ -4274,6 +4279,8 @@ def main():
                 maturity = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/skipped_candidate_maturity_audit.csv")).read().decode().splitlines()))
                 issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                market_context = json.loads(tf.extractfile(extract_member(tf, "summaries/market_context.json")).read().decode())
+                report_index = json.loads(tf.extractfile(extract_member(tf, "reports/index.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
                 labels_lines = tf.extractfile(extract_member(tf, "raw/reports/skipped_candidate_labels.jsonl")).read().decode().splitlines()
 
@@ -4315,6 +4322,13 @@ def main():
             assert window["ml_live_overlay_status"] == "disabled_in_live_prod", window
             assert window["ml_factor_enabled"] == "false", window
             assert window["collect_ml_training_data"] == "false", window
+            assert market_context["schema_version"] == "v5.market_context.v1", market_context
+            assert market_context["auto_risk"]["current_level"] == "PROTECT", market_context
+            assert market_context["event_candidates"]["regime"] == "TRENDING", market_context
+            assert market_context["event_candidates"]["candidate_count"] == 2, market_context
+            assert market_context["latest_decision_audit"]["run_id"] == run_id, market_context
+            assert market_context["no_trade_context"]["trade_observation_status"] == "no_trades", market_context
+            assert report_index["links"]["market_context"] == "../summaries/market_context.json", report_index
             ml_issue_codes = {"ml_missing_model", "promotion_not_passed", "model_artifact_missing"}
             assert not any(item.get("code") in ml_issue_codes for item in issues["issues"]), issues
             assert "是否真实成交: no / 0" in readme, readme

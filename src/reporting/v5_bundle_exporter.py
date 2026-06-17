@@ -594,6 +594,7 @@ def _write_static_report_index(
         "raw_large_manifest": "raw/large/manifest.json" if large_raw_files else "",
         "links": {
             "window_summary": "../summaries/window_summary.json",
+            "market_context": "../summaries/market_context.json",
             "issues_to_fix": "../summaries/issues_to_fix.json",
             "raw_large": "../raw/large/",
         },
@@ -667,6 +668,7 @@ def _static_report_index_html(payload: Mapping[str, Any]) -> str:
             "</tbody></table>",
             "<p><a href=\"index.json\">index.json</a> · "
             "<a href=\"../summaries/window_summary.json\">window_summary</a> · "
+            "<a href=\"../summaries/market_context.json\">market_context</a> · "
             "<a href=\"../summaries/issues_to_fix.json\">issues_to_fix</a></p>",
             "</body></html>",
         ]
@@ -1806,6 +1808,175 @@ def _enforce_readiness_snapshot(
     }
 
 
+def _read_csv_dicts(path: Path) -> list[Dict[str, Any]]:
+    if not path.is_file():
+        return []
+    try:
+        with path.open("r", encoding="utf-8", errors="replace", newline="") as fh:
+            return [dict(row) for row in csv.DictReader(fh) if row]
+    except OSError:
+        return []
+
+
+def _nested_first_value(obj: Any, names: Iterable[str]) -> Any:
+    name_set = set(names)
+    if isinstance(obj, Mapping):
+        for name in name_set:
+            value = obj.get(name)
+            if value not in (None, "", "not_observable"):
+                return value
+        for value in obj.values():
+            found = _nested_first_value(value, name_set)
+            if found not in (None, "", "not_observable"):
+                return found
+    elif isinstance(obj, list):
+        for value in obj:
+            found = _nested_first_value(value, name_set)
+            if found not in (None, "", "not_observable"):
+                return found
+    return "not_observable"
+
+
+def _jsonish_value(value: Any) -> Any:
+    if value in (None, "", "not_observable"):
+        return "not_observable"
+    text = str(value).strip()
+    if not text or text in {"null", "not_observable"}:
+        return "not_observable"
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
+
+
+def _build_market_context_summary(
+    staging: Path,
+    reports: Path,
+    *,
+    window_summary: Mapping[str, Any],
+) -> Dict[str, Any]:
+    auto_risk = _read_json_obj(staging / "raw/state/auto_risk_eval.json")
+    if not isinstance(auto_risk, Mapping):
+        auto_risk = _read_json_obj(reports / "auto_risk_eval.json")
+    if not isinstance(auto_risk, Mapping):
+        auto_risk = {}
+    event_candidates = _read_json_obj(staging / "raw/reports/event_candidates.json")
+    if not isinstance(event_candidates, Mapping):
+        event_candidates = _read_json_obj(reports / "event_candidates.json")
+    if not isinstance(event_candidates, Mapping):
+        event_candidates = {}
+    candidates = event_candidates.get("candidates")
+    if not isinstance(candidates, list):
+        candidates = []
+    market_rows = _read_csv_dicts(staging / "summaries/market_impulse_selection_shadow.csv")
+    risk_on_rows = _read_csv_dicts(staging / "summaries/risk_on_multi_buy_shadow.csv")
+    market_latest = market_rows[-1] if market_rows else {}
+    risk_on_latest = risk_on_rows[-1] if risk_on_rows else {}
+    router_reasons = window_summary.get("router_reason_counts") or {}
+    if not isinstance(router_reasons, Mapping):
+        router_reasons = {}
+
+    event_symbols = sorted(
+        {
+            str(item.get("symbol") or item.get("instId") or item.get("normalized_symbol") or "").strip()
+            for item in candidates
+            if isinstance(item, Mapping)
+            and str(item.get("symbol") or item.get("instId") or item.get("normalized_symbol") or "").strip()
+        }
+    )
+    return {
+        "schema_version": "v5.market_context.v1",
+        "sampled_at_utc": window_summary.get("sampled_at_utc", datetime.now(timezone.utc).isoformat()),
+        "window_hours": window_summary.get("window_hours", "not_observable"),
+        "source_files": {
+            "auto_risk_eval": "raw/state/auto_risk_eval.json" if auto_risk else "not_observable",
+            "event_candidates": "raw/reports/event_candidates.json" if event_candidates else "not_observable",
+            "latest_decision_audit": "not_observable",
+            "market_impulse_selection_shadow": "summaries/market_impulse_selection_shadow.csv" if market_rows else "not_observable",
+            "risk_on_multi_buy_shadow": "summaries/risk_on_multi_buy_shadow.csv" if risk_on_rows else "not_observable",
+            "window_summary": "summaries/window_summary.json",
+        },
+        "auto_risk": {
+            "current_level": _nested_first_value(auto_risk, ("current_level", "risk_level", "level")),
+            "status": _nested_first_value(auto_risk, ("status", "state")),
+            "source": "auto_risk_eval" if auto_risk else "not_observable",
+        },
+        "event_candidates": {
+            "regime": event_candidates.get("regime") or event_candidates.get("market_regime") or "not_observable",
+            "candidate_count": len(candidates),
+            "symbols": event_symbols,
+        },
+        "latest_decision_audit": {
+            "run_id": "not_observable",
+            "path": "not_observable",
+            "window_end_utc": "not_observable",
+            "router_reason_counts": dict(sorted(router_reasons.items())),
+        },
+        "no_trade_context": {
+            "trade_observation_status": window_summary.get("trade_observation_status", "not_observable"),
+            "latest_24h_trade_count": window_summary.get("latest_24h_trade_count", "not_observable"),
+            "last_72h_trade_count": window_summary.get("last_72h_trade_count", "not_observable"),
+            "latest_24h_roundtrip_count": window_summary.get("latest_24h_roundtrip_count", "not_observable"),
+            "last_72h_roundtrip_count": window_summary.get("last_72h_roundtrip_count", "not_observable"),
+            "top_router_reasons": [
+                {"reason": reason, "count": count}
+                for reason, count in sorted(router_reasons.items(), key=lambda item: (-_to_int(item[1]), str(item[0])))[:8]
+            ],
+        },
+        "market_impulse_probe": {
+            "candidate_count": window_summary.get("market_impulse_probe_candidate_count", 0),
+            "open_count": window_summary.get("market_impulse_probe_open_count", 0),
+            "selection_shadow_rows": window_summary.get("market_impulse_selection_shadow_rows", len(market_rows)),
+            "latest_shadow": {
+                "run_id": market_latest.get("run_id", "not_observable"),
+                "ts_utc": market_latest.get("ts_utc") or market_latest.get("decision_ts") or "not_observable",
+                "current_level": market_latest.get("current_level") or market_latest.get("risk_level") or "not_observable",
+                "selected_by_composite": market_latest.get("selected_by_composite", "not_observable"),
+                "selected_by_expected_net_shadow": market_latest.get("selected_by_expected_net_shadow", "not_observable"),
+            }
+            if market_latest
+            else "not_observable",
+        },
+        "risk_on_multi_buy": {
+            "shadow_rows": window_summary.get("risk_on_multi_buy_shadow_rows", len(risk_on_rows)),
+            "latest_selected_symbols": _jsonish_value(
+                window_summary.get("risk_on_multi_buy_latest_selected_symbols")
+                or risk_on_latest.get("selected_symbols")
+            ),
+            "source_detail_available": window_summary.get("risk_on_multi_buy_source_detail_available", False),
+            "latest_shadow": {
+                "run_id": risk_on_latest.get("run_id", "not_observable"),
+                "decision_ts": risk_on_latest.get("decision_ts") or risk_on_latest.get("ts_utc") or "not_observable",
+                "top_k": risk_on_latest.get("top_k", "not_observable"),
+                "current_regime": risk_on_latest.get("current_regime") or risk_on_latest.get("regime") or "not_observable",
+                "would_buy_symbols": _jsonish_value(risk_on_latest.get("would_buy_symbols")),
+            }
+            if risk_on_latest
+            else "not_observable",
+        },
+        "alt_impulse_shadow": {
+            "ready_for_live_probe": window_summary.get("alt_impulse_shadow_ready_for_live_probe", False),
+            "ready_symbols": window_summary.get("alt_impulse_shadow_ready_symbols", []),
+            "blocking_reasons": window_summary.get("alt_impulse_shadow_readiness_blocking_reasons", []),
+            "recent_sample_count": window_summary.get("alt_impulse_shadow_recent_sample_count", 0),
+        },
+        "quant_lab_coordination": {
+            "requested_mode": window_summary.get("quant_lab_requested_mode", "not_observable"),
+            "effective_mode": window_summary.get("quant_lab_effective_mode", "not_observable"),
+            "mode_source": window_summary.get("quant_lab_mode_source", "not_observable"),
+            "enforce_readiness_status": window_summary.get("enforce_readiness_status", "not_observable"),
+            "request_success_count": window_summary.get("quant_lab_request_success_count", 0),
+            "request_error_count": window_summary.get("quant_lab_request_error_count", 0),
+            "fallback_count": window_summary.get("quant_lab_fallback_count", 0),
+            "current_contract_cost_rows": window_summary.get("cost_usage_current_contract_rows", 0),
+            "global_default_cost_count": window_summary.get(
+                "post_deployment_global_default_cost_count",
+                window_summary.get("current_contract_global_default_cost_count", 0),
+            ),
+        },
+    }
+
+
 def _window_summary(
     rows: list[Dict[str, Any]],
     request_rows: list[Dict[str, Any]],
@@ -2483,6 +2654,18 @@ def export_v5_bundle(
         )
         _write_text(staging / "summaries/window_summary.json", json.dumps(window_summary, ensure_ascii=False, indent=2))
         _write_text(
+            staging / "summaries/market_context.json",
+            json.dumps(
+                _build_market_context_summary(
+                    staging,
+                    reports,
+                    window_summary=window_summary,
+                ),
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+        _write_text(
             staging / "summaries/enforce_readiness_snapshot.json",
             json.dumps(_enforce_readiness_snapshot(mode_rows, window_summary), ensure_ascii=False, indent=2),
         )
@@ -2541,6 +2724,13 @@ def export_v5_bundle(
             effective_text = _read_text_redacted(effective_path)
             _write_text(staging / "raw/reports/effective_live_config.json", effective_text)
             _write_text(staging / "raw/effective_live_config.json", effective_text)
+        for source_name, dest_rel in (
+            ("auto_risk_eval.json", "raw/state/auto_risk_eval.json"),
+            ("event_candidates.json", "raw/reports/event_candidates.json"),
+        ):
+            source_path = reports / source_name
+            if source_path.exists():
+                _write_text(staging / dest_rel, _read_text_redacted(source_path))
         if include_config:
             for rel in ("configs/config.yaml", "configs/live_prod.yaml"):
                 path = root / rel

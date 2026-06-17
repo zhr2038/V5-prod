@@ -153,6 +153,14 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         "execution": {"market_impulse_probe_enabled": False},
     }
     (reports / "effective_live_config.json").write_text(json.dumps(effective_config), encoding="utf-8")
+    (reports / "auto_risk_eval.json").write_text(
+        json.dumps({"current_level": "PROTECT", "status": "ok"}),
+        encoding="utf-8",
+    )
+    (reports / "event_candidates.json").write_text(
+        json.dumps({"regime": "TRENDING", "candidates": [{"symbol": "BTC/USDT"}, {"symbol": "BNB/USDT"}]}),
+        encoding="utf-8",
+    )
     (reports / "quant_lab_usage.jsonl").write_text(
         json.dumps(
             {
@@ -382,10 +390,13 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "summaries/fast_microstructure_strategy_shadow.csv" in names
         assert "raw/recent_runs/r1/candidate_snapshot.csv" in names
         assert "raw/recent_runs/r1/order_lifecycle.csv" in names
+        assert "raw/state/auto_risk_eval.json" in names
+        assert "raw/reports/event_candidates.json" in names
         assert "raw/effective_live_config.json" in names
         assert "raw/reports/effective_live_config.json" in names
         assert "reports/summary_trade_count_mismatch.csv" in names
         assert "summaries/window_summary.json" in names
+        assert "summaries/market_context.json" in names
         assert "reports/index.html" in names
         assert "reports/index.json" in names
         assert "raw/large/.noindex" in names
@@ -410,6 +421,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         mismatch_rows = list(csv.DictReader(tf.extractfile("reports/summary_trade_count_mismatch.csv").read().decode("utf-8").splitlines()))
         manifest = json.loads(tf.extractfile("manifest.json").read().decode("utf-8"))
         window = json.loads(tf.extractfile("summaries/window_summary.json").read().decode("utf-8"))
+        market_context = json.loads(tf.extractfile("summaries/market_context.json").read().decode("utf-8"))
         report_index = json.loads(tf.extractfile("reports/index.json").read().decode("utf-8"))
         report_index_html = tf.extractfile("reports/index.html").read().decode("utf-8")
         assert "mode" in compliance.splitlines()[0]
@@ -452,8 +464,15 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert report_index["schema_version"] == "v5.static_report_index.v1"
         assert report_index["latest_trade_count"] == len(trade_metrics)
         assert report_index["candidate_snapshot_rows"] == len(candidate_snapshot)
+        assert report_index["links"]["market_context"] == "../summaries/market_context.json"
         assert "V5 Follow-up Report" in report_index_html
+        assert "market_context" in report_index_html
         assert "raw_large_file_count" in report_index_html
+        assert market_context["schema_version"] == "v5.market_context.v1"
+        assert market_context["auto_risk"]["current_level"] == "PROTECT"
+        assert market_context["event_candidates"]["regime"] == "TRENDING"
+        assert market_context["event_candidates"]["candidate_count"] == 2
+        assert market_context["quant_lab_coordination"]["requested_mode"] == "enforce"
         assert "hypothetical_violation" in compliance
         assert "actual_violation" in compliance
         assert "true,false,false" in compliance
