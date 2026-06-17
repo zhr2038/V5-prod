@@ -1224,6 +1224,7 @@ BTC_LEADERSHIP_PROBE_CONFIG_KEYS = (
 MARKET_IMPULSE_PROBE_CONFIG_KEYS = (
     "market_impulse_probe_enabled",
     "market_impulse_probe_live_enabled",
+    "market_impulse_probe_forward_test_live_ready",
     "market_impulse_probe_only_in_protect",
     "market_impulse_probe_min_trend_buy_count",
     "market_impulse_probe_require_btc_trend_buy",

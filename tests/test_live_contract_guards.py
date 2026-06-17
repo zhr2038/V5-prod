@@ -355,6 +355,8 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
     assert payload["execution"]["max_rebalance_turnover_per_cycle"] == pytest.approx(0.15)
     for key in main_module.BTC_LEADERSHIP_PROBE_CONFIG_KEYS:
         assert key in payload["execution"]
+    for key in main_module.MARKET_IMPULSE_PROBE_CONFIG_KEYS:
+        assert key in payload["execution"]
     for key in main_module.PROBE_EXIT_CONFIG_KEYS:
         assert key in payload["execution"]
     for key in main_module.PROTECT_PROFIT_LOCK_CONFIG_KEYS:
@@ -370,6 +372,7 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
     assert payload["execution"]["btc_leadership_probe_enabled"] is True
     assert payload["execution"]["btc_leadership_probe_min_alpha6_score"] == pytest.approx(0.30)
     assert payload["execution"]["btc_leadership_probe_time_stop_hours"] == 8
+    assert payload["execution"]["market_impulse_probe_forward_test_live_ready"] is False
     assert payload["execution"]["probe_exit_enabled"] is True
     assert payload["execution"]["probe_time_stop_hours"] == 8
     assert payload["execution"]["probe_ignore_normal_zero_target_close"] is True
@@ -413,6 +416,8 @@ def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_k
 
     for key in main_module.BTC_LEADERSHIP_PROBE_CONFIG_KEYS:
         assert key in payload["execution"]
+    for key in main_module.MARKET_IMPULSE_PROBE_CONFIG_KEYS:
+        assert key in payload["execution"]
     for key in main_module.PROBE_EXIT_CONFIG_KEYS:
         assert key in payload["execution"]
     for key in main_module.PROTECT_PROFIT_LOCK_CONFIG_KEYS:
@@ -439,6 +444,7 @@ def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_k
     assert payload["execution"]["btc_leadership_probe_max_negative_cycles_to_bypass"] == 1
     assert payload["execution"]["btc_leadership_probe_min_net_expectancy_bps_to_bypass"] == pytest.approx(-120.0)
 
+    assert payload["execution"]["market_impulse_probe_forward_test_live_ready"] is False
     assert payload["execution"]["btc_leadership_probe_time_stop_hours"] == 8
     assert payload["execution"]["probe_exit_enabled"] is True
     assert payload["execution"]["probe_take_profit_net_bps"] == pytest.approx(80.0)
