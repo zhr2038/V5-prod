@@ -3855,6 +3855,49 @@ def test_api_decision_audit_latest_ordered_run_summary_prefers_updated_ts(monkey
     assert payload["latest_ordered_run_summary"]["last_ts"] == 1_710_088_200_000
 
 
+def test_api_decision_audit_missing_runs_returns_degraded_empty_payload(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(module, "load_config", lambda: {"execution": {"order_store_path": "reports/orders.sqlite"}})
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["available"] is False
+    assert payload["status"] == "degraded"
+    assert payload["warning"] == "No runs directory"
+    assert payload["counts"]["selected"] == 0
+    assert payload["execution_summary"]["total"] == 0
+    assert payload["strategy_signals"] == []
+
+
+def test_api_decision_audit_empty_runs_returns_degraded_empty_payload(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    (reports_dir / "runs").mkdir(parents=True)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(module, "load_config", lambda: {"execution": {"order_store_path": "reports/orders.sqlite"}})
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["available"] is False
+    assert payload["status"] == "degraded"
+    assert payload["warning"] == "No audit files found"
+    assert payload["run_orders"] == []
+    assert payload["actionable_signals"]["buy_candidates"] == []
+
+
 def test_api_decision_audit_uses_active_runtime_paths(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

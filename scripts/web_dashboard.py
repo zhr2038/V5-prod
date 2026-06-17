@@ -7395,6 +7395,70 @@ def api_auto_risk_guard():
         )
 
 
+def _empty_decision_audit_payload(reason: str) -> Dict[str, Any]:
+    return {
+        'available': False,
+        'status': 'degraded',
+        'error': reason,
+        'warning': reason,
+        'run_id': '',
+        'strategy_run_id': None,
+        'strategy_signal_source': 'missing',
+        'strategy_signals_count': 0,
+        'timestamp': time.time(),
+        'counts': {
+            'selected': 0,
+            'orders_rebalance': 0,
+            'orders_exit': 0,
+        },
+        'rejects': {},
+        'top_scores': [],
+        'selection_source': 'unavailable',
+        'target_rank': [],
+        'fused_buy_rank': [],
+        'fused_rank_source_run': None,
+        'fused_source_is_fallback': False,
+        'router_decisions': [],
+        'router_reason_counts': {},
+        'selected_orders': [],
+        'blocked_routes': [],
+        'strategy_signals': [],
+        'actionable_signals': {
+            'held_symbols': [],
+            'buy_candidates': [],
+            'sell_candidates': [],
+        },
+        'execution_summary': {
+            'total': 0,
+            'filled': 0,
+            'rejected': 0,
+            'open_or_partial': 0,
+            'cancelled': 0,
+            'other': 0,
+            'reject_reasons': {},
+            'negative_expectancy_penalty_count': 0,
+            'negative_expectancy_cooldown_count': 0,
+            'negative_expectancy_open_block_count': 0,
+            'negative_expectancy_fast_fail_open_block_count': 0,
+            'negative_expectancy_probation_release_count': 0,
+        },
+        'execution_scope': {
+            'type': 'unavailable',
+            'run_id': '',
+            'note': reason,
+        },
+        'ml_signal_overview': {},
+        'recent_fill_summary': {
+            'count_60m': 0,
+            'count_24h': 0,
+            'latest_fill': None,
+        },
+        'latest_ordered_run_summary': None,
+        'run_orders': [],
+        'notes': [],
+    }
+
+
 @app.route('/api/decision_audit')
 @_cache_json_response(15.0)
 def api_decision_audit():
@@ -7403,12 +7467,12 @@ def api_decision_audit():
         config = load_config()
         runtime_paths = _resolve_dashboard_runtime_paths(config)
         if not runtime_paths.runs_dir.exists():
-            return jsonify({'error': 'No runs directory'}), 404
+            return jsonify(_empty_decision_audit_payload('No runs directory'))
 
         decision_audit_scan_limit = _load_recent_scan_limit('V5_DASHBOARD_DECISION_AUDIT_SCAN_LIMIT')
         audit_entries = _iter_decision_audits(runtime_paths.reports_dir, scan_limit=decision_audit_scan_limit)
         if not audit_entries:
-            return jsonify({'error': 'No audit files found'}), 404
+            return jsonify(_empty_decision_audit_payload('No audit files found'))
 
         latest_run_dir = audit_entries[0]['run_dir']
         latest_audit_file = latest_run_dir / 'decision_audit.json'
