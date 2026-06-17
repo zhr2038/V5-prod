@@ -2538,7 +2538,9 @@ def export_v5_bundle(
             _write_text(staging / "raw/state/quant_lab_mode.json", _read_text_redacted(state_path))
         effective_path = reports / "effective_live_config.json"
         if effective_path.exists():
-            _write_text(staging / "raw/reports/effective_live_config.json", _read_text_redacted(effective_path))
+            effective_text = _read_text_redacted(effective_path)
+            _write_text(staging / "raw/reports/effective_live_config.json", effective_text)
+            _write_text(staging / "raw/effective_live_config.json", effective_text)
         if include_config:
             for rel in ("configs/config.yaml", "configs/live_prod.yaml"):
                 path = root / rel

@@ -95,6 +95,7 @@ STATE_FILES = [
 ]
 CURRENT_REPORT_FILES = [
     ("reports/effective_live_config.json", "raw/reports/effective_live_config.json", False),
+    ("reports/effective_live_config.json", "raw/effective_live_config.json", False),
     ("reports/event_candidates.json", "raw/reports/event_candidates.json", False),
     ("reports/skipped_candidate_labels.jsonl", "raw/reports/skipped_candidate_labels.jsonl", False),
     ("reports/alt_impulse_shadow_labels.jsonl", "raw/reports/alt_impulse_shadow_labels.jsonl", False),

@@ -147,6 +147,12 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         json.dumps({"mode": "shadow", "reason": "test", "updated_by": "test", "updated_at": "2026-05-11T13:00:00Z"}),
         encoding="utf-8",
     )
+    effective_config = {
+        "strategy_version": "test-v5",
+        "quant_lab_contract_version": "v5.quant_lab.telemetry.v2",
+        "execution": {"market_impulse_probe_enabled": False},
+    }
+    (reports / "effective_live_config.json").write_text(json.dumps(effective_config), encoding="utf-8")
     (reports / "quant_lab_usage.jsonl").write_text(
         json.dumps(
             {
@@ -376,6 +382,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "summaries/fast_microstructure_strategy_shadow.csv" in names
         assert "raw/recent_runs/r1/candidate_snapshot.csv" in names
         assert "raw/recent_runs/r1/order_lifecycle.csv" in names
+        assert "raw/effective_live_config.json" in names
+        assert "raw/reports/effective_live_config.json" in names
         assert "reports/summary_trade_count_mismatch.csv" in names
         assert "summaries/window_summary.json" in names
         assert "reports/index.html" in names
@@ -389,6 +397,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         cost_usage = tf.extractfile("summaries/quant_lab_cost_usage.csv").read().decode("utf-8")
         fallbacks = tf.extractfile("summaries/quant_lab_fallbacks.csv").read().decode("utf-8")
         config_text = tf.extractfile("raw/config/live_prod.yaml").read().decode("utf-8")
+        effective_config_alias = tf.extractfile("raw/effective_live_config.json").read().decode("utf-8")
+        effective_config_reports = tf.extractfile("raw/reports/effective_live_config.json").read().decode("utf-8")
         config_audit = json.loads(tf.extractfile("summaries/quant_lab_config_audit.json").read().decode("utf-8"))
         readiness_snapshot = json.loads(tf.extractfile("summaries/enforce_readiness_snapshot.json").read().decode("utf-8"))
         trade_metrics = list(csv.DictReader(tf.extractfile("summaries/trade_metrics.csv").read().decode("utf-8").splitlines()))
@@ -403,6 +413,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         report_index = json.loads(tf.extractfile("reports/index.json").read().decode("utf-8"))
         report_index_html = tf.extractfile("reports/index.html").read().decode("utf-8")
         assert "mode" in compliance.splitlines()[0]
+        assert json.loads(effective_config_alias) == effective_config
+        assert effective_config_alias == effective_config_reports
         assert "called_api" in compliance.splitlines()[0]
         assert "permission_gate_enforced" in compliance.splitlines()[0]
         assert "cost_gate_enforced" in compliance.splitlines()[0]

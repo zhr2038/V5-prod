@@ -4268,6 +4268,8 @@ def main():
         bundle = run_bundle(root)
         try:
             with tarfile.open(bundle, "r:gz") as tf:
+                raw_effective_config = tf.extractfile(extract_member(tf, "raw/effective_live_config.json")).read().decode()
+                report_effective_config = tf.extractfile(extract_member(tf, "raw/reports/effective_live_config.json")).read().decode()
                 blocked = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/btc_leadership_probe_blocked_outcomes.csv")).read().decode().splitlines()))
                 maturity = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/skipped_candidate_maturity_audit.csv")).read().decode().splitlines()))
                 issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
@@ -4275,6 +4277,8 @@ def main():
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
                 labels_lines = tf.extractfile(extract_member(tf, "raw/reports/skipped_candidate_labels.jsonl")).read().decode().splitlines()
 
+            assert raw_effective_config == report_effective_config
+            assert json.loads(raw_effective_config)["btc_leadership_probe_enabled"] is True
             keys = [(r["run_id"], r["ts_utc"], r["symbol"], r["skip_reason"]) for r in blocked]
             assert len(keys) == len(set(keys)), keys
             assert len(labels_lines) == 2, labels_lines
