@@ -617,6 +617,14 @@ CANDIDATE_SNAPSHOT_FIELDS = (
     "block_reason",
     "no_signal_reason",
     "strategy_candidate",
+    "cost_bootstrap_state",
+    "cost_evidence_tier",
+    "cost_trust_level",
+    "cost_sample_origin_mix",
+    "cost_bootstrap_trusted_for_paper",
+    "cost_bootstrap_trusted_for_live",
+    "cost_bootstrap_next_action",
+    "allowed_live_modes",
 )
 FINAL_SCORE_ALPHA6_CONFLICT_FIELDS = tuple(REPORT_FINAL_SCORE_ALPHA6_CONFLICT_FIELDS)
 BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS = tuple(REPORT_BNB_STRONG_ALPHA6_BYPASS_SHADOW_FIELDS)
@@ -666,6 +674,55 @@ ORDER_LIFECYCLE_FIELDS = (
     "exited_before_min_hold",
     "source_reason",
     "max_unrealized_bps",
+    "execution_purpose",
+    "cost_probe_id",
+    "cost_probe_roundtrip_id",
+    "eligible_for_cost_model",
+    "eligible_for_alpha_pnl",
+    "arrival_spread_bps",
+    "arrival_slippage_bps",
+    "delay_cost_bps",
+    "fee_bps",
+    "roundtrip_all_in_cost_bps",
+    "cost_sample_origin",
+    "live_order_effect",
+)
+RUNTIME_COST_GUARD_FIELDS = (
+    "run_id",
+    "ts_utc",
+    "symbol",
+    "strategy_candidate",
+    "side",
+    "intent",
+    "selected_entry_gate_cost_bps",
+    "quant_lab_roundtrip_cost_bps",
+    "v5_runtime_floor_bps",
+    "local_recent_roundtrip_cost_bps",
+    "config_hard_floor_bps",
+    "final_runtime_cost_bps",
+    "cost_source",
+    "cost_evidence_tier",
+    "cost_trust_level",
+    "cost_trusted_for_live",
+    "guard_decision",
+    "guard_reason",
+    "live_order_effect",
+)
+COST_DISAGREEMENT_FIELDS = (
+    "run_id",
+    "ts_utc",
+    "symbol",
+    "strategy_candidate",
+    "quant_lab_roundtrip_cost_bps",
+    "v5_runtime_roundtrip_cost_bps",
+    "difference_bps",
+    "difference_abs_bps",
+    "disagreement_level",
+    "quant_lab_cost_source",
+    "v5_cost_source",
+    "recommended_owner",
+    "next_action",
+    "live_order_effect",
 )
 SOURCE_SNAPSHOT_PATHS = (
     "main.py",
@@ -12001,6 +12058,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "summaries/quant_lab_cost_usage.csv",
         quant_lab_cost_usage_rows,
         ["source", "run_id", "ts_utc", "event_type", "schema_version", "contract_version", "event_id_generation_version", "source_snapshot_hash", "event_id", "request_id", "endpoint_path", "status_code", "success", "latency_ms", "error_type", "error_message_short", "mode", "symbol", "request_symbol", "normalized_symbol", "response_symbol", "venue", "instrument_type", "side", "intent", "notional_usdt", "quantile", "requested_quantile", "strategy_id", "requested_regime", "matched_regime", "alpha_id", "cost_bps", "cost_usdt", "cost_source", "fallback_level", "cost_model_version", "cost_contract_version", "as_of_ts", "sample_count", "selected_total_cost_bps", "total_cost_bps", "effective_total_cost_bps", "total_cost_bps_p50", "total_cost_bps_p75", "total_cost_bps_p90", "required_edge_bps", "expected_edge_bps", "expected_edge_source", "min_required_edge_bps", "would_filter_by_cost", "would_block_by_cost", "actually_filtered", "cost_gate_enforced", "quant_lab_decision", "fallback_used", "fallback_used_for_cost_model", "fallback_reason", "degraded_cost_model", "filtered", "filter_reason", "warning", "cost_gate_verified", "diagnosis", "raw_json"],
+    )
+    write_csv(
+        "summaries/runtime_cost_guard.csv",
+        [],
+        RUNTIME_COST_GUARD_FIELDS,
+    )
+    write_csv(
+        "summaries/cost_disagreement.csv",
+        [],
+        COST_DISAGREEMENT_FIELDS,
     )
     write_csv(
         "summaries/live_guard_impact.csv",
