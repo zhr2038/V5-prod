@@ -14641,12 +14641,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 not_obs,
             )
         )
+        source_health_age_sec = flatten_value(advisory_source_health.get("advisory_age_sec") or "")
         for row in alpha_factory_advisory_rows:
             row["selected_source"] = selected_source
             row["source_health_freshness_status"] = freshness_status
             if selected_source != not_obs:
                 row["advisory_source"] = selected_source
             row["advisory_fresh"] = "false" if selected_is_stale else "true"
+            if source_health_age_sec and source_health_age_sec != not_obs:
+                row["advisory_age_sec"] = source_health_age_sec
             row["stale_reason"] = selected_stale_reason if selected_is_stale else ""
             action_row = dict(row)
             action_row.pop("response_action", None)

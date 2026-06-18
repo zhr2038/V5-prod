@@ -4074,6 +4074,11 @@ def fixture_mixed_generation_advisory_source_health_root(root):
         )
         + "\n",
     )
+    write_text(
+        root / "reports/summaries/alpha_factory_advisory_reader.csv",
+        "run_id,ts_utc,strategy_candidate,symbol,decision,recommended_mode,promotion_state,alpha_factory_score,advisory_source,advisory_fresh,advisory_age_sec,response_action,max_live_notional_usdt_ignored,live_order_effect\n"
+        "r_af,2026-05-20T00:00:00Z,v5.old_alpha_factory_shadow,BNB/USDT,KILL,shadow,KILL,-12.5,api,True,7200,negative_advisory,True,read_only_no_live_order\n",
+    )
     return run_id
 
 
@@ -6960,6 +6965,7 @@ def main():
         try:
             with tarfile.open(bundle, "r:gz") as tf:
                 source_health = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/strategy_opportunity_advisory_source_health.csv")).read().decode().splitlines()))
+                alpha_factory = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alpha_factory_advisory_reader.csv")).read().decode().splitlines()))
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
             assert len(source_health) == 1, source_health
@@ -6974,6 +6980,13 @@ def main():
             assert health_row["freshness_reason"] == "fresh", health_row
             assert health_row["stale_reason"] == "", health_row
             assert "expired" not in health_row["stale_reason_detail"], health_row
+            assert len(alpha_factory) == 1, alpha_factory
+            alpha_row = alpha_factory[0]
+            assert alpha_row["strategy_candidate"] == "v5.old_alpha_factory_shadow", alpha_row
+            assert alpha_row["source_health_freshness_status"] == "fresh", alpha_row
+            assert alpha_row["advisory_fresh"] == "true", alpha_row
+            assert alpha_row["advisory_age_sec"] == health_row["advisory_age_sec"], alpha_row
+            assert float(alpha_row["advisory_age_sec"]) <= float(health_row["advisory_max_age_sec"]), alpha_row
             assert window["strategy_advisory_selected_source_is_stale"] == "false", window
             assert window["strategy_advisory_freshness_status"] == "fresh", window
             assert window["strategy_advisory_stale_reason"] == "", window
