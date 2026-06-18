@@ -2515,7 +2515,23 @@ def _live_symbol_set(cfg: AppConfig) -> set[str]:
 
 
 def _expanded_universe_type(row: Mapping[str, Any]) -> str:
-    return str(row.get("universe_type") or "").strip().lower().replace("-", "_")
+    explicit = str(row.get("universe_type") or "").strip().lower().replace("-", "_")
+    if explicit:
+        return explicit
+    strategy_candidate = str(row.get("strategy_candidate") or "").strip().lower()
+    strategy_id = str(row.get("strategy_id") or "").strip().upper()
+    template_family = str(row.get("template_family") or "").strip().lower()
+    source_module = str(row.get("source_module") or "").strip().lower()
+    if (
+        strategy_candidate.startswith("v5.expanded_universe_")
+        or strategy_candidate.startswith("v5.expanded_relative_strength_")
+        or strategy_candidate.startswith("regime_router:v5.expanded_relative_strength_")
+        or strategy_id.startswith(("HYPE_EXPANDED_", "WLD_EXPANDED_"))
+        or template_family == "expanded_relative_strength"
+        or source_module == "expanded_universe"
+    ):
+        return "expanded_paper"
+    return ""
 
 
 def _expanded_would_enter(row: Mapping[str, Any]) -> bool:
@@ -2655,6 +2671,9 @@ def _expanded_universe_advisory_rows(
 def _expanded_universe_paper_rows(expanded_rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row in expanded_rows:
+        symbol = _symbol_text(row.get("symbol"))
+        if not symbol or symbol == "ALL":
+            continue
         response_action = str(row.get("response_action") or "")
         if response_action not in {
             "paper_tracking",
@@ -2676,7 +2695,7 @@ def _expanded_universe_paper_rows(expanded_rows: Iterable[Mapping[str, Any]]) ->
             "ts_utc": row.get("ts_utc"),
             "paper_date": str(row.get("ts_utc") or "")[:10],
             "universe_type": "expanded_paper",
-            "symbol": row.get("symbol"),
+            "symbol": symbol,
             "symbol_in_live_universe": row.get("symbol_in_live_universe"),
             "live_symbols_unchanged": True,
             "strategy_id": row.get("strategy_id"),

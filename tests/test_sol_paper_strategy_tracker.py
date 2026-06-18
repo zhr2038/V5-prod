@@ -1828,6 +1828,66 @@ def test_hype_wld_expanded_paper_ready_advisory_generates_paper_strategy_rows(tm
     assert all(row["live_order_effect"] == "read_only_no_live_order" for row in expanded_daily)
 
 
+def test_expanded_relative_strength_advisory_without_universe_type_is_tracked(tmp_path: Path) -> None:
+    cfg = AppConfig(symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT"])
+    cfg.quant_lab.enabled = True
+    start_s = 1_779_000_000
+    reports_dir = tmp_path / "reports"
+    run_dir = reports_dir / "runs" / "r_expanded_relative_strength"
+    run_dir.mkdir(parents=True)
+    _write_strategy_advisory(
+        reports_dir,
+        [
+            {
+                "strategy_id": "ALLO_USDT_V5_EXPANDED_RELATIVE_STRENGTH_TOP1_SHADOW",
+                "strategy_candidate": "v5.expanded_relative_strength_top1_shadow",
+                "template_family": "expanded_relative_strength",
+                "symbol": "ALLO-USDT",
+                "decision": "KEEP_SHADOW",
+                "recommended_mode": "shadow",
+                "horizon_hours": "24",
+                "sample_count": "1600",
+                "complete_sample_count": "1590",
+                "expanded_universe_maturity_state": "KEEP_SHADOW",
+                "no_sample_reason": "shadow_only",
+                **_fresh_meta(start_s),
+            },
+            {
+                "strategy_id": "ALL_REGIME_ROUTER_V5_EXPANDED_RELATIVE_STRENGTH_TOP1_SHADOW",
+                "strategy_candidate": "regime_router:v5.expanded_relative_strength_top1_shadow",
+                "symbol": "ALL",
+                "decision": "KEEP_SHADOW",
+                "recommended_mode": "shadow",
+                "no_sample_reason": "regime_router_summary_only",
+                **_fresh_meta(start_s),
+            },
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_expanded_relative_strength", start_s),
+        market_data_1h={"ALLO/USDT": _series("ALLO/USDT", start_s, {0: 0.4})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["expanded_universe_advisory_rows"] == 2
+    assert result["expanded_universe_paper_rows"] == 1
+
+    advisory = _read_csv(reports_dir / "summaries" / "expanded_universe_advisory_reader.csv")
+    assert {row["symbol"] for row in advisory} == {"ALLO/USDT", "ALL"}
+    allo = next(row for row in advisory if row["symbol"] == "ALLO/USDT")
+    assert allo["universe_type"] == "expanded_paper"
+    assert allo["response_action"] == "shadow_tracking"
+    assert allo["live_order_effect"] == "read_only_no_live_order"
+
+    runs = _read_csv(reports_dir / "summaries" / "expanded_universe_paper_runs.csv")
+    assert [row["symbol"] for row in runs] == ["ALLO/USDT"]
+    assert runs[0]["tracking_mode"] == "shadow"
+    assert runs[0]["no_sample_reason"] == "shadow_only"
+
+
 def test_expanded_paper_no_entry_rows_have_standard_no_sample_reason(tmp_path: Path) -> None:
     cfg = AppConfig(symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT"])
     cfg.quant_lab.enabled = True

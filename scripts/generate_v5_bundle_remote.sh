@@ -13276,10 +13276,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         universe_type = flatten_value(advisory_value(row, "universe_type", default="")).strip().lower().replace("-", "_")
         strategy_id = flatten_value(advisory_value(row, "strategy_id", default="")).strip()
         strategy_candidate = flatten_value(advisory_value(row, "strategy_candidate", default="")).strip()
+        strategy_candidate_norm = strategy_candidate.lower()
+        template_family = flatten_value(advisory_value(row, "template_family", default="")).strip().lower()
+        source_module = flatten_value(advisory_value(row, "source_module", default="")).strip().lower()
         if not (
             universe_type == "expanded_paper"
             or strategy_id.startswith(("HYPE_EXPANDED_", "WLD_EXPANDED_"))
             or strategy_candidate in {"v5.expanded_universe_hype_paper", "v5.expanded_universe_wld_paper"}
+            or strategy_candidate_norm.startswith("v5.expanded_universe_")
+            or strategy_candidate_norm.startswith("v5.expanded_relative_strength_")
+            or strategy_candidate_norm.startswith("regime_router:v5.expanded_relative_strength_")
+            or template_family == "expanded_relative_strength"
+            or source_module == "expanded_universe"
         ):
             return None
         symbol = normalize_symbol_text(advisory_value(row, "symbol", default=""))
@@ -13364,6 +13372,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         return payload
 
     def expanded_universe_paper_run_row(row):
+        symbol = normalize_symbol_text(row.get("symbol"))
+        if not symbol or symbol == "ALL":
+            return None
         response_action = flatten_value(row.get("response_action")).strip()
         if response_action not in {
             "paper_tracking",
@@ -13389,7 +13400,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "ts_utc": row.get("ts_utc"),
             "paper_date": flatten_value(row.get("ts_utc"))[:10],
             "universe_type": "expanded_paper",
-            "symbol": row.get("symbol"),
+            "symbol": symbol,
             "symbol_in_live_universe": row.get("symbol_in_live_universe"),
             "live_symbols_unchanged": "true",
             "strategy_id": row.get("strategy_id"),
