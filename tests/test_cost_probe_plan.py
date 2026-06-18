@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import csv
 import json
+import sqlite3
 from datetime import UTC, datetime
 
 from configs.schema import AppConfig
 from src.reporting.cost_probe_plan import (
+    CostProbeEngine,
     build_cost_probe_dry_run_plan,
     write_cost_probe_dry_run_outputs,
 )
+
+GENERATED_AT = datetime(2026, 6, 18, 12, tzinfo=UTC)
 
 
 def test_cost_probe_plan_is_blocked_when_prod_switches_are_closed(tmp_path):
@@ -20,14 +24,16 @@ def test_cost_probe_plan_is_blocked_when_prod_switches_are_closed(tmp_path):
 
     rows, summary = build_cost_probe_dry_run_plan(
         cfg,
-        generated_at=datetime(2026, 6, 18, 12, tzinfo=UTC),
+        generated_at=GENERATED_AT,
     )
-    plan_path, summary_path = write_cost_probe_dry_run_outputs(
+    written_paths = write_cost_probe_dry_run_outputs(
         rows,
         summary,
         plan_path=tmp_path / "cost_probe_plan.csv",
         summary_path=tmp_path / "cost_probe_summary.json",
     )
+    plan_path = written_paths["plan_path"]
+    summary_path = written_paths["summary_path"]
 
     assert summary["state"] == "DISABLED"
     assert summary["no_order_submitted"] is True
@@ -55,7 +61,7 @@ def test_cost_probe_plan_ready_requires_dry_run_and_live_disabled():
 
     rows, summary = build_cost_probe_dry_run_plan(
         cfg,
-        generated_at=datetime(2026, 6, 18, 12, tzinfo=UTC),
+        generated_at=GENERATED_AT,
     )
 
     assert summary["state"] == "DRY_RUN_PLAN_READY"
@@ -65,3 +71,137 @@ def test_cost_probe_plan_ready_requires_dry_run_and_live_disabled():
     assert {row["plan_status"] for row in rows} == {"planned"}
     assert {row["entry_intent"] for row in rows} == {"DRY_RUN_ENTRY_ONLY_NO_ORDER"}
     assert {row["exit_intent"] for row in rows} == {"DRY_RUN_IMMEDIATE_FLAT_NO_ORDER"}
+
+
+def test_cost_probe_engine_writes_guarded_read_only_artifacts(tmp_path):
+    cfg = _ready_cost_probe_config()
+    _write_clean_runtime_state(tmp_path)
+
+    engine = CostProbeEngine(
+        cfg,
+        reports_dir=tmp_path / "out",
+        generated_at=GENERATED_AT,
+        project_root=tmp_path,
+    )
+    payload = engine.build()
+
+    assert payload["summary"]["state"] == "DRY_RUN_PLAN_READY"
+    assert payload["summary"]["runtime_blockers"] == []
+    assert payload["summary"]["no_order_submitted"] is True
+    assert payload["summary"]["live_enabled"] is False
+    assert {row["status"] for row in payload["guard_rows"]} == {"PASS"}
+    assert {row["order_status"] for row in payload["order_rows"]} == {"not_submitted"}
+    assert {row["live_order_effect"] for row in payload["order_rows"]} == {
+        "none_read_only_dry_run_plan"
+    }
+
+    written_paths = engine.write()
+    assert set(written_paths) == {
+        "plan_path",
+        "summary_path",
+        "orders_path",
+        "roundtrips_path",
+        "runtime_guard_path",
+        "disagreement_path",
+    }
+    assert all(path.exists() for path in written_paths.values())
+    order_rows = list(csv.DictReader(written_paths["orders_path"].open(encoding="utf-8")))
+    guard_rows = list(
+        csv.DictReader(written_paths["runtime_guard_path"].open(encoding="utf-8"))
+    )
+    assert len(order_rows) == 2
+    assert {row["no_order_submitted"] for row in order_rows} == {"True"}
+    assert {row["status"] for row in guard_rows} == {"PASS"}
+    assert json.loads(written_paths["summary_path"].read_text(encoding="utf-8"))[
+        "state"
+    ] == "DRY_RUN_PLAN_READY"
+
+
+def test_cost_probe_engine_blocks_when_kill_switch_is_enabled(tmp_path):
+    cfg = _ready_cost_probe_config()
+    _write_clean_runtime_state(tmp_path, kill_switch_enabled=True)
+
+    engine = CostProbeEngine(
+        cfg,
+        reports_dir=tmp_path / "out",
+        generated_at=GENERATED_AT,
+        project_root=tmp_path,
+    )
+    payload = engine.build()
+
+    assert payload["summary"]["state"] == "DISABLED"
+    assert "kill_switch_enabled" in payload["summary"]["runtime_blockers"]
+    assert "kill_switch_enabled" in payload["summary"]["blocked_reasons"]
+    assert {row["plan_status"] for row in payload["plan_rows"]} == {"blocked"}
+
+
+def test_cost_probe_engine_blocks_on_dirty_order_or_position_state(tmp_path):
+    cfg = _ready_cost_probe_config()
+    _write_clean_runtime_state(tmp_path)
+    _write_open_order(tmp_path / "runtime" / "orders.sqlite")
+    _write_position(tmp_path / "runtime" / "positions.sqlite")
+
+    engine = CostProbeEngine(
+        cfg,
+        reports_dir=tmp_path / "out",
+        generated_at=GENERATED_AT,
+        project_root=tmp_path,
+    )
+    payload = engine.build()
+
+    assert payload["summary"]["state"] == "DISABLED"
+    assert "order_store_open_orders" in payload["summary"]["runtime_blockers"]
+    assert "existing_position_present" in payload["summary"]["runtime_blockers"]
+    assert "position_state_dirty" in payload["summary"]["runtime_blockers"]
+
+
+def _ready_cost_probe_config() -> AppConfig:
+    cfg = AppConfig()
+    cfg.execution.order_store_path = "runtime/orders.sqlite"
+    cfg.execution.cost_bootstrap_enabled = True
+    cfg.execution.cost_probe_enabled = True
+    cfg.execution.cost_probe_dry_run = True
+    cfg.execution.cost_probe_live_enabled = False
+    cfg.execution.cost_probe_use_exchange_min_notional = False
+    cfg.execution.cost_probe_symbols = ["btcusdt"]
+    cfg.execution.cost_probe_max_orders_per_day = 1
+    cfg.execution.cost_probe_max_roundtrips_per_symbol_per_day = 1
+    cfg.execution.cost_probe_max_notional_usdt = 5.0
+    return cfg
+
+
+def _write_clean_runtime_state(
+    project_root,
+    *,
+    kill_switch_enabled: bool = False,
+) -> None:
+    runtime_dir = project_root / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "kill_switch.json").write_text(
+        json.dumps({"enabled": kill_switch_enabled}),
+        encoding="utf-8",
+    )
+    (runtime_dir / "reconcile_status.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "reason": "ok",
+                "generated_ts_ms": int(GENERATED_AT.timestamp() * 1000),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_open_order(path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(path)) as con:
+        con.execute("CREATE TABLE orders (state TEXT)")
+        con.execute("INSERT INTO orders (state) VALUES ('OPEN')")
+
+
+def _write_position(path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(path)) as con:
+        con.execute("CREATE TABLE positions (symbol TEXT, qty REAL)")
+        con.execute("INSERT INTO positions (symbol, qty) VALUES ('BTC/USDT', 0.01)")

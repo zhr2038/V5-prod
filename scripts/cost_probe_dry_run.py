@@ -11,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from configs.loader import load_config  # noqa: E402
 from src.reporting.cost_probe_plan import (  # noqa: E402
-    build_cost_probe_dry_run_plan,
+    CostProbeEngine,
     write_cost_probe_dry_run_outputs,
 )
 
@@ -32,19 +32,29 @@ def main(argv: list[str] | None = None) -> int:
     summary_path = (
         Path(args.summary_out) if args.summary_out else reports_dir / "cost_probe_summary.json"
     )
-    rows, summary = build_cost_probe_dry_run_plan(cfg)
-    plan_written, summary_written = write_cost_probe_dry_run_outputs(
-        rows,
-        summary,
+    engine = CostProbeEngine(cfg, reports_dir=reports_dir, project_root=PROJECT_ROOT)
+    payload = engine.build()
+    written_paths = write_cost_probe_dry_run_outputs(
+        payload["plan_rows"],
+        payload["summary"],
+        order_rows=payload["order_rows"],
+        roundtrip_rows=payload["roundtrip_rows"],
+        guard_rows=payload["guard_rows"],
+        disagreement_rows=payload["disagreement_rows"],
         plan_path=plan_path,
         summary_path=summary_path,
+        orders_path=reports_dir / "cost_probe_orders.csv",
+        roundtrips_path=reports_dir / "cost_probe_roundtrips.csv",
+        runtime_guard_path=reports_dir / "runtime_cost_guard.csv",
+        disagreement_path=reports_dir / "cost_disagreement.csv",
     )
-    payload = {
-        **summary,
-        "plan_path": str(plan_written),
-        "summary_path": str(summary_written),
+    output = {
+        **payload["summary"],
+        "artifact_paths": {key: str(path) for key, path in written_paths.items()},
+        "plan_path": str(written_paths["plan_path"]),
+        "summary_path": str(written_paths["summary_path"]),
     }
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0
 
 
