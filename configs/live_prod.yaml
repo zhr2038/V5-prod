@@ -448,7 +448,7 @@ execution:
   cost_probe_respect_kill_switch: true
   cost_probe_disable_if_order_store_dirty: true
   cost_probe_disable_if_position_state_dirty: true
-  preflight_bootstrap_patch_enabled: true
+  preflight_bootstrap_patch_enabled: false
   preflight_bootstrap_patch_max_total_usdt: 100.0
   preflight_bootstrap_patch_min_interval_sec: 300
   

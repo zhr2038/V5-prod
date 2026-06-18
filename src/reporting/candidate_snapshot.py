@@ -221,6 +221,14 @@ def write_latest_symbol_cost_table(path: str | Path, rows: Sequence[Mapping[str,
         "cost_resolution_reason",
         "matched_regime",
         "regime",
+        "cost_bootstrap_state",
+        "cost_evidence_tier",
+        "cost_trust_level",
+        "cost_sample_origin_mix",
+        "cost_bootstrap_trusted_for_paper",
+        "cost_bootstrap_trusted_for_live",
+        "cost_bootstrap_next_action",
+        "allowed_live_modes",
         "quantile",
         "notional_usdt",
         "as_of_ts",
@@ -626,6 +634,42 @@ def build_candidate_snapshot_rows(
             degraded_cost_model=degraded_cost_model,
             absence_reason=cost_absence_reason,
         )
+        cost_bootstrap_state = _first(
+            _nested_get(qlab, ("cost_bootstrap_state",)),
+            _nested_get(qlab, ("bootstrap_state",)),
+        )
+        cost_evidence_tier = _first(
+            _nested_get(qlab, ("cost_evidence_tier",)),
+            _nested_get(qlab, ("evidence_tier",)),
+        )
+        cost_trust_level = _first(
+            _nested_get(qlab, ("cost_trust_level",)),
+            _nested_get(qlab, ("trust_level",)),
+        )
+        cost_sample_origin_mix = _first(
+            _nested_get(qlab, ("cost_sample_origin_mix",)),
+            _nested_get(qlab, ("sample_origin_mix",)),
+        )
+        cost_bootstrap_trusted_for_paper = _first_bool(
+            _nested_get(qlab, ("cost_bootstrap_trusted_for_paper",)),
+            _nested_get(qlab, ("bootstrap_trusted_for_paper",)),
+            _nested_get(qlab, ("trusted_for_paper",)),
+            _nested_get(qlab, ("cost_trusted_for_paper",)),
+        )
+        cost_bootstrap_trusted_for_live = _first_bool(
+            _nested_get(qlab, ("cost_bootstrap_trusted_for_live",)),
+            _nested_get(qlab, ("bootstrap_trusted_for_live",)),
+            _nested_get(qlab, ("trusted_for_live",)),
+            _nested_get(qlab, ("cost_trusted_for_live",)),
+        )
+        cost_bootstrap_next_action = _first(
+            _nested_get(qlab, ("cost_bootstrap_next_action",)),
+            _nested_get(qlab, ("next_action",)),
+        )
+        allowed_live_modes = _first(
+            _nested_get(qlab, ("allowed_live_modes",)),
+            _nested_get(qlab, ("live_allowed_modes",)),
+        )
         eligible_before_filters = (
             symbol in top_scores
             or abs(float(target_raw or 0.0)) > 0.0
@@ -725,6 +769,14 @@ def build_candidate_snapshot_rows(
             "cost_gate_verified": bool(cost_gate_verified),
             "would_block_by_cost": bool(would_block_by_cost),
             "cost_reason": cost_reason,
+            "cost_bootstrap_state": cost_bootstrap_state,
+            "cost_evidence_tier": cost_evidence_tier,
+            "cost_trust_level": cost_trust_level,
+            "cost_sample_origin_mix": cost_sample_origin_mix,
+            "cost_bootstrap_trusted_for_paper": cost_bootstrap_trusted_for_paper,
+            "cost_bootstrap_trusted_for_live": cost_bootstrap_trusted_for_live,
+            "cost_bootstrap_next_action": cost_bootstrap_next_action,
+            "allowed_live_modes": allowed_live_modes,
             "eligible_before_filters": _bool_str(eligible_before_filters),
             "final_score_missing_reason": final_score_missing_reason,
             "eligibility_block_reason": eligibility_block_reason,

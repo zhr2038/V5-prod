@@ -182,6 +182,14 @@ def test_candidate_snapshot_uses_quant_lab_cost_estimates_for_blocked_candidate(
                     "cost_gate_verified": True,
                     "would_block_by_cost": False,
                     "filter_reason": "cost_gate_passed",
+                    "bootstrap_state": "BOOTSTRAP_PROBE_AVAILABLE",
+                    "cost_evidence_tier": "bootstrap_cost_probe",
+                    "cost_trust_level": "paper_or_shadow_only",
+                    "sample_origin_mix": "cost_probe_only",
+                    "trusted_for_paper": True,
+                    "trusted_for_live": False,
+                    "next_action": "collect strategy live samples before trusted live review",
+                    "allowed_live_modes": ["shadow", "paper"],
                 }
             ]
         },
@@ -212,6 +220,14 @@ def test_candidate_snapshot_uses_quant_lab_cost_estimates_for_blocked_candidate(
     assert btc["required_edge_bps"] == 45.0
     assert btc["cost_gate_verified"] is True
     assert btc["would_block_by_cost"] is True
+    assert btc["cost_bootstrap_state"] == "BOOTSTRAP_PROBE_AVAILABLE"
+    assert btc["cost_evidence_tier"] == "bootstrap_cost_probe"
+    assert btc["cost_trust_level"] == "paper_or_shadow_only"
+    assert btc["cost_sample_origin_mix"] == "cost_probe_only"
+    assert btc["cost_bootstrap_trusted_for_paper"] is True
+    assert btc["cost_bootstrap_trusted_for_live"] is False
+    assert btc["cost_bootstrap_next_action"] == "collect strategy live samples before trusted live review"
+    assert btc["allowed_live_modes"] == ["shadow", "paper"]
 
 
 def test_candidate_snapshot_records_all_in_cost_fields_and_entry_gate_floor() -> None:
