@@ -375,6 +375,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "summaries/quant_lab_permission_audit.csv" in names
         assert "summaries/quant_lab_mode_audit.csv" in names
         assert "summaries/quant_lab_cost_usage.csv" in names
+        assert "summaries/runtime_cost_guard.csv" in names
+        assert "summaries/cost_disagreement.csv" in names
         assert "summaries/quant_lab_fallbacks.csv" in names
         assert "summaries/enforce_readiness_snapshot.json" in names
         assert "summaries/quant_lab_config_audit.json" in names
@@ -406,6 +408,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         permission_audit = tf.extractfile("summaries/quant_lab_permission_audit.csv").read().decode("utf-8")
         mode_audit = tf.extractfile("summaries/quant_lab_mode_audit.csv").read().decode("utf-8")
         cost_usage = tf.extractfile("summaries/quant_lab_cost_usage.csv").read().decode("utf-8")
+        runtime_cost_guard = tf.extractfile("summaries/runtime_cost_guard.csv").read().decode("utf-8")
+        cost_disagreement = tf.extractfile("summaries/cost_disagreement.csv").read().decode("utf-8")
         fallbacks = tf.extractfile("summaries/quant_lab_fallbacks.csv").read().decode("utf-8")
         config_text = tf.extractfile("raw/config/live_prod.yaml").read().decode("utf-8")
         effective_config_alias = tf.extractfile("raw/effective_live_config.json").read().decode("utf-8")
@@ -430,6 +434,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "called_api" in compliance.splitlines()[0]
         assert "permission_gate_enforced" in compliance.splitlines()[0]
         assert "cost_gate_enforced" in compliance.splitlines()[0]
+        assert "selected_entry_gate_cost_bps" in runtime_cost_guard.splitlines()[0]
+        assert "quant_lab_roundtrip_cost_bps" in runtime_cost_guard.splitlines()[0]
+        assert "v5_runtime_roundtrip_cost_bps" in cost_disagreement.splitlines()[0]
         assert "raw_permission_decision" in compliance.splitlines()[0]
         assert "raw_permission_status" in compliance.splitlines()[0]
         assert "raw_permission_enforceable" in compliance.splitlines()[0]

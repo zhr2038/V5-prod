@@ -303,6 +303,32 @@ COST_FIELDS = (
     "filter_reason",
 )
 
+RUNTIME_COST_GUARD_FIELDS = (
+    "ts_utc",
+    "symbol",
+    "decision_scope",
+    "quant_lab_roundtrip_cost_bps",
+    "v5_local_runtime_cost_floor_bps",
+    "config_hard_floor_bps",
+    "selected_entry_gate_cost_bps",
+    "cost_source",
+    "cost_trusted_for_live",
+    "guard_action",
+    "reason",
+)
+
+COST_DISAGREEMENT_FIELDS = (
+    "ts_utc",
+    "symbol",
+    "quant_lab_cost_source",
+    "quant_lab_roundtrip_cost_bps",
+    "v5_runtime_roundtrip_cost_bps",
+    "abs_diff_bps",
+    "diff_ratio",
+    "severity",
+    "next_action",
+)
+
 LIVE_GUARD_IMPACT_FIELDS = (
     "run_id",
     "ts_utc",
@@ -2608,6 +2634,8 @@ def export_v5_bundle(
         _write_csv(staging / "summaries/quant_lab_permission_audit.csv", PERMISSION_AUDIT_FIELDS, permission_rows)
         _write_csv(staging / "summaries/quant_lab_mode_audit.csv", MODE_AUDIT_FIELDS, mode_rows)
         _write_csv(staging / "summaries/quant_lab_cost_usage.csv", COST_FIELDS, cost_rows)
+        _write_csv(staging / "summaries/runtime_cost_guard.csv", RUNTIME_COST_GUARD_FIELDS, [])
+        _write_csv(staging / "summaries/cost_disagreement.csv", COST_DISAGREEMENT_FIELDS, [])
         _write_csv(staging / "summaries/live_guard_impact.csv", LIVE_GUARD_IMPACT_FIELDS, live_guard_impact_rows)
         _write_csv(staging / "summaries/quant_lab_fallbacks.csv", FALLBACK_FIELDS, fallback_rows)
         _write_csv(staging / "summaries/trade_metrics.csv", TRADE_METRICS_FIELDS, trade_metrics_rows)

@@ -7,6 +7,7 @@ from src.core.models import Order
 from src.execution.fill_store import FillRow, FillStore
 from src.execution.order_store import OrderStore
 from src.reporting.order_lifecycle import (
+    ORDER_LIFECYCLE_FIELDS,
     annotate_orders_with_arrival,
     write_order_lifecycle,
 )
@@ -178,3 +179,57 @@ def test_order_lifecycle_projects_close_swing_attribution_meta(tmp_path: Path) -
     assert row["exit_priority"] == "soft"
     assert row["exited_before_min_hold"] == "true"
     assert str(row["max_unrealized_bps"]) == "69.9"
+
+
+def test_order_lifecycle_projects_cost_probe_meta_append_only(tmp_path: Path) -> None:
+    run_id = "run_cost_probe_lifecycle"
+    run_dir = tmp_path / "reports" / "runs" / run_id
+    order = Order(
+        symbol="BTC/USDT",
+        side="buy",
+        intent="OPEN_LONG",
+        notional_usdt=5.0,
+        signal_price=70000.0,
+        meta={
+            "execution_purpose": "cost_probe",
+            "cost_probe_id": "probe-1",
+            "cost_probe_roundtrip_id": "rt-1",
+            "eligible_for_cost_model": True,
+            "eligible_for_alpha_pnl": False,
+            "arrival_slippage_bps": 1.25,
+            "delay_cost_bps": 0.5,
+            "fee_bps": 0.8,
+            "roundtrip_all_in_cost_bps": 8.5,
+            "live_order_effect": "cost_probe_only",
+            "order_lifecycle": {
+                "decision_ts": "2026-06-18T00:00:00Z",
+                "arrival_bid": 69999.0,
+                "arrival_ask": 70001.0,
+                "arrival_mid": 70000.0,
+                "spread_bps_at_decision": 0.2857,
+            },
+        },
+    )
+
+    rows = write_order_lifecycle(run_dir=run_dir, orders=[order])
+
+    assert ORDER_LIFECYCLE_FIELDS[-12:] == (
+        "execution_purpose",
+        "cost_probe_id",
+        "cost_probe_roundtrip_id",
+        "eligible_for_cost_model",
+        "eligible_for_alpha_pnl",
+        "arrival_spread_bps",
+        "arrival_slippage_bps",
+        "delay_cost_bps",
+        "fee_bps",
+        "roundtrip_all_in_cost_bps",
+        "cost_sample_origin",
+        "live_order_effect",
+    )
+    row = rows[0]
+    assert row["execution_purpose"] == "cost_probe"
+    assert row["eligible_for_cost_model"] == "true"
+    assert row["eligible_for_alpha_pnl"] == "false"
+    assert row["arrival_spread_bps"] == "0.2857"
+    assert row["cost_sample_origin"] == "cost_probe"

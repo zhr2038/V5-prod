@@ -61,6 +61,18 @@ ORDER_LIFECYCLE_FIELDS = (
     "exited_before_min_hold",
     "source_reason",
     "max_unrealized_bps",
+    "execution_purpose",
+    "cost_probe_id",
+    "cost_probe_roundtrip_id",
+    "eligible_for_cost_model",
+    "eligible_for_alpha_pnl",
+    "arrival_spread_bps",
+    "arrival_slippage_bps",
+    "delay_cost_bps",
+    "fee_bps",
+    "roundtrip_all_in_cost_bps",
+    "cost_sample_origin",
+    "live_order_effect",
 )
 
 
@@ -241,6 +253,8 @@ def _rows_from_order_store(
         fill_notional = None
         if avg_fill_px is not None and filled_qty is not None:
             fill_notional = abs(float(avg_fill_px) * float(filled_qty))
+        fee_bps = _fee_bps(agg.get("fee_usdt"), fill_notional or row.get("notional_usdt"))
+        meta_projection = _order_meta_projection(meta)
         rows.append(
             _format_row(
                 {
@@ -286,7 +300,8 @@ def _rows_from_order_store(
                     "requested_notional_usdt": row.get("notional_usdt"),
                     "trade_ids": agg.get("trade_ids"),
                     "fill_count": agg.get("fill_count") or 0,
-                    **_order_meta_projection(meta),
+                    **meta_projection,
+                    "fee_bps": _first_non_empty(meta_projection.get("fee_bps"), fee_bps),
                 }
             )
         )
@@ -294,8 +309,25 @@ def _rows_from_order_store(
 
 
 def _order_meta_projection(meta: Mapping[str, Any]) -> dict[str, Any]:
+    lifecycle = (
+        meta.get("order_lifecycle")
+        if isinstance(meta.get("order_lifecycle"), Mapping)
+        else {}
+    )
+    cost_probe = meta.get("cost_probe") if isinstance(meta.get("cost_probe"), Mapping) else {}
     source_reason = meta.get("source_reason") or meta.get("reason") or meta.get("exit_reason")
     exit_reason = meta.get("exit_reason") or meta.get("reason") or source_reason
+    execution_purpose = _first_non_empty(
+        meta.get("execution_purpose"),
+        cost_probe.get("execution_purpose"),
+        meta.get("live_order_effect"),
+    )
+    cost_sample_origin = _first_non_empty(
+        meta.get("cost_sample_origin"),
+        cost_probe.get("cost_sample_origin"),
+    )
+    if not cost_sample_origin and str(execution_purpose or "").strip().lower() == "cost_probe":
+        cost_sample_origin = "cost_probe"
     return {
         "swing_hold_position": meta.get("swing_hold_position"),
         "swing_entry_ts": meta.get("swing_entry_ts"),
@@ -312,7 +344,58 @@ def _order_meta_projection(meta: Mapping[str, Any]) -> dict[str, Any]:
             or meta.get("highest_net_bps")
             or meta.get("highest_unrealized_net_bps")
         ),
+        "execution_purpose": execution_purpose,
+        "cost_probe_id": _first_non_empty(
+            meta.get("cost_probe_id"),
+            cost_probe.get("cost_probe_id"),
+        ),
+        "cost_probe_roundtrip_id": _first_non_empty(
+            meta.get("cost_probe_roundtrip_id"),
+            cost_probe.get("cost_probe_roundtrip_id"),
+            meta.get("roundtrip_id"),
+        ),
+        "eligible_for_cost_model": _first_non_empty(
+            meta.get("eligible_for_cost_model"),
+            cost_probe.get("eligible_for_cost_model"),
+        ),
+        "eligible_for_alpha_pnl": _first_non_empty(
+            meta.get("eligible_for_alpha_pnl"),
+            cost_probe.get("eligible_for_alpha_pnl"),
+        ),
+        "arrival_spread_bps": _first_non_empty(
+            meta.get("arrival_spread_bps"),
+            lifecycle.get("arrival_spread_bps"),
+            lifecycle.get("spread_bps_at_decision"),
+        ),
+        "arrival_slippage_bps": _first_non_empty(
+            meta.get("arrival_slippage_bps"),
+            lifecycle.get("arrival_slippage_bps"),
+        ),
+        "delay_cost_bps": _first_non_empty(
+            meta.get("delay_cost_bps"),
+            lifecycle.get("delay_cost_bps"),
+        ),
+        "fee_bps": _first_non_empty(meta.get("fee_bps"), cost_probe.get("fee_bps")),
+        "roundtrip_all_in_cost_bps": _first_non_empty(
+            meta.get("roundtrip_all_in_cost_bps"),
+            cost_probe.get("roundtrip_all_in_cost_bps"),
+        ),
+        "cost_sample_origin": cost_sample_origin,
+        "live_order_effect": _first_non_empty(
+            meta.get("live_order_effect"),
+            cost_probe.get("live_order_effect"),
+        ),
     }
+
+
+def _first_non_empty(*values: Any) -> Any:
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, str) and value.strip() in {"", "null", "None"}:
+            continue
+        return value
+    return None
 
 
 def _order_rows_for_run(order_path: Path, run_id: str) -> list[dict[str, Any]]:
@@ -438,6 +521,14 @@ def _fee_cost_usdt(fees_by_ccy: Mapping[str, float], *, symbol: str, fill_px: fl
             total += abs(float(fee)) * float(fill_px)
             observed = True
     return total if observed else None
+
+
+def _fee_bps(fee_usdt: Any, notional_usdt: Any) -> float | None:
+    fee = _float_or_none(fee_usdt)
+    notional = _float_or_none(notional_usdt)
+    if fee is None or notional is None or notional <= 0:
+        return None
+    return abs(fee) / float(notional) * 10_000.0
 
 
 def _lookup_top_of_book(book: Mapping[str, Any], symbol: str) -> Mapping[str, Any]:

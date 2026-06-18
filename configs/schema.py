@@ -613,6 +613,30 @@ class ExecutionConfig(BaseModel):
     quant_lab_effective_enabled: bool = Field(default=False, description="Runtime-injected effective top-level quant-lab enablement")
     quant_lab_effective_mode: str = Field(default="", description="Runtime-injected effective quant-lab mode after override resolution")
     quant_lab_config_source: str = Field(default="", description="Runtime-injected quant-lab config source")
+
+    # Cost bootstrap / probe switches. Defaults are fail-closed: V5 may report plans,
+    # but it must not create live cost-probe orders unless all three gates are opened.
+    cost_bootstrap_enabled: bool = Field(default=False)
+    cost_probe_enabled: bool = Field(default=False)
+    cost_probe_dry_run: bool = Field(default=True)
+    cost_probe_live_enabled: bool = Field(default=False)
+    cost_probe_symbols: List[str] = Field(
+        default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"]
+    )
+    cost_probe_max_notional_usdt: float = Field(default=5.0, ge=0.0)
+    cost_probe_use_exchange_min_notional: bool = Field(default=True)
+    cost_probe_max_orders_per_day: int = Field(default=2, ge=0)
+    cost_probe_max_roundtrips_per_symbol_per_day: int = Field(default=1, ge=0)
+    cost_probe_cooldown_minutes: int = Field(default=360, ge=0)
+    cost_probe_max_daily_loss_usdt: float = Field(default=1.0, ge=0.0)
+    cost_probe_order_style: str = Field(default="marketable_limit_ioc")
+    cost_probe_exit_policy: str = Field(default="immediate_flat")
+    cost_probe_max_open_seconds: int = Field(default=60, ge=1)
+    cost_probe_require_reconcile_clean: bool = Field(default=True)
+    cost_probe_require_no_existing_position: bool = Field(default=True)
+    cost_probe_respect_kill_switch: bool = Field(default=True)
+    cost_probe_disable_if_order_store_dirty: bool = Field(default=True)
+    cost_probe_disable_if_position_state_dirty: bool = Field(default=True)
     late_entry_chase_guard_enabled: bool = Field(default=False, description="Read-only entry-quality advisory switch; live late-chase guard stays disabled by default")
     pullback_reversal_live_enabled: bool = Field(default=False, description="Read-only entry-quality advisory switch; pullback reversal live trading stays disabled by default")
     

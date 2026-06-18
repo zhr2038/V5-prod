@@ -425,6 +425,29 @@ execution:
   live_arm_env: V5_LIVE_ARM
   live_arm_value: "YES"
   auto_clear_kill_switch_if_ok: true
+  cost_bootstrap_enabled: false
+  cost_probe_enabled: false
+  cost_probe_dry_run: true
+  cost_probe_live_enabled: false
+  cost_probe_symbols:
+    - BTC/USDT
+    - ETH/USDT
+    - SOL/USDT
+    - BNB/USDT
+  cost_probe_max_notional_usdt: 5.0
+  cost_probe_use_exchange_min_notional: true
+  cost_probe_max_orders_per_day: 2
+  cost_probe_max_roundtrips_per_symbol_per_day: 1
+  cost_probe_cooldown_minutes: 360
+  cost_probe_max_daily_loss_usdt: 1.0
+  cost_probe_order_style: marketable_limit_ioc
+  cost_probe_exit_policy: immediate_flat
+  cost_probe_max_open_seconds: 60
+  cost_probe_require_reconcile_clean: true
+  cost_probe_require_no_existing_position: true
+  cost_probe_respect_kill_switch: true
+  cost_probe_disable_if_order_store_dirty: true
+  cost_probe_disable_if_position_state_dirty: true
   preflight_bootstrap_patch_enabled: true
   preflight_bootstrap_patch_max_total_usdt: 100.0
   preflight_bootstrap_patch_min_interval_sec: 300
