@@ -77,6 +77,16 @@ COST_DISAGREEMENT_FIELDS = [
     "reason",
     "live_order_effect",
 ]
+P3_MANUAL_PROBE_ALLOWED_SYMBOLS = ("BTC/USDT", "ETH/USDT")
+P3_MANUAL_PROBE_MAX_NOTIONAL_USDT = 5.0
+P3_MANUAL_PROBE_MAX_OPEN_SECONDS = 60
+P3_POST_PROBE_REQUIRED_EVIDENCE = [
+    "v5_cost_probe_orders_entry_exit_submitted_for_authorized_symbol",
+    "v5_cost_probe_roundtrip_closed_and_flat_for_authorized_symbol",
+    "quant_lab_bootstrap_probe_available_observed",
+    "quant_lab_trusted_live_coverage_remains_false_until_strategy_or_private_fills",
+    "quant_lab_live_actual_or_mixed_coverage_not_promoted_by_cost_probe_only",
+]
 
 
 class CostProbeEngine:
@@ -531,6 +541,16 @@ def build_cost_probe_p3_preflight(
             for row in plan_rows
             if str(row.get("plan_status") or "") == "planned" and row.get("symbol")
         ]
+    manual_probe_symbol = planned_symbols[0] if len(planned_symbols) == 1 else ""
+    selected_plan_rows = [
+        row
+        for row in plan_rows
+        if str(row.get("symbol") or "") == manual_probe_symbol
+        and str(row.get("plan_status") or "") == "planned"
+    ]
+    selected_plan = selected_plan_rows[0] if len(selected_plan_rows) == 1 else {}
+    exit_policy = str(selected_plan.get("exit_policy") or "")
+    max_open_seconds = _int_value(selected_plan.get("max_open_seconds"))
     guard_failures = [
         {
             "guard_name": str(row.get("guard_name") or ""),
@@ -548,6 +568,8 @@ def build_cost_probe_p3_preflight(
         blockers.append("runtime_guard_failures_present")
     if len(planned_symbols) != 1:
         blockers.append("single_symbol_plan_required")
+    elif manual_probe_symbol not in P3_MANUAL_PROBE_ALLOWED_SYMBOLS:
+        blockers.append("manual_probe_symbol_not_allowed")
     if not bool(summary.get("dry_run")):
         blockers.append("dry_run_true_required")
     if bool(summary.get("live_enabled")):
@@ -556,10 +578,21 @@ def build_cost_probe_p3_preflight(
         blockers.append("no_order_submitted_required")
     orders_per_roundtrip = _int_value(summary.get("orders_per_roundtrip"))
     available_order_slots = _int_value(summary.get("available_order_slots"))
+    max_notional_usdt = _float_value(summary.get("max_notional_usdt"))
     if orders_per_roundtrip != 2:
         blockers.append("orders_per_roundtrip_must_be_two")
     if available_order_slots < max(orders_per_roundtrip, 2):
         blockers.append("insufficient_available_order_slots")
+    if max_notional_usdt <= 0:
+        blockers.append("max_notional_usdt_positive_required")
+    if max_notional_usdt > P3_MANUAL_PROBE_MAX_NOTIONAL_USDT:
+        blockers.append("max_notional_exceeds_p3_manual_limit")
+    if manual_probe_symbol and exit_policy != "immediate_flat":
+        blockers.append("immediate_flat_exit_policy_required")
+    if manual_probe_symbol and (
+        max_open_seconds <= 0 or max_open_seconds > P3_MANUAL_PROBE_MAX_OPEN_SECONDS
+    ):
+        blockers.append("max_open_seconds_exceeds_p3_manual_limit")
     if _int_value(summary.get("daily_order_used_count")) > 0:
         blockers.append("daily_probe_order_history_present")
     if _int_value(summary.get("daily_roundtrip_used_count")) > 0:
@@ -575,7 +608,11 @@ def build_cost_probe_p3_preflight(
         "manual_authorization_required": True,
         "approved_live_order_execution": False,
         "live_order_effect": "none_preflight_only_no_order",
-        "manual_probe_symbol": planned_symbols[0] if len(planned_symbols) == 1 else "",
+        "manual_probe_symbol": manual_probe_symbol,
+        "manual_allowed_symbols": list(P3_MANUAL_PROBE_ALLOWED_SYMBOLS),
+        "manual_max_notional_usdt": P3_MANUAL_PROBE_MAX_NOTIONAL_USDT,
+        "manual_required_exit_policy": "immediate_flat",
+        "manual_max_open_seconds": P3_MANUAL_PROBE_MAX_OPEN_SECONDS,
         "planned_symbols": planned_symbols,
         "blockers": blockers,
         "runtime_blockers": summary.get("runtime_blockers") or [],
@@ -585,9 +622,11 @@ def build_cost_probe_p3_preflight(
         "dry_run": bool(summary.get("dry_run")),
         "live_enabled": bool(summary.get("live_enabled")),
         "no_order_submitted": bool(summary.get("no_order_submitted", True)),
-        "max_notional_usdt": _float_value(summary.get("max_notional_usdt")),
+        "max_notional_usdt": max_notional_usdt,
         "max_orders_per_day": _int_value(summary.get("max_orders_per_day")),
         "orders_per_roundtrip": orders_per_roundtrip,
+        "exit_policy": exit_policy,
+        "max_open_seconds": max_open_seconds,
         "daily_order_used_count": _int_value(summary.get("daily_order_used_count")),
         "available_order_slots": available_order_slots,
         "daily_roundtrip_used_count": _int_value(
@@ -599,6 +638,7 @@ def build_cost_probe_p3_preflight(
             if not blockers
             else "fix_preflight_blockers_before_requesting_live_probe"
         ),
+        "post_probe_required_evidence": P3_POST_PROBE_REQUIRED_EVIDENCE,
     }
 
 
