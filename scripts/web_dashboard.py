@@ -3194,7 +3194,11 @@ def _quant_lab_proxy_fetch(path: str, params: Optional[Dict[str, Any]] = None, *
     if not base_url:
         return _quant_lab_proxy_degraded('quant_lab_base_url_missing', path=path)
 
-    headers = {'Accept': 'application/json'}
+    headers = {
+        'Accept': 'application/json',
+        'User-Agent': 'v5-dashboard-proxy/1.0',
+        'X-Quant-Lab-Client-Id': 'v5.dashboard_proxy',
+    }
     token = qcfg.get('token')
     if token:
         headers['Authorization'] = f'Bearer {token}'

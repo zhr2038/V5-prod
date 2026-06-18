@@ -81,6 +81,8 @@ def test_quant_lab_client_uses_get_and_redacts_token(tmp_path: Path) -> None:
     assert cost.symbol == "BTC-USDT"
     assert {call["method"] for call in http.calls} == {"GET"}
     assert http.calls[0]["headers"]["Authorization"] == "Bearer super-secret-token"
+    assert http.calls[0]["headers"]["X-Quant-Lab-Client-Id"] == "v5.quant_lab_client"
+    assert http.calls[0]["headers"]["User-Agent"] == "v5-quant-lab-client/1.0"
     text = log_path.read_text(encoding="utf-8")
     assert "super-secret-token" not in text
     rows = [json.loads(line) for line in text.splitlines()]

@@ -363,6 +363,8 @@ class QuantLabClient:
     http_cache_path: str | Path = "reports/quant_lab_http_cache.json"
     run_id: Optional[str] = None
     phase: str = "live"
+    client_id: str = "v5.quant_lab_client"
+    user_agent: str = "v5-quant-lab-client/1.0"
     _cache: TTLCache = field(init=False, repr=False)
     _cache_headers: Dict[Tuple[str, Tuple[Tuple[str, str], ...]], Dict[str, str]] = field(init=False, repr=False)
     _stale_cache: Dict[Tuple[str, Tuple[Tuple[str, str], ...]], Any] = field(init=False, repr=False)
@@ -489,7 +491,11 @@ class QuantLabClient:
         warnings.warn(message, RuntimeWarning, stacklevel=2)
 
     def _headers(self, *, etag: Optional[str] = None) -> Dict[str, str]:
-        headers = {"Accept": "application/json"}
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": self.user_agent,
+            "X-Quant-Lab-Client-Id": self.client_id,
+        }
         if self.api_token:
             headers["Authorization"] = f"Bearer {self.api_token}"
         if etag:
