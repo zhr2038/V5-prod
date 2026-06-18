@@ -114,6 +114,14 @@ CURRENT_REPORT_FILES = [
     ("reports/quant_lab_usage.jsonl", "raw/reports/quant_lab_usage.jsonl", False),
     ("reports/quant_lab_requests.jsonl", "raw/reports/quant_lab_requests.jsonl", False),
 ]
+COST_PROBE_BUNDLE_ARTIFACTS = [
+    ("cost_probe_plan.csv", "summaries/cost_probe_plan.csv"),
+    ("cost_probe_orders.csv", "summaries/cost_probe_orders.csv"),
+    ("cost_probe_roundtrips.csv", "summaries/cost_probe_roundtrips.csv"),
+    ("cost_probe_summary.json", "summaries/cost_probe_summary.json"),
+    ("runtime_cost_guard.csv", "summaries/cost_probe_runtime_cost_guard.csv"),
+    ("cost_disagreement.csv", "summaries/cost_probe_cost_disagreement.csv"),
+]
 EXPANDED_UNIVERSE_ADVISORY_FIELDS = (
     "run_id",
     "ts_utc",
@@ -1075,6 +1083,32 @@ def copy_jsonl_since(src_rel, dest_rel, since_dt, required=False, limit=MAX_COPY
     except Exception as exc:
         collection_errors.append({"source": str(src), "dest": dest_rel, "error": repr(exc)})
         return False
+
+
+def copy_cost_probe_artifacts():
+    meta = {"present": [], "missing": [], "row_counts": {}, "summary": {}}
+    for filename, summary_rel in COST_PROBE_BUNDLE_ARTIFACTS:
+        src_rel = f"reports/{filename}"
+        if not copy_sanitized(src_rel, f"raw/reports/{filename}", required=False):
+            meta["missing"].append(filename)
+            continue
+        copy_sanitized(src_rel, summary_rel, required=False)
+        meta["present"].append(filename)
+        source = ROOT / src_rel
+        if filename.endswith(".csv"):
+            meta["row_counts"][filename] = len(load_csv_dicts(source))
+        elif filename == "cost_probe_summary.json":
+            payload = load_json(source)
+            if isinstance(payload, dict):
+                meta["summary"] = {
+                    "state": payload.get("state", "not_observable"),
+                    "dry_run": payload.get("dry_run", "not_observable"),
+                    "live_enabled": payload.get("live_enabled", "not_observable"),
+                    "no_order_submitted": payload.get("no_order_submitted", "not_observable"),
+                    "planned_rows": payload.get("planned_rows", "not_observable"),
+                    "plan_rows": payload.get("plan_rows", "not_observable"),
+                }
+    return meta
 
 
 def yaml_section_text_from_raw(section_name):
@@ -14880,6 +14914,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "candidate_price_observability_rate": candidate_price_observability["price_observability_rate"],
         "candidate_price_source_mix": safe_json(candidate_price_observability["price_source_mix"]),
         "candidate_price_observability_diagnosis": candidate_price_observability["diagnosis"],
+        "cost_probe_artifact_count": len(cost_probe_artifact_meta.get("present", [])),
+        "cost_probe_artifacts_present": cost_probe_artifact_meta.get("present", []),
+        "cost_probe_artifacts_missing": cost_probe_artifact_meta.get("missing", []),
+        "cost_probe_artifact_row_counts": cost_probe_artifact_meta.get("row_counts", {}),
+        "cost_probe_summary": cost_probe_artifact_meta.get("summary", {}),
         "router_decision_rows": len(router_rows),
         "has_trade_data": has_trade_data,
         "trade_observation_status": trade_observation_status,
@@ -16666,6 +16705,7 @@ copy_sanitized("configs/live_prod.yaml", "raw/config_live_prod.yaml", required=T
 for src_rel, dest_rel, required in STATE_FILES:
     copy_sanitized(src_rel, dest_rel, required=required)
 copy_current_reports()
+cost_probe_artifact_meta = copy_cost_probe_artifacts()
 synthesize_backtest_advisory_reader_if_missing()
 provenance_meta = build_provenance_meta()
 copied_runs, recent_24_decisions = copy_recent_runs()
@@ -16811,6 +16851,11 @@ manifest = {
         summary_meta.get("order_lifecycle_trade_metric_fill_count", 0) or 0
     ),
     "order_lifecycle_missing_high_issue": bool(summary_meta.get("order_lifecycle_missing_high_issue", False)),
+    "cost_probe_artifact_count": int(summary_meta.get("cost_probe_artifact_count", 0) or 0),
+    "cost_probe_artifacts_present": summary_meta.get("cost_probe_artifacts_present", []),
+    "cost_probe_artifacts_missing": summary_meta.get("cost_probe_artifacts_missing", []),
+    "cost_probe_artifact_row_counts": summary_meta.get("cost_probe_artifact_row_counts", {}),
+    "cost_probe_summary": summary_meta.get("cost_probe_summary", {}),
     "trade_state_consistency_rows": int(summary_meta.get("trade_state_consistency_rows", 0) or 0),
     "close_lifecycle_missing_trade_export_count": int(
         summary_meta.get("close_lifecycle_missing_trade_export_count", 0) or 0

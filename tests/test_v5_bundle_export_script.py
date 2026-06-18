@@ -41,6 +41,17 @@ def test_v5_bundle_export_script_includes_fast_microstructure_shadow_summary() -
     assert '"summaries/fast_microstructure_strategy_shadow.csv"' in script
 
 
+def test_v5_bundle_export_script_includes_cost_probe_artifacts() -> None:
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "scripts" / "generate_v5_bundle_remote.sh").read_text(encoding="utf-8")
+
+    assert "COST_PROBE_BUNDLE_ARTIFACTS" in script
+    assert '"cost_probe_plan.csv", "summaries/cost_probe_plan.csv"' in script
+    assert '"cost_probe_summary.json", "summaries/cost_probe_summary.json"' in script
+    assert '"runtime_cost_guard.csv", "summaries/cost_probe_runtime_cost_guard.csv"' in script
+    assert '"cost_probe_artifact_count"' in script
+
+
 def test_v5_bundle_export_script_regression() -> None:
     root = Path(__file__).resolve().parents[1]
     proc = subprocess.run(

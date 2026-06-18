@@ -360,6 +360,70 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+    (reports / "cost_probe_plan.csv").write_text(
+        "\n".join(
+            [
+                "generated_at,symbol,plan_status,blocked_reasons,dry_run,live_enabled,no_order_submitted",
+                "2026-05-11T13:00:00Z,BTC/USDT,blocked,cost_probe_enabled_false,True,False,True",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (reports / "cost_probe_orders.csv").write_text(
+        "\n".join(
+            [
+                "generated_at,symbol,leg,order_status,no_order_submitted,live_order_effect",
+                "2026-05-11T13:00:00Z,BTC/USDT,entry,not_submitted,True,none_read_only_dry_run_plan",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (reports / "cost_probe_roundtrips.csv").write_text(
+        "\n".join(
+            [
+                "generated_at,symbol,roundtrip_status,no_order_submitted,live_order_effect",
+                "2026-05-11T13:00:00Z,BTC/USDT,blocked,True,none_read_only_dry_run_plan",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (reports / "runtime_cost_guard.csv").write_text(
+        "\n".join(
+            [
+                "generated_at,guard_name,status,reason,path,observed_value",
+                "2026-05-11T13:00:00Z,kill_switch_clean,PASS,kill_switch_clean,reports/kill_switch.json,disabled",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (reports / "cost_disagreement.csv").write_text(
+        "\n".join(
+            [
+                "generated_at,symbol,status,reason,live_order_effect",
+                "2026-05-11T13:00:00Z,BTC/USDT,not_evaluated,no_live_probe_roundtrip_no_cost_disagreement,none_read_only_dry_run_plan",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (reports / "cost_probe_summary.json").write_text(
+        json.dumps(
+            {
+                "state": "DISABLED",
+                "dry_run": True,
+                "live_enabled": False,
+                "no_order_submitted": True,
+                "planned_rows": 0,
+                "plan_rows": 1,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     bundle = export_v5_bundle(reports_dir=reports, out_dir=out, window_hours=24 * 3650)
     sha_path = Path(str(bundle) + ".sha256")
@@ -385,6 +449,18 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "summaries/candidate_snapshot.csv" in names
         assert "raw/reports/candidate_snapshot.csv" in names
         assert "summaries/order_lifecycle.csv" in names
+        assert "raw/reports/cost_probe_plan.csv" in names
+        assert "raw/reports/cost_probe_orders.csv" in names
+        assert "raw/reports/cost_probe_roundtrips.csv" in names
+        assert "raw/reports/cost_probe_summary.json" in names
+        assert "raw/reports/runtime_cost_guard.csv" in names
+        assert "raw/reports/cost_disagreement.csv" in names
+        assert "summaries/cost_probe_plan.csv" in names
+        assert "summaries/cost_probe_orders.csv" in names
+        assert "summaries/cost_probe_roundtrips.csv" in names
+        assert "summaries/cost_probe_summary.json" in names
+        assert "summaries/cost_probe_runtime_cost_guard.csv" in names
+        assert "summaries/cost_probe_cost_disagreement.csv" in names
         assert "summaries/paper_strategy_runs.csv" in names
         assert "summaries/paper_strategy_daily.csv" in names
         assert "summaries/paper_slippage_coverage.csv" in names
@@ -410,6 +486,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         cost_usage = tf.extractfile("summaries/quant_lab_cost_usage.csv").read().decode("utf-8")
         runtime_cost_guard = tf.extractfile("summaries/runtime_cost_guard.csv").read().decode("utf-8")
         cost_disagreement = tf.extractfile("summaries/cost_disagreement.csv").read().decode("utf-8")
+        cost_probe_plan = tf.extractfile("summaries/cost_probe_plan.csv").read().decode("utf-8")
+        cost_probe_guard = tf.extractfile("summaries/cost_probe_runtime_cost_guard.csv").read().decode("utf-8")
+        cost_probe_summary = json.loads(tf.extractfile("summaries/cost_probe_summary.json").read().decode("utf-8"))
         fallbacks = tf.extractfile("summaries/quant_lab_fallbacks.csv").read().decode("utf-8")
         config_text = tf.extractfile("raw/config/live_prod.yaml").read().decode("utf-8")
         effective_config_alias = tf.extractfile("raw/effective_live_config.json").read().decode("utf-8")
@@ -437,6 +516,10 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "selected_entry_gate_cost_bps" in runtime_cost_guard.splitlines()[0]
         assert "quant_lab_roundtrip_cost_bps" in runtime_cost_guard.splitlines()[0]
         assert "v5_runtime_roundtrip_cost_bps" in cost_disagreement.splitlines()[0]
+        assert "blocked_reasons" in cost_probe_plan.splitlines()[0]
+        assert "guard_name" in cost_probe_guard.splitlines()[0]
+        assert cost_probe_summary["no_order_submitted"] is True
+        assert cost_probe_summary["live_enabled"] is False
         assert "raw_permission_decision" in compliance.splitlines()[0]
         assert "raw_permission_status" in compliance.splitlines()[0]
         assert "raw_permission_enforceable" in compliance.splitlines()[0]
@@ -552,10 +635,17 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert manifest["dirty_worktree"] is False
         assert manifest["provenance_status"] == "git_clean"
         assert manifest["code_provenance"] == "ok"
+        assert manifest["cost_probe_artifact_count"] == 6
+        assert manifest["cost_probe_artifact_row_counts"]["cost_probe_plan.csv"] == 1
+        assert manifest["cost_probe_summary"]["state"] == "DISABLED"
+        assert manifest["cost_probe_summary"]["no_order_submitted"] is True
         assert window["fill_metrics_rows"] == 1
         assert window["candidate_snapshot_rows"] == 1
         assert window["candidate_cost_source_coverage"] == 1.0
         assert window["order_lifecycle_rows"] == 1
+        assert window["cost_probe_artifact_count"] == 6
+        assert window["cost_probe_artifacts_missing"] == []
+        assert window["cost_probe_artifact_row_counts"]["cost_probe_orders.csv"] == 1
         assert config_audit["mode_source"] == "runtime_override"
         assert "api_env_path_present" in config_audit
         assert "api_env_secure_permissions" in config_audit

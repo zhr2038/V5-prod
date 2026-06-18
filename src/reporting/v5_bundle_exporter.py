@@ -454,6 +454,15 @@ SUMMARY_TRADE_COUNT_MISMATCH_FIELDS = (
     "trade_metrics_warning",
 )
 
+COST_PROBE_BUNDLE_ARTIFACTS = (
+    ("cost_probe_plan.csv", "summaries/cost_probe_plan.csv"),
+    ("cost_probe_orders.csv", "summaries/cost_probe_orders.csv"),
+    ("cost_probe_roundtrips.csv", "summaries/cost_probe_roundtrips.csv"),
+    ("cost_probe_summary.json", "summaries/cost_probe_summary.json"),
+    ("runtime_cost_guard.csv", "summaries/cost_probe_runtime_cost_guard.csv"),
+    ("cost_disagreement.csv", "summaries/cost_probe_cost_disagreement.csv"),
+)
+
 
 def _utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -1156,6 +1165,41 @@ def _copy_order_lifecycle_files(staging: Path, reports: Path) -> None:
             staging / "raw/recent_runs" / run_id / "order_lifecycle.csv",
             _redact_text(path.read_text(encoding="utf-8", errors="replace")),
         )
+
+
+def _copy_cost_probe_artifacts(staging: Path, reports: Path) -> dict[str, Any]:
+    present: list[str] = []
+    missing: list[str] = []
+    row_counts: dict[str, int] = {}
+    summary_state: dict[str, Any] = {}
+    for filename, summary_rel in COST_PROBE_BUNDLE_ARTIFACTS:
+        source = reports / filename
+        if not source.exists():
+            missing.append(filename)
+            continue
+        text = _read_text_redacted(source)
+        _write_text(staging / "raw/reports" / filename, text)
+        _write_text(staging / summary_rel, text)
+        present.append(filename)
+        if source.suffix.lower() == ".csv":
+            row_counts[filename] = len(_read_csv_dicts(source))
+        elif filename == "cost_probe_summary.json":
+            payload = _read_json_obj(source)
+            if isinstance(payload, Mapping):
+                summary_state = {
+                    "state": payload.get("state", "not_observable"),
+                    "dry_run": payload.get("dry_run", "not_observable"),
+                    "live_enabled": payload.get("live_enabled", "not_observable"),
+                    "no_order_submitted": payload.get("no_order_submitted", "not_observable"),
+                    "planned_rows": payload.get("planned_rows", "not_observable"),
+                    "plan_rows": payload.get("plan_rows", "not_observable"),
+                }
+    return {
+        "present": present,
+        "missing": missing,
+        "row_counts": row_counts,
+        "summary": summary_state,
+    }
 
 
 def _count_trade_metric_fills(rows: Iterable[Mapping[str, Any]]) -> int:
@@ -2644,6 +2688,7 @@ def export_v5_bundle(
         _write_csv(staging / "summaries/order_lifecycle.csv", ORDER_LIFECYCLE_FIELDS, order_lifecycle_rows)
         _copy_candidate_snapshot_files(staging, reports, candidate_rows)
         _copy_order_lifecycle_files(staging, reports)
+        cost_probe_artifacts = _copy_cost_probe_artifacts(staging, reports)
         _copy_sol_paper_strategy_files(staging, reports)
         _write_csv(
             staging / "reports/summary_trade_count_mismatch.csv",
@@ -2670,6 +2715,11 @@ def export_v5_bundle(
                 "order_lifecycle_rows": len(order_lifecycle_rows),
                 "order_lifecycle_trade_metric_fill_count": trade_metric_fill_count,
                 "order_lifecycle_missing_high_issue": order_lifecycle_missing_for_trades,
+                "cost_probe_artifact_count": len(cost_probe_artifacts["present"]),
+                "cost_probe_artifacts_present": cost_probe_artifacts["present"],
+                "cost_probe_artifacts_missing": cost_probe_artifacts["missing"],
+                "cost_probe_artifact_row_counts": cost_probe_artifacts["row_counts"],
+                "cost_probe_summary": cost_probe_artifacts["summary"],
                 "live_guard_would_block_count": len([row for row in live_guard_impact_rows if _live_guard_would_block(row)]),
                 "would_block_count": len([row for row in live_guard_impact_rows if _live_guard_would_block(row)]),
                 "live_guard_actual_block_count": 0,
@@ -2790,6 +2840,11 @@ def export_v5_bundle(
             "order_lifecycle_rows": len(order_lifecycle_rows),
             "order_lifecycle_trade_metric_fill_count": trade_metric_fill_count,
             "order_lifecycle_missing_high_issue": order_lifecycle_missing_for_trades,
+            "cost_probe_artifact_count": len(cost_probe_artifacts["present"]),
+            "cost_probe_artifacts_present": cost_probe_artifacts["present"],
+            "cost_probe_artifacts_missing": cost_probe_artifacts["missing"],
+            "cost_probe_artifact_row_counts": cost_probe_artifacts["row_counts"],
+            "cost_probe_summary": cost_probe_artifacts["summary"],
             "run_summary_invalid": run_summary_invalid,
             "summary_trade_count_mismatch_high_issue_count": summary_high_issue_count,
             "data_quality_warnings": data_quality_warnings,
