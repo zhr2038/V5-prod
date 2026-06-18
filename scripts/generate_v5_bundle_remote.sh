@@ -119,6 +119,7 @@ COST_PROBE_BUNDLE_ARTIFACTS = [
     ("cost_probe_orders.csv", "summaries/cost_probe_orders.csv"),
     ("cost_probe_roundtrips.csv", "summaries/cost_probe_roundtrips.csv"),
     ("cost_probe_summary.json", "summaries/cost_probe_summary.json"),
+    ("cost_probe_p3_preflight.json", "summaries/cost_probe_p3_preflight.json"),
     ("runtime_cost_guard.csv", "summaries/cost_probe_runtime_cost_guard.csv"),
     ("cost_disagreement.csv", "summaries/cost_probe_cost_disagreement.csv"),
 ]
@@ -1086,15 +1087,34 @@ def copy_jsonl_since(src_rel, dest_rel, since_dt, required=False, limit=MAX_COPY
 
 
 def copy_cost_probe_artifacts():
-    meta = {"present": [], "missing": [], "row_counts": {}, "summary": {}}
+    meta = {
+        "present": [],
+        "missing": [],
+        "row_counts": {},
+        "summary": {},
+        "p3_preflight": {},
+    }
     for filename, summary_rel in COST_PROBE_BUNDLE_ARTIFACTS:
         src_rel = f"reports/{filename}"
-        if not copy_sanitized(src_rel, f"raw/reports/{filename}", required=False):
+        source = ROOT / src_rel
+        if not source.is_file():
+            record_missing(src_rel)
             meta["missing"].append(filename)
             continue
-        copy_sanitized(src_rel, summary_rel, required=False)
+        if filename.endswith(".json"):
+            payload = load_json(source)
+            if isinstance(payload, dict):
+                text = json.dumps(sanitize_obj(payload), ensure_ascii=False, indent=2) + "\n"
+            else:
+                text = sanitize_text(read_text_limited(source, MAX_COPY_BYTES))
+            write_text(f"raw/reports/{filename}", text)
+            write_text(summary_rel, text)
+            copied_sources[f"raw/reports/{filename}"] = str(source)
+            copied_sources[summary_rel] = str(source)
+        else:
+            copy_sanitized(src_rel, f"raw/reports/{filename}", required=False)
+            copy_sanitized(src_rel, summary_rel, required=False)
         meta["present"].append(filename)
-        source = ROOT / src_rel
         if filename.endswith(".csv"):
             meta["row_counts"][filename] = len(load_csv_dicts(source))
         elif filename == "cost_probe_summary.json":
@@ -1107,6 +1127,29 @@ def copy_cost_probe_artifacts():
                     "no_order_submitted": payload.get("no_order_submitted", "not_observable"),
                     "planned_rows": payload.get("planned_rows", "not_observable"),
                     "plan_rows": payload.get("plan_rows", "not_observable"),
+                }
+        elif filename == "cost_probe_p3_preflight.json":
+            payload = load_json(source)
+            if isinstance(payload, dict):
+                meta["p3_preflight"] = {
+                    "state": payload.get("state", "not_observable"),
+                    "ready_to_request_manual_live_probe": payload.get(
+                        "ready_to_request_manual_live_probe",
+                        "not_observable",
+                    ),
+                    "manual_authorization_required": payload.get(
+                        "manual_authorization_required",
+                        "not_observable",
+                    ),
+                    "approved_live_order_execution": payload.get(
+                        "approved_live_order_execution",
+                        "not_observable",
+                    ),
+                    "manual_probe_symbol": payload.get(
+                        "manual_probe_symbol",
+                        "not_observable",
+                    ),
+                    "blockers": payload.get("blockers", "not_observable"),
                 }
     return meta
 
@@ -14919,6 +14962,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "cost_probe_artifacts_missing": cost_probe_artifact_meta.get("missing", []),
         "cost_probe_artifact_row_counts": cost_probe_artifact_meta.get("row_counts", {}),
         "cost_probe_summary": cost_probe_artifact_meta.get("summary", {}),
+        "cost_probe_p3_preflight": cost_probe_artifact_meta.get("p3_preflight", {}),
         "router_decision_rows": len(router_rows),
         "has_trade_data": has_trade_data,
         "trade_observation_status": trade_observation_status,
@@ -16856,6 +16900,7 @@ manifest = {
     "cost_probe_artifacts_missing": summary_meta.get("cost_probe_artifacts_missing", []),
     "cost_probe_artifact_row_counts": summary_meta.get("cost_probe_artifact_row_counts", {}),
     "cost_probe_summary": summary_meta.get("cost_probe_summary", {}),
+    "cost_probe_p3_preflight": summary_meta.get("cost_probe_p3_preflight", {}),
     "trade_state_consistency_rows": int(summary_meta.get("trade_state_consistency_rows", 0) or 0),
     "close_lifecycle_missing_trade_export_count": int(
         summary_meta.get("close_lifecycle_missing_trade_export_count", 0) or 0

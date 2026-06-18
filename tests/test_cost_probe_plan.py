@@ -9,6 +9,7 @@ from configs.schema import AppConfig
 from src.reporting.cost_probe_plan import (
     CostProbeEngine,
     build_cost_probe_dry_run_plan,
+    build_cost_probe_p3_preflight,
     write_cost_probe_dry_run_outputs,
 )
 
@@ -35,6 +36,7 @@ def test_cost_probe_plan_is_blocked_when_prod_switches_are_closed(tmp_path):
         roundtrips_path=tmp_path / "cost_probe_roundtrips.csv",
         runtime_guard_path=tmp_path / "runtime_cost_guard.csv",
         disagreement_path=tmp_path / "cost_disagreement.csv",
+        p3_preflight_path=tmp_path / "cost_probe_p3_preflight.json",
     )
     plan_path = written_paths["plan_path"]
     summary_path = written_paths["summary_path"]
@@ -49,6 +51,12 @@ def test_cost_probe_plan_is_blocked_when_prod_switches_are_closed(tmp_path):
     assert {row["plan_status"] for row in written_rows} == {"blocked"}
     assert {row["no_order_submitted"] for row in written_rows} == {"True"}
     assert json.loads(summary_path.read_text(encoding="utf-8"))["state"] == "DISABLED"
+    p3_preflight = json.loads(
+        written_paths["p3_preflight_path"].read_text(encoding="utf-8")
+    )
+    assert p3_preflight["state"] == "NOT_READY"
+    assert p3_preflight["approved_live_order_execution"] is False
+    assert "dry_run_plan_not_ready" in p3_preflight["blockers"]
 
 
 def test_cost_probe_plan_ready_requires_dry_run_and_live_disabled():
@@ -102,6 +110,56 @@ def test_cost_probe_plan_treats_max_orders_as_entry_exit_order_budget():
     assert all("daily_order_limit_exceeded" in row["blocked_reasons"] for row in blocked_rows)
 
 
+def test_cost_probe_p3_preflight_requires_single_symbol_manual_authorization():
+    cfg = AppConfig()
+    cfg.execution.cost_bootstrap_enabled = True
+    cfg.execution.cost_probe_enabled = True
+    cfg.execution.cost_probe_dry_run = True
+    cfg.execution.cost_probe_live_enabled = False
+    cfg.execution.cost_probe_use_exchange_min_notional = False
+    cfg.execution.cost_probe_symbols = ["BTC/USDT"]
+    cfg.execution.cost_probe_max_orders_per_day = 2
+    cfg.execution.cost_probe_max_roundtrips_per_symbol_per_day = 1
+    cfg.execution.cost_probe_max_notional_usdt = 5.0
+
+    rows, summary = build_cost_probe_dry_run_plan(
+        cfg,
+        generated_at=GENERATED_AT,
+    )
+    p3_preflight = build_cost_probe_p3_preflight(rows, summary, [])
+
+    assert p3_preflight["state"] == "READY_FOR_MANUAL_AUTHORIZATION"
+    assert p3_preflight["ready_to_request_manual_live_probe"] is True
+    assert p3_preflight["manual_authorization_required"] is True
+    assert p3_preflight["approved_live_order_execution"] is False
+    assert p3_preflight["manual_probe_symbol"] == "BTC/USDT"
+    assert p3_preflight["live_order_effect"] == "none_preflight_only_no_order"
+
+
+def test_cost_probe_p3_preflight_rejects_multi_symbol_plan():
+    cfg = AppConfig()
+    cfg.execution.cost_bootstrap_enabled = True
+    cfg.execution.cost_probe_enabled = True
+    cfg.execution.cost_probe_dry_run = True
+    cfg.execution.cost_probe_live_enabled = False
+    cfg.execution.cost_probe_use_exchange_min_notional = False
+    cfg.execution.cost_probe_symbols = ["BTC/USDT", "ETH/USDT"]
+    cfg.execution.cost_probe_max_orders_per_day = 4
+    cfg.execution.cost_probe_max_roundtrips_per_symbol_per_day = 1
+    cfg.execution.cost_probe_max_notional_usdt = 5.0
+
+    rows, summary = build_cost_probe_dry_run_plan(
+        cfg,
+        generated_at=GENERATED_AT,
+    )
+    p3_preflight = build_cost_probe_p3_preflight(rows, summary, [])
+
+    assert p3_preflight["state"] == "NOT_READY"
+    assert p3_preflight["ready_to_request_manual_live_probe"] is False
+    assert p3_preflight["approved_live_order_execution"] is False
+    assert "single_symbol_plan_required" in p3_preflight["blockers"]
+
+
 def test_cost_probe_engine_writes_guarded_read_only_artifacts(tmp_path):
     cfg = _ready_cost_probe_config()
     _write_clean_runtime_state(tmp_path)
@@ -132,6 +190,7 @@ def test_cost_probe_engine_writes_guarded_read_only_artifacts(tmp_path):
         "roundtrips_path",
         "runtime_guard_path",
         "disagreement_path",
+        "p3_preflight_path",
     }
     assert all(path.exists() for path in written_paths.values())
     order_rows = list(csv.DictReader(written_paths["orders_path"].open(encoding="utf-8")))
@@ -144,6 +203,11 @@ def test_cost_probe_engine_writes_guarded_read_only_artifacts(tmp_path):
     assert json.loads(written_paths["summary_path"].read_text(encoding="utf-8"))[
         "state"
     ] == "DRY_RUN_PLAN_READY"
+    p3_preflight = json.loads(
+        written_paths["p3_preflight_path"].read_text(encoding="utf-8")
+    )
+    assert p3_preflight["state"] == "READY_FOR_MANUAL_AUTHORIZATION"
+    assert p3_preflight["approved_live_order_execution"] is False
 
 
 def test_cost_probe_engine_blocks_when_kill_switch_is_enabled(tmp_path):

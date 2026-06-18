@@ -41,18 +41,22 @@ def main(argv: list[str] | None = None) -> int:
         roundtrip_rows=payload["roundtrip_rows"],
         guard_rows=payload["guard_rows"],
         disagreement_rows=payload["disagreement_rows"],
+        p3_preflight=payload["p3_preflight"],
         plan_path=plan_path,
         summary_path=summary_path,
         orders_path=reports_dir / "cost_probe_orders.csv",
         roundtrips_path=reports_dir / "cost_probe_roundtrips.csv",
         runtime_guard_path=reports_dir / "runtime_cost_guard.csv",
         disagreement_path=reports_dir / "cost_disagreement.csv",
+        p3_preflight_path=reports_dir / "cost_probe_p3_preflight.json",
     )
     output = {
         **payload["summary"],
+        "p3_preflight": payload["p3_preflight"],
         "artifact_paths": {key: str(path) for key, path in written_paths.items()},
         "plan_path": str(written_paths["plan_path"]),
         "summary_path": str(written_paths["summary_path"]),
+        "p3_preflight_path": str(written_paths["p3_preflight_path"]),
     }
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0

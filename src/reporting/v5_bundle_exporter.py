@@ -459,6 +459,7 @@ COST_PROBE_BUNDLE_ARTIFACTS = (
     ("cost_probe_orders.csv", "summaries/cost_probe_orders.csv"),
     ("cost_probe_roundtrips.csv", "summaries/cost_probe_roundtrips.csv"),
     ("cost_probe_summary.json", "summaries/cost_probe_summary.json"),
+    ("cost_probe_p3_preflight.json", "summaries/cost_probe_p3_preflight.json"),
     ("runtime_cost_guard.csv", "summaries/cost_probe_runtime_cost_guard.csv"),
     ("cost_disagreement.csv", "summaries/cost_probe_cost_disagreement.csv"),
 )
@@ -1172,19 +1173,23 @@ def _copy_cost_probe_artifacts(staging: Path, reports: Path) -> dict[str, Any]:
     missing: list[str] = []
     row_counts: dict[str, int] = {}
     summary_state: dict[str, Any] = {}
+    p3_preflight_state: dict[str, Any] = {}
     for filename, summary_rel in COST_PROBE_BUNDLE_ARTIFACTS:
         source = reports / filename
         if not source.exists():
             missing.append(filename)
             continue
-        text = _read_text_redacted(source)
+        payload = _read_json_obj(source) if source.suffix.lower() == ".json" else None
+        if isinstance(payload, Mapping):
+            text = json.dumps(_sanitize_bundle_obj(payload), ensure_ascii=False, indent=2) + "\n"
+        else:
+            text = _read_text_redacted(source)
         _write_text(staging / "raw/reports" / filename, text)
         _write_text(staging / summary_rel, text)
         present.append(filename)
         if source.suffix.lower() == ".csv":
             row_counts[filename] = len(_read_csv_dicts(source))
         elif filename == "cost_probe_summary.json":
-            payload = _read_json_obj(source)
             if isinstance(payload, Mapping):
                 summary_state = {
                     "state": payload.get("state", "not_observable"),
@@ -1194,11 +1199,34 @@ def _copy_cost_probe_artifacts(staging: Path, reports: Path) -> dict[str, Any]:
                     "planned_rows": payload.get("planned_rows", "not_observable"),
                     "plan_rows": payload.get("plan_rows", "not_observable"),
                 }
+        elif filename == "cost_probe_p3_preflight.json":
+            if isinstance(payload, Mapping):
+                p3_preflight_state = {
+                    "state": payload.get("state", "not_observable"),
+                    "ready_to_request_manual_live_probe": payload.get(
+                        "ready_to_request_manual_live_probe",
+                        "not_observable",
+                    ),
+                    "manual_authorization_required": payload.get(
+                        "manual_authorization_required",
+                        "not_observable",
+                    ),
+                    "approved_live_order_execution": payload.get(
+                        "approved_live_order_execution",
+                        "not_observable",
+                    ),
+                    "manual_probe_symbol": payload.get(
+                        "manual_probe_symbol",
+                        "not_observable",
+                    ),
+                    "blockers": payload.get("blockers", "not_observable"),
+                }
     return {
         "present": present,
         "missing": missing,
         "row_counts": row_counts,
         "summary": summary_state,
+        "p3_preflight": p3_preflight_state,
     }
 
 
@@ -2720,6 +2748,7 @@ def export_v5_bundle(
                 "cost_probe_artifacts_missing": cost_probe_artifacts["missing"],
                 "cost_probe_artifact_row_counts": cost_probe_artifacts["row_counts"],
                 "cost_probe_summary": cost_probe_artifacts["summary"],
+                "cost_probe_p3_preflight": cost_probe_artifacts["p3_preflight"],
                 "live_guard_would_block_count": len([row for row in live_guard_impact_rows if _live_guard_would_block(row)]),
                 "would_block_count": len([row for row in live_guard_impact_rows if _live_guard_would_block(row)]),
                 "live_guard_actual_block_count": 0,
@@ -2845,6 +2874,7 @@ def export_v5_bundle(
             "cost_probe_artifacts_missing": cost_probe_artifacts["missing"],
             "cost_probe_artifact_row_counts": cost_probe_artifacts["row_counts"],
             "cost_probe_summary": cost_probe_artifacts["summary"],
+            "cost_probe_p3_preflight": cost_probe_artifacts["p3_preflight"],
             "run_summary_invalid": run_summary_invalid,
             "summary_trade_count_mismatch_high_issue_count": summary_high_issue_count,
             "data_quality_warnings": data_quality_warnings,

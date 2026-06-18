@@ -424,6 +424,20 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+    (reports / "cost_probe_p3_preflight.json").write_text(
+        json.dumps(
+            {
+                "state": "NOT_READY",
+                "ready_to_request_manual_live_probe": False,
+                "manual_authorization_required": True,
+                "approved_live_order_execution": False,
+                "manual_probe_symbol": "",
+                "blockers": ["dry_run_plan_not_ready"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     bundle = export_v5_bundle(reports_dir=reports, out_dir=out, window_hours=24 * 3650)
     sha_path = Path(str(bundle) + ".sha256")
@@ -453,12 +467,14 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "raw/reports/cost_probe_orders.csv" in names
         assert "raw/reports/cost_probe_roundtrips.csv" in names
         assert "raw/reports/cost_probe_summary.json" in names
+        assert "raw/reports/cost_probe_p3_preflight.json" in names
         assert "raw/reports/runtime_cost_guard.csv" in names
         assert "raw/reports/cost_disagreement.csv" in names
         assert "summaries/cost_probe_plan.csv" in names
         assert "summaries/cost_probe_orders.csv" in names
         assert "summaries/cost_probe_roundtrips.csv" in names
         assert "summaries/cost_probe_summary.json" in names
+        assert "summaries/cost_probe_p3_preflight.json" in names
         assert "summaries/cost_probe_runtime_cost_guard.csv" in names
         assert "summaries/cost_probe_cost_disagreement.csv" in names
         assert "summaries/paper_strategy_runs.csv" in names
@@ -489,6 +505,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         cost_probe_plan = tf.extractfile("summaries/cost_probe_plan.csv").read().decode("utf-8")
         cost_probe_guard = tf.extractfile("summaries/cost_probe_runtime_cost_guard.csv").read().decode("utf-8")
         cost_probe_summary = json.loads(tf.extractfile("summaries/cost_probe_summary.json").read().decode("utf-8"))
+        cost_probe_p3_preflight = json.loads(
+            tf.extractfile("summaries/cost_probe_p3_preflight.json").read().decode("utf-8")
+        )
         fallbacks = tf.extractfile("summaries/quant_lab_fallbacks.csv").read().decode("utf-8")
         config_text = tf.extractfile("raw/config/live_prod.yaml").read().decode("utf-8")
         effective_config_alias = tf.extractfile("raw/effective_live_config.json").read().decode("utf-8")
@@ -520,6 +539,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "guard_name" in cost_probe_guard.splitlines()[0]
         assert cost_probe_summary["no_order_submitted"] is True
         assert cost_probe_summary["live_enabled"] is False
+        assert cost_probe_p3_preflight["approved_live_order_execution"] is False
+        assert cost_probe_p3_preflight["state"] == "NOT_READY"
         assert "raw_permission_decision" in compliance.splitlines()[0]
         assert "raw_permission_status" in compliance.splitlines()[0]
         assert "raw_permission_enforceable" in compliance.splitlines()[0]
@@ -635,17 +656,20 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert manifest["dirty_worktree"] is False
         assert manifest["provenance_status"] == "git_clean"
         assert manifest["code_provenance"] == "ok"
-        assert manifest["cost_probe_artifact_count"] == 6
+        assert manifest["cost_probe_artifact_count"] == 7
         assert manifest["cost_probe_artifact_row_counts"]["cost_probe_plan.csv"] == 1
         assert manifest["cost_probe_summary"]["state"] == "DISABLED"
         assert manifest["cost_probe_summary"]["no_order_submitted"] is True
+        assert manifest["cost_probe_p3_preflight"]["state"] == "NOT_READY"
+        assert manifest["cost_probe_p3_preflight"]["approved_live_order_execution"] is False
         assert window["fill_metrics_rows"] == 1
         assert window["candidate_snapshot_rows"] == 1
         assert window["candidate_cost_source_coverage"] == 1.0
         assert window["order_lifecycle_rows"] == 1
-        assert window["cost_probe_artifact_count"] == 6
+        assert window["cost_probe_artifact_count"] == 7
         assert window["cost_probe_artifacts_missing"] == []
         assert window["cost_probe_artifact_row_counts"]["cost_probe_orders.csv"] == 1
+        assert window["cost_probe_p3_preflight"]["state"] == "NOT_READY"
         assert config_audit["mode_source"] == "runtime_override"
         assert "api_env_path_present" in config_audit
         assert "api_env_secure_permissions" in config_audit

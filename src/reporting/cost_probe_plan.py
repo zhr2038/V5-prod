@@ -154,6 +154,7 @@ class CostProbeEngine:
             "kill_switch_path": str(self.kill_switch_path),
             "reconcile_status_path": str(self.reconcile_status_path),
         }
+        p3_preflight = build_cost_probe_p3_preflight(plan_rows, summary, guard_rows)
         return {
             "plan_rows": plan_rows,
             "summary": summary,
@@ -161,6 +162,7 @@ class CostProbeEngine:
             "roundtrip_rows": roundtrip_rows,
             "guard_rows": guard_rows,
             "disagreement_rows": disagreement_rows,
+            "p3_preflight": p3_preflight,
         }
 
     def write(self) -> dict[str, Path]:
@@ -172,12 +174,14 @@ class CostProbeEngine:
             roundtrip_rows=payload["roundtrip_rows"],
             guard_rows=payload["guard_rows"],
             disagreement_rows=payload["disagreement_rows"],
+            p3_preflight=payload["p3_preflight"],
             plan_path=self.reports_dir / "cost_probe_plan.csv",
             summary_path=self.reports_dir / "cost_probe_summary.json",
             orders_path=self.reports_dir / "cost_probe_orders.csv",
             roundtrips_path=self.reports_dir / "cost_probe_roundtrips.csv",
             runtime_guard_path=self.reports_dir / "runtime_cost_guard.csv",
             disagreement_path=self.reports_dir / "cost_disagreement.csv",
+            p3_preflight_path=self.reports_dir / "cost_probe_p3_preflight.json",
         )
 
     def evaluate_runtime_guards(self) -> tuple[list[dict[str, Any]], list[str]]:
@@ -513,6 +517,91 @@ def build_cost_probe_dry_run_plan(
     return rows, summary
 
 
+def build_cost_probe_p3_preflight(
+    plan_rows: list[dict[str, Any]],
+    summary: dict[str, Any],
+    guard_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build a read-only authorization preflight for manual P3 live probes."""
+
+    planned_symbols = [str(symbol) for symbol in summary.get("planned_symbols") or []]
+    if not planned_symbols:
+        planned_symbols = [
+            str(row.get("symbol"))
+            for row in plan_rows
+            if str(row.get("plan_status") or "") == "planned" and row.get("symbol")
+        ]
+    guard_failures = [
+        {
+            "guard_name": str(row.get("guard_name") or ""),
+            "reason": str(row.get("reason") or ""),
+        }
+        for row in (guard_rows or [])
+        if str(row.get("status") or "") != "PASS"
+    ]
+    blockers: list[str] = []
+    if summary.get("state") != "DRY_RUN_PLAN_READY":
+        blockers.append("dry_run_plan_not_ready")
+    if summary.get("runtime_blockers"):
+        blockers.append("runtime_blockers_present")
+    if guard_failures:
+        blockers.append("runtime_guard_failures_present")
+    if len(planned_symbols) != 1:
+        blockers.append("single_symbol_plan_required")
+    if not bool(summary.get("dry_run")):
+        blockers.append("dry_run_true_required")
+    if bool(summary.get("live_enabled")):
+        blockers.append("live_enabled_must_remain_false_for_preflight")
+    if not bool(summary.get("no_order_submitted", True)):
+        blockers.append("no_order_submitted_required")
+    orders_per_roundtrip = _int_value(summary.get("orders_per_roundtrip"))
+    available_order_slots = _int_value(summary.get("available_order_slots"))
+    if orders_per_roundtrip != 2:
+        blockers.append("orders_per_roundtrip_must_be_two")
+    if available_order_slots < max(orders_per_roundtrip, 2):
+        blockers.append("insufficient_available_order_slots")
+    if _int_value(summary.get("daily_order_used_count")) > 0:
+        blockers.append("daily_probe_order_history_present")
+    if _int_value(summary.get("daily_roundtrip_used_count")) > 0:
+        blockers.append("daily_probe_roundtrip_history_present")
+    if _float_value(summary.get("daily_loss_usdt")) > 0:
+        blockers.append("daily_probe_loss_present")
+
+    blockers = sorted(set(blockers))
+    return {
+        "generated_at": str(summary.get("generated_at") or ""),
+        "state": "READY_FOR_MANUAL_AUTHORIZATION" if not blockers else "NOT_READY",
+        "ready_to_request_manual_live_probe": not blockers,
+        "manual_authorization_required": True,
+        "approved_live_order_execution": False,
+        "live_order_effect": "none_preflight_only_no_order",
+        "manual_probe_symbol": planned_symbols[0] if len(planned_symbols) == 1 else "",
+        "planned_symbols": planned_symbols,
+        "blockers": blockers,
+        "runtime_blockers": summary.get("runtime_blockers") or [],
+        "symbol_runtime_blockers": summary.get("symbol_runtime_blockers") or {},
+        "guard_failures": guard_failures,
+        "dry_run_plan_state": summary.get("state"),
+        "dry_run": bool(summary.get("dry_run")),
+        "live_enabled": bool(summary.get("live_enabled")),
+        "no_order_submitted": bool(summary.get("no_order_submitted", True)),
+        "max_notional_usdt": _float_value(summary.get("max_notional_usdt")),
+        "max_orders_per_day": _int_value(summary.get("max_orders_per_day")),
+        "orders_per_roundtrip": orders_per_roundtrip,
+        "daily_order_used_count": _int_value(summary.get("daily_order_used_count")),
+        "available_order_slots": available_order_slots,
+        "daily_roundtrip_used_count": _int_value(
+            summary.get("daily_roundtrip_used_count")
+        ),
+        "daily_loss_usdt": _float_value(summary.get("daily_loss_usdt")),
+        "next_action": (
+            "request_explicit_operator_authorization_for_one_symbol_live_probe"
+            if not blockers
+            else "fix_preflight_blockers_before_requesting_live_probe"
+        ),
+    }
+
+
 def write_cost_probe_dry_run_outputs(
     rows: list[dict[str, Any]],
     summary: dict[str, Any],
@@ -521,12 +610,14 @@ def write_cost_probe_dry_run_outputs(
     roundtrip_rows: list[dict[str, Any]] | None = None,
     guard_rows: list[dict[str, Any]] | None = None,
     disagreement_rows: list[dict[str, Any]] | None = None,
+    p3_preflight: dict[str, Any] | None = None,
     plan_path: str | Path = "reports/cost_probe_plan.csv",
     summary_path: str | Path = "reports/cost_probe_summary.json",
     orders_path: str | Path = "reports/cost_probe_orders.csv",
     roundtrips_path: str | Path = "reports/cost_probe_roundtrips.csv",
     runtime_guard_path: str | Path = "reports/runtime_cost_guard.csv",
     disagreement_path: str | Path = "reports/cost_disagreement.csv",
+    p3_preflight_path: str | Path = "reports/cost_probe_p3_preflight.json",
 ) -> dict[str, Path]:
     plan = Path(plan_path)
     summary_file = Path(summary_path)
@@ -534,6 +625,7 @@ def write_cost_probe_dry_run_outputs(
     roundtrips = Path(roundtrips_path)
     runtime_guard = Path(runtime_guard_path)
     disagreement = Path(disagreement_path)
+    p3_preflight_file = Path(p3_preflight_path)
     plan.parent.mkdir(parents=True, exist_ok=True)
     summary_file.parent.mkdir(parents=True, exist_ok=True)
     _write_csv(plan, COST_PROBE_PLAN_FIELDS, rows)
@@ -545,6 +637,16 @@ def write_cost_probe_dry_run_outputs(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    preflight = p3_preflight or build_cost_probe_p3_preflight(
+        rows,
+        summary,
+        guard_rows or [],
+    )
+    p3_preflight_file.parent.mkdir(parents=True, exist_ok=True)
+    p3_preflight_file.write_text(
+        json.dumps(preflight, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
     return {
         "plan_path": plan,
         "summary_path": summary_file,
@@ -552,6 +654,7 @@ def write_cost_probe_dry_run_outputs(
         "roundtrips_path": roundtrips,
         "runtime_guard_path": runtime_guard,
         "disagreement_path": disagreement,
+        "p3_preflight_path": p3_preflight_file,
     }
 
 
