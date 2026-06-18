@@ -16756,6 +16756,16 @@ copied_runs, recent_24_decisions = copy_recent_runs()
 merged_candidate_snapshot_rows = merge_candidate_snapshot_reports()
 copied_logs = copy_logs()
 summary_meta = build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_meta)
+summary_meta.update(
+    {
+        "cost_probe_artifact_count": len(cost_probe_artifact_meta.get("present", [])),
+        "cost_probe_artifacts_present": cost_probe_artifact_meta.get("present", []),
+        "cost_probe_artifacts_missing": cost_probe_artifact_meta.get("missing", []),
+        "cost_probe_artifact_row_counts": cost_probe_artifact_meta.get("row_counts", {}),
+        "cost_probe_summary": cost_probe_artifact_meta.get("summary", {}),
+        "cost_probe_p3_preflight": cost_probe_artifact_meta.get("p3_preflight", {}),
+    }
+)
 filter_raw_jsonl_outputs_recent_24h()
 
 sanity = {
