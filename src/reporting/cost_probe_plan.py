@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +26,9 @@ COST_PROBE_PLAN_FIELDS = [
     "exit_policy",
     "max_open_seconds",
     "roundtrip_limit",
+    "orders_per_roundtrip",
+    "daily_order_used_count",
+    "available_order_slots",
     "entry_intent",
     "exit_intent",
     "live_order_effect",
@@ -118,10 +121,20 @@ class CostProbeEngine:
 
     def build(self) -> dict[str, Any]:
         guard_rows, runtime_blockers = self.evaluate_runtime_guards()
+        (
+            history_guard_rows,
+            history_blockers,
+            symbol_runtime_blockers,
+            history_summary,
+        ) = self.evaluate_cost_probe_history()
+        guard_rows.extend(history_guard_rows)
+        runtime_blockers = [*runtime_blockers, *history_blockers]
         plan_rows, summary = build_cost_probe_dry_run_plan(
             self.cfg,
             generated_at=self.generated_at,
             runtime_blockers=runtime_blockers,
+            symbol_runtime_blockers=symbol_runtime_blockers,
+            daily_order_used_count=int(history_summary["daily_order_used_count"]),
         )
         order_rows = _cost_probe_order_rows(plan_rows)
         roundtrip_rows = _cost_probe_roundtrip_rows(plan_rows)
@@ -130,6 +143,8 @@ class CostProbeEngine:
             **summary,
             "engine": "CostProbeEngine",
             "runtime_blockers": sorted(set(runtime_blockers)),
+            "symbol_runtime_blockers": symbol_runtime_blockers,
+            **history_summary,
             "order_rows": len(order_rows),
             "roundtrip_rows": len(roundtrip_rows),
             "guard_rows": len(guard_rows),
@@ -229,7 +244,11 @@ class CostProbeEngine:
                 blockers.append(reason)
 
         if _bool_attr(self.execution, "cost_probe_disable_if_position_state_dirty", True):
-            status = "PASS" if not any(row["guard_name"] == "no_existing_position" and row["status"] != "PASS" for row in rows) else "BLOCK"
+            position_dirty = any(
+                row["guard_name"] == "no_existing_position" and row["status"] != "PASS"
+                for row in rows
+            )
+            status = "BLOCK" if position_dirty else "PASS"
             reason = "position_state_clean" if status == "PASS" else "position_state_dirty"
             rows.append(
                 self._guard_row(
@@ -244,6 +263,137 @@ class CostProbeEngine:
                 blockers.append(reason)
 
         return rows, sorted(set(blockers))
+
+    def evaluate_cost_probe_history(
+        self,
+    ) -> tuple[list[dict[str, Any]], list[str], dict[str, list[str]], dict[str, Any]]:
+        orders_path = self.reports_dir / "cost_probe_orders.csv"
+        roundtrips_path = self.reports_dir / "cost_probe_roundtrips.csv"
+        orders = _read_csv_rows(orders_path)
+        roundtrips = _read_csv_rows(roundtrips_path)
+        symbols = _cost_probe_symbols(self.execution)
+        daily_orders = [
+            row
+            for row in orders
+            if _probe_order_submitted(row)
+            and _same_utc_day(_row_datetime(row), self.generated_at)
+        ]
+        daily_roundtrips = [
+            row
+            for row in roundtrips
+            if _probe_roundtrip_active(row)
+            and _same_utc_day(_row_datetime(row), self.generated_at)
+        ]
+        daily_order_used_count = len(daily_orders)
+        max_orders = max(_int_attr(self.execution, "cost_probe_max_orders_per_day", 0), 0)
+        roundtrip_limit = max(
+            _int_attr(self.execution, "cost_probe_max_roundtrips_per_symbol_per_day", 0),
+            0,
+        )
+        cooldown_minutes = max(
+            _int_attr(self.execution, "cost_probe_cooldown_minutes", 0),
+            0,
+        )
+        max_daily_loss = _float_attr(self.execution, "cost_probe_max_daily_loss_usdt", 0.0)
+        daily_loss = _daily_roundtrip_loss_usdt(daily_roundtrips)
+        rows: list[dict[str, Any]] = []
+        blockers: list[str] = []
+        symbol_blockers: dict[str, list[str]] = {symbol: [] for symbol in symbols}
+
+        order_status = "PASS"
+        order_reason = "daily_order_budget_available"
+        if max_orders > 0 and daily_order_used_count >= max_orders:
+            order_status = "BLOCK"
+            order_reason = "daily_order_limit_exhausted"
+            blockers.append(order_reason)
+        rows.append(
+            self._guard_row(
+                "cost_probe_daily_order_budget",
+                status=order_status,
+                reason=order_reason,
+                path=orders_path,
+                observed_value=f"used={daily_order_used_count};max={max_orders}",
+            )
+        )
+
+        loss_status = "PASS"
+        loss_reason = "daily_loss_budget_available"
+        if max_daily_loss > 0 and daily_loss >= max_daily_loss:
+            loss_status = "BLOCK"
+            loss_reason = "daily_loss_limit_reached"
+            blockers.append(loss_reason)
+        rows.append(
+            self._guard_row(
+                "cost_probe_daily_loss_budget",
+                status=loss_status,
+                reason=loss_reason,
+                path=roundtrips_path,
+                observed_value=f"loss_usdt={daily_loss:.8f};max={max_daily_loss:.8f}",
+            )
+        )
+
+        for symbol in symbols:
+            symbol_roundtrips = [
+                row
+                for row in daily_roundtrips
+                if _normalize_cost_probe_symbol(row.get("symbol")) == symbol
+            ]
+            roundtrip_status = "PASS"
+            roundtrip_reason = "roundtrip_budget_available"
+            if roundtrip_limit > 0 and len(symbol_roundtrips) >= roundtrip_limit:
+                roundtrip_status = "BLOCK"
+                roundtrip_reason = "roundtrip_limit_reached"
+                symbol_blockers[symbol].append(roundtrip_reason)
+            rows.append(
+                self._guard_row(
+                    "cost_probe_symbol_roundtrip_budget",
+                    status=roundtrip_status,
+                    reason=roundtrip_reason,
+                    path=roundtrips_path,
+                    observed_value=(
+                        f"symbol={symbol};used={len(symbol_roundtrips)};max={roundtrip_limit}"
+                    ),
+                )
+            )
+
+            latest_symbol_probe = _latest_probe_datetime(symbol, orders, roundtrips)
+            cooldown_status = "PASS"
+            cooldown_reason = "cooldown_clear"
+            cooldown_observed = f"symbol={symbol};cooldown_minutes={cooldown_minutes}"
+            if latest_symbol_probe is not None and cooldown_minutes > 0:
+                cooldown_until = latest_symbol_probe + timedelta(minutes=cooldown_minutes)
+                if cooldown_until > self.generated_at:
+                    remain_sec = max((cooldown_until - self.generated_at).total_seconds(), 0.0)
+                    cooldown_status = "BLOCK"
+                    cooldown_reason = "cost_probe_cooldown_active"
+                    cooldown_observed = (
+                        f"symbol={symbol};remaining_sec={remain_sec:.1f};"
+                        f"latest={_iso(latest_symbol_probe)}"
+                    )
+                    symbol_blockers[symbol].append(cooldown_reason)
+            rows.append(
+                self._guard_row(
+                    "cost_probe_symbol_cooldown",
+                    status=cooldown_status,
+                    reason=cooldown_reason,
+                    path=orders_path,
+                    observed_value=cooldown_observed,
+                )
+            )
+
+        symbol_blockers = {
+            symbol: sorted(set(reasons))
+            for symbol, reasons in symbol_blockers.items()
+            if reasons
+        }
+        history_summary = {
+            "daily_order_used_count": daily_order_used_count,
+            "daily_roundtrip_used_count": len(daily_roundtrips),
+            "daily_loss_usdt": daily_loss,
+            "cost_probe_orders_path": str(orders_path),
+            "cost_probe_roundtrips_path": str(roundtrips_path),
+        }
+        return rows, sorted(set(blockers)), symbol_blockers, history_summary
 
     def _guard_row(
         self,
@@ -269,6 +419,8 @@ def build_cost_probe_dry_run_plan(
     *,
     generated_at: datetime | None = None,
     runtime_blockers: list[str] | None = None,
+    symbol_runtime_blockers: dict[str, list[str]] | None = None,
+    daily_order_used_count: int = 0,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Build a read-only cost-probe plan without touching exchange state."""
 
@@ -277,17 +429,23 @@ def build_cost_probe_dry_run_plan(
     symbols = _cost_probe_symbols(execution)
     blockers = [*_cost_probe_blockers(execution), *(runtime_blockers or [])]
     max_orders = max(_int_attr(execution, "cost_probe_max_orders_per_day", 0), 0)
+    used_order_count = max(int(daily_order_used_count or 0), 0)
+    orders_per_roundtrip = 2
+    available_order_slots = max(max_orders - used_order_count, 0)
     roundtrip_limit = max(
         _int_attr(execution, "cost_probe_max_roundtrips_per_symbol_per_day", 0),
         0,
     )
-    candidate_symbols = symbols[:max_orders] if max_orders > 0 else []
+    symbol_blockers_map = symbol_runtime_blockers or {}
+    budget_candidate_limit = available_order_slots // orders_per_roundtrip
+    budget_pool = [symbol for symbol in symbols if not symbol_blockers_map.get(symbol)]
+    candidate_symbols = budget_pool[:budget_candidate_limit] if max_orders > 0 else []
     rows: list[dict[str, Any]] = []
     for symbol in symbols:
-        symbol_blockers = list(blockers)
+        symbol_blockers = [*blockers, *symbol_blockers_map.get(symbol, [])]
         if max_orders <= 0:
             symbol_blockers.append("cost_probe_max_orders_per_day_zero")
-        elif symbol not in candidate_symbols:
+        elif available_order_slots < orders_per_roundtrip or symbol not in candidate_symbols:
             symbol_blockers.append("daily_order_limit_exceeded")
         if roundtrip_limit <= 0:
             symbol_blockers.append("roundtrip_limit_zero")
@@ -318,6 +476,9 @@ def build_cost_probe_dry_run_plan(
                 ),
                 "max_open_seconds": _int_attr(execution, "cost_probe_max_open_seconds", 60),
                 "roundtrip_limit": roundtrip_limit,
+                "orders_per_roundtrip": orders_per_roundtrip,
+                "daily_order_used_count": used_order_count,
+                "available_order_slots": available_order_slots,
                 "entry_intent": "DRY_RUN_ENTRY_ONLY_NO_ORDER",
                 "exit_intent": "DRY_RUN_IMMEDIATE_FLAT_NO_ORDER",
                 "live_order_effect": "none_read_only_dry_run_plan",
@@ -343,6 +504,9 @@ def build_cost_probe_dry_run_plan(
         ),
         "max_notional_usdt": _float_attr(execution, "cost_probe_max_notional_usdt", 0.0),
         "max_orders_per_day": max_orders,
+        "daily_order_used_count": used_order_count,
+        "available_order_slots": available_order_slots,
+        "orders_per_roundtrip": orders_per_roundtrip,
         "max_roundtrips_per_symbol_per_day": roundtrip_limit,
         "live_order_effect": "none_read_only_dry_run_plan",
     }
@@ -563,6 +727,134 @@ def _position_store_guard(path: Path) -> tuple[str, str, str]:
     return "PASS", "position_store_flat", "positions=0"
 
 
+def _read_csv_rows(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    try:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            return [dict(row) for row in csv.DictReader(handle)]
+    except (OSError, csv.Error):
+        return []
+
+
+def _row_datetime(row: dict[str, Any]) -> datetime | None:
+    for key in (
+        "generated_at",
+        "filled_at",
+        "closed_at",
+        "completed_at",
+        "exit_at",
+        "updated_at",
+        "created_at",
+        "timestamp",
+        "ts",
+    ):
+        parsed = _parse_datetime(row.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        if raw.replace(".", "", 1).isdigit():
+            try:
+                numeric = float(raw)
+            except ValueError:
+                return None
+            if numeric > 10_000_000_000:
+                numeric /= 1000.0
+            return datetime.fromtimestamp(numeric, tz=UTC)
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _same_utc_day(value: datetime | None, ref: datetime) -> bool:
+    if value is None:
+        return False
+    return value.astimezone(UTC).date() == ref.astimezone(UTC).date()
+
+
+def _normalize_cost_probe_symbol(value: Any) -> str:
+    symbol = str(value or "").strip().upper().replace("-", "/")
+    if "/" not in symbol and symbol.endswith("USDT"):
+        symbol = f"{symbol[:-4]}/USDT"
+    return symbol
+
+
+def _probe_order_submitted(row: dict[str, Any]) -> bool:
+    if _json_bool(row.get("no_order_submitted")):
+        return False
+    status = str(row.get("order_status") or row.get("status") or "").strip().lower()
+    if status in {"", "not_submitted", "blocked", "dry_run_ready"}:
+        return False
+    if str(row.get("live_order_effect") or "").startswith("none_read_only"):
+        return False
+    if str(row.get("intent") or "").upper().startswith("DRY_RUN_"):
+        return False
+    return True
+
+
+def _probe_roundtrip_active(row: dict[str, Any]) -> bool:
+    if _json_bool(row.get("no_order_submitted")):
+        return False
+    status = str(row.get("roundtrip_status") or row.get("status") or "").strip().lower()
+    if status in {"", "blocked", "dry_run_ready", "not_submitted", "planned"}:
+        return False
+    if str(row.get("live_order_effect") or "").startswith("none_read_only"):
+        return False
+    return True
+
+
+def _latest_probe_datetime(
+    symbol: str,
+    orders: list[dict[str, Any]],
+    roundtrips: list[dict[str, Any]],
+) -> datetime | None:
+    timestamps: list[datetime] = []
+    for row in orders:
+        if _normalize_cost_probe_symbol(row.get("symbol")) != symbol:
+            continue
+        if not _probe_order_submitted(row):
+            continue
+        parsed = _row_datetime(row)
+        if parsed is not None:
+            timestamps.append(parsed)
+    for row in roundtrips:
+        if _normalize_cost_probe_symbol(row.get("symbol")) != symbol:
+            continue
+        if not _probe_roundtrip_active(row):
+            continue
+        parsed = _row_datetime(row)
+        if parsed is not None:
+            timestamps.append(parsed)
+    return max(timestamps) if timestamps else None
+
+
+def _daily_roundtrip_loss_usdt(roundtrips: list[dict[str, Any]]) -> float:
+    loss = 0.0
+    for row in roundtrips:
+        pnl = _float_value(
+            row.get("net_pnl_usdt")
+            or row.get("realized_pnl_usdt")
+            or row.get("pnl_usdt")
+            or 0.0
+        )
+        if pnl < 0:
+            loss += abs(pnl)
+    return loss
+
+
 def _read_json(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
@@ -645,6 +937,13 @@ def _float_attr(obj: Any, name: str, default: float) -> float:
         return float(getattr(obj, name, default) or 0.0)
     except (TypeError, ValueError):
         return default
+
+
+def _float_value(value: Any) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _iso(value: datetime) -> str:
