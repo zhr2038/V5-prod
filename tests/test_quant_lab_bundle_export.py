@@ -573,6 +573,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "guard_name" in cost_probe_guard.splitlines()[0]
         assert cost_probe_summary["no_order_submitted"] is True
         assert cost_probe_summary["live_enabled"] is False
+        assert cost_probe_p3_preflight["manual_authorization_required"] is True
         assert cost_probe_p3_preflight["approved_live_order_execution"] is False
         assert cost_probe_p3_preflight["state"] == "NOT_READY"
         assert "raw_permission_decision" in compliance.splitlines()[0]
@@ -696,6 +697,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert manifest["cost_probe_artifact_row_counts"]["cost_probe_roundtrip_events.jsonl"] == 1
         assert manifest["cost_probe_summary"]["state"] == "DISABLED"
         assert manifest["cost_probe_summary"]["no_order_submitted"] is True
+        assert manifest["cost_probe_p3_preflight"]["manual_authorization_required"] is True
         assert manifest["cost_probe_p3_preflight"]["state"] == "NOT_READY"
         assert manifest["cost_probe_p3_preflight"]["approved_live_order_execution"] is False
         assert window["fill_metrics_rows"] == 1
@@ -705,6 +707,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert window["cost_probe_artifact_count"] == 9
         assert window["cost_probe_artifacts_missing"] == []
         assert window["cost_probe_artifact_row_counts"]["cost_probe_orders.csv"] == 1
+        assert window["cost_probe_p3_preflight"]["manual_authorization_required"] is True
         assert window["cost_probe_p3_preflight"]["state"] == "NOT_READY"
         assert config_audit["mode_source"] == "runtime_override"
         assert "api_env_path_present" in config_audit

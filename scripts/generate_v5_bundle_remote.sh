@@ -573,6 +573,10 @@ UNREDACTED_SECRET_RE = re.compile(
     r"(?i)(api[_-]?secret|passphrase|password|authorization|cookie|token)([\"']?\s*[:=]\s*[\"']?)"
     r"(?!<REDACTED>|REDACTED|null|none|false|true|0\b)[^\"'\s,;#}\]]+"
 )
+NON_SECRET_KEYS = {
+    "authorization_id",
+    "manual_authorization_required",
+}
 DUST_TERMS = ("dust", "anti_chase", "anti-chase", "anti chase")
 PROBE_TERMS = ("probe", "candidate", "event_candidate")
 PROBE_TYPES = ("market_impulse_probe", "btc_leadership_probe")
@@ -910,7 +914,9 @@ def sanitize_obj(obj):
     if isinstance(obj, dict):
         result = {}
         for key, value in obj.items():
-            if SECRET_KEY_RE.search(str(key)):
+            if str(key).lower() in NON_SECRET_KEYS:
+                result[key] = sanitize_obj(value)
+            elif SECRET_KEY_RE.search(str(key)):
                 result[key] = "<REDACTED>"
             else:
                 result[key] = sanitize_obj(value)
