@@ -208,6 +208,12 @@ class CostEstimate:
     cost_quality: Optional[str] = None
     cost_trusted_for_paper: Optional[bool] = None
     cost_trusted_for_live: Optional[bool] = None
+    cost_trusted_for_live_canary: Optional[bool] = None
+    cost_trusted_for_live_scale: Optional[bool] = None
+    cost_trust_level: Optional[str] = None
+    cost_trust_block_reasons: List[Any] = field(default_factory=list)
+    live_cost_sample_count: Optional[int] = None
+    trusted_live_sample_count: Optional[int] = None
     raw_response: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -237,6 +243,20 @@ class CostEstimate:
             sample_count_i = int(sample_count) if sample_count is not None and sample_count != "" else None
         except (TypeError, ValueError):
             sample_count_i = None
+        live_sample_count = data.get("live_cost_sample_count")
+        try:
+            live_sample_count_i = int(live_sample_count) if live_sample_count is not None and live_sample_count != "" else None
+        except (TypeError, ValueError):
+            live_sample_count_i = None
+        trusted_live_sample_count = data.get("trusted_live_sample_count")
+        try:
+            trusted_live_sample_count_i = (
+                int(trusted_live_sample_count)
+                if trusted_live_sample_count is not None and trusted_live_sample_count != ""
+                else None
+            )
+        except (TypeError, ValueError):
+            trusted_live_sample_count_i = None
         cost_bps = _float(data, "cost_bps")
         return cls(
             symbol=str(data.get("symbol") or ""),
@@ -265,6 +285,12 @@ class CostEstimate:
             cost_quality=str(data.get("cost_quality") or "") or None,
             cost_trusted_for_paper=_bool(data, "cost_trusted_for_paper"),
             cost_trusted_for_live=_bool(data, "cost_trusted_for_live"),
+            cost_trusted_for_live_canary=_bool(data, "cost_trusted_for_live_canary"),
+            cost_trusted_for_live_scale=_bool(data, "cost_trusted_for_live_scale"),
+            cost_trust_level=str(data.get("cost_trust_level") or "") or None,
+            cost_trust_block_reasons=_list(data, "cost_trust_block_reasons"),
+            live_cost_sample_count=live_sample_count_i,
+            trusted_live_sample_count=trusted_live_sample_count_i,
             raw_response=dict(data),
         )
 

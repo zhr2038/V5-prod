@@ -298,6 +298,57 @@ def _degraded_cost_model(estimate: CostEstimate) -> bool:
     return source == "global_default" or raw_source == "global_default" or fallback_level == "GLOBAL_DEFAULT" or cost_model_version == "global_default_v0"
 
 
+_COST_TRUST_LEVEL_RANK = {
+    "BLOCK": 0,
+    "PAPER_ONLY": 1,
+    "CANARY": 2,
+    "SCALE_READY": 3,
+}
+
+
+def _normalize_cost_trust_level(value: Any) -> str:
+    text = str(value or "").strip().upper().replace("-", "_")
+    return text if text in _COST_TRUST_LEVEL_RANK else ""
+
+
+def _cost_trust_level_at_least(level: str, required: str) -> bool:
+    normalized_level = _normalize_cost_trust_level(level) or "BLOCK"
+    normalized_required = _normalize_cost_trust_level(required) or "SCALE_READY"
+    return _COST_TRUST_LEVEL_RANK[normalized_level] >= _COST_TRUST_LEVEL_RANK[normalized_required]
+
+
+def _estimate_cost_trust_level(estimate: CostEstimate, gate: CostGateResult) -> str:
+    raw_response = getattr(estimate, "raw_response", {}) or {}
+    raw_level = _first_present(
+        getattr(estimate, "cost_trust_level", None),
+        raw_response.get("cost_trust_level") if isinstance(raw_response, Mapping) else None,
+        getattr(gate, "cost_trust_level", None),
+    )
+    level = _normalize_cost_trust_level(raw_level)
+    if level:
+        return level
+    if getattr(estimate, "cost_trusted_for_live_scale", None) is True or getattr(gate, "cost_trusted_for_live_scale", None) is True:
+        return "SCALE_READY"
+    if getattr(estimate, "cost_trusted_for_live_canary", None) is True or getattr(gate, "cost_trusted_for_live_canary", None) is True:
+        return "CANARY"
+    trusted_live = _first_present(
+        getattr(estimate, "cost_trusted_for_live", None),
+        getattr(gate, "cost_trusted_for_live", None),
+    )
+    if trusted_live is True:
+        return "SCALE_READY"
+    if trusted_live is False:
+        return "PAPER_ONLY"
+    return "BLOCK"
+
+
+def _guard_float_value(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _cost_model_diagnosis(*, degraded: bool, fallback_used: bool, gate_reason: str) -> str:
     if degraded:
         return "global_default_cost"
@@ -512,6 +563,25 @@ class QuantLabGuard:
         mode = mode.strip().lower().replace("-", "_") or "observe_only"
         never_block_exits = bool(getattr(guard_cfg, "never_block_exits", True)) if guard_cfg is not None else True
         block_only_new_open = bool(getattr(guard_cfg, "block_only_new_open", True)) if guard_cfg is not None else True
+        required_canary = _normalize_cost_trust_level(
+            getattr(guard_cfg, "required_level_for_canary", "CANARY")
+            if guard_cfg is not None
+            else "CANARY"
+        ) or "CANARY"
+        required_normal = _normalize_cost_trust_level(
+            getattr(guard_cfg, "required_level_for_normal_live", "SCALE_READY")
+            if guard_cfg is not None
+            else "SCALE_READY"
+        ) or "SCALE_READY"
+        canary_max_notional = max(
+            _guard_float_value(
+                getattr(guard_cfg, "canary_max_notional_usdt", 20.0)
+                if guard_cfg is not None
+                else 20.0,
+                20.0,
+            ),
+            0.0,
+        )
 
         meta = dict(getattr(order, "meta", None) or {})
         is_exit = _is_sell_or_close(order)
@@ -523,8 +593,15 @@ class QuantLabGuard:
         trusted_live = getattr(estimate, "cost_trusted_for_live", None)
         if trusted_live is None:
             trusted_live = getattr(gate, "cost_trusted_for_live", None)
-        untrusted_live = trusted_live is not True
         raw_response = getattr(estimate, "raw_response", {}) or {}
+        cost_trust_level = _estimate_cost_trust_level(estimate, gate)
+        normal_live_allowed = _cost_trust_level_at_least(cost_trust_level, required_normal)
+        canary_trust_allowed = _cost_trust_level_at_least(cost_trust_level, required_canary)
+        order_notional = max(_guard_float_value(getattr(order, "notional_usdt", 0.0), 0.0), 0.0)
+        canary_notional_ok = canary_max_notional <= 0.0 or order_notional <= canary_max_notional
+        canary_live_allowed = bool(canary_trust_allowed and whitelist_match and canary_notional_ok)
+        live_trust_allowed = bool(normal_live_allowed or canary_live_allowed)
+        untrusted_live = not live_trust_allowed
         raw_allowed_live_modes = _first_present(
             raw_response.get("allowed_live_modes"),
             raw_response.get("live_modes"),
@@ -538,11 +615,19 @@ class QuantLabGuard:
         reasons: list[str] = []
         if trusted_live is False:
             reasons.append("cost_untrusted_for_live")
-        elif trusted_live is None:
+        elif trusted_live is None and not getattr(estimate, "cost_trust_level", None):
             reasons.append("cost_trust_missing_for_live")
+        if cost_trust_level == "PAPER_ONLY":
+            reasons.append("cost_trust_level_paper_only")
+        if not normal_live_allowed:
+            reasons.append(f"cost_trust_level_lt_{required_normal.lower()}")
+        if not canary_trust_allowed:
+            reasons.append(f"cost_trust_level_lt_{required_canary.lower()}")
+        if canary_trust_allowed and whitelist_match and not canary_notional_ok:
+            reasons.append("canary_notional_exceeds_limit")
         if no_live_modes:
             reasons.append("quant_lab_allowed_live_modes_empty")
-        if mode == "block_non_whitelist_only" and not whitelist_match and (untrusted_live or no_live_modes):
+        if not whitelist_match and not normal_live_allowed and (untrusted_live or no_live_modes):
             reasons.append("strategy_not_in_canary_whitelist")
         if mode == "block_all_untrusted_open" and untrusted_live:
             reasons.append("block_all_untrusted_open")
@@ -555,9 +640,26 @@ class QuantLabGuard:
 
         would_be_blocked_by_no_live_modes = bool(would_have_opened_live and no_live_modes)
         would_be_blocked_by_cost_trust = bool(would_have_opened_live and untrusted_live)
-        would_be_blocked_by_whitelist = bool(would_have_opened_live and not whitelist_match and (untrusted_live or no_live_modes))
+        would_be_blocked_by_whitelist = bool(
+            would_have_opened_live
+            and not whitelist_match
+            and not normal_live_allowed
+            and (untrusted_live or no_live_modes)
+        )
+        would_be_blocked_by_canary_notional = bool(
+            would_have_opened_live
+            and canary_trust_allowed
+            and whitelist_match
+            and not canary_notional_ok
+            and not normal_live_allowed
+        )
         if mode == "block_non_whitelist_only":
-            guard_condition = bool(would_be_blocked_by_whitelist)
+            guard_condition = bool(
+                would_be_blocked_by_cost_trust
+                or would_be_blocked_by_no_live_modes
+                or would_be_blocked_by_whitelist
+                or would_be_blocked_by_canary_notional
+            )
         elif mode == "block_all_untrusted_open":
             guard_condition = bool(would_be_blocked_by_cost_trust or would_be_blocked_by_no_live_modes)
         else:
@@ -565,6 +667,7 @@ class QuantLabGuard:
                 would_be_blocked_by_no_live_modes
                 or would_be_blocked_by_cost_trust
                 or would_be_blocked_by_whitelist
+                or would_be_blocked_by_canary_notional
             )
         guard_enforced = bool(
             enabled
@@ -575,10 +678,10 @@ class QuantLabGuard:
         before = "BLOCKED_COST_GATE" if cost_filtered_before_guard else "ALLOW"
         after = "BLOCKED_COST_TRUST_GUARD" if blocked else before
         cost_trust_exception = bool(
-            mode == "block_non_whitelist_only"
-            and would_have_opened_live
-            and whitelist_match
-            and (untrusted_live or no_live_modes)
+            would_have_opened_live
+            and canary_live_allowed
+            and not normal_live_allowed
+            and not no_live_modes
         )
         return {
             "event_type": "live_guard_impact",
@@ -592,15 +695,25 @@ class QuantLabGuard:
             "would_be_blocked_by_quant_lab_no_live_modes": would_be_blocked_by_no_live_modes,
             "would_be_blocked_by_cost_trust_guard": would_be_blocked_by_cost_trust,
             "would_be_blocked_by_shadow_live_whitelist": would_be_blocked_by_whitelist,
+            "would_be_blocked_by_canary_notional": would_be_blocked_by_canary_notional,
             "blocked_by_quant_lab_no_live_modes": bool(blocked and would_be_blocked_by_no_live_modes),
             "blocked_by_cost_trust_guard": blocked,
             "blocked_by_shadow_live_whitelist": bool(blocked and would_be_blocked_by_whitelist),
+            "blocked_by_canary_notional": bool(blocked and would_be_blocked_by_canary_notional),
             "whitelist_strategy_match": whitelist_match,
             "cost_trust_exception": cost_trust_exception,
             "paper_or_shadow_bypassed": bool(paper_or_shadow),
             "cost_quality": gate.cost_quality,
             "cost_trusted_for_live": trusted_live,
-            "cost_trust_level": (getattr(estimate, "raw_response", {}) or {}).get("cost_trust_level"),
+            "cost_trusted_for_live_canary": getattr(estimate, "cost_trusted_for_live_canary", None),
+            "cost_trusted_for_live_scale": getattr(estimate, "cost_trusted_for_live_scale", None),
+            "cost_trust_level": cost_trust_level,
+            "required_level_for_canary": required_canary,
+            "required_level_for_normal_live": required_normal,
+            "canary_max_notional_usdt": canary_max_notional,
+            "order_notional_usdt": order_notional,
+            "normal_live_allowed_by_cost_trust": normal_live_allowed,
+            "canary_live_allowed_by_cost_trust": canary_live_allowed,
             "cost_trust_block_reasons": ";".join(dict.fromkeys(reasons)),
             "raw_permission_decision": raw_permission,
             "allowed_live_modes": json.dumps(allowed_live_modes) if allowed_live_modes is not None else "",

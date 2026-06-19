@@ -748,6 +748,9 @@ quant_lab:
     mode: observe_only
     block_only_new_open: true
     never_block_exits: true
+    required_level_for_canary: CANARY
+    required_level_for_normal_live: SCALE_READY
+    canary_max_notional_usdt: 20.0
   quant_lab_shadow_live_canary_whitelist_enabled: false
   quant_lab_shadow_live_canary_whitelist:
     - BTC_STRICT_PROBE

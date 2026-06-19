@@ -25,6 +25,9 @@ class _Client:
         sample_count=100,
         cost_model_version="cost_bucket_daily:2026-05-11",
         cost_trusted_for_live=None,
+        cost_trusted_for_live_canary=None,
+        cost_trusted_for_live_scale=None,
+        cost_trust_level=None,
         allowed_live_modes=None,
         permission_allowed_live_modes=None,
         permission_live_block_reasons=None,
@@ -39,6 +42,9 @@ class _Client:
         self.sample_count = sample_count
         self.cost_model_version = cost_model_version
         self.cost_trusted_for_live = cost_trusted_for_live
+        self.cost_trusted_for_live_canary = cost_trusted_for_live_canary
+        self.cost_trusted_for_live_scale = cost_trusted_for_live_scale
+        self.cost_trust_level = cost_trust_level
         self.allowed_live_modes = allowed_live_modes
         self.permission_allowed_live_modes = permission_allowed_live_modes
         self.permission_live_block_reasons = list(permission_live_block_reasons or [])
@@ -111,6 +117,9 @@ class _Client:
             total_cost_bps_p90=30.0 if self.cost_source == "global_default" else 2.0,
             cost_quality="proxy" if self.cost_trusted_for_live is False else "mixed",
             cost_trusted_for_live=self.cost_trusted_for_live,
+            cost_trusted_for_live_canary=self.cost_trusted_for_live_canary,
+            cost_trusted_for_live_scale=self.cost_trusted_for_live_scale,
+            cost_trust_level=self.cost_trust_level,
             raw_response={"allowed_live_modes": self.allowed_live_modes}
             if self.allowed_live_modes is not None
             else {},
@@ -510,7 +519,14 @@ def test_live_cost_trust_guard_allows_btc_strict_probe_exception(tmp_path: Path)
     guard = _guard(
         tmp_path,
         cfg,
-        _Client(permission="ALLOW", cost_trusted_for_live=False, allowed_live_modes=[]),
+        _Client(
+            permission="ALLOW",
+            cost_trusted_for_live=True,
+            cost_trusted_for_live_canary=True,
+            cost_trusted_for_live_scale=False,
+            cost_trust_level="CANARY",
+            allowed_live_modes=["canary"],
+        ),
     )
     guard.check_startup_permission(cfg, "run-1")
 
@@ -534,8 +550,135 @@ def test_live_cost_trust_guard_allows_btc_strict_probe_exception(tmp_path: Path)
     assert impact["guard_enforced"] is True
     assert impact["whitelist_strategy_match"] is True
     assert impact["cost_trust_exception"] is True
+    assert impact["cost_trust_level"] == "CANARY"
+    assert impact["canary_live_allowed_by_cost_trust"] is True
+    assert impact["normal_live_allowed_by_cost_trust"] is False
     assert impact["would_be_blocked_by_shadow_live_whitelist"] is False
     assert impact["blocked_by_cost_trust_guard"] is False
+
+
+def test_live_cost_trust_guard_blocks_paper_only_even_when_whitelisted(tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "cost_only"
+    cfg.quant_lab.live_cost_trust_guard.enabled = True
+    cfg.quant_lab.live_cost_trust_guard.mode = "block_non_whitelist_only"
+    guard = _guard(
+        tmp_path,
+        cfg,
+        _Client(
+            permission="ALLOW",
+            cost_trusted_for_live=False,
+            cost_trusted_for_live_canary=False,
+            cost_trusted_for_live_scale=False,
+            cost_trust_level="PAPER_ONLY",
+            allowed_live_modes=["canary"],
+        ),
+    )
+    guard.check_startup_permission(cfg, "run-1")
+
+    kept, rows = guard.enrich_orders_with_cost(
+        [
+            Order(
+                "BTC/USDT",
+                "buy",
+                "OPEN_LONG",
+                10.0,
+                100.0,
+                {"expected_edge_bps": 80, "entry_reason": "btc_leadership_probe", "btc_leadership_probe": True},
+            )
+        ],
+        "normal",
+        cfg,
+    )
+
+    assert kept == []
+    assert rows[0]["filter_reason"] == "cost_trust_guard_blocked"
+    impact = guard.live_guard_rows[-1]
+    assert impact["whitelist_strategy_match"] is True
+    assert impact["cost_trust_exception"] is False
+    assert impact["cost_trust_level"] == "PAPER_ONLY"
+    assert impact["blocked_by_cost_trust_guard"] is True
+    assert "cost_trust_level_paper_only" in impact["cost_trust_block_reasons"]
+
+
+def test_live_cost_trust_guard_allows_scale_ready_normal_live_without_whitelist(tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "cost_only"
+    cfg.quant_lab.live_cost_trust_guard.enabled = True
+    cfg.quant_lab.live_cost_trust_guard.mode = "block_non_whitelist_only"
+    guard = _guard(
+        tmp_path,
+        cfg,
+        _Client(
+            permission="ALLOW",
+            cost_trusted_for_live=True,
+            cost_trusted_for_live_canary=True,
+            cost_trusted_for_live_scale=True,
+            cost_trust_level="SCALE_READY",
+            allowed_live_modes=["normal_live"],
+        ),
+    )
+    guard.check_startup_permission(cfg, "run-1")
+
+    kept, _rows = guard.enrich_orders_with_cost(
+        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 80, "strategy_candidate": "f3_dominant_entry"})],
+        "normal",
+        cfg,
+    )
+
+    assert len(kept) == 1
+    impact = guard.live_guard_rows[-1]
+    assert impact["whitelist_strategy_match"] is False
+    assert impact["cost_trust_level"] == "SCALE_READY"
+    assert impact["normal_live_allowed_by_cost_trust"] is True
+    assert impact["blocked_by_cost_trust_guard"] is False
+
+
+def test_live_cost_trust_guard_blocks_canary_notional_over_limit(tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "cost_only"
+    cfg.quant_lab.live_cost_trust_guard.enabled = True
+    cfg.quant_lab.live_cost_trust_guard.mode = "block_non_whitelist_only"
+    cfg.quant_lab.live_cost_trust_guard.canary_max_notional_usdt = 20.0
+    guard = _guard(
+        tmp_path,
+        cfg,
+        _Client(
+            permission="ALLOW",
+            cost_trusted_for_live=True,
+            cost_trusted_for_live_canary=True,
+            cost_trusted_for_live_scale=False,
+            cost_trust_level="CANARY",
+            allowed_live_modes=["canary"],
+        ),
+    )
+    guard.check_startup_permission(cfg, "run-1")
+
+    kept, rows = guard.enrich_orders_with_cost(
+        [
+            Order(
+                "BTC/USDT",
+                "buy",
+                "OPEN_LONG",
+                25.0,
+                100.0,
+                {"expected_edge_bps": 80, "entry_reason": "btc_leadership_probe", "btc_leadership_probe": True},
+            )
+        ],
+        "normal",
+        cfg,
+    )
+
+    assert kept == []
+    assert rows[0]["filter_reason"] == "cost_trust_guard_blocked"
+    impact = guard.live_guard_rows[-1]
+    assert impact["cost_trust_level"] == "CANARY"
+    assert impact["would_be_blocked_by_canary_notional"] is True
+    assert impact["blocked_by_canary_notional"] is True
+    assert "canary_notional_exceeds_limit" in impact["cost_trust_block_reasons"]
 
 
 def test_live_cost_trust_guard_never_blocks_close_or_paper_shadow(tmp_path: Path) -> None:

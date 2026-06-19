@@ -1845,6 +1845,9 @@ class LiveCostTrustGuardConfig(BaseModel):
     mode: str = Field(default="observe_only")
     block_only_new_open: bool = Field(default=True)
     never_block_exits: bool = Field(default=True)
+    required_level_for_canary: str = Field(default="CANARY")
+    required_level_for_normal_live: str = Field(default="SCALE_READY")
+    canary_max_notional_usdt: float = Field(default=20.0, ge=0.0)
 
     @field_validator("mode")
     @classmethod
@@ -1853,6 +1856,16 @@ class LiveCostTrustGuardConfig(BaseModel):
         if value not in {"observe_only", "block_non_whitelist_only", "block_all_untrusted_open"}:
             raise ValueError(
                 "live_cost_trust_guard.mode must be observe_only, block_non_whitelist_only, or block_all_untrusted_open"
+            )
+        return value
+
+    @field_validator("required_level_for_canary", "required_level_for_normal_live")
+    @classmethod
+    def _validate_required_level(cls, v: str) -> str:
+        value = str(v or "").strip().upper()
+        if value not in {"BLOCK", "PAPER_ONLY", "CANARY", "SCALE_READY"}:
+            raise ValueError(
+                "live_cost_trust_guard required levels must be BLOCK, PAPER_ONLY, CANARY, or SCALE_READY"
             )
         return value
 

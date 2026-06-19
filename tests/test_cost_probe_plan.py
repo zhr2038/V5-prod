@@ -365,6 +365,121 @@ def test_cost_probe_engine_write_preserves_live_history_in_event_logs(tmp_path):
     assert payload["summary"]["daily_loss_usdt"] == 1.25
 
 
+def test_cost_probe_event_log_appends_later_status_for_same_order_key(tmp_path):
+    cfg = _ready_cost_probe_config()
+    cfg.execution.cost_probe_max_orders_per_day = 4
+    _write_clean_runtime_state(tmp_path)
+    reports_dir = tmp_path / "out"
+    order_path = reports_dir / "cost_probe_orders.csv"
+    _write_cost_probe_order_history(
+        order_path,
+        [
+            {
+                "generated_at": "2026-06-18T11:00:00Z",
+                "symbol": "BTC/USDT",
+                "leg": "entry",
+                "side": "buy",
+                "intent": "live_probe_entry",
+                "order_status": "submitted",
+                "client_order_id": "cost-probe-entry-1",
+                "submitted_at": "2026-06-18T11:00:01Z",
+                "dry_run": False,
+                "live_enabled": True,
+                "no_order_submitted": False,
+                "live_order_effect": "live_cost_probe_order",
+            }
+        ],
+    )
+
+    engine = CostProbeEngine(
+        cfg,
+        reports_dir=reports_dir,
+        generated_at=GENERATED_AT,
+        project_root=tmp_path,
+    )
+    first_paths = engine.write()
+    _write_cost_probe_order_history(
+        order_path,
+        [
+            {
+                "generated_at": "2026-06-18T11:00:00Z",
+                "symbol": "BTC/USDT",
+                "leg": "entry",
+                "side": "buy",
+                "intent": "live_probe_entry",
+                "order_status": "filled",
+                "client_order_id": "cost-probe-entry-1",
+                "submitted_at": "2026-06-18T11:00:01Z",
+                "filled_at": "2026-06-18T11:00:20Z",
+                "dry_run": False,
+                "live_enabled": True,
+                "no_order_submitted": False,
+                "live_order_effect": "live_cost_probe_order",
+            }
+        ],
+    )
+    second_paths = engine.write()
+
+    assert first_paths["order_events_path"] == second_paths["order_events_path"]
+    order_events = [
+        json.loads(line)
+        for line in second_paths["order_events_path"].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [row["order_status"] for row in order_events] == ["submitted", "filled"]
+    assert {row["order_key"] for row in order_events} == {"cost-probe-entry-1"}
+    assert len({row["event_id"] for row in order_events}) == 2
+
+    payload = engine.build()
+    assert payload["summary"]["daily_order_used_count"] == 1
+
+
+def test_cost_probe_jsonl_corruption_keeps_good_rows_but_blocks_p3(tmp_path):
+    cfg = _ready_cost_probe_config()
+    cfg.execution.cost_probe_max_orders_per_day = 4
+    _write_clean_runtime_state(tmp_path)
+    reports_dir = tmp_path / "out"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "cost_probe_order_events.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "generated_at": "2026-06-18T11:00:00Z",
+                        "event_ts": "2026-06-18T11:00:01Z",
+                        "symbol": "BTC/USDT",
+                        "order_status": "submitted",
+                        "client_order_id": "cost-probe-entry-1",
+                        "no_order_submitted": False,
+                        "live_order_effect": "live_cost_probe_order",
+                    }
+                ),
+                "{not-json",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    engine = CostProbeEngine(
+        cfg,
+        reports_dir=reports_dir,
+        generated_at=GENERATED_AT,
+        project_root=tmp_path,
+    )
+    payload = engine.build()
+
+    assert payload["summary"]["daily_order_used_count"] == 1
+    assert payload["summary"]["cost_probe_order_events_corruption_count"] == 1
+    assert payload["p3_preflight"]["state"] == "NOT_READY"
+    assert "runtime_guard_failures_present" in payload["p3_preflight"]["blockers"]
+    failures = {
+        row["guard_name"]: row["reason"]
+        for row in payload["p3_preflight"]["guard_failures"]
+    }
+    assert failures["cost_probe_order_events_jsonl_parse"] == "jsonl_corruption_detected"
+
+
 def test_cost_probe_engine_blocks_when_kill_switch_is_enabled(tmp_path):
     cfg = _ready_cost_probe_config()
     _write_clean_runtime_state(tmp_path, kill_switch_enabled=True)

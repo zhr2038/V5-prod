@@ -50,6 +50,12 @@ def test_cost_gate_uses_roundtrip_all_in_cost_with_local_floor() -> None:
             "cost_quality": "proxy",
             "cost_trusted_for_paper": True,
             "cost_trusted_for_live": False,
+            "cost_trusted_for_live_canary": False,
+            "cost_trusted_for_live_scale": False,
+            "cost_trust_level": "PAPER_ONLY",
+            "cost_trust_block_reasons": ["fallback_not_live_safe"],
+            "live_cost_sample_count": 12,
+            "trusted_live_sample_count": 0,
         }
     )
 
@@ -63,6 +69,11 @@ def test_cost_gate_uses_roundtrip_all_in_cost_with_local_floor() -> None:
     assert result.cost_quality == "proxy"
     assert result.cost_trusted_for_paper is True
     assert result.cost_trusted_for_live is False
+    assert result.cost_trusted_for_live_canary is False
+    assert result.cost_trusted_for_live_scale is False
+    assert result.cost_trust_level == "PAPER_ONLY"
+    assert result.live_cost_sample_count == 12
+    assert result.trusted_live_sample_count == 0
 
 
 def test_cost_gate_uses_higher_roundtrip_all_in_cost_over_local_floor() -> None:

@@ -36,6 +36,11 @@ class CostGateResult:
     cost_quality: Optional[str] = None
     cost_trusted_for_paper: Optional[bool] = None
     cost_trusted_for_live: Optional[bool] = None
+    cost_trusted_for_live_canary: Optional[bool] = None
+    cost_trusted_for_live_scale: Optional[bool] = None
+    cost_trust_level: Optional[str] = None
+    live_cost_sample_count: Optional[int] = None
+    trusted_live_sample_count: Optional[int] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -165,6 +170,11 @@ def apply_quant_lab_cost_gate(order: Any, cost_estimate: CostEstimate, cfg: Any,
         "cost_quality": getattr(cost_estimate, "cost_quality", None),
         "cost_trusted_for_paper": getattr(cost_estimate, "cost_trusted_for_paper", None),
         "cost_trusted_for_live": getattr(cost_estimate, "cost_trusted_for_live", None),
+        "cost_trusted_for_live_canary": getattr(cost_estimate, "cost_trusted_for_live_canary", None),
+        "cost_trusted_for_live_scale": getattr(cost_estimate, "cost_trusted_for_live_scale", None),
+        "cost_trust_level": getattr(cost_estimate, "cost_trust_level", None),
+        "live_cost_sample_count": getattr(cost_estimate, "live_cost_sample_count", None),
+        "trusted_live_sample_count": getattr(cost_estimate, "trusted_live_sample_count", None),
     }
     mode_value = str(mode or _cfg_value(cfg, "mode", "shadow") or "shadow").strip().lower().replace("-", "_")
     expected_edge, expected_edge_source = _order_expected_edge(order)

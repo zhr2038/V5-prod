@@ -326,12 +326,12 @@ class CostProbeEngine:
         roundtrips_path = self.reports_dir / "cost_probe_roundtrips.csv"
         order_events_path = self.reports_dir / "cost_probe_order_events.jsonl"
         roundtrip_events_path = self.reports_dir / "cost_probe_roundtrip_events.jsonl"
-        orders = _dedupe_probe_rows(
-            [*_read_jsonl_rows(order_events_path), *_read_csv_rows(orders_path)]
-        )
-        roundtrips = _dedupe_probe_rows(
-            [*_read_jsonl_rows(roundtrip_events_path), *_read_csv_rows(roundtrips_path)]
-        )
+        order_events, order_events_report = _read_jsonl_rows_with_report(order_events_path)
+        roundtrip_events, roundtrip_events_report = _read_jsonl_rows_with_report(roundtrip_events_path)
+        order_rows = [*order_events, *_read_csv_rows(orders_path)]
+        roundtrip_rows = [*roundtrip_events, *_read_csv_rows(roundtrips_path)]
+        orders = _dedupe_probe_rows(order_rows, key_fn=_probe_order_budget_key)
+        roundtrips = _dedupe_probe_rows(roundtrip_rows, key_fn=_probe_roundtrip_budget_key)
         symbols = _cost_probe_symbols(self.execution)
         daily_orders = [
             row
@@ -360,6 +360,30 @@ class CostProbeEngine:
         rows: list[dict[str, Any]] = []
         blockers: list[str] = []
         symbol_blockers: dict[str, list[str]] = {symbol: [] for symbol in symbols}
+
+        for report, path, guard_name in (
+            (order_events_report, order_events_path, "cost_probe_order_events_jsonl_parse"),
+            (
+                roundtrip_events_report,
+                roundtrip_events_path,
+                "cost_probe_roundtrip_events_jsonl_parse",
+            ),
+        ):
+            corruption_count = _int_value(report.get("corruption_count"))
+            status = "BLOCK" if corruption_count > 0 else "PASS"
+            reason = "jsonl_corruption_detected" if corruption_count > 0 else "jsonl_parse_clean"
+            rows.append(
+                self._guard_row(
+                    guard_name,
+                    status=status,
+                    reason=reason,
+                    path=path,
+                    observed_value=(
+                        f"good_rows={_int_value(report.get('good_row_count'))};"
+                        f"corruption_count={corruption_count}"
+                    ),
+                )
+            )
 
         order_status = "PASS"
         order_reason = "daily_order_budget_available"
@@ -417,7 +441,7 @@ class CostProbeEngine:
                 )
             )
 
-            latest_symbol_probe = _latest_probe_datetime(symbol, orders, roundtrips)
+            latest_symbol_probe = _latest_probe_datetime(symbol, order_rows, roundtrip_rows)
             cooldown_status = "PASS"
             cooldown_reason = "cooldown_clear"
             cooldown_observed = f"symbol={symbol};cooldown_minutes={cooldown_minutes}"
@@ -455,6 +479,12 @@ class CostProbeEngine:
             "cost_probe_roundtrips_path": str(roundtrips_path),
             "cost_probe_order_events_path": str(order_events_path),
             "cost_probe_roundtrip_events_path": str(roundtrip_events_path),
+            "cost_probe_order_events_corruption_count": _int_value(
+                order_events_report.get("corruption_count")
+            ),
+            "cost_probe_roundtrip_events_corruption_count": _int_value(
+                roundtrip_events_report.get("corruption_count")
+            ),
         }
         return rows, sorted(set(blockers)), symbol_blockers, history_summary
 
@@ -882,15 +912,18 @@ def _preserve_probe_history(
     submitted_predicate: Any,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    existing = _read_jsonl_rows(path)
-    seen_keys = {_probe_row_key(row) for row in existing}
+    existing, _report = _read_jsonl_rows_with_report(path)
+    seen_keys = {_probe_event_id(row) for row in existing}
     append_rows: list[dict[str, Any]] = []
     for row in rows:
-        key = _probe_row_key(row)
-        if not submitted_predicate(row) or key in seen_keys:
+        if not submitted_predicate(row):
+            continue
+        event_row = _probe_event_row(row)
+        key = _probe_event_id(event_row)
+        if key in seen_keys:
             continue
         seen_keys.add(key)
-        append_rows.append(row)
+        append_rows.append(event_row)
     if not path.exists():
         path.write_text("", encoding="utf-8")
     if not append_rows:
@@ -992,33 +1025,153 @@ def _read_csv_rows(path: Path) -> list[dict[str, Any]]:
 
 
 def _read_jsonl_rows(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    rows: list[dict[str, Any]] = []
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                raw = line.strip()
-                if not raw:
-                    continue
-                payload = json.loads(raw)
-                if isinstance(payload, dict):
-                    rows.append(payload)
-    except (OSError, json.JSONDecodeError):
-        return []
+    rows, _report = _read_jsonl_rows_with_report(path)
     return rows
 
 
-def _dedupe_probe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _read_jsonl_rows_with_report(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    report: dict[str, Any] = {
+        "path": str(path),
+        "good_row_count": 0,
+        "corruption_count": 0,
+        "corrupt_lines": [],
+        "read_error": "",
+    }
+    if not path.exists():
+        return [], report
+    rows: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError as exc:
+                    report["corruption_count"] += 1
+                    report["corrupt_lines"].append(
+                        {"line": line_number, "error": str(exc), "raw_prefix": raw[:120]}
+                    )
+                    continue
+                if isinstance(payload, dict):
+                    rows.append(payload)
+                else:
+                    report["corruption_count"] += 1
+                    report["corrupt_lines"].append(
+                        {
+                            "line": line_number,
+                            "error": "jsonl_payload_not_object",
+                            "raw_prefix": raw[:120],
+                        }
+                    )
+    except OSError as exc:
+        report["read_error"] = str(exc)
+        report["corruption_count"] += 1
+    report["good_row_count"] = len(rows)
+    return rows, report
+
+
+def _dedupe_probe_rows(
+    rows: list[dict[str, Any]],
+    *,
+    key_fn: Any | None = None,
+) -> list[dict[str, Any]]:
     deduped: list[dict[str, Any]] = []
     seen: set[str] = set()
+    make_key = key_fn or _probe_row_key
     for row in rows:
-        key = _probe_row_key(row)
+        key = make_key(row)
         if key in seen:
             continue
         seen.add(key)
         deduped.append(row)
     return deduped
+
+
+def _probe_event_row(row: dict[str, Any]) -> dict[str, Any]:
+    event_row = dict(row)
+    order_key = _probe_order_budget_key(row)
+    roundtrip_key = _probe_roundtrip_budget_key(row)
+    if order_key:
+        event_row.setdefault("order_key", order_key)
+    if roundtrip_key:
+        event_row.setdefault("roundtrip_key", roundtrip_key)
+    event_row.setdefault("event_type", _probe_event_type(row))
+    event_row.setdefault("event_ts", _probe_event_ts(row))
+    event_row.setdefault("event_id", _probe_event_id(event_row))
+    return event_row
+
+
+def _probe_event_id(row: dict[str, Any]) -> str:
+    event_id = str(row.get("event_id") or "").strip()
+    if event_id:
+        return event_id
+    stable_key = _probe_order_budget_key(row) or _probe_roundtrip_budget_key(row) or _probe_row_key(row)
+    return "|".join(
+        [
+            stable_key,
+            _probe_event_type(row),
+            _probe_event_ts(row),
+        ]
+    )
+
+
+def _probe_event_type(row: dict[str, Any]) -> str:
+    explicit = str(row.get("event_type") or "").strip()
+    if explicit:
+        return explicit
+    order_status = str(row.get("order_status") or "").strip()
+    if order_status:
+        leg = str(row.get("leg") or "").strip()
+        return ":".join(part for part in ("order", leg, order_status) if part)
+    roundtrip_status = str(row.get("roundtrip_status") or "").strip()
+    if roundtrip_status:
+        return f"roundtrip:{roundtrip_status}"
+    return "probe_event"
+
+
+def _probe_event_ts(row: dict[str, Any]) -> str:
+    for key in (
+        "event_ts",
+        "filled_at",
+        "submitted_at",
+        "closed_at",
+        "opened_at",
+        "generated_at",
+    ):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _probe_order_budget_key(row: dict[str, Any]) -> str:
+    explicit = str(row.get("order_key") or "").strip()
+    if explicit:
+        return explicit
+    order_ids = [
+        str(row.get(key) or "").strip()
+        for key in ("client_order_id", "exchange_order_id", "order_id")
+    ]
+    clean_ids = [value for value in order_ids if value]
+    if clean_ids:
+        return "|".join(clean_ids)
+    return _probe_row_key(row)
+
+
+def _probe_roundtrip_budget_key(row: dict[str, Any]) -> str:
+    explicit = str(row.get("roundtrip_key") or "").strip()
+    if explicit:
+        return explicit
+    roundtrip_id = str(row.get("roundtrip_id") or "").strip()
+    if roundtrip_id:
+        return f"{roundtrip_id}|{str(row.get('symbol') or '').strip()}"
+    entry_id = str(row.get("entry_order_id") or "").strip()
+    exit_id = str(row.get("exit_order_id") or "").strip()
+    if entry_id or exit_id:
+        return f"{entry_id}|{exit_id}|{str(row.get('symbol') or '').strip()}"
+    return _probe_row_key(row)
 
 
 def _probe_row_key(row: dict[str, Any]) -> str:
@@ -1048,6 +1201,7 @@ def _probe_row_key(row: dict[str, Any]) -> str:
 
 def _row_datetime(row: dict[str, Any]) -> datetime | None:
     for key in (
+        "event_ts",
         "generated_at",
         "filled_at",
         "closed_at",
