@@ -458,6 +458,8 @@ COST_PROBE_BUNDLE_ARTIFACTS = (
     ("cost_probe_plan.csv", "summaries/cost_probe_plan.csv"),
     ("cost_probe_orders.csv", "summaries/cost_probe_orders.csv"),
     ("cost_probe_roundtrips.csv", "summaries/cost_probe_roundtrips.csv"),
+    ("cost_probe_order_events.jsonl", "summaries/cost_probe_order_events.jsonl"),
+    ("cost_probe_roundtrip_events.jsonl", "summaries/cost_probe_roundtrip_events.jsonl"),
     ("cost_probe_summary.json", "summaries/cost_probe_summary.json"),
     ("cost_probe_p3_preflight.json", "summaries/cost_probe_p3_preflight.json"),
     ("runtime_cost_guard.csv", "summaries/cost_probe_runtime_cost_guard.csv"),
@@ -1189,6 +1191,8 @@ def _copy_cost_probe_artifacts(staging: Path, reports: Path) -> dict[str, Any]:
         present.append(filename)
         if source.suffix.lower() == ".csv":
             row_counts[filename] = len(_read_csv_dicts(source))
+        elif source.suffix.lower() == ".jsonl":
+            row_counts[filename] = sum(1 for line in text.splitlines() if line.strip())
         elif filename == "cost_probe_summary.json":
             if isinstance(payload, Mapping):
                 summary_state = {

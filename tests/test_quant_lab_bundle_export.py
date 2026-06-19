@@ -390,6 +390,36 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+    (reports / "cost_probe_order_events.jsonl").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-05-11T12:30:00Z",
+                "symbol": "BTC/USDT",
+                "leg": "entry",
+                "order_status": "filled",
+                "client_order_id": "cost-probe-entry-1",
+                "no_order_submitted": False,
+                "live_order_effect": "live_cost_probe_order",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (reports / "cost_probe_roundtrip_events.jsonl").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-05-11T12:31:00Z",
+                "symbol": "BTC/USDT",
+                "roundtrip_id": "cost-probe-rt-1",
+                "roundtrip_status": "closed",
+                "no_order_submitted": False,
+                "net_pnl_usdt": "-0.01",
+                "live_order_effect": "live_cost_probe_roundtrip",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     (reports / "runtime_cost_guard.csv").write_text(
         "\n".join(
             [
@@ -466,6 +496,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "raw/reports/cost_probe_plan.csv" in names
         assert "raw/reports/cost_probe_orders.csv" in names
         assert "raw/reports/cost_probe_roundtrips.csv" in names
+        assert "raw/reports/cost_probe_order_events.jsonl" in names
+        assert "raw/reports/cost_probe_roundtrip_events.jsonl" in names
         assert "raw/reports/cost_probe_summary.json" in names
         assert "raw/reports/cost_probe_p3_preflight.json" in names
         assert "raw/reports/runtime_cost_guard.csv" in names
@@ -473,6 +505,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "summaries/cost_probe_plan.csv" in names
         assert "summaries/cost_probe_orders.csv" in names
         assert "summaries/cost_probe_roundtrips.csv" in names
+        assert "summaries/cost_probe_order_events.jsonl" in names
+        assert "summaries/cost_probe_roundtrip_events.jsonl" in names
         assert "summaries/cost_probe_summary.json" in names
         assert "summaries/cost_probe_p3_preflight.json" in names
         assert "summaries/cost_probe_runtime_cost_guard.csv" in names
@@ -656,8 +690,10 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert manifest["dirty_worktree"] is False
         assert manifest["provenance_status"] == "git_clean"
         assert manifest["code_provenance"] == "ok"
-        assert manifest["cost_probe_artifact_count"] == 7
+        assert manifest["cost_probe_artifact_count"] == 9
         assert manifest["cost_probe_artifact_row_counts"]["cost_probe_plan.csv"] == 1
+        assert manifest["cost_probe_artifact_row_counts"]["cost_probe_order_events.jsonl"] == 1
+        assert manifest["cost_probe_artifact_row_counts"]["cost_probe_roundtrip_events.jsonl"] == 1
         assert manifest["cost_probe_summary"]["state"] == "DISABLED"
         assert manifest["cost_probe_summary"]["no_order_submitted"] is True
         assert manifest["cost_probe_p3_preflight"]["state"] == "NOT_READY"
@@ -666,7 +702,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert window["candidate_snapshot_rows"] == 1
         assert window["candidate_cost_source_coverage"] == 1.0
         assert window["order_lifecycle_rows"] == 1
-        assert window["cost_probe_artifact_count"] == 7
+        assert window["cost_probe_artifact_count"] == 9
         assert window["cost_probe_artifacts_missing"] == []
         assert window["cost_probe_artifact_row_counts"]["cost_probe_orders.csv"] == 1
         assert window["cost_probe_p3_preflight"]["state"] == "NOT_READY"

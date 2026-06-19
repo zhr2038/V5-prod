@@ -248,6 +248,8 @@ def test_cost_probe_engine_writes_guarded_read_only_artifacts(tmp_path):
         "summary_path",
         "orders_path",
         "roundtrips_path",
+        "order_events_path",
+        "roundtrip_events_path",
         "runtime_guard_path",
         "disagreement_path",
         "p3_preflight_path",
@@ -268,6 +270,99 @@ def test_cost_probe_engine_writes_guarded_read_only_artifacts(tmp_path):
     )
     assert p3_preflight["state"] == "READY_FOR_MANUAL_AUTHORIZATION"
     assert p3_preflight["approved_live_order_execution"] is False
+
+
+def test_cost_probe_p3_preflight_blocks_when_runtime_databases_are_missing(tmp_path):
+    cfg = _ready_cost_probe_config()
+    _write_clean_runtime_state(tmp_path, create_stores=False)
+
+    engine = CostProbeEngine(
+        cfg,
+        reports_dir=tmp_path / "out",
+        generated_at=GENERATED_AT,
+        project_root=tmp_path,
+    )
+    payload = engine.build()
+
+    assert payload["summary"]["state"] == "DRY_RUN_PLAN_READY"
+    assert payload["summary"]["runtime_blockers"] == []
+    guard_failures = {
+        row["guard_name"]: row["reason"]
+        for row in payload["p3_preflight"]["guard_failures"]
+    }
+    assert payload["p3_preflight"]["state"] == "NOT_READY"
+    assert "runtime_guard_failures_present" in payload["p3_preflight"]["blockers"]
+    assert guard_failures["order_store_clean"] == "order_store_missing_cannot_verify_clean"
+    assert guard_failures["fill_store_readable"] == "fill_store_missing_cannot_verify_fills"
+    assert guard_failures["no_existing_position"] == "position_store_missing_cannot_verify_flat"
+    assert guard_failures["position_state_clean"] == "position_state_not_verified"
+
+
+def test_cost_probe_engine_write_preserves_live_history_in_event_logs(tmp_path):
+    cfg = _ready_cost_probe_config()
+    cfg.execution.cost_probe_max_orders_per_day = 4
+    _write_clean_runtime_state(tmp_path)
+    reports_dir = tmp_path / "out"
+    _write_cost_probe_order_history(
+        reports_dir / "cost_probe_orders.csv",
+        [
+            {
+                "generated_at": "2026-06-18T11:30:00Z",
+                "symbol": "BTC/USDT",
+                "leg": "entry",
+                "side": "buy",
+                "intent": "live_probe_entry",
+                "order_status": "filled",
+                "client_order_id": "cost-probe-entry-1",
+                "dry_run": False,
+                "live_enabled": True,
+                "no_order_submitted": False,
+                "live_order_effect": "live_cost_probe_order",
+            }
+        ],
+    )
+    _write_cost_probe_roundtrip_history(
+        reports_dir / "cost_probe_roundtrips.csv",
+        [
+            {
+                "generated_at": "2026-06-18T11:45:00Z",
+                "symbol": "BTC/USDT",
+                "roundtrip_status": "closed",
+                "roundtrip_id": "rt-1",
+                "entry_order_status": "filled",
+                "exit_order_status": "filled",
+                "no_order_submitted": False,
+                "live_order_effect": "live_cost_probe_roundtrip",
+                "net_pnl_usdt": -1.25,
+            }
+        ],
+    )
+
+    engine = CostProbeEngine(
+        cfg,
+        reports_dir=reports_dir,
+        generated_at=GENERATED_AT,
+        project_root=tmp_path,
+    )
+    written_paths = engine.write()
+
+    order_events = [
+        json.loads(line)
+        for line in written_paths["order_events_path"].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    roundtrip_events = [
+        json.loads(line)
+        for line in written_paths["roundtrip_events_path"].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert order_events[0]["client_order_id"] == "cost-probe-entry-1"
+    assert roundtrip_events[0]["roundtrip_id"] == "rt-1"
+
+    payload = engine.build()
+    assert payload["summary"]["daily_order_used_count"] == 1
+    assert payload["summary"]["daily_roundtrip_used_count"] == 1
+    assert payload["summary"]["daily_loss_usdt"] == 1.25
 
 
 def test_cost_probe_engine_blocks_when_kill_switch_is_enabled(tmp_path):
@@ -440,6 +535,7 @@ def _write_clean_runtime_state(
     project_root,
     *,
     kill_switch_enabled: bool = False,
+    create_stores: bool = True,
 ) -> None:
     runtime_dir = project_root / "runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -457,6 +553,10 @@ def _write_clean_runtime_state(
         ),
         encoding="utf-8",
     )
+    if create_stores:
+        _write_empty_order_store(runtime_dir / "orders.sqlite")
+        _write_empty_position_store(runtime_dir / "positions.sqlite")
+        _write_empty_fill_store(runtime_dir / "fills.sqlite")
 
 
 def _write_cost_probe_order_history(path, rows) -> None:
@@ -467,6 +567,14 @@ def _write_cost_probe_order_history(path, rows) -> None:
         "side",
         "intent",
         "order_status",
+        "order_id",
+        "client_order_id",
+        "exchange_order_id",
+        "filled_qty",
+        "avg_px",
+        "fee_usdt",
+        "submitted_at",
+        "filled_at",
         "dry_run",
         "live_enabled",
         "no_order_submitted",
@@ -483,8 +591,13 @@ def _write_cost_probe_roundtrip_history(path, rows) -> None:
         "generated_at",
         "symbol",
         "roundtrip_status",
+        "roundtrip_id",
         "entry_order_status",
         "exit_order_status",
+        "entry_order_id",
+        "exit_order_id",
+        "gross_pnl_usdt",
+        "fees_usdt",
         "max_open_seconds",
         "blocked_reasons",
         "no_order_submitted",
@@ -506,12 +619,30 @@ def _write_history_csv(path, fields, rows) -> None:
 def _write_open_order(path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(str(path)) as con:
-        con.execute("CREATE TABLE orders (state TEXT)")
+        con.execute("CREATE TABLE IF NOT EXISTS orders (state TEXT)")
         con.execute("INSERT INTO orders (state) VALUES ('OPEN')")
 
 
 def _write_position(path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(str(path)) as con:
-        con.execute("CREATE TABLE positions (symbol TEXT, qty REAL)")
+        con.execute("CREATE TABLE IF NOT EXISTS positions (symbol TEXT, qty REAL)")
         con.execute("INSERT INTO positions (symbol, qty) VALUES ('BTC/USDT', 0.01)")
+
+
+def _write_empty_order_store(path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(path)) as con:
+        con.execute("CREATE TABLE IF NOT EXISTS orders (state TEXT)")
+
+
+def _write_empty_position_store(path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(path)) as con:
+        con.execute("CREATE TABLE IF NOT EXISTS positions (symbol TEXT, qty REAL)")
+
+
+def _write_empty_fill_store(path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(path)) as con:
+        con.execute("CREATE TABLE IF NOT EXISTS fills (id TEXT)")

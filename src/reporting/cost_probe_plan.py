@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from src.execution.fill_store import (
+    derive_fill_store_path,
     derive_position_store_path,
     derive_runtime_named_json_path,
 )
@@ -40,6 +41,14 @@ COST_PROBE_ORDER_FIELDS = [
     "side",
     "intent",
     "order_status",
+    "order_id",
+    "client_order_id",
+    "exchange_order_id",
+    "filled_qty",
+    "avg_px",
+    "fee_usdt",
+    "submitted_at",
+    "filled_at",
     "dry_run",
     "live_enabled",
     "no_order_submitted",
@@ -52,8 +61,16 @@ COST_PROBE_ROUNDTRIP_FIELDS = [
     "generated_at",
     "symbol",
     "roundtrip_status",
+    "roundtrip_id",
     "entry_order_status",
     "exit_order_status",
+    "entry_order_id",
+    "exit_order_id",
+    "gross_pnl_usdt",
+    "fees_usdt",
+    "net_pnl_usdt",
+    "opened_at",
+    "closed_at",
     "max_open_seconds",
     "blocked_reasons",
     "no_order_submitted",
@@ -114,6 +131,7 @@ class CostProbeEngine:
             project_root=self.project_root,
         )
         self.position_store_path = derive_position_store_path(self.order_store_path)
+        self.fill_store_path = derive_fill_store_path(self.order_store_path)
         self.kill_switch_path = _runtime_json_path(
             getattr(self.execution, "kill_switch_path", None),
             order_store_path=self.order_store_path,
@@ -161,6 +179,7 @@ class CostProbeEngine:
             "disagreement_rows": len(disagreement_rows),
             "order_store_path": str(self.order_store_path),
             "position_store_path": str(self.position_store_path),
+            "fill_store_path": str(self.fill_store_path),
             "kill_switch_path": str(self.kill_switch_path),
             "reconcile_status_path": str(self.reconcile_status_path),
         }
@@ -189,6 +208,8 @@ class CostProbeEngine:
             summary_path=self.reports_dir / "cost_probe_summary.json",
             orders_path=self.reports_dir / "cost_probe_orders.csv",
             roundtrips_path=self.reports_dir / "cost_probe_roundtrips.csv",
+            order_events_path=self.reports_dir / "cost_probe_order_events.jsonl",
+            roundtrip_events_path=self.reports_dir / "cost_probe_roundtrip_events.jsonl",
             runtime_guard_path=self.reports_dir / "runtime_cost_guard.csv",
             disagreement_path=self.reports_dir / "cost_disagreement.csv",
             p3_preflight_path=self.reports_dir / "cost_probe_p3_preflight.json",
@@ -240,8 +261,21 @@ class CostProbeEngine:
                     observed_value=observed,
                 )
             )
-            if status != "PASS":
+            if status == "BLOCK":
                 blockers.append(reason)
+
+        status, reason, observed = _fill_store_guard(self.fill_store_path)
+        rows.append(
+            self._guard_row(
+                "fill_store_readable",
+                status=status,
+                reason=reason,
+                path=self.fill_store_path,
+                observed_value=observed,
+            )
+        )
+        if status == "BLOCK":
+            blockers.append(reason)
 
         if _bool_attr(self.execution, "cost_probe_require_no_existing_position", True):
             status, reason, observed = _position_store_guard(self.position_store_path)
@@ -254,16 +288,23 @@ class CostProbeEngine:
                     observed_value=observed,
                 )
             )
-            if status != "PASS":
+            if status == "BLOCK":
                 blockers.append(reason)
 
         if _bool_attr(self.execution, "cost_probe_disable_if_position_state_dirty", True):
-            position_dirty = any(
-                row["guard_name"] == "no_existing_position" and row["status"] != "PASS"
-                for row in rows
+            position_row = next(
+                (row for row in rows if row["guard_name"] == "no_existing_position"),
+                None,
             )
-            status = "BLOCK" if position_dirty else "PASS"
-            reason = "position_state_clean" if status == "PASS" else "position_state_dirty"
+            if position_row is not None and position_row["status"] == "BLOCK":
+                status = "BLOCK"
+                reason = "position_state_dirty"
+            elif position_row is not None and position_row["status"] == "WARN":
+                status = "WARN"
+                reason = "position_state_not_verified"
+            else:
+                status = "PASS"
+                reason = "position_state_clean"
             rows.append(
                 self._guard_row(
                     "position_state_clean",
@@ -273,7 +314,7 @@ class CostProbeEngine:
                     observed_value=reason,
                 )
             )
-            if status != "PASS":
+            if status == "BLOCK":
                 blockers.append(reason)
 
         return rows, sorted(set(blockers))
@@ -283,8 +324,14 @@ class CostProbeEngine:
     ) -> tuple[list[dict[str, Any]], list[str], dict[str, list[str]], dict[str, Any]]:
         orders_path = self.reports_dir / "cost_probe_orders.csv"
         roundtrips_path = self.reports_dir / "cost_probe_roundtrips.csv"
-        orders = _read_csv_rows(orders_path)
-        roundtrips = _read_csv_rows(roundtrips_path)
+        order_events_path = self.reports_dir / "cost_probe_order_events.jsonl"
+        roundtrip_events_path = self.reports_dir / "cost_probe_roundtrip_events.jsonl"
+        orders = _dedupe_probe_rows(
+            [*_read_jsonl_rows(order_events_path), *_read_csv_rows(orders_path)]
+        )
+        roundtrips = _dedupe_probe_rows(
+            [*_read_jsonl_rows(roundtrip_events_path), *_read_csv_rows(roundtrips_path)]
+        )
         symbols = _cost_probe_symbols(self.execution)
         daily_orders = [
             row
@@ -406,6 +453,8 @@ class CostProbeEngine:
             "daily_loss_usdt": daily_loss,
             "cost_probe_orders_path": str(orders_path),
             "cost_probe_roundtrips_path": str(roundtrips_path),
+            "cost_probe_order_events_path": str(order_events_path),
+            "cost_probe_roundtrip_events_path": str(roundtrip_events_path),
         }
         return rows, sorted(set(blockers)), symbol_blockers, history_summary
 
@@ -655,6 +704,8 @@ def write_cost_probe_dry_run_outputs(
     summary_path: str | Path = "reports/cost_probe_summary.json",
     orders_path: str | Path = "reports/cost_probe_orders.csv",
     roundtrips_path: str | Path = "reports/cost_probe_roundtrips.csv",
+    order_events_path: str | Path | None = None,
+    roundtrip_events_path: str | Path | None = None,
     runtime_guard_path: str | Path = "reports/runtime_cost_guard.csv",
     disagreement_path: str | Path = "reports/cost_disagreement.csv",
     p3_preflight_path: str | Path = "reports/cost_probe_p3_preflight.json",
@@ -663,12 +714,32 @@ def write_cost_probe_dry_run_outputs(
     summary_file = Path(summary_path)
     orders = Path(orders_path)
     roundtrips = Path(roundtrips_path)
+    order_events = (
+        Path(order_events_path)
+        if order_events_path is not None
+        else orders.with_name("cost_probe_order_events.jsonl")
+    )
+    roundtrip_events = (
+        Path(roundtrip_events_path)
+        if roundtrip_events_path is not None
+        else roundtrips.with_name("cost_probe_roundtrip_events.jsonl")
+    )
     runtime_guard = Path(runtime_guard_path)
     disagreement = Path(disagreement_path)
     p3_preflight_file = Path(p3_preflight_path)
     plan.parent.mkdir(parents=True, exist_ok=True)
     summary_file.parent.mkdir(parents=True, exist_ok=True)
     _write_csv(plan, COST_PROBE_PLAN_FIELDS, rows)
+    _preserve_probe_history(
+        order_events,
+        _read_csv_rows(orders),
+        submitted_predicate=_probe_order_submitted,
+    )
+    _preserve_probe_history(
+        roundtrip_events,
+        _read_csv_rows(roundtrips),
+        submitted_predicate=_probe_roundtrip_active,
+    )
     _write_csv(orders, COST_PROBE_ORDER_FIELDS, order_rows or [])
     _write_csv(roundtrips, COST_PROBE_ROUNDTRIP_FIELDS, roundtrip_rows or [])
     _write_csv(runtime_guard, RUNTIME_COST_GUARD_FIELDS, guard_rows or [])
@@ -692,6 +763,8 @@ def write_cost_probe_dry_run_outputs(
         "summary_path": summary_file,
         "orders_path": orders,
         "roundtrips_path": roundtrips,
+        "order_events_path": order_events,
+        "roundtrip_events_path": roundtrip_events,
         "runtime_guard_path": runtime_guard,
         "disagreement_path": disagreement,
         "p3_preflight_path": p3_preflight_file,
@@ -802,6 +875,31 @@ def _write_csv(path: Path, fields: list[str], rows: list[dict[str, Any]]) -> Non
             writer.writerow({field: row.get(field, "") for field in fields})
 
 
+def _preserve_probe_history(
+    path: Path,
+    rows: list[dict[str, Any]],
+    *,
+    submitted_predicate: Any,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = _read_jsonl_rows(path)
+    seen_keys = {_probe_row_key(row) for row in existing}
+    append_rows: list[dict[str, Any]] = []
+    for row in rows:
+        key = _probe_row_key(row)
+        if not submitted_predicate(row) or key in seen_keys:
+            continue
+        seen_keys.add(key)
+        append_rows.append(row)
+    if not path.exists():
+        path.write_text("", encoding="utf-8")
+    if not append_rows:
+        return
+    with path.open("a", encoding="utf-8") as handle:
+        for row in append_rows:
+            handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+
+
 def _kill_switch_guard(path: Path) -> tuple[str, str, str]:
     payload = _read_json(path)
     if payload is None:
@@ -837,7 +935,7 @@ def _reconcile_guard(
 
 def _order_store_guard(path: Path) -> tuple[str, str, str]:
     if not path.exists():
-        return "PASS", "order_store_missing_assumed_clean", "missing"
+        return "WARN", "order_store_missing_cannot_verify_clean", "missing"
     try:
         with sqlite3.connect(str(path), timeout=2.0) as con:
             cur = con.cursor()
@@ -857,7 +955,7 @@ def _order_store_guard(path: Path) -> tuple[str, str, str]:
 
 def _position_store_guard(path: Path) -> tuple[str, str, str]:
     if not path.exists():
-        return "PASS", "position_store_missing_assumed_flat", "missing"
+        return "WARN", "position_store_missing_cannot_verify_flat", "missing"
     try:
         with sqlite3.connect(str(path), timeout=2.0) as con:
             cur = con.cursor()
@@ -870,6 +968,19 @@ def _position_store_guard(path: Path) -> tuple[str, str, str]:
     return "PASS", "position_store_flat", "positions=0"
 
 
+def _fill_store_guard(path: Path) -> tuple[str, str, str]:
+    if not path.exists():
+        return "WARN", "fill_store_missing_cannot_verify_fills", "missing"
+    try:
+        with sqlite3.connect(str(path), timeout=2.0) as con:
+            cur = con.cursor()
+            cur.execute("SELECT COUNT(*) FROM fills")
+            fill_count = int(cur.fetchone()[0] or 0)
+    except Exception as exc:
+        return "BLOCK", "fill_store_unreadable", str(exc)
+    return "PASS", "fill_store_readable", f"fills={fill_count}"
+
+
 def _read_csv_rows(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -878,6 +989,61 @@ def _read_csv_rows(path: Path) -> list[dict[str, Any]]:
             return [dict(row) for row in csv.DictReader(handle)]
     except (OSError, csv.Error):
         return []
+
+
+def _read_jsonl_rows(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                raw = line.strip()
+                if not raw:
+                    continue
+                payload = json.loads(raw)
+                if isinstance(payload, dict):
+                    rows.append(payload)
+    except (OSError, json.JSONDecodeError):
+        return []
+    return rows
+
+
+def _dedupe_probe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        key = _probe_row_key(row)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped
+
+
+def _probe_row_key(row: dict[str, Any]) -> str:
+    order_ids = [
+        str(row.get(key) or "").strip()
+        for key in ("client_order_id", "exchange_order_id", "order_id")
+    ]
+    if any(order_ids):
+        return "|".join(
+            [
+                *order_ids,
+                str(row.get("leg") or "").strip(),
+                str(row.get("symbol") or "").strip(),
+            ]
+        )
+    roundtrip_id = str(row.get("roundtrip_id") or "").strip()
+    if roundtrip_id:
+        return f"{roundtrip_id}|{str(row.get('symbol') or '').strip()}"
+    parts = [
+        str(row.get(key) or "").strip()
+        for key in ("generated_at", "symbol", "leg", "order_status", "roundtrip_status")
+    ]
+    if any(parts):
+        return "|".join(parts)
+    return json.dumps(row, ensure_ascii=False, sort_keys=True)
 
 
 def _row_datetime(row: dict[str, Any]) -> datetime | None:
