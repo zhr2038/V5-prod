@@ -34,16 +34,21 @@ AUTHORIZATION_OPERATOR_ALLOWLIST_ENV = "V5_COST_PROBE_AUTH_OPERATORS"
 GLOBAL_PROBE_LOCK_PATH_ENV = "V5_COST_PROBE_LIVE_LOCK_PATH"
 GLOBAL_PROBE_LOCK_PATH = "/var/lock/v5-cost-probe-live-once.lock"
 AUTHORIZATION_SIGNATURE_FIELDS = (
+    "scope",
     "authorization_id",
     "nonce",
     "code_sha",
     "config_sha256",
+    "signed_by",
+    "approved_live_order_execution",
     "symbol",
     "max_notional_usdt",
     "issued_at",
     "expires_at",
     "acknowledged_risks",
 )
+EMERGENCY_FLATTEN_MAX_RETRIES = 3
+EMERGENCY_FLATTEN_MAX_SLIPPAGE_BPS = Decimal("100")
 REQUIRED_ACKS = {
     "one_time_live_cost_probe",
     "immediate_flat_exit",
@@ -108,6 +113,8 @@ def build_live_probe_preflight(
         "blockers": blockers,
         "p3_preflight": p3,
         "authorization": _redacted_authorization(auth),
+        "authorization_canonical_payload": _canonical_authorization_payload(auth) if auth else "",
+        "authorization_signature_sha256": _authorization_signature_sha256(auth),
         "required_authorization": auth_context,
         "instrument_preflight": instrument,
         "runtime_paths": _runtime_paths(payload),
@@ -148,6 +155,7 @@ def run_live_probe_once(
                 okx=okx,
                 reports_dir=Path(reports_dir),
                 auth_path=auth_path,
+                project_root=project_root,
             )
     except RuntimeError as exc:
         blockers = sorted(set([*list(preflight.get("blockers") or []), str(exc)]))
@@ -167,6 +175,7 @@ def _execute_live_probe(
     okx: Any,
     reports_dir: Path,
     auth_path: str | Path,
+    project_root: str | Path,
 ) -> dict[str, Any]:
     symbol = str(preflight["manual_probe_symbol"])
     inst_id = symbol.replace("/", "-").upper()
@@ -192,7 +201,12 @@ def _execute_live_probe(
     order_events_path = reports_dir / "cost_probe_order_events.jsonl"
     roundtrip_events_path = reports_dir / "cost_probe_roundtrip_events.jsonl"
     try:
-        consumed_auth = _consume_authorization_file(auth_path, preflight=preflight)
+        consumed_auth = _consume_authorization_file(
+            auth_path,
+            preflight=preflight,
+            cfg=cfg,
+            project_root=project_root,
+        )
     except Exception as exc:
         blockers = sorted(set([*list(preflight.get("blockers") or []), str(exc)]))
         return {
@@ -222,7 +236,7 @@ def _execute_live_probe(
     try:
         entry_order_attempted = True
         entry = okx.place_order(entry_payload, exp_time_ms=1500)
-        entry_data = _first_okx_item(entry)
+        entry_data = _accepted_okx_item(entry, action="entry_order")
         entry_ord_id = str(entry_data.get("ordId") or "")
         _append_jsonl(
             order_events_path,
@@ -341,7 +355,7 @@ def _execute_live_probe(
             "clOrdId": f"{clid_prefix}X",
         }
         exit_resp = okx.place_order(exit_payload, exp_time_ms=1500)
-        exit_data = _first_okx_item(exit_resp)
+        exit_data = _accepted_okx_item(exit_resp, action="exit_order")
         exit_ord_id = str(exit_data.get("ordId") or "")
         _append_jsonl(
             order_events_path,
@@ -513,6 +527,17 @@ def _instrument_preflight(okx: Any, symbol: str, *, max_notional_usdt: float) ->
     tick_sz = Decimal(str(spec.get("tickSz") or "0"))
     ask = Decimal(str(ticker.get("askPx") or ticker.get("last") or "0"))
     bid = Decimal(str(ticker.get("bidPx") or ticker.get("last") or "0"))
+    instrument_state = str(spec.get("state") or "").strip().lower()
+    quote_balance = _query_quote_balance(okx, symbol)
+    max_notional = Decimal(str(max_notional_usdt))
+    fee_reserve = max(max_notional * Decimal("0.01"), Decimal("0.01")) if max_notional > 0 else Decimal("0")
+    quote_required = max_notional + fee_reserve
+    if instrument_state != "live":
+        blockers.append("instrument_state_missing" if not instrument_state else "instrument_state_not_live")
+    if quote_balance is None:
+        blockers.append("quote_balance_unverified")
+    elif max_notional > 0 and quote_balance < quote_required:
+        blockers.append("quote_balance_insufficient_for_authorized_notional")
     if min_sz <= 0:
         blockers.append("exchange_min_sz_missing")
     if lot_sz <= 0:
@@ -523,7 +548,6 @@ def _instrument_preflight(okx: Any, symbol: str, *, max_notional_usdt: float) ->
         blockers.append("ticker_bid_ask_missing")
     order_plan: dict[str, str] = {}
     if not blockers:
-        max_notional = Decimal(str(max_notional_usdt))
         entry_px = _round_to_step(ask * Decimal("1.001"), tick_sz, ROUND_UP)
         exit_px = _round_to_step(bid * Decimal("0.999"), tick_sz, ROUND_DOWN)
         qty = _round_to_step(max_notional / entry_px, lot_sz, ROUND_DOWN)
@@ -545,6 +569,10 @@ def _instrument_preflight(okx: Any, symbol: str, *, max_notional_usdt: float) ->
         "tick_sz": _decimal_text(tick_sz),
         "ask_px": _decimal_text(ask),
         "bid_px": _decimal_text(bid),
+        "instrument_state": instrument_state or "missing",
+        "quote_balance": _decimal_text(quote_balance) if quote_balance is not None else "unverified",
+        "quote_required": _decimal_text(quote_required),
+        "quote_fee_reserve": _decimal_text(fee_reserve),
         "order_plan": order_plan,
         "instrument_preflight_passed": not blockers,
         "normalized_qty": order_plan.get("base_qty", ""),
@@ -797,9 +825,9 @@ def _authorization_signature_blockers(auth: dict[str, Any]) -> list[str]:
     secret = os.environ.get(AUTHORIZATION_HMAC_SECRET_ENV)
     if not secret:
         blockers.append("manual_authorization_signature_secret_missing")
-    if blockers or not str(auth.get("signature") or "").strip():
-        return blockers
     actual = str(auth.get("signature") or "").strip()
+    if not actual or not secret:
+        return blockers
     expected = _authorization_hmac_signature(auth, secret)
     expected_hex = expected.split(":", 1)[1]
     if not (
@@ -832,7 +860,18 @@ def _authorization_hmac_signature(auth: dict[str, Any], secret: str) -> str:
     return f"hmac-sha256:{digest}"
 
 
-def _consume_authorization_file(path: str | Path, *, preflight: dict[str, Any]) -> dict[str, Any]:
+def _authorization_signature_sha256(auth: dict[str, Any]) -> str:
+    signature = str((auth or {}).get("signature") or "").strip()
+    return hashlib.sha256(signature.encode("utf-8")).hexdigest() if signature else ""
+
+
+def _consume_authorization_file(
+    path: str | Path,
+    *,
+    preflight: dict[str, Any],
+    cfg: Any,
+    project_root: str | Path = PROJECT_ROOT,
+) -> dict[str, Any]:
     source = Path(path)
     if not source.name.endswith(".pending.json"):
         raise RuntimeError("manual_authorization_pending_file_required")
@@ -848,9 +887,25 @@ def _consume_authorization_file(path: str | Path, *, preflight: dict[str, Any]) 
         expected = preflight.get("authorization") or {}
         if str(fresh.get("authorization_id") or "") != str(expected.get("authorization_id") or ""):
             raise RuntimeError("manual_authorization_changed_after_preflight")
-        for key in ("nonce", "code_sha", "config_sha256", "symbol", "max_notional_usdt", "issued_at", "expires_at"):
-            if str(fresh.get(key) or "") != str(expected.get(key) or ""):
-                raise RuntimeError("manual_authorization_changed_after_preflight")
+        fresh_canonical = _canonical_authorization_payload(fresh)
+        expected_canonical = str(preflight.get("authorization_canonical_payload") or "")
+        if not expected_canonical or fresh_canonical != expected_canonical:
+            raise RuntimeError("manual_authorization_changed_after_preflight")
+        if _authorization_signature_sha256(fresh) != str(preflight.get("authorization_signature_sha256") or ""):
+            raise RuntimeError("manual_authorization_signature_changed_after_preflight")
+        current_context = _authorization_context(
+            cfg,
+            p3=dict(preflight.get("p3_preflight") or {}),
+            project_root=project_root,
+        )
+        blockers = _authorization_blockers(
+            fresh,
+            dict(preflight.get("p3_preflight") or {}),
+            generated_at=datetime.now(UTC),
+            required_context=current_context,
+        )
+        if blockers:
+            raise RuntimeError(f"manual_authorization_revalidation_failed:{';'.join(sorted(set(blockers)))}")
         consumed = source.with_name(source.name[: -len(".pending.json")] + ".consumed.json")
         if consumed.exists():
             raise RuntimeError("manual_authorization_consumed_file_exists")
@@ -1030,6 +1085,20 @@ def _first_okx_item(response: Any) -> dict[str, Any]:
     return {}
 
 
+def _accepted_okx_item(response: Any, *, action: str) -> dict[str, Any]:
+    data = getattr(response, "data", response)
+    top_code = str(data.get("code") or "") if isinstance(data, dict) else ""
+    top_msg = str(data.get("msg") or data.get("error") or "") if isinstance(data, dict) else ""
+    row = _first_okx_item(response)
+    if not row:
+        raise RuntimeError(f"{action}_rejected:code={top_code or 'missing'}:sCode=missing:no_order_response")
+    s_code = str(row.get("sCode") or "0")
+    if top_code != "0" or s_code != "0":
+        s_msg = str(row.get("sMsg") or top_msg or "unknown")
+        raise RuntimeError(f"{action}_rejected:code={top_code or 'missing'}:sCode={s_code or 'missing'}:{s_msg}")
+    return row
+
+
 def _poll_order(okx: Any, *, inst_id: str, cl_ord_id: str, max_seconds: int) -> dict[str, Any]:
     # The production client performs one signed read per poll; tests inject a fake.
     for _ in range(max(int(max_seconds), 1)):
@@ -1122,6 +1191,9 @@ def _finish_roundtrip(
         "symbol": symbol,
         "roundtrip_status": status,
         "completed": bool(completed),
+        "execution_completed": bool(completed),
+        "cost_evidence_complete": cost["cost_evidence_complete"] == "true",
+        "eligible_for_cost_model": bool(completed) and cost["cost_evidence_complete"] == "true",
         "roundtrip_id": f"{entry_order_id}:{exit_order_id}",
         "entry_order_id": entry_order_id,
         "exit_order_id": exit_order_id,
@@ -1230,7 +1302,12 @@ def _verify_roundtrip_flat(
     reconcile_probe_dust_accepted = (
         not raw_reconcile_ok
         and bool(exchange_flat)
-        and _reconcile_base_delta_within_tolerance(reconcile, symbol=symbol, tolerance=tolerance)
+        and _reconcile_probe_dust_accepted(
+            reconcile,
+            symbol=symbol,
+            base_tolerance=tolerance,
+            quote_tolerance=Decimal(str(getattr(getattr(cfg, "execution", cfg), "reconcile_abs_usdt_tol", 1.0) or 1.0)),
+        )
     )
     reconcile_ok = raw_reconcile_ok or reconcile_probe_dust_accepted
     return {
@@ -1257,15 +1334,58 @@ def _verify_roundtrip_flat(
     }
 
 
-def _reconcile_base_delta_within_tolerance(reconcile: dict[str, Any], *, symbol: str, tolerance: Decimal) -> bool:
+def _reconcile_probe_dust_accepted(
+    reconcile: dict[str, Any],
+    *,
+    symbol: str,
+    base_tolerance: Decimal,
+    quote_tolerance: Decimal,
+) -> bool:
+    reason = str(reconcile.get("reason") or "").strip().lower()
+    if reason not in {"probe_dust_only", "below_lot_size_residual"}:
+        return False
+    rendered = json.dumps(reconcile, ensure_ascii=False).lower()
+    hard_fail_fragments = ("network_error", "parse_error", "stale", "missing", "unreadable", "invalid")
+    if any(fragment in rendered for fragment in hard_fail_fragments):
+        return False
+    return _reconcile_all_deltas_within_tolerance(
+        reconcile,
+        symbol=symbol,
+        base_tolerance=base_tolerance,
+        quote_tolerance=quote_tolerance,
+    )
+
+
+def _reconcile_all_deltas_within_tolerance(
+    reconcile: dict[str, Any],
+    *,
+    symbol: str,
+    base_tolerance: Decimal,
+    quote_tolerance: Decimal,
+) -> bool:
     base_ccy = symbol.split("/")[0].upper()
+    quote_ccy = symbol.split("/")[1].upper() if "/" in symbol else "USDT"
     diffs = reconcile.get("diffs")
     if not isinstance(diffs, list):
         return False
+    saw_base = False
     for item in diffs:
-        if isinstance(item, dict) and str(item.get("ccy") or "").upper() == base_ccy:
-            return abs(_decimal(item.get("delta"))) <= tolerance
-    return False
+        if not isinstance(item, dict):
+            return False
+        ccy = str(item.get("ccy") or "").upper()
+        delta = abs(_decimal(item.get("delta")))
+        enforced = item.get("enforced")
+        ignored_as_dust = bool(item.get("ignored_as_dust"))
+        if ccy == base_ccy:
+            saw_base = True
+            if delta > base_tolerance:
+                return False
+        elif ccy == quote_ccy:
+            if delta > quote_tolerance:
+                return False
+        elif enforced is True and delta > Decimal("0") and not ignored_as_dust:
+            return False
+    return saw_base
 
 
 def _emergency_flatten_cost_probe(
@@ -1291,57 +1411,127 @@ def _emergency_flatten_cost_probe(
         "sell_qty": _decimal_text(sell_qty),
         "baseline_base_balance": _decimal_text(baseline),
         "balance_before": _decimal_text(balance) if balance is not None else "unverified",
+        "max_retries": EMERGENCY_FLATTEN_MAX_RETRIES,
+        "max_slippage_bps": _decimal_text(EMERGENCY_FLATTEN_MAX_SLIPPAGE_BPS),
+        "attempts": [],
     }
     if sell_qty <= 0:
         result["status"] = "no_sellable_qty"
         return result
-    plan = instrument.get("order_plan") if isinstance(instrument.get("order_plan"), dict) else {}
-    payload = {
-        "instId": inst_id,
-        "tdMode": "cash",
-        "side": "sell",
-        "ordType": "ioc",
-        "px": plan.get("exit_px") or instrument.get("bid_px") or "0",
-        "sz": _decimal_text(sell_qty),
-        "clOrdId": f"{clid_prefix or ('cp' + datetime.now(UTC).strftime('%Y%m%d%H%M%S'))}F",
-    }
-    response = okx.place_order(payload, exp_time_ms=1500)
-    data = _first_okx_item(response)
-    ord_id = str(data.get("ordId") or "")
-    result.update({"attempted": True, "order_id": ord_id, "client_order_id": payload["clOrdId"]})
-    _append_jsonl(
-        order_events_path,
-        _event(
-            symbol=symbol,
-            leg="emergency_exit",
-            status="submitted",
-            cl_ord_id=payload["clOrdId"],
-            ord_id=ord_id,
-            payload=payload,
-            instrument=instrument,
-        ),
-    )
-    state = _poll_order(okx, inst_id=inst_id, cl_ord_id=payload["clOrdId"], max_seconds=5)
+    prefix = clid_prefix or ("cp" + datetime.now(UTC).strftime("%Y%m%d%H%M%S"))
+    filled_total = Decimal("0")
+    last_state: dict[str, Any] = {}
+    for attempt in range(1, EMERGENCY_FLATTEN_MAX_RETRIES + 1):
+        balance = _query_base_balance(okx, symbol)
+        target_qty = max(balance - baseline, Decimal("0")) if balance is not None else max(sell_qty - filled_total, Decimal("0"))
+        sell_qty = _round_to_step(target_qty, lot_sz, ROUND_DOWN) if lot_sz > 0 else target_qty
+        attempt_row: dict[str, Any] = {
+            "attempt": attempt,
+            "balance_before": _decimal_text(balance) if balance is not None else "unverified",
+            "target_qty": _decimal_text(target_qty),
+            "sell_qty": _decimal_text(sell_qty),
+        }
+        if sell_qty <= 0:
+            attempt_row["status"] = "flat_or_no_sellable_qty"
+            result["attempts"].append(attempt_row)
+            break
+        px, px_meta = _fresh_emergency_exit_px(okx, inst_id=inst_id, instrument=instrument)
+        attempt_row.update(px_meta)
+        if px is None:
+            attempt_row["status"] = "price_guard_blocked"
+            result["attempts"].append(attempt_row)
+            break
+        payload = {
+            "instId": inst_id,
+            "tdMode": "cash",
+            "side": "sell",
+            "ordType": "ioc",
+            "px": _decimal_text(px),
+            "sz": _decimal_text(sell_qty),
+            "clOrdId": f"{prefix}F{attempt}",
+        }
+        response = okx.place_order(payload, exp_time_ms=1500)
+        data = _accepted_okx_item(response, action="emergency_exit_order")
+        ord_id = str(data.get("ordId") or "")
+        result.update({"attempted": True, "order_id": ord_id, "client_order_id": payload["clOrdId"]})
+        _append_jsonl(
+            order_events_path,
+            _event(
+                symbol=symbol,
+                leg="emergency_exit",
+                status="submitted",
+                cl_ord_id=payload["clOrdId"],
+                ord_id=ord_id,
+                payload=payload,
+                instrument=instrument,
+            ),
+        )
+        state = _poll_order(okx, inst_id=inst_id, cl_ord_id=payload["clOrdId"], max_seconds=5)
+        last_state = state
+        filled = _filled_qty(state)
+        filled_total += max(filled, Decimal("0"))
+        balance_after = _query_base_balance(okx, symbol)
+        flat_after = balance_after is not None and abs(balance_after - baseline) <= max(lot_sz, Decimal("0.00000001"))
+        attempt_row.update(
+            {
+                "status": str(state.get("state") or "unknown"),
+                "filled_qty": _decimal_text(filled),
+                "balance_after": _decimal_text(balance_after) if balance_after is not None else "unverified",
+                "flat_after": bool(flat_after),
+            }
+        )
+        result["attempts"].append(attempt_row)
+        _append_jsonl(
+            order_events_path,
+            _event(
+                symbol=symbol,
+                leg="emergency_exit",
+                status=str(state.get("state") or "unknown"),
+                cl_ord_id=payload["clOrdId"],
+                ord_id=str(state.get("ordId") or ord_id),
+                payload=state,
+                instrument=instrument,
+            ),
+        )
+        if flat_after:
+            break
+    balance_after = _query_base_balance(okx, symbol)
     result.update(
         {
-            "status": str(state.get("state") or "unknown"),
-            "filled_qty": _decimal_text(_filled_qty(state)),
-            "balance_after": _decimal_text(_query_base_balance(okx, symbol) or Decimal("0")),
+            "status": str(last_state.get("state") or (result["attempts"][-1].get("status") if result["attempts"] else "unknown")),
+            "filled_qty": _decimal_text(filled_total),
+            "balance_after": _decimal_text(balance_after) if balance_after is not None else "unverified",
+            "flat_after": bool(balance_after is not None and abs(balance_after - baseline) <= max(lot_sz, Decimal("0.00000001"))),
         }
     )
-    _append_jsonl(
-        order_events_path,
-        _event(
-            symbol=symbol,
-            leg="emergency_exit",
-            status=str(state.get("state") or "unknown"),
-            cl_ord_id=payload["clOrdId"],
-            ord_id=str(state.get("ordId") or ord_id),
-            payload=state,
-            instrument=instrument,
-        ),
-    )
     return result
+
+
+def _fresh_emergency_exit_px(
+    okx: Any,
+    *,
+    inst_id: str,
+    instrument: dict[str, Any],
+) -> tuple[Decimal | None, dict[str, Any]]:
+    tick_sz = _decimal(instrument.get("tick_sz"))
+    arrival_bid = _decimal(instrument.get("bid_px"))
+    ticker = _public_okx_item(okx, "/api/v5/market/ticker", {"instId": inst_id})
+    bid = _decimal(ticker.get("bidPx") or ticker.get("last"))
+    floor = arrival_bid * (Decimal("1") - (EMERGENCY_FLATTEN_MAX_SLIPPAGE_BPS / Decimal("10000")))
+    meta = {
+        "fresh_bid_px": _decimal_text(bid),
+        "arrival_bid_px": _decimal_text(arrival_bid),
+        "slippage_floor_px": _decimal_text(floor),
+    }
+    if bid <= 0:
+        return None, {**meta, "price_blocker": "emergency_exit_bid_missing"}
+    if arrival_bid > 0 and bid < floor:
+        return None, {**meta, "price_blocker": "emergency_exit_bid_below_slippage_floor"}
+    raw_px = bid * Decimal("0.999")
+    px = _round_to_step(raw_px, tick_sz, ROUND_DOWN) if tick_sz > 0 else raw_px
+    if px <= 0:
+        return None, {**meta, "price_blocker": "emergency_exit_px_invalid"}
+    return px, {**meta, "order_px": _decimal_text(px)}
 
 
 def _roundtrip_cost_fields(entry_state: dict[str, Any], exit_state: dict[str, Any], symbol: str) -> dict[str, str]:
@@ -1360,6 +1550,8 @@ def _roundtrip_cost_fields(entry_state: dict[str, Any], exit_state: dict[str, An
     cost_bps = Decimal("0")
     if entry_notional > 0:
         cost_bps = (Decimal("0") - net_pnl) / entry_notional * Decimal("10000")
+    fee_warnings = [*entry_warnings, *exit_warnings]
+    cost_evidence_complete = not fee_warnings
     return {
         "entry_filled_qty": _decimal_text(entry_qty),
         "exit_filled_qty": _decimal_text(exit_qty),
@@ -1371,7 +1563,8 @@ def _roundtrip_cost_fields(entry_state: dict[str, Any], exit_state: dict[str, An
         "exit_fee": _decimal_text(exit_fee),
         "exit_fee_ccy": _fee_ccy(exit_state),
         "exit_fee_usdt": _decimal_text(exit_fee_usdt),
-        "fee_conversion_warnings": ";".join([*entry_warnings, *exit_warnings]),
+        "fee_conversion_warnings": ";".join(fee_warnings),
+        "cost_evidence_complete": str(cost_evidence_complete).lower(),
         "gross_pnl_usdt": _decimal_text(gross_pnl),
         "net_pnl_usdt": _decimal_text(net_pnl),
         "roundtrip_cost_bps": _decimal_text(cost_bps),
@@ -1465,21 +1658,36 @@ def _fill_rows(row: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _query_base_balance(okx: Any, symbol: str) -> Decimal | None:
     base_ccy = symbol.split("/")[0].upper()
+    return _query_available_balance(okx, base_ccy)
+
+
+def _query_quote_balance(okx: Any, symbol: str) -> Decimal | None:
+    parts = symbol.upper().replace("-", "/").split("/")
+    quote_ccy = parts[1] if len(parts) > 1 else "USDT"
+    return _query_available_balance(okx, quote_ccy)
+
+
+def _query_available_balance(okx: Any, ccy: str) -> Decimal | None:
+    ccy = str(ccy or "").upper()
+    if not ccy:
+        return None
     try:
-        response = okx.get_balance(ccy=base_ccy) if hasattr(okx, "get_balance") else okx.request(
+        response = okx.get_balance(ccy=ccy) if hasattr(okx, "get_balance") else okx.request(
             "GET",
             "/api/v5/account/balance",
-            params={"ccy": base_ccy},
+            params={"ccy": ccy},
         )
     except Exception:
         return None
     data = getattr(response, "data", response)
+    if isinstance(data, dict) and str(data.get("code") or "0") != "0":
+        return None
     rows = data.get("data") if isinstance(data, dict) else None
     details = ((rows[0] if isinstance(rows, list) and rows else {}) or {}).get("details")
     if not isinstance(details, list):
         return None
     for item in details:
-        if isinstance(item, dict) and str(item.get("ccy") or "").upper() == base_ccy:
+        if isinstance(item, dict) and str(item.get("ccy") or "").upper() == ccy:
             return _decimal(item.get("availBal") or item.get("cashBal") or item.get("eq") or item.get("bal"))
     return Decimal("0")
 
@@ -1560,6 +1768,16 @@ def _refresh_reconcile_status(
             universe_bases=[symbol.split("/")[0].upper()],
             ccy_mode=str(getattr(execution, "reconcile_ccy_mode", "universe_only") or "universe_only"),
         )
+        status = _annotate_cost_probe_reconcile_residual(
+            status,
+            symbol=symbol,
+            base_tolerance=max(
+                _decimal((preflight.get("instrument_preflight") or {}).get("lot_sz")),
+                Decimal("0.00000001"),
+            ),
+            quote_tolerance=Decimal(str(getattr(execution, "reconcile_abs_usdt_tol", 50.0) or 50.0)),
+            out_path=reconcile_path,
+        )
         return {
             "refreshed": True,
             "ok": bool(status.get("ok")),
@@ -1582,6 +1800,43 @@ def _refresh_reconcile_status(
         except Exception:
             pass
         return {"refreshed": False, "reason": failure["reason"], "error": str(exc), "path": str(reconcile_path)}
+
+
+def _annotate_cost_probe_reconcile_residual(
+    status: dict[str, Any],
+    *,
+    symbol: str,
+    base_tolerance: Decimal,
+    quote_tolerance: Decimal,
+    out_path: Path,
+) -> dict[str, Any]:
+    if bool(status.get("ok")) or str(status.get("reason") or "") != "base_mismatch":
+        return status
+    if status.get("error"):
+        return status
+    if not _reconcile_all_deltas_within_tolerance(
+        status,
+        symbol=symbol,
+        base_tolerance=base_tolerance,
+        quote_tolerance=quote_tolerance,
+    ):
+        return status
+
+    annotated = dict(status)
+    annotated["reason"] = "below_lot_size_residual"
+    annotated["cost_probe_residual_annotation"] = {
+        "reason": "below_lot_size_residual",
+        "base_tolerance": _decimal_text(base_tolerance),
+        "quote_tolerance": _decimal_text(quote_tolerance),
+        "symbol": symbol,
+    }
+    try:
+        tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+        tmp_path.write_text(json.dumps(annotated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp_path.replace(out_path)
+    except Exception:
+        pass
+    return annotated
 
 
 def _arrival_mid_px(instrument: dict[str, Any]) -> str:

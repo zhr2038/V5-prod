@@ -12,12 +12,16 @@ import pytest
 from configs.schema import AppConfig
 from scripts.cost_probe_live_once import (
     _authorization_hmac_signature,
+    _consume_authorization_file,
     _cost_probe_config_sha,
     _current_code_sha,
+    _reconcile_probe_dust_accepted,
     _roundtrip_cost_fields,
     build_live_probe_preflight,
     run_live_probe_once,
 )
+from src.execution.account_store import AccountStore
+from src.execution.position_store import PositionStore
 
 
 class _Response:
@@ -34,6 +38,9 @@ class _FakeOKX:
         base_fee_on_entry: bool = False,
         raise_after_entry: bool = False,
         entry_get_order_fails: bool = False,
+        quote_balance: str = "100",
+        ticker_bids: list[str] | None = None,
+        unknown_fee_ccy: bool = False,
     ) -> None:
         self.placed: list[dict] = []
         self.partial_exit = partial_exit
@@ -41,6 +48,9 @@ class _FakeOKX:
         self.base_fee_on_entry = base_fee_on_entry
         self.raise_after_entry = raise_after_entry
         self.entry_get_order_fails = entry_get_order_fails
+        self.quote_balance = Decimal(quote_balance)
+        self.ticker_bids = list(ticker_bids or ["49990"])
+        self.unknown_fee_ccy = unknown_fee_ccy
         self.orders_by_clid: dict[str, dict] = {}
         self.settled_clids: set[str] = set()
         self.cancels: list[dict] = []
@@ -53,6 +63,7 @@ class _FakeOKX:
                     "data": [
                         {
                             "instId": params["instId"],
+                            "state": "live",
                             "minSz": "0.00001",
                             "lotSz": "0.000001",
                             "tickSz": "0.1",
@@ -67,7 +78,7 @@ class _FakeOKX:
                     "data": [
                         {
                             "instId": params["instId"],
-                            "bidPx": "49990",
+                            "bidPx": self._next_bid(),
                             "askPx": "50010",
                             "last": "50000",
                         }
@@ -112,7 +123,7 @@ class _FakeOKX:
             fill_qty = min(fill_qty, Decimal("0.00005"))
             state = "partially_filled"
         fee = Decimal("-0.00000001") if side == "buy" and self.base_fee_on_entry else Decimal("-0.01")
-        fee_ccy = "BTC" if side == "buy" and self.base_fee_on_entry else "USDT"
+        fee_ccy = "OKB" if self.unknown_fee_ccy else ("BTC" if side == "buy" and self.base_fee_on_entry else "USDT")
         if cl_ord_id not in self.settled_clids:
             if side == "buy":
                 self.balance_qty += fill_qty + (fee if fee_ccy == "BTC" else Decimal("0"))
@@ -160,14 +171,19 @@ class _FakeOKX:
             else [
                 {
                     "ccy": ccy,
-                    "availBal": format(self.balance_qty, "f"),
-                    "cashBal": format(self.balance_qty, "f"),
-                    "eq": format(self.balance_qty, "f"),
-                    "eqUsd": "0",
+                    "availBal": format(self.quote_balance if str(ccy).upper() == "USDT" else self.balance_qty, "f"),
+                    "cashBal": format(self.quote_balance if str(ccy).upper() == "USDT" else self.balance_qty, "f"),
+                    "eq": format(self.quote_balance if str(ccy).upper() == "USDT" else self.balance_qty, "f"),
+                    "eqUsd": format(self.quote_balance if str(ccy).upper() == "USDT" else Decimal("0"), "f"),
                 }
             ]
         )
         return _Response({"code": "0", "data": [{"details": details}]})
+
+    def _next_bid(self) -> str:
+        if len(self.ticker_bids) > 1:
+            return self.ticker_bids.pop(0)
+        return self.ticker_bids[0]
 
 
 @pytest.fixture(autouse=True)
@@ -254,6 +270,69 @@ def test_cost_probe_live_once_rejects_text_only_signature(tmp_path: Path) -> Non
 
     assert result["state"] == "NOT_READY"
     assert "manual_authorization_signature_invalid" in result["blockers"]
+
+
+def test_cost_probe_live_once_signature_covers_operator_scope_and_approval(tmp_path: Path) -> None:
+    cfg = _ready_cost_probe_config(tmp_path)
+    _write_clean_runtime_state(tmp_path)
+    auth_path = _write_auth(tmp_path, cfg=cfg)
+    payload = json.loads(auth_path.read_text(encoding="utf-8"))
+    payload["approved_live_order_execution"] = False
+    payload["signed_by"] = "intruder"
+    auth_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = build_live_probe_preflight(
+        cfg,
+        reports_dir=tmp_path / "reports",
+        auth_path=auth_path,
+        okx=_FakeOKX(),
+        project_root=tmp_path,
+    )
+
+    assert result["state"] == "NOT_READY"
+    assert "manual_authorization_not_approved" in result["blockers"]
+    assert "manual_authorization_signed_by_not_allowed" in result["blockers"]
+    assert "manual_authorization_signature_invalid" in result["blockers"]
+
+
+def test_cost_probe_live_once_consume_revalidates_authorization_under_lock(tmp_path: Path) -> None:
+    cfg = _ready_cost_probe_config(tmp_path)
+    _write_clean_runtime_state(tmp_path)
+    auth_path = _write_auth(tmp_path, cfg=cfg)
+    preflight = build_live_probe_preflight(
+        cfg,
+        reports_dir=tmp_path / "reports",
+        auth_path=auth_path,
+        okx=_FakeOKX(),
+        project_root=tmp_path,
+    )
+    payload = json.loads(auth_path.read_text(encoding="utf-8"))
+    payload["approved_live_order_execution"] = False
+    payload["signature"] = _authorization_hmac_signature(payload, "unit-test-secret")
+    auth_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="manual_authorization_changed_after_preflight"):
+        _consume_authorization_file(auth_path, preflight=preflight, cfg=cfg, project_root=tmp_path)
+
+    assert auth_path.exists()
+    assert not (tmp_path / "auth.consumed.json").exists()
+
+
+def test_cost_probe_live_once_blocks_insufficient_quote_balance(tmp_path: Path) -> None:
+    cfg = _ready_cost_probe_config(tmp_path)
+    _write_clean_runtime_state(tmp_path)
+    auth_path = _write_auth(tmp_path, cfg=cfg)
+
+    result = build_live_probe_preflight(
+        cfg,
+        reports_dir=tmp_path / "reports",
+        auth_path=auth_path,
+        okx=_FakeOKX(quote_balance="5"),
+        project_root=tmp_path,
+    )
+
+    assert result["state"] == "NOT_READY"
+    assert "quote_balance_insufficient_for_authorized_notional" in result["blockers"]
 
 
 def test_cost_probe_live_once_execute_uses_entry_and_immediate_exit_with_fake_okx(tmp_path: Path) -> None:
@@ -381,6 +460,28 @@ def test_cost_probe_live_once_partial_exit_is_incomplete_and_triggers_emergency_
     assert kill_switch["sell_only_on_error"] is True
 
 
+def test_cost_probe_live_once_emergency_flatten_refreshes_exit_bid(tmp_path: Path) -> None:
+    cfg = _ready_cost_probe_config(tmp_path)
+    _write_clean_runtime_state(tmp_path)
+    auth_path = _write_auth(tmp_path, cfg=cfg)
+    fake = _FakeOKX(partial_exit=True, initial_base_balance="0.000003", ticker_bids=["49990", "49700"])
+
+    result = run_live_probe_once(
+        cfg,
+        reports_dir=tmp_path / "reports",
+        auth_path=auth_path,
+        okx=fake,
+        project_root=tmp_path,
+        execute_live_order=True,
+        operator_confirmed=True,
+    )
+
+    assert result["state"] == "INCOMPLETE"
+    assert fake.placed[-1]["side"] == "sell"
+    assert fake.placed[-1]["px"] == "49650.3"
+    assert result["emergency_flatten"]["attempts"][0]["fresh_bid_px"] == "49700"
+
+
 def test_cost_probe_live_once_exception_after_unknown_entry_attempt_flattens_balance_delta(tmp_path: Path) -> None:
     cfg = _ready_cost_probe_config(tmp_path)
     _write_clean_runtime_state(tmp_path)
@@ -459,6 +560,58 @@ def test_cost_probe_live_once_rejects_reused_consumed_authorization(tmp_path: Pa
     assert len(fake.placed) == 2
 
 
+def test_cost_probe_live_once_reconcile_dust_acceptance_is_reason_whitelisted() -> None:
+    accepted = {
+        "ok": False,
+        "reason": "probe_dust_only",
+        "diffs": [
+            {"ccy": "BTC", "delta": "0.00000001", "enforced": True},
+            {"ccy": "USDT", "delta": "0.01", "enforced": True},
+        ],
+    }
+    stale = {
+        **accepted,
+        "reason": "probe_dust_only",
+        "detail": "stale reconcile snapshot",
+    }
+    usdt_mismatch = {
+        **accepted,
+        "reason": "usdt_mismatch",
+    }
+    other_symbol = {
+        **accepted,
+        "diffs": [
+            {"ccy": "BTC", "delta": "0.00000001", "enforced": True},
+            {"ccy": "ETH", "delta": "0.1", "enforced": True},
+        ],
+    }
+
+    assert _reconcile_probe_dust_accepted(
+        accepted,
+        symbol="BTC/USDT",
+        base_tolerance=Decimal("0.000001"),
+        quote_tolerance=Decimal("1"),
+    )
+    assert not _reconcile_probe_dust_accepted(
+        stale,
+        symbol="BTC/USDT",
+        base_tolerance=Decimal("0.000001"),
+        quote_tolerance=Decimal("1"),
+    )
+    assert not _reconcile_probe_dust_accepted(
+        usdt_mismatch,
+        symbol="BTC/USDT",
+        base_tolerance=Decimal("0.000001"),
+        quote_tolerance=Decimal("1"),
+    )
+    assert not _reconcile_probe_dust_accepted(
+        other_symbol,
+        symbol="BTC/USDT",
+        base_tolerance=Decimal("0.000001"),
+        quote_tolerance=Decimal("1"),
+    )
+
+
 def test_cost_probe_roundtrip_cost_converts_base_fee_to_usdt() -> None:
     cost = _roundtrip_cost_fields(
         {
@@ -482,6 +635,30 @@ def test_cost_probe_roundtrip_cost_converts_base_fee_to_usdt() -> None:
     assert cost["exit_fee_usdt"] == "-0.05"
     assert cost["net_pnl_usdt"] == "-0.1"
     assert cost["fee_conversion_warnings"] == ""
+    assert cost["cost_evidence_complete"] == "true"
+
+
+def test_cost_probe_roundtrip_with_unknown_fee_is_not_cost_model_eligible(tmp_path: Path) -> None:
+    cfg = _ready_cost_probe_config(tmp_path)
+    _write_clean_runtime_state(tmp_path)
+    auth_path = _write_auth(tmp_path, cfg=cfg)
+    fake = _FakeOKX(unknown_fee_ccy=True)
+
+    result = run_live_probe_once(
+        cfg,
+        reports_dir=tmp_path / "reports",
+        auth_path=auth_path,
+        okx=fake,
+        project_root=tmp_path,
+        execute_live_order=True,
+        operator_confirmed=True,
+    )
+
+    assert result["state"] == "COMPLETED"
+    assert result["execution_completed"] is True
+    assert result["cost_evidence_complete"] is False
+    assert result["eligible_for_cost_model"] is False
+    assert "fee_ccy_conversion_unavailable:OKB" in result["fee_conversion_warnings"]
 
 
 def _ready_cost_probe_config(tmp_path: Path) -> AppConfig:
@@ -559,7 +736,7 @@ def _write_clean_runtime_state(project_root: Path) -> None:
     )
     with sqlite3.connect(str(runtime_dir / "orders.sqlite")) as con:
         con.execute("CREATE TABLE IF NOT EXISTS orders (state TEXT)")
-    with sqlite3.connect(str(runtime_dir / "positions.sqlite")) as con:
-        con.execute("CREATE TABLE IF NOT EXISTS positions (symbol TEXT, qty REAL)")
+    PositionStore(path=str(runtime_dir / "positions.sqlite"))
+    AccountStore(path=str(runtime_dir / "positions.sqlite"))
     with sqlite3.connect(str(runtime_dir / "fills.sqlite")) as con:
         con.execute("CREATE TABLE IF NOT EXISTS fills (id TEXT)")
