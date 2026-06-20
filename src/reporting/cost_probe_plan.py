@@ -698,6 +698,8 @@ def build_cost_probe_p3_preflight(
         "symbol_runtime_blockers": summary.get("symbol_runtime_blockers") or {},
         "guard_failures": guard_failures,
         "dry_run_plan_state": summary.get("state"),
+        "offline_plan_state": summary.get("state"),
+        "online_exchange_preflight_state": "NOT_RUN",
         "dry_run": bool(summary.get("dry_run")),
         "live_enabled": bool(summary.get("live_enabled")),
         "no_order_submitted": bool(summary.get("no_order_submitted", True)),
@@ -713,7 +715,7 @@ def build_cost_probe_p3_preflight(
         ),
         "daily_loss_usdt": _float_value(summary.get("daily_loss_usdt")),
         "next_action": (
-            "request_explicit_operator_authorization_for_one_symbol_live_probe"
+            "create_signed_authorization_and_run_no_order_validation"
             if not blockers
             else "fix_preflight_blockers_before_requesting_live_probe"
         ),

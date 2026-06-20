@@ -51,6 +51,10 @@ def test_v5_bundle_export_script_includes_cost_probe_artifacts() -> None:
     assert '"cost_probe_roundtrip_events.jsonl", "summaries/cost_probe_roundtrip_events.jsonl"' in script
     assert '"cost_probe_summary.json", "summaries/cost_probe_summary.json"' in script
     assert '"cost_probe_p3_preflight.json", "summaries/cost_probe_p3_preflight.json"' in script
+    assert (
+        '"cost_probe_live_execution_status.json", '
+        '"summaries/cost_probe_live_execution_status.json"'
+    ) in script
     assert '"manual_authorization_required"' in script
     assert "NON_SECRET_KEYS" in script
     assert '"runtime_cost_guard.csv", "summaries/cost_probe_runtime_cost_guard.csv"' in script

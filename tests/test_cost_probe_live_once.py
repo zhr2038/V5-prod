@@ -20,12 +20,14 @@ from scripts.cost_probe_live_once import (
     _consume_authorization_file,
     _cost_probe_config_sha,
     _current_code_sha,
+    _persist_live_execution_status,
     _persist_preflight_snapshot,
     _reconcile_probe_dust_accepted,
     _roundtrip_cost_fields,
     build_live_probe_preflight,
     run_live_probe_once,
 )
+from scripts.create_cost_probe_authorization import build_authorization_payload
 from src.execution.account_store import AccountStore
 from src.execution.position_store import PositionStore
 
@@ -251,6 +253,12 @@ def test_cost_probe_live_once_waits_for_operator_execution_confirmation(tmp_path
     assert result["approved_live_order_execution"] is False
     assert fake.placed == []
     assert result["instrument_preflight"]["order_plan"]["base_qty"] == "0.000099"
+    status_path = _persist_live_execution_status(result, tmp_path / "reports")
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    assert status["status"] == "AUTH_VALIDATED"
+    assert status["authorization_validated"] is True
+    assert status["no_order_submitted"] is True
+    assert status["approved_live_order_execution"] is False
 
 
 def test_cost_probe_live_once_persists_latest_p3_preflight_snapshot(tmp_path: Path) -> None:
@@ -269,6 +277,67 @@ def test_cost_probe_live_once_persists_latest_p3_preflight_snapshot(tmp_path: Pa
     assert payload["state"] == "READY_FOR_MANUAL_AUTHORIZATION"
     assert payload["manual_probe_symbol"] == "BTC/USDT"
     assert payload["approved_live_order_execution"] is False
+
+
+def test_cost_probe_live_once_persists_live_execution_status_for_closed_flat(tmp_path: Path) -> None:
+    result = {
+        "state": "COMPLETED",
+        "manual_probe_symbol": "BTC/USDT",
+        "authorization_id": "auth-1",
+        "execution_completed": True,
+        "entry_order_id": "entry-1",
+        "exit_order_id": "exit-1",
+        "entry_filled_qty": "0.0001",
+        "exit_filled_qty": "0.0001",
+        "flat_verified": True,
+        "exchange_flat_verified": True,
+        "local_flat_verified": True,
+        "reconcile_ok": True,
+        "cost_evidence_complete": True,
+        "eligible_for_cost_model": True,
+        "eligible_for_live_cost_coverage": False,
+        "source": "bootstrap_cost_probe",
+        "sample_origin": "cost_probe",
+    }
+
+    path = _persist_live_execution_status(result, tmp_path / "reports")
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["status"] == "CLOSED_FLAT"
+    assert payload["entry_submitted"] is True
+    assert payload["exit_submitted"] is True
+    assert payload["execution_completed"] is True
+    assert payload["eligible_for_live_cost_coverage"] is False
+
+
+def test_create_cost_probe_authorization_payload_signs_required_context() -> None:
+    now = datetime(2026, 6, 20, 12, tzinfo=UTC)
+    preflight = {
+        "required_authorization": {
+            "code_sha": "abc123",
+            "config_sha256": "cfg456",
+            "symbol": "BTC/USDT",
+            "max_notional_usdt": "5",
+        }
+    }
+
+    payload = build_authorization_payload(
+        preflight=preflight,
+        signed_by="operator",
+        secret="unit-test-secret",
+        ttl_sec=300,
+        authorization_id="auth-1",
+        nonce="nonce-1",
+        now=now,
+    )
+
+    assert payload["scope"] == "v5_cost_probe_live_once"
+    assert payload["approved_live_order_execution"] is True
+    assert payload["symbol"] == "BTC/USDT"
+    assert payload["max_notional_usdt"] == "5"
+    assert payload["signature"] == _authorization_hmac_signature(payload, "unit-test-secret")
+    assert payload["issued_at"] == "2026-06-20T12:00:00Z"
+    assert payload["expires_at"] == "2026-06-20T12:05:00Z"
 
 
 def test_cost_probe_live_once_blocks_incomplete_manual_authorization(tmp_path: Path) -> None:
@@ -483,6 +552,16 @@ def test_cost_probe_live_once_exchange_min_preflight_can_clear_pending_blocker(t
     assert result["state"] == "READY_FOR_OPERATOR_CONFIRMATION"
     assert "exchange_min_notional_check_pending" not in result["blockers"]
     assert result["p3_preflight"]["instrument_preflight_passed"] is True
+    assert result["p3_preflight"]["instrument_minimum_verified"] is True
+    assert result["p3_preflight"]["exchange_min_notional_verified"] is True
+    assert result["p3_preflight"]["offline_plan_state"] == "NO_PLAN_ROWS"
+    assert result["p3_preflight"]["online_exchange_preflight_state"] == "READY_FOR_MANUAL_AUTHORIZATION"
+    assert result["p3_preflight"]["exit_policy"] == "immediate_flat"
+    assert result["p3_preflight"]["max_open_seconds"] == 60
+    assert (
+        result["p3_preflight"]["next_action"]
+        == "create_signed_authorization_and_run_no_order_validation"
+    )
     assert result["p3_preflight"]["normalized_qty"] == "0.000099"
 
 

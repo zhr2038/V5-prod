@@ -464,6 +464,7 @@ COST_PROBE_BUNDLE_ARTIFACTS = (
     ("cost_probe_roundtrip_events.jsonl", "summaries/cost_probe_roundtrip_events.jsonl"),
     ("cost_probe_summary.json", "summaries/cost_probe_summary.json"),
     ("cost_probe_p3_preflight.json", "summaries/cost_probe_p3_preflight.json"),
+    ("cost_probe_live_execution_status.json", "summaries/cost_probe_live_execution_status.json"),
     ("runtime_cost_guard.csv", "summaries/cost_probe_runtime_cost_guard.csv"),
     ("cost_disagreement.csv", "summaries/cost_probe_cost_disagreement.csv"),
 )
@@ -1178,6 +1179,7 @@ def _copy_cost_probe_artifacts(staging: Path, reports: Path) -> dict[str, Any]:
     row_counts: dict[str, int] = {}
     summary_state: dict[str, Any] = {}
     p3_preflight_state: dict[str, Any] = {}
+    live_execution_status: dict[str, Any] = {}
     for filename, summary_rel in COST_PROBE_BUNDLE_ARTIFACTS:
         source = reports / filename
         if not source.exists():
@@ -1227,12 +1229,36 @@ def _copy_cost_probe_artifacts(staging: Path, reports: Path) -> dict[str, Any]:
                     ),
                     "blockers": payload.get("blockers", "not_observable"),
                 }
+        elif filename == "cost_probe_live_execution_status.json":
+            if isinstance(payload, Mapping):
+                live_execution_status = {
+                    "status": payload.get("status", "not_observable"),
+                    "source_state": payload.get("source_state", "not_observable"),
+                    "manual_probe_symbol": payload.get(
+                        "manual_probe_symbol",
+                        "not_observable",
+                    ),
+                    "authorization_validated": payload.get(
+                        "authorization_validated",
+                        "not_observable",
+                    ),
+                    "authorization_consumed": payload.get(
+                        "authorization_consumed",
+                        "not_observable",
+                    ),
+                    "execution_completed": payload.get(
+                        "execution_completed",
+                        "not_observable",
+                    ),
+                    "flat_verified": payload.get("flat_verified", "not_observable"),
+                }
     return {
         "present": present,
         "missing": missing,
         "row_counts": row_counts,
         "summary": summary_state,
         "p3_preflight": p3_preflight_state,
+        "live_execution_status": live_execution_status,
     }
 
 
@@ -2755,6 +2781,9 @@ def export_v5_bundle(
                 "cost_probe_artifact_row_counts": cost_probe_artifacts["row_counts"],
                 "cost_probe_summary": cost_probe_artifacts["summary"],
                 "cost_probe_p3_preflight": cost_probe_artifacts["p3_preflight"],
+                "cost_probe_live_execution_status": cost_probe_artifacts[
+                    "live_execution_status"
+                ],
                 "live_guard_would_block_count": len([row for row in live_guard_impact_rows if _live_guard_would_block(row)]),
                 "would_block_count": len([row for row in live_guard_impact_rows if _live_guard_would_block(row)]),
                 "live_guard_actual_block_count": 0,
@@ -2881,6 +2910,9 @@ def export_v5_bundle(
             "cost_probe_artifact_row_counts": cost_probe_artifacts["row_counts"],
             "cost_probe_summary": cost_probe_artifacts["summary"],
             "cost_probe_p3_preflight": cost_probe_artifacts["p3_preflight"],
+            "cost_probe_live_execution_status": cost_probe_artifacts[
+                "live_execution_status"
+            ],
             "run_summary_invalid": run_summary_invalid,
             "summary_trade_count_mismatch_high_issue_count": summary_high_issue_count,
             "data_quality_warnings": data_quality_warnings,

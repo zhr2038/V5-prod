@@ -39,6 +39,7 @@ AUTHORIZATION_OPERATOR_ALLOWLIST_ENV = "V5_COST_PROBE_AUTH_OPERATORS"
 EXECUTION_MAINTENANCE_LOCK_PATH_ENV = "V5_EXECUTION_MAINTENANCE_LOCK"
 GLOBAL_PROBE_LOCK_PATH_ENV = "V5_COST_PROBE_LIVE_LOCK_PATH"
 GLOBAL_PROBE_LOCK_PATH = "/tmp/v5_execution_maintenance.lock"
+LIVE_EXECUTION_STATUS_FILENAME = "cost_probe_live_execution_status.json"
 AUTHORIZATION_SIGNATURE_FIELDS = (
     "scope",
     "authorization_id",
@@ -631,6 +632,20 @@ def _apply_exchange_min_notional_preflight(
         return p3
     if summary.get("runtime_blockers") or summary.get("symbol_runtime_blockers"):
         return p3
+    selected_plan = dict(symbol_rows[0])
+    exit_policy = str(
+        selected_plan.get("exit_policy")
+        or p3.get("manual_required_exit_policy")
+        or "immediate_flat"
+    )
+    try:
+        max_open_seconds = int(
+            selected_plan.get("max_open_seconds")
+            or p3.get("manual_max_open_seconds")
+            or 60
+        )
+    except Exception:
+        max_open_seconds = 60
     blockers = [
         blocker
         for blocker in list(p3.get("blockers") or [])
@@ -647,7 +662,18 @@ def _apply_exchange_min_notional_preflight(
     out["ready_to_request_manual_live_probe"] = not blockers
     out["manual_probe_symbol"] = symbol
     out["planned_symbols"] = [symbol]
+    out["exit_policy"] = exit_policy
+    out["max_open_seconds"] = max_open_seconds
+    out["offline_plan_state"] = summary.get("state")
+    out["offline_plan_blocked_reasons"] = sorted(blocked_reasons)
+    out["online_exchange_preflight_state"] = out["state"]
+    out["next_action"] = (
+        "create_signed_authorization_and_run_no_order_validation"
+        if not blockers
+        else "fix_preflight_blockers_before_requesting_live_probe"
+    )
     out["instrument_preflight_passed"] = True
+    out["instrument_minimum_verified"] = True
     out["exchange_min_notional_verified"] = True
     out["exchange_min_notional_source"] = "okx_public_instruments_and_ticker"
     out["min_sz"] = instrument.get("min_sz", "")
@@ -1044,6 +1070,90 @@ def _persist_preflight_snapshot(result: dict[str, Any], reports_dir: str | Path)
     out = reports_path / "cost_probe_p3_preflight.json"
     out.write_text(json.dumps(p3, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return out
+
+
+def _persist_live_execution_status(result: dict[str, Any], reports_dir: str | Path) -> Path:
+    reports_path = Path(reports_dir)
+    reports_path.mkdir(parents=True, exist_ok=True)
+    out = reports_path / LIVE_EXECUTION_STATUS_FILENAME
+    status = _live_execution_status(result)
+    out.write_text(json.dumps(status, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return out
+
+
+def _live_execution_status(result: dict[str, Any]) -> dict[str, Any]:
+    p3 = result.get("p3_preflight") if isinstance(result.get("p3_preflight"), dict) else {}
+    authorization = result.get("authorization") if isinstance(result.get("authorization"), dict) else {}
+    flat_verification = (
+        result.get("flat_verification")
+        if isinstance(result.get("flat_verification"), dict)
+        else {}
+    )
+    state = str(result.get("state") or "")
+    completed = bool(result.get("execution_completed") or result.get("completed"))
+    flat_verified = bool(result.get("flat_verified") or flat_verification.get("flat_verified"))
+    entry_filled_qty = _decimal(result.get("entry_filled_qty"))
+    exit_filled_qty = _decimal(result.get("exit_filled_qty"))
+    entry_submitted = bool(str(result.get("entry_order_id") or "").strip())
+    exit_submitted = bool(str(result.get("exit_order_id") or "").strip())
+    auth_consumed = bool(result.get("authorization_consumed") or str(authorization.get("consumed_at") or "").strip())
+    status = "NOT_READY"
+    if state == "READY_FOR_OPERATOR_CONFIRMATION":
+        status = "AUTH_VALIDATED"
+    elif state == "COMPLETED" and completed and flat_verified:
+        status = "CLOSED_FLAT"
+    elif state in {"INCOMPLETE", "ABORTED_KILL_SWITCH_ENABLED"}:
+        status = "INCOMPLETE_KILL_SWITCH"
+    elif auth_consumed:
+        status = "AUTH_CONSUMED"
+    elif entry_submitted:
+        status = "ENTRY_FILLED" if entry_filled_qty > 0 else "ENTRY_SUBMITTED"
+    elif state == "NOT_READY" and p3.get("state") == "READY_FOR_MANUAL_AUTHORIZATION":
+        status = "PREFLIGHT_READY"
+    return {
+        "schema_version": "v5.cost_probe_live_execution_status.v1",
+        "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "status": status,
+        "known_statuses": [
+            "PREFLIGHT_READY",
+            "AUTH_VALIDATED",
+            "AUTH_CONSUMED",
+            "ENTRY_SUBMITTED",
+            "ENTRY_FILLED",
+            "EXIT_SUBMITTED",
+            "CLOSED_FLAT",
+            "INCOMPLETE_KILL_SWITCH",
+        ],
+        "source_state": state,
+        "manual_probe_symbol": str(result.get("manual_probe_symbol") or p3.get("manual_probe_symbol") or ""),
+        "authorization_id": str(authorization.get("authorization_id") or result.get("authorization_id") or ""),
+        "authorization_validated": state == "READY_FOR_OPERATOR_CONFIRMATION",
+        "authorization_consumed": auth_consumed,
+        "approved_live_order_execution": bool(result.get("approved_live_order_execution")),
+        "live_order_effect": str(result.get("live_order_effect") or ""),
+        "blockers": list(result.get("blockers") or []),
+        "no_order_submitted": not entry_submitted and not exit_submitted and not completed,
+        "entry_submitted": entry_submitted,
+        "entry_filled": entry_filled_qty > 0,
+        "entry_filled_qty": _decimal_text(entry_filled_qty),
+        "exit_submitted": exit_submitted,
+        "exit_filled": exit_filled_qty > 0,
+        "exit_filled_qty": _decimal_text(exit_filled_qty),
+        "execution_completed": completed,
+        "flat_verified": flat_verified,
+        "exchange_flat_verified": bool(
+            result.get("exchange_flat_verified") or flat_verification.get("exchange_flat_verified")
+        ),
+        "local_flat_verified": bool(
+            result.get("local_flat_verified") or flat_verification.get("local_flat_verified")
+        ),
+        "reconcile_ok": bool(result.get("reconcile_ok") or flat_verification.get("reconcile_ok")),
+        "cost_evidence_complete": bool(result.get("cost_evidence_complete")),
+        "eligible_for_cost_model": bool(result.get("eligible_for_cost_model")),
+        "eligible_for_live_cost_coverage": bool(result.get("eligible_for_live_cost_coverage")),
+        "sample_origin": str(result.get("sample_origin") or ""),
+        "source": str(result.get("source") or ""),
+    }
 
 
 def _single_configured_symbol(cfg: Any) -> str:
@@ -2097,6 +2207,7 @@ def main(argv: list[str] | None = None) -> int:
             operator_confirmed=args.i_understand_this_submits_live_okx_orders,
         )
         _persist_preflight_snapshot(result, args.reports_dir)
+        _persist_live_execution_status(result, args.reports_dir)
     finally:
         client.close()
     print(json.dumps(result, ensure_ascii=False, indent=2))

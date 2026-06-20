@@ -122,6 +122,7 @@ COST_PROBE_BUNDLE_ARTIFACTS = [
     ("cost_probe_roundtrip_events.jsonl", "summaries/cost_probe_roundtrip_events.jsonl"),
     ("cost_probe_summary.json", "summaries/cost_probe_summary.json"),
     ("cost_probe_p3_preflight.json", "summaries/cost_probe_p3_preflight.json"),
+    ("cost_probe_live_execution_status.json", "summaries/cost_probe_live_execution_status.json"),
     ("runtime_cost_guard.csv", "summaries/cost_probe_runtime_cost_guard.csv"),
     ("cost_disagreement.csv", "summaries/cost_probe_cost_disagreement.csv"),
 ]
@@ -1162,6 +1163,30 @@ def copy_cost_probe_artifacts():
                         "not_observable",
                     ),
                     "blockers": payload.get("blockers", "not_observable"),
+                }
+        elif filename == "cost_probe_live_execution_status.json":
+            payload = load_json(source)
+            if isinstance(payload, dict):
+                meta["live_execution_status"] = {
+                    "status": payload.get("status", "not_observable"),
+                    "source_state": payload.get("source_state", "not_observable"),
+                    "manual_probe_symbol": payload.get(
+                        "manual_probe_symbol",
+                        "not_observable",
+                    ),
+                    "authorization_validated": payload.get(
+                        "authorization_validated",
+                        "not_observable",
+                    ),
+                    "authorization_consumed": payload.get(
+                        "authorization_consumed",
+                        "not_observable",
+                    ),
+                    "execution_completed": payload.get(
+                        "execution_completed",
+                        "not_observable",
+                    ),
+                    "flat_verified": payload.get("flat_verified", "not_observable"),
                 }
     return meta
 
@@ -14975,6 +15000,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "cost_probe_artifact_row_counts": cost_probe_artifact_meta.get("row_counts", {}),
         "cost_probe_summary": cost_probe_artifact_meta.get("summary", {}),
         "cost_probe_p3_preflight": cost_probe_artifact_meta.get("p3_preflight", {}),
+        "cost_probe_live_execution_status": cost_probe_artifact_meta.get(
+            "live_execution_status",
+            {},
+        ),
         "router_decision_rows": len(router_rows),
         "has_trade_data": has_trade_data,
         "trade_observation_status": trade_observation_status,
@@ -16776,6 +16805,10 @@ summary_meta.update(
         "cost_probe_artifact_row_counts": cost_probe_artifact_meta.get("row_counts", {}),
         "cost_probe_summary": cost_probe_artifact_meta.get("summary", {}),
         "cost_probe_p3_preflight": cost_probe_artifact_meta.get("p3_preflight", {}),
+        "cost_probe_live_execution_status": cost_probe_artifact_meta.get(
+            "live_execution_status",
+            {},
+        ),
     }
 )
 filter_raw_jsonl_outputs_recent_24h()
@@ -16923,6 +16956,7 @@ manifest = {
     "cost_probe_artifact_row_counts": summary_meta.get("cost_probe_artifact_row_counts", {}),
     "cost_probe_summary": summary_meta.get("cost_probe_summary", {}),
     "cost_probe_p3_preflight": summary_meta.get("cost_probe_p3_preflight", {}),
+    "cost_probe_live_execution_status": summary_meta.get("cost_probe_live_execution_status", {}),
     "trade_state_consistency_rows": int(summary_meta.get("trade_state_consistency_rows", 0) or 0),
     "close_lifecycle_missing_trade_export_count": int(
         summary_meta.get("close_lifecycle_missing_trade_export_count", 0) or 0
