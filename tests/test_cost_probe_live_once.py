@@ -259,6 +259,12 @@ def test_cost_probe_live_once_waits_for_operator_execution_confirmation(tmp_path
     assert status["authorization_validated"] is True
     assert status["no_order_submitted"] is True
     assert status["approved_live_order_execution"] is False
+    assert status["instrument_preflight_passed"] is True
+    assert status["instrument_state"] == "live"
+    assert status["quote_balance_sufficient"] is True
+    assert status["quote_balance"] == "100"
+    assert status["quote_required"] == "5.05"
+    assert status["order_plan"]["base_qty"] == "0.000099"
 
 
 def test_cost_probe_live_once_persists_latest_p3_preflight_snapshot(tmp_path: Path) -> None:

@@ -1083,6 +1083,11 @@ def _persist_live_execution_status(result: dict[str, Any], reports_dir: str | Pa
 
 def _live_execution_status(result: dict[str, Any]) -> dict[str, Any]:
     p3 = result.get("p3_preflight") if isinstance(result.get("p3_preflight"), dict) else {}
+    instrument = (
+        result.get("instrument_preflight")
+        if isinstance(result.get("instrument_preflight"), dict)
+        else {}
+    )
     authorization = result.get("authorization") if isinstance(result.get("authorization"), dict) else {}
     flat_verification = (
         result.get("flat_verification")
@@ -1097,6 +1102,13 @@ def _live_execution_status(result: dict[str, Any]) -> dict[str, Any]:
     entry_submitted = bool(str(result.get("entry_order_id") or "").strip())
     exit_submitted = bool(str(result.get("exit_order_id") or "").strip())
     auth_consumed = bool(result.get("authorization_consumed") or str(authorization.get("consumed_at") or "").strip())
+    quote_balance = _decimal_or_none(instrument.get("quote_balance"))
+    quote_required = _decimal_or_none(instrument.get("quote_required"))
+    quote_balance_sufficient = (
+        None
+        if quote_balance is None or quote_required is None
+        else quote_balance >= quote_required
+    )
     status = "NOT_READY"
     if state == "READY_FOR_OPERATOR_CONFIRMATION":
         status = "AUTH_VALIDATED"
@@ -1132,6 +1144,12 @@ def _live_execution_status(result: dict[str, Any]) -> dict[str, Any]:
         "approved_live_order_execution": bool(result.get("approved_live_order_execution")),
         "live_order_effect": str(result.get("live_order_effect") or ""),
         "blockers": list(result.get("blockers") or []),
+        "instrument_preflight_passed": bool(instrument.get("instrument_preflight_passed")),
+        "instrument_state": str(instrument.get("instrument_state") or ""),
+        "quote_balance": str(instrument.get("quote_balance") or ""),
+        "quote_required": str(instrument.get("quote_required") or ""),
+        "quote_balance_sufficient": quote_balance_sufficient,
+        "order_plan": instrument.get("order_plan") if isinstance(instrument.get("order_plan"), dict) else {},
         "no_order_submitted": not entry_submitted and not exit_submitted and not completed,
         "entry_submitted": entry_submitted,
         "entry_filled": entry_filled_qty > 0,
