@@ -1035,6 +1035,17 @@ def _runtime_paths(payload: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _persist_preflight_snapshot(result: dict[str, Any], reports_dir: str | Path) -> Path | None:
+    p3 = result.get("p3_preflight")
+    if not isinstance(p3, dict):
+        return None
+    reports_path = Path(reports_dir)
+    reports_path.mkdir(parents=True, exist_ok=True)
+    out = reports_path / "cost_probe_p3_preflight.json"
+    out.write_text(json.dumps(p3, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return out
+
+
 def _single_configured_symbol(cfg: Any) -> str:
     execution = getattr(cfg, "execution", cfg)
     symbols = []
@@ -2085,6 +2096,7 @@ def main(argv: list[str] | None = None) -> int:
             execute_live_order=args.execute_live_order,
             operator_confirmed=args.i_understand_this_submits_live_okx_orders,
         )
+        _persist_preflight_snapshot(result, args.reports_dir)
     finally:
         client.close()
     print(json.dumps(result, ensure_ascii=False, indent=2))

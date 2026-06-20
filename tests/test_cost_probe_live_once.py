@@ -20,6 +20,7 @@ from scripts.cost_probe_live_once import (
     _consume_authorization_file,
     _cost_probe_config_sha,
     _current_code_sha,
+    _persist_preflight_snapshot,
     _reconcile_probe_dust_accepted,
     _roundtrip_cost_fields,
     build_live_probe_preflight,
@@ -250,6 +251,24 @@ def test_cost_probe_live_once_waits_for_operator_execution_confirmation(tmp_path
     assert result["approved_live_order_execution"] is False
     assert fake.placed == []
     assert result["instrument_preflight"]["order_plan"]["base_qty"] == "0.000099"
+
+
+def test_cost_probe_live_once_persists_latest_p3_preflight_snapshot(tmp_path: Path) -> None:
+    result = {
+        "p3_preflight": {
+            "state": "READY_FOR_MANUAL_AUTHORIZATION",
+            "manual_probe_symbol": "BTC/USDT",
+            "approved_live_order_execution": False,
+        }
+    }
+
+    path = _persist_preflight_snapshot(result, tmp_path / "reports")
+
+    assert path == tmp_path / "reports" / "cost_probe_p3_preflight.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["state"] == "READY_FOR_MANUAL_AUTHORIZATION"
+    assert payload["manual_probe_symbol"] == "BTC/USDT"
+    assert payload["approved_live_order_execution"] is False
 
 
 def test_cost_probe_live_once_blocks_incomplete_manual_authorization(tmp_path: Path) -> None:
