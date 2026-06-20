@@ -14,6 +14,11 @@ from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from pathlib import Path
 from typing import Any
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback for local checks.
+    fcntl = None  # type: ignore[assignment]
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -31,8 +36,9 @@ AUTHORIZATION_MAX_TTL_SEC = 300
 AUTHORIZATION_CLOCK_SKEW_SEC = 30
 AUTHORIZATION_HMAC_SECRET_ENV = "V5_COST_PROBE_AUTH_HMAC_SECRET"
 AUTHORIZATION_OPERATOR_ALLOWLIST_ENV = "V5_COST_PROBE_AUTH_OPERATORS"
+EXECUTION_MAINTENANCE_LOCK_PATH_ENV = "V5_EXECUTION_MAINTENANCE_LOCK"
 GLOBAL_PROBE_LOCK_PATH_ENV = "V5_COST_PROBE_LIVE_LOCK_PATH"
-GLOBAL_PROBE_LOCK_PATH = "/var/lock/v5-cost-probe-live-once.lock"
+GLOBAL_PROBE_LOCK_PATH = "/tmp/v5_execution_maintenance.lock"
 AUTHORIZATION_SIGNATURE_FIELDS = (
     "scope",
     "authorization_id",
@@ -963,11 +969,21 @@ class _GlobalProbeExecutionLock:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.fd: int | None = None
+        self._owns_exclusive_file = False
 
     def __enter__(self) -> "_GlobalProbeExecutionLock":
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+            if fcntl is None:
+                self.fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+                self._owns_exclusive_file = True
+            else:
+                self.fd = os.open(str(self.path), os.O_CREAT | os.O_RDWR)
+                try:
+                    fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError as exc:
+                    raise RuntimeError("cost_probe_global_execution_lock_held") from exc
+                os.ftruncate(self.fd, 0)
             os.write(
                 self.fd,
                 f"{os.getpid()} {datetime.now(UTC).isoformat().replace('+00:00', 'Z')}\n".encode("utf-8"),
@@ -980,16 +996,26 @@ class _GlobalProbeExecutionLock:
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
         if self.fd is not None:
+            if fcntl is not None:
+                try:
+                    fcntl.flock(self.fd, fcntl.LOCK_UN)
+                except OSError:
+                    pass
             os.close(self.fd)
             self.fd = None
-        try:
-            self.path.unlink()
-        except FileNotFoundError:
-            pass
+        if self._owns_exclusive_file:
+            try:
+                self.path.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def _global_probe_execution_lock() -> _GlobalProbeExecutionLock:
-    return _GlobalProbeExecutionLock(os.environ.get(GLOBAL_PROBE_LOCK_PATH_ENV) or GLOBAL_PROBE_LOCK_PATH)
+    return _GlobalProbeExecutionLock(
+        os.environ.get(EXECUTION_MAINTENANCE_LOCK_PATH_ENV)
+        or os.environ.get(GLOBAL_PROBE_LOCK_PATH_ENV)
+        or GLOBAL_PROBE_LOCK_PATH
+    )
 
 
 def _client_order_prefix(auth: dict[str, Any]) -> str:

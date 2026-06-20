@@ -9,6 +9,11 @@ from pathlib import Path
 
 import pytest
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback.
+    fcntl = None  # type: ignore[assignment]
+
 from configs.schema import AppConfig
 from scripts.cost_probe_live_once import (
     _authorization_hmac_signature,
@@ -572,18 +577,28 @@ def test_cost_probe_live_once_global_lock_blocks_second_executor_before_consumin
     _write_clean_runtime_state(tmp_path)
     auth_path = _write_auth(tmp_path, cfg=cfg)
     lock_path = Path(os.environ["V5_COST_PROBE_LIVE_LOCK_PATH"])
-    lock_path.write_text("held\n", encoding="utf-8")
+    lock_fd = None
+    if fcntl is None:
+        lock_path.write_text("held\n", encoding="utf-8")
+    else:
+        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     fake = _FakeOKX()
 
-    result = run_live_probe_once(
-        cfg,
-        reports_dir=tmp_path / "reports",
-        auth_path=auth_path,
-        okx=fake,
-        project_root=tmp_path,
-        execute_live_order=True,
-        operator_confirmed=True,
-    )
+    try:
+        result = run_live_probe_once(
+            cfg,
+            reports_dir=tmp_path / "reports",
+            auth_path=auth_path,
+            okx=fake,
+            project_root=tmp_path,
+            execute_live_order=True,
+            operator_confirmed=True,
+        )
+    finally:
+        if lock_fd is not None:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            os.close(lock_fd)
 
     assert result["state"] == "NOT_READY"
     assert "cost_probe_global_execution_lock_held" in result["blockers"]

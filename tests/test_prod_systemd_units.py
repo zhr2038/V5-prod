@@ -67,6 +67,17 @@ def test_live_prod_service_fails_when_pre_trade_auto_sync_fails() -> None:
     assert "ExecStartPre=/bin/bash" in service
 
 
+def test_live_prod_and_cost_probe_share_execution_maintenance_lock() -> None:
+    service = (PROJECT_ROOT / "deploy" / "systemd" / "v5-prod.user.service").read_text(encoding="utf-8")
+    live_runner = (PROJECT_ROOT / "scripts" / "run_hourly_live_window.sh").read_text(encoding="utf-8")
+    probe_runner = (PROJECT_ROOT / "scripts" / "cost_probe_live_once.py").read_text(encoding="utf-8")
+
+    assert "Environment=V5_EXECUTION_MAINTENANCE_LOCK=/tmp/v5_execution_maintenance.lock" in service
+    assert "V5_EXECUTION_MAINTENANCE_LOCK" in live_runner
+    assert 'GLOBAL_PROBE_LOCK_PATH = "/tmp/v5_execution_maintenance.lock"' in probe_runner
+    assert "V5_COST_PROBE_LIVE_LOCK_PATH" in probe_runner
+
+
 def test_event_driven_timer_is_offset_from_hourly_live_and_auto_risk_writes() -> None:
     timer = (PROJECT_ROOT / "deploy" / "systemd" / "v5-event-driven.timer").read_text(encoding="utf-8")
 
