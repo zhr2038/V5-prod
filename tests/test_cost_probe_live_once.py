@@ -41,6 +41,7 @@ class _FakeOKX:
         quote_balance: str = "100",
         ticker_bids: list[str] | None = None,
         unknown_fee_ccy: bool = False,
+        raise_on_emergency_flatten: bool = False,
     ) -> None:
         self.placed: list[dict] = []
         self.partial_exit = partial_exit
@@ -51,6 +52,7 @@ class _FakeOKX:
         self.quote_balance = Decimal(quote_balance)
         self.ticker_bids = list(ticker_bids or ["49990"])
         self.unknown_fee_ccy = unknown_fee_ccy
+        self.raise_on_emergency_flatten = raise_on_emergency_flatten
         self.orders_by_clid: dict[str, dict] = {}
         self.settled_clids: set[str] = set()
         self.cancels: list[dict] = []
@@ -96,6 +98,8 @@ class _FakeOKX:
 
     def place_order(self, payload, *, exp_time_ms=None):
         order = dict(payload)
+        if order["side"] == "sell" and "F" in str(order.get("clOrdId") or "") and self.raise_on_emergency_flatten:
+            raise RuntimeError("emergency_flatten_submit_failed")
         self.placed.append(order)
         self.orders_by_clid[order["clOrdId"]] = order
         if order["side"] == "buy" and self.raise_after_entry:
@@ -109,6 +113,12 @@ class _FakeOKX:
         order = self.orders_by_clid.get(cl_ord_id, {"side": "buy" if cl_ord_id.endswith("E") else "sell", "sz": "0.000099"})
         return self._settle_order(order)
 
+    def get_order_fills(self, *, inst_id, ord_id, cl_ord_id):
+        order = self.orders_by_clid.get(cl_ord_id)
+        if not order:
+            return _Response({"code": "0", "data": []})
+        return _Response({"code": "0", "data": [self._fill_row(order)]})
+
     def cancel_order(self, *, inst_id, ord_id=None, cl_ord_id=None):
         payload = {"instId": inst_id, "ordId": ord_id or "", "clOrdId": cl_ord_id or ""}
         self.cancels.append(payload)
@@ -117,10 +127,9 @@ class _FakeOKX:
     def _settle_order(self, order: dict) -> _Response:
         cl_ord_id = str(order.get("clOrdId") or "")
         side = str(order.get("side") or "")
-        fill_qty = Decimal(str(order.get("sz") or "0.000099"))
+        fill_qty = self._fill_qty(order)
         state = "filled"
         if cl_ord_id.endswith("X") and self.partial_exit:
-            fill_qty = min(fill_qty, Decimal("0.00005"))
             state = "partially_filled"
         fee = Decimal("-0.00000001") if side == "buy" and self.base_fee_on_entry else Decimal("-0.01")
         fee_ccy = "OKB" if self.unknown_fee_ccy else ("BTC" if side == "buy" and self.base_fee_on_entry else "USDT")
@@ -148,6 +157,29 @@ class _FakeOKX:
                 ],
             }
         )
+
+    def _fill_qty(self, order: dict) -> Decimal:
+        qty = Decimal(str(order.get("sz") or "0.000099"))
+        if str(order.get("clOrdId") or "").endswith("X") and self.partial_exit:
+            return min(qty, Decimal("0.00005"))
+        return qty
+
+    def _fill_row(self, order: dict) -> dict:
+        cl_ord_id = str(order.get("clOrdId") or "")
+        side = str(order.get("side") or "")
+        fee = Decimal("-0.00000001") if side == "buy" and self.base_fee_on_entry else Decimal("-0.01")
+        fee_ccy = "OKB" if self.unknown_fee_ccy else ("BTC" if side == "buy" and self.base_fee_on_entry else "USDT")
+        return {
+            "instId": str(order.get("instId") or "BTC-USDT"),
+            "clOrdId": cl_ord_id,
+            "ordId": f"okx-{cl_ord_id[-1]}",
+            "tradeId": f"trade-{cl_ord_id}",
+            "side": side,
+            "fillSz": format(self._fill_qty(order), "f"),
+            "fillPx": "50010",
+            "fee": format(fee, "f"),
+            "feeCcy": fee_ccy,
+        }
 
     def get_balance(self, ccy=None):
         details = (
@@ -460,6 +492,36 @@ def test_cost_probe_live_once_partial_exit_is_incomplete_and_triggers_emergency_
     assert kill_switch["sell_only_on_error"] is True
 
 
+def test_cost_probe_live_once_records_kill_switch_when_emergency_flatten_throws(
+    tmp_path: Path,
+) -> None:
+    cfg = _ready_cost_probe_config(tmp_path)
+    _write_clean_runtime_state(tmp_path)
+    auth_path = _write_auth(tmp_path, cfg=cfg)
+    fake = _FakeOKX(
+        partial_exit=True,
+        initial_base_balance="0.000003",
+        raise_on_emergency_flatten=True,
+    )
+
+    result = run_live_probe_once(
+        cfg,
+        reports_dir=tmp_path / "reports",
+        auth_path=auth_path,
+        okx=fake,
+        project_root=tmp_path,
+        execute_live_order=True,
+        operator_confirmed=True,
+    )
+
+    assert result["state"] == "INCOMPLETE"
+    assert result["roundtrip_status"] == "incomplete_exit"
+    assert result["emergency_flatten"]["status"] == "emergency_flatten_error"
+    kill_switch = json.loads((tmp_path / "runtime" / "kill_switch.json").read_text(encoding="utf-8"))
+    assert kill_switch["enabled"] is True
+    assert kill_switch["sell_only_on_error"] is True
+
+
 def test_cost_probe_live_once_emergency_flatten_refreshes_exit_bid(tmp_path: Path) -> None:
     cfg = _ready_cost_probe_config(tmp_path)
     _write_clean_runtime_state(tmp_path)
@@ -525,6 +587,48 @@ def test_cost_probe_live_once_global_lock_blocks_second_executor_before_consumin
 
     assert result["state"] == "NOT_READY"
     assert "cost_probe_global_execution_lock_held" in result["blockers"]
+    assert fake.placed == []
+    assert auth_path.exists()
+
+
+def test_cost_probe_live_once_revalidates_runtime_guards_under_global_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cfg = _ready_cost_probe_config(tmp_path)
+    _write_clean_runtime_state(tmp_path)
+    auth_path = _write_auth(tmp_path, cfg=cfg)
+    fake = _FakeOKX()
+
+    class DirtyRuntimeLock:
+        def __enter__(self):
+            (tmp_path / "runtime" / "kill_switch.json").write_text(
+                json.dumps({"enabled": True, "reason": "dirty_under_lock"}),
+                encoding="utf-8",
+            )
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+    monkeypatch.setattr(
+        "scripts.cost_probe_live_once._global_probe_execution_lock",
+        lambda: DirtyRuntimeLock(),
+    )
+
+    result = run_live_probe_once(
+        cfg,
+        reports_dir=tmp_path / "reports",
+        auth_path=auth_path,
+        okx=fake,
+        project_root=tmp_path,
+        execute_live_order=True,
+        operator_confirmed=True,
+    )
+
+    assert result["state"] == "NOT_READY"
+    assert result["live_order_effect"] == "none_runtime_revalidation_failed_no_order"
+    assert result["authorization_consumed"] is False
     assert fake.placed == []
     assert auth_path.exists()
 
@@ -616,17 +720,25 @@ def test_cost_probe_roundtrip_cost_converts_base_fee_to_usdt() -> None:
     cost = _roundtrip_cost_fields(
         {
             "instId": "BTC-USDT",
-            "accFillSz": "0.001",
-            "avgPx": "50000",
-            "fee": "-0.000001",
-            "feeCcy": "BTC",
+            "_fills": [
+                {
+                    "fillSz": "0.001",
+                    "fillPx": "50000",
+                    "fee": "-0.000001",
+                    "feeCcy": "BTC",
+                }
+            ],
         },
         {
             "instId": "BTC-USDT",
-            "accFillSz": "0.001",
-            "avgPx": "50000",
-            "fee": "-0.05",
-            "feeCcy": "USDT",
+            "_fills": [
+                {
+                    "fillSz": "0.001",
+                    "fillPx": "50000",
+                    "fee": "-0.05",
+                    "feeCcy": "USDT",
+                }
+            ],
         },
         "BTC/USDT",
     )
@@ -635,6 +747,43 @@ def test_cost_probe_roundtrip_cost_converts_base_fee_to_usdt() -> None:
     assert cost["exit_fee_usdt"] == "-0.05"
     assert cost["net_pnl_usdt"] == "-0.1"
     assert cost["fee_conversion_warnings"] == ""
+    assert cost["cost_evidence_complete"] == "true"
+    assert cost["entry_has_fill_rows"] == "true"
+    assert cost["exit_has_fill_rows"] == "true"
+
+
+def test_cost_probe_roundtrip_cost_does_not_double_count_reflected_base_fee() -> None:
+    cost = _roundtrip_cost_fields(
+        {
+            "instId": "BTC-USDT",
+            "_fills": [
+                {
+                    "fillSz": "0.001",
+                    "fillPx": "50000",
+                    "fee": "-0.000001",
+                    "feeCcy": "BTC",
+                }
+            ],
+        },
+        {
+            "instId": "BTC-USDT",
+            "_fills": [
+                {
+                    "fillSz": "0.000999",
+                    "fillPx": "50000",
+                    "fee": "-0.05",
+                    "feeCcy": "USDT",
+                }
+            ],
+        },
+        "BTC/USDT",
+    )
+
+    assert cost["entry_fee_usdt"] == "-0.05"
+    assert cost["entry_fee_usdt_applied_to_net"] == "0"
+    assert cost["entry_base_fee_reflected_in_exit_qty"] == "true"
+    assert cost["entry_base_fee_ledger_adjustment_usdt"] == "0.05"
+    assert cost["net_pnl_usdt"] == "-0.1"
     assert cost["cost_evidence_complete"] == "true"
 
 

@@ -177,6 +177,23 @@ def _execute_live_probe(
     auth_path: str | Path,
     project_root: str | Path,
 ) -> dict[str, Any]:
+    locked_preflight = build_live_probe_preflight(
+        cfg,
+        reports_dir=reports_dir,
+        auth_path=auth_path,
+        okx=okx,
+        project_root=project_root,
+    )
+    if locked_preflight["state"] != "READY_FOR_LIVE_EXECUTION":
+        return {
+            **locked_preflight,
+            "state": "NOT_READY",
+            "approved_live_order_execution": False,
+            "live_order_effect": "none_runtime_revalidation_failed_no_order",
+            "authorization_consumed": False,
+            "lock_revalidated": True,
+        }
+    preflight = locked_preflight
     symbol = str(preflight["manual_probe_symbol"])
     inst_id = symbol.replace("/", "-").upper()
     instrument = dict(preflight["instrument_preflight"])
@@ -309,7 +326,8 @@ def _execute_live_probe(
         entry_state["_planned_exit_qty"] = _decimal_text(exit_qty)
         entry_state["_unsellable_dust_qty"] = _decimal_text(unsellable_dust)
         if exit_qty <= Decimal("0"):
-            emergency = _emergency_flatten_cost_probe(
+            _write_kill_switch(cfg, reason="cost_probe_no_sellable_exit_qty")
+            emergency = _safe_emergency_flatten_cost_probe(
                 okx,
                 symbol=symbol,
                 inst_id=inst_id,
@@ -330,7 +348,6 @@ def _execute_live_probe(
                 exit_state={},
                 emergency=emergency,
             )
-            _write_kill_switch(cfg, reason="cost_probe_no_sellable_exit_qty")
             return _finish_roundtrip(
                 roundtrip_events_path,
                 symbol=symbol,
@@ -402,7 +419,8 @@ def _execute_live_probe(
             exit_state=exit_state,
         )
         if not flat["flat_verified"]:
-            emergency = _emergency_flatten_cost_probe(
+            _write_kill_switch(cfg, reason="cost_probe_incomplete_exit")
+            emergency = _safe_emergency_flatten_cost_probe(
                 okx,
                 symbol=symbol,
                 inst_id=inst_id,
@@ -423,7 +441,6 @@ def _execute_live_probe(
                 exit_state=exit_state,
                 emergency=emergency,
             )
-            _write_kill_switch(cfg, reason="cost_probe_incomplete_exit")
             return _finish_roundtrip(
                 roundtrip_events_path,
                 symbol=symbol,
@@ -453,7 +470,10 @@ def _execute_live_probe(
         )
     except Exception as exc:
         emergency: dict[str, Any] = {}
+        kill_switch_written = False
         if entry_order_attempted:
+            _write_kill_switch(cfg, reason=f"cost_probe_live_once_error:{exc}")
+            kill_switch_written = True
             if entry_cl_ord_id and not entry_state:
                 entry_state = _recover_order_state(
                     okx,
@@ -472,7 +492,7 @@ def _execute_live_probe(
                 _probe_balance_delta(okx, symbol=symbol, instrument=instrument),
                 Decimal("0"),
             )
-            emergency = _emergency_flatten_cost_probe(
+            emergency = _safe_emergency_flatten_cost_probe(
                 okx,
                 symbol=symbol,
                 inst_id=inst_id,
@@ -508,7 +528,8 @@ def _execute_live_probe(
                 completed=False,
                 authorization=consumed_auth,
             )
-        _write_kill_switch(cfg, reason=f"cost_probe_live_once_error:{exc}")
+        if not kill_switch_written:
+            _write_kill_switch(cfg, reason=f"cost_probe_live_once_error:{exc}")
         return {
             "state": "ABORTED_KILL_SWITCH_ENABLED",
             "live_order_effect": "kill_switch_enabled_after_cost_probe_error",
@@ -1185,6 +1206,19 @@ def _finish_roundtrip(
     emergency: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     cost = _roundtrip_cost_fields(entry_state, exit_state, symbol)
+    flat_verified = bool(flat_verification.get("flat_verified"))
+    exchange_flat_verified = bool(flat_verification.get("exchange_flat_verified"))
+    local_flat_verified = bool(flat_verification.get("local_flat_verified"))
+    reconcile_ok = bool(flat_verification.get("reconcile_ok"))
+    cost_evidence_complete = cost["cost_evidence_complete"] == "true"
+    eligible_for_cost_model = (
+        bool(completed)
+        and flat_verified
+        and exchange_flat_verified
+        and local_flat_verified
+        and reconcile_ok
+        and cost_evidence_complete
+    )
     row = {
         "event_type": f"roundtrip:{status}",
         "event_ts": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
@@ -1192,8 +1226,12 @@ def _finish_roundtrip(
         "roundtrip_status": status,
         "completed": bool(completed),
         "execution_completed": bool(completed),
-        "cost_evidence_complete": cost["cost_evidence_complete"] == "true",
-        "eligible_for_cost_model": bool(completed) and cost["cost_evidence_complete"] == "true",
+        "cost_evidence_complete": cost_evidence_complete,
+        "eligible_for_cost_model": eligible_for_cost_model,
+        "eligible_for_alpha_pnl": False,
+        "eligible_for_live_cost_coverage": False,
+        "sample_origin": "cost_probe",
+        "source": "bootstrap_cost_probe",
         "roundtrip_id": f"{entry_order_id}:{exit_order_id}",
         "entry_order_id": entry_order_id,
         "exit_order_id": exit_order_id,
@@ -1221,9 +1259,10 @@ def _finish_roundtrip(
         "arrival_ask_px": instrument.get("ask_px", ""),
         "arrival_mid_px": _arrival_mid_px(instrument),
         "flat_verification": flat_verification,
-        "local_flat_verified": flat_verification.get("local_flat_verified", False),
-        "exchange_flat_verified": flat_verification.get("exchange_flat_verified", False),
-        "reconcile_ok": flat_verification.get("reconcile_ok", False),
+        "flat_verified": flat_verified,
+        "local_flat_verified": local_flat_verified,
+        "exchange_flat_verified": exchange_flat_verified,
+        "reconcile_ok": reconcile_ok,
         "open_order_count": flat_verification.get("open_order_count", -1),
         "emergency_flatten": emergency or {},
     }
@@ -1507,6 +1546,40 @@ def _emergency_flatten_cost_probe(
     return result
 
 
+def _safe_emergency_flatten_cost_probe(
+    okx: Any,
+    *,
+    symbol: str,
+    inst_id: str,
+    instrument: dict[str, Any],
+    order_events_path: Path,
+    fallback_qty: Decimal,
+    reason: str,
+    clid_prefix: str | None = None,
+) -> dict[str, Any]:
+    try:
+        return _emergency_flatten_cost_probe(
+            okx,
+            symbol=symbol,
+            inst_id=inst_id,
+            instrument=instrument,
+            order_events_path=order_events_path,
+            fallback_qty=fallback_qty,
+            reason=reason,
+            clid_prefix=clid_prefix,
+        )
+    except Exception as exc:
+        return {
+            "attempted": True,
+            "reason": reason,
+            "status": "emergency_flatten_error",
+            "error": str(exc),
+            "target_qty": _decimal_text(fallback_qty),
+            "sell_qty": "unverified",
+            "attempts": [],
+        }
+
+
 def _fresh_emergency_exit_px(
     okx: Any,
     *,
@@ -1546,12 +1619,34 @@ def _roundtrip_cost_fields(entry_state: dict[str, Any], exit_state: dict[str, An
     entry_notional = entry_qty * entry_px
     exit_notional = exit_qty * exit_px
     gross_pnl = exit_notional - entry_notional
-    net_pnl = gross_pnl + entry_fee_usdt + exit_fee_usdt
+    entry_base_fee_usdt = _base_fee_usdt(entry_state, price=entry_px, symbol=symbol)
+    base_fee_reflected_in_exit_qty = _base_fee_reflected_in_exit_quantity(
+        entry_state,
+        entry_qty=entry_qty,
+        exit_qty=exit_qty,
+        symbol=symbol,
+    )
+    entry_fee_for_net = (
+        entry_fee_usdt - entry_base_fee_usdt
+        if base_fee_reflected_in_exit_qty
+        else entry_fee_usdt
+    )
+    net_pnl = gross_pnl + entry_fee_for_net + exit_fee_usdt
     cost_bps = Decimal("0")
     if entry_notional > 0:
         cost_bps = (Decimal("0") - net_pnl) / entry_notional * Decimal("10000")
     fee_warnings = [*entry_warnings, *exit_warnings]
-    cost_evidence_complete = not fee_warnings
+    entry_has_fills = bool(_fill_rows(entry_state))
+    exit_has_fills = bool(_fill_rows(exit_state))
+    cost_evidence_complete = (
+        entry_has_fills
+        and exit_has_fills
+        and entry_qty > 0
+        and exit_qty > 0
+        and entry_px > 0
+        and exit_px > 0
+        and not fee_warnings
+    )
     return {
         "entry_filled_qty": _decimal_text(entry_qty),
         "exit_filled_qty": _decimal_text(exit_qty),
@@ -1563,6 +1658,13 @@ def _roundtrip_cost_fields(entry_state: dict[str, Any], exit_state: dict[str, An
         "exit_fee": _decimal_text(exit_fee),
         "exit_fee_ccy": _fee_ccy(exit_state),
         "exit_fee_usdt": _decimal_text(exit_fee_usdt),
+        "entry_fee_usdt_applied_to_net": _decimal_text(entry_fee_for_net),
+        "entry_base_fee_reflected_in_exit_qty": str(base_fee_reflected_in_exit_qty).lower(),
+        "entry_base_fee_ledger_adjustment_usdt": _decimal_text(
+            Decimal("0") - entry_base_fee_usdt if base_fee_reflected_in_exit_qty else Decimal("0")
+        ),
+        "entry_has_fill_rows": str(entry_has_fills).lower(),
+        "exit_has_fill_rows": str(exit_has_fills).lower(),
         "fee_conversion_warnings": ";".join(fee_warnings),
         "cost_evidence_complete": str(cost_evidence_complete).lower(),
         "gross_pnl_usdt": _decimal_text(gross_pnl),
@@ -1649,6 +1751,38 @@ def _fee_usdt(row: dict[str, Any], *, price: Decimal, symbol: str) -> tuple[Deci
             else:
                 warnings.append(f"fee_ccy_conversion_unavailable:{ccy or 'unknown'}")
     return total, warnings
+
+
+def _base_fee_usdt(row: dict[str, Any], *, price: Decimal, symbol: str) -> Decimal:
+    base = symbol.upper().replace("-", "/").split("/")[0]
+    total = Decimal("0")
+    for item in _fill_rows(row) or [row]:
+        ccy = str(item.get("feeCcy") or row.get("feeCcy") or "").upper()
+        if ccy != base:
+            continue
+        fill_px = _decimal(item.get("fillPx") or item.get("avgPx") or item.get("px")) or price
+        if fill_px > 0:
+            total += _decimal(item.get("fee")) * fill_px
+    return total
+
+
+def _base_fee_reflected_in_exit_quantity(
+    row: dict[str, Any],
+    *,
+    entry_qty: Decimal,
+    exit_qty: Decimal,
+    symbol: str,
+) -> bool:
+    base = symbol.upper().replace("-", "/").split("/")[0]
+    base_fee_qty = Decimal("0")
+    for item in _fill_rows(row) or [row]:
+        ccy = str(item.get("feeCcy") or row.get("feeCcy") or "").upper()
+        if ccy == base:
+            base_fee_qty += abs(_decimal(item.get("fee")))
+    if base_fee_qty <= 0:
+        return False
+    exit_gap = max(entry_qty - exit_qty, Decimal("0"))
+    return exit_gap >= base_fee_qty
 
 
 def _fill_rows(row: dict[str, Any]) -> list[dict[str, Any]]:
