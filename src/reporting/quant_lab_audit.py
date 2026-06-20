@@ -73,7 +73,9 @@ NON_SECRET_EXACT_KEYS = {
     "api_env_secure_permissions",
     "api_env_token_loaded",
     "api_env_warning",
+    "authorization_consumed",
     "authorization_id",
+    "authorization_validated",
     "manual_authorization_required",
 }
 

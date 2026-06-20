@@ -126,7 +126,9 @@ NON_SECRET_CONFIG_KEYS = {
     "api_env_token_loaded",
     "api_env_warning",
     "api_token_env",
+    "authorization_consumed",
     "authorization_id",
+    "authorization_validated",
     "manual_authorization_required",
 }
 

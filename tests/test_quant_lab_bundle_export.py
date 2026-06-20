@@ -475,6 +475,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
                 "status": "PREFLIGHT_READY",
                 "source_state": "NOT_READY",
                 "manual_probe_symbol": "BTC/USDT",
+                "authorization_id": "cost-probe-test-auth",
                 "authorization_validated": False,
                 "authorization_consumed": False,
                 "execution_completed": False,
@@ -724,6 +725,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert manifest["cost_probe_p3_preflight"]["state"] == "NOT_READY"
         assert manifest["cost_probe_p3_preflight"]["approved_live_order_execution"] is False
         assert cost_probe_live_execution_status["status"] == "PREFLIGHT_READY"
+        assert cost_probe_live_execution_status["authorization_id"] == "cost-probe-test-auth"
+        assert cost_probe_live_execution_status["authorization_validated"] is False
+        assert cost_probe_live_execution_status["authorization_consumed"] is False
         assert manifest["cost_probe_live_execution_status"]["status"] == "PREFLIGHT_READY"
         assert window["fill_metrics_rows"] == 1
         assert window["candidate_snapshot_rows"] == 1

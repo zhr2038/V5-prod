@@ -575,7 +575,9 @@ UNREDACTED_SECRET_RE = re.compile(
     r"(?!<REDACTED>|REDACTED|null|none|false|true|0\b)[^\"'\s,;#}\]]+"
 )
 NON_SECRET_KEYS = {
+    "authorization_consumed",
     "authorization_id",
+    "authorization_validated",
     "manual_authorization_required",
 }
 DUST_TERMS = ("dust", "anti_chase", "anti-chase", "anti chase")
