@@ -566,6 +566,13 @@ def test_cost_probe_live_once_execute_uses_entry_and_immediate_exit_with_fake_ok
     assert (tmp_path / "auth.consumed.json").exists()
     assert result["completed"] is True
     assert result["flat_verification"]["flat_verified"] is True
+    roundtrip = json.loads((tmp_path / "reports" / "cost_probe_roundtrip_events.jsonl").read_text().splitlines()[-1])
+    assert roundtrip["cost_evidence_complete"] is True
+    assert roundtrip["entry_has_fill_rows"] == "true"
+    assert roundtrip["exit_has_fill_rows"] == "true"
+    assert roundtrip["entry_has_fill_evidence"] == "true"
+    assert roundtrip["exit_has_fill_evidence"] == "true"
+    assert "entry_fee_usdt_applied_to_net" in roundtrip
 
 
 def test_cost_probe_live_once_persists_entry_submit_intent_before_order(tmp_path: Path) -> None:
