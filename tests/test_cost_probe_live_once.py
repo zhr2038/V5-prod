@@ -52,6 +52,7 @@ class _FakeOKX:
         raise_on_emergency_flatten: bool = False,
         base_fee_qty: str = "0.00000001",
         lot_sz: str = "0.000001",
+        sell_residual_qty: str | None = None,
     ) -> None:
         self.placed: list[dict] = []
         self.partial_exit = partial_exit
@@ -65,6 +66,9 @@ class _FakeOKX:
         self.raise_on_emergency_flatten = raise_on_emergency_flatten
         self.base_fee_qty = Decimal(base_fee_qty)
         self.lot_sz = str(lot_sz)
+        self.sell_residual_qty = (
+            Decimal(sell_residual_qty) if sell_residual_qty is not None else None
+        )
         self.orders_by_clid: dict[str, dict] = {}
         self.settled_clids: set[str] = set()
         self.cancels: list[dict] = []
@@ -149,7 +153,12 @@ class _FakeOKX:
             if side == "buy":
                 self.balance_qty += fill_qty + (fee if fee_ccy == "BTC" else Decimal("0"))
             elif side == "sell":
-                self.balance_qty = max(self.balance_qty - fill_qty, Decimal("0"))
+                next_balance = max(self.balance_qty - fill_qty, Decimal("0"))
+                self.balance_qty = (
+                    max(next_balance, self.sell_residual_qty)
+                    if self.sell_residual_qty is not None
+                    else next_balance
+                )
             self.settled_clids.add(cl_ord_id)
         return _Response(
             {
@@ -696,6 +705,34 @@ def test_cost_probe_live_once_accepts_base_fee_net_exit_as_flat(tmp_path: Path) 
     assert result["flat_verification"]["entry_base_fee_qty"] == "0.00000008"
     assert result["flat_verification"]["entry_base_fee_reflected_in_exit_qty"] is True
     assert result["flat_verification"]["flat_verified"] is True
+
+
+def test_cost_probe_live_once_accepts_base_fee_dust_residual_as_flat(tmp_path: Path) -> None:
+    cfg = _ready_cost_probe_config(tmp_path)
+    _write_clean_runtime_state(tmp_path)
+    auth_path = _write_auth(tmp_path, cfg=cfg)
+    fake = _FakeOKX(
+        base_fee_on_entry=True,
+        base_fee_qty="0.00000008",
+        lot_sz="0.00000001",
+        sell_residual_qty="0.00000001134",
+    )
+
+    result = run_live_probe_once(
+        cfg,
+        reports_dir=tmp_path / "reports",
+        auth_path=auth_path,
+        okx=fake,
+        project_root=tmp_path,
+        execute_live_order=True,
+        operator_confirmed=True,
+    )
+
+    assert result["state"] == "COMPLETED"
+    assert result["flat_verification"]["exchange_base_delta_from_baseline"] == "0.00000001134"
+    assert result["flat_verification"]["base_flat_tolerance"] == "0.00000008"
+    assert result["flat_verification"]["exchange_flat_verified"] is True
+    assert result["flat_verification"]["reconcile_ok"] is True
 
 
 def test_cost_probe_live_once_exchange_min_preflight_can_clear_pending_blocker(tmp_path: Path) -> None:

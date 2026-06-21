@@ -1984,10 +1984,15 @@ def _verify_roundtrip_flat(
         and total_exit_qty <= entry_qty + tolerance
     )
     required_exit_qty = net_entry_qty if base_fee_reflected_in_exit_qty else entry_qty
+    base_flat_tolerance = (
+        max(tolerance, entry_base_fee_qty)
+        if base_fee_reflected_in_exit_qty
+        else tolerance
+    )
     exit_fully_filled = total_exit_qty + tolerance >= required_exit_qty
     exchange_delta = None if exchange_balance is None else exchange_balance - baseline_balance
-    exchange_flat = exchange_delta is not None and abs(exchange_delta) <= tolerance
-    local_flat = local_qty is not None and local_qty <= tolerance
+    exchange_flat = exchange_delta is not None and abs(exchange_delta) <= base_flat_tolerance
+    local_flat = local_qty is not None and local_qty <= base_flat_tolerance
     open_orders_clear = open_order_count == 0
     raw_reconcile_ok = bool(reconcile.get("ok"))
     reconcile_probe_dust_accepted = (
@@ -1996,7 +2001,7 @@ def _verify_roundtrip_flat(
         and _reconcile_probe_dust_accepted(
             reconcile,
             symbol=symbol,
-            base_tolerance=tolerance,
+            base_tolerance=base_flat_tolerance,
             quote_tolerance=Decimal(str(getattr(getattr(cfg, "execution", cfg), "reconcile_abs_usdt_tol", 1.0) or 1.0)),
         )
     )
@@ -2010,6 +2015,7 @@ def _verify_roundtrip_flat(
         "entry_base_fee_qty": _decimal_text(entry_base_fee_qty),
         "required_exit_qty": _decimal_text(required_exit_qty),
         "entry_base_fee_reflected_in_exit_qty": bool(base_fee_reflected_in_exit_qty),
+        "base_flat_tolerance": _decimal_text(base_flat_tolerance),
         "lot_sz_tolerance": _decimal_text(tolerance),
         "open_order_count": open_order_count,
         "open_orders_clear": open_orders_clear,
@@ -2036,7 +2042,7 @@ def _reconcile_probe_dust_accepted(
     quote_tolerance: Decimal,
 ) -> bool:
     reason = str(reconcile.get("reason") or "").strip().lower()
-    if reason not in {"probe_dust_only", "below_lot_size_residual"}:
+    if reason not in {"probe_dust_only", "below_lot_size_residual", "base_mismatch"}:
         return False
     rendered = json.dumps(reconcile, ensure_ascii=False).lower()
     hard_fail_fragments = ("network_error", "parse_error", "stale", "missing", "unreadable", "invalid")
