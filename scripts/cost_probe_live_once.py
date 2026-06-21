@@ -2042,7 +2042,7 @@ def _reconcile_probe_dust_accepted(
     quote_tolerance: Decimal,
 ) -> bool:
     reason = str(reconcile.get("reason") or "").strip().lower()
-    if reason not in {"probe_dust_only", "below_lot_size_residual", "base_mismatch"}:
+    if reason not in {"", "probe_dust_only", "below_lot_size_residual", "base_mismatch"}:
         return False
     rendered = json.dumps(reconcile, ensure_ascii=False).lower()
     hard_fail_fragments = ("network_error", "parse_error", "stale", "missing", "unreadable", "invalid")
