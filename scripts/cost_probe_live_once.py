@@ -913,6 +913,7 @@ def _apply_exchange_min_notional_preflight(
     out["offline_plan_state"] = summary.get("state")
     out["offline_plan_blocked_reasons"] = sorted(blocked_reasons)
     out["online_exchange_preflight_state"] = out["state"]
+    out["effective_preflight_state"] = out["state"]
     out["next_action"] = (
         "create_signed_authorization_and_run_no_order_validation"
         if not blockers
@@ -1348,7 +1349,40 @@ def _persist_preflight_snapshot(result: dict[str, Any], reports_dir: str | Path)
     reports_path.mkdir(parents=True, exist_ok=True)
     out = reports_path / "cost_probe_p3_preflight.json"
     _atomic_write_json(out, p3)
+    _persist_effective_preflight_summary(p3, reports_path)
     return out
+
+
+def _persist_effective_preflight_summary(p3: dict[str, Any], reports_path: Path) -> None:
+    summary_path = reports_path / "cost_probe_summary.json"
+    try:
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(payload, dict):
+        return
+    effective_state = str(
+        p3.get("effective_preflight_state")
+        or p3.get("online_exchange_preflight_state")
+        or p3.get("state")
+        or ""
+    )
+    payload.update(
+        {
+            "offline_plan_state": p3.get("offline_plan_state", payload.get("state")),
+            "online_exchange_preflight_state": p3.get(
+                "online_exchange_preflight_state",
+                "NOT_RUN",
+            ),
+            "effective_preflight_state": effective_state,
+            "effective_preflight_ready": bool(
+                p3.get("ready_to_request_manual_live_probe")
+            ),
+            "effective_preflight_blockers": list(p3.get("blockers") or []),
+            "manual_probe_symbol": p3.get("manual_probe_symbol", ""),
+        }
+    )
+    _atomic_write_json(summary_path, payload)
 
 
 def _persist_live_execution_status(result: dict[str, Any], reports_dir: str | Path) -> Path:

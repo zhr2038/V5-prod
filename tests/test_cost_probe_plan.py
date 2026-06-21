@@ -133,7 +133,13 @@ def test_cost_probe_p3_preflight_requires_single_symbol_manual_authorization():
     assert p3_preflight["manual_authorization_required"] is True
     assert p3_preflight["approved_live_order_execution"] is False
     assert p3_preflight["manual_probe_symbol"] == "BTC/USDT"
-    assert p3_preflight["manual_allowed_symbols"] == ["BTC/USDT", "ETH/USDT"]
+    assert p3_preflight["manual_allowed_symbols"] == [
+        "BTC/USDT",
+        "ETH/USDT",
+        "SOL/USDT",
+        "BNB/USDT",
+    ]
+    assert p3_preflight["effective_preflight_state"] == "READY_FOR_MANUAL_AUTHORIZATION"
     assert p3_preflight["manual_max_notional_usdt"] == 5.0
     assert p3_preflight["manual_required_exit_policy"] == "immediate_flat"
     assert p3_preflight["manual_max_open_seconds"] == 60
@@ -176,7 +182,7 @@ def test_cost_probe_p3_preflight_rejects_unapproved_symbol():
     cfg.execution.cost_probe_dry_run = True
     cfg.execution.cost_probe_live_enabled = False
     cfg.execution.cost_probe_use_exchange_min_notional = False
-    cfg.execution.cost_probe_symbols = ["SOL/USDT"]
+    cfg.execution.cost_probe_symbols = ["DOGE/USDT"]
     cfg.execution.cost_probe_max_orders_per_day = 2
     cfg.execution.cost_probe_max_roundtrips_per_symbol_per_day = 1
     cfg.execution.cost_probe_max_notional_usdt = 5.0
@@ -188,9 +194,33 @@ def test_cost_probe_p3_preflight_rejects_unapproved_symbol():
     p3_preflight = build_cost_probe_p3_preflight(rows, summary, [])
 
     assert p3_preflight["state"] == "NOT_READY"
-    assert p3_preflight["manual_probe_symbol"] == "SOL/USDT"
+    assert p3_preflight["manual_probe_symbol"] == "DOGE/USDT"
     assert p3_preflight["ready_to_request_manual_live_probe"] is False
     assert "manual_probe_symbol_not_allowed" in p3_preflight["blockers"]
+
+
+def test_cost_probe_p3_preflight_allows_sol_bnb_but_still_requires_single_symbol():
+    for symbol in ["SOL/USDT", "BNB/USDT"]:
+        cfg = AppConfig()
+        cfg.execution.cost_bootstrap_enabled = True
+        cfg.execution.cost_probe_enabled = True
+        cfg.execution.cost_probe_dry_run = True
+        cfg.execution.cost_probe_live_enabled = False
+        cfg.execution.cost_probe_use_exchange_min_notional = False
+        cfg.execution.cost_probe_symbols = [symbol]
+        cfg.execution.cost_probe_max_orders_per_day = 2
+        cfg.execution.cost_probe_max_roundtrips_per_symbol_per_day = 1
+        cfg.execution.cost_probe_max_notional_usdt = 5.0
+
+        rows, summary = build_cost_probe_dry_run_plan(
+            cfg,
+            generated_at=GENERATED_AT,
+        )
+        p3_preflight = build_cost_probe_p3_preflight(rows, summary, [])
+
+        assert p3_preflight["state"] == "READY_FOR_MANUAL_AUTHORIZATION"
+        assert p3_preflight["manual_probe_symbol"] == symbol
+        assert "manual_probe_symbol_not_allowed" not in p3_preflight["blockers"]
 
 
 def test_cost_probe_p3_preflight_rejects_large_notional_or_non_flat_exit():

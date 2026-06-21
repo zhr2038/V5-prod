@@ -280,21 +280,46 @@ def test_cost_probe_live_once_waits_for_operator_execution_confirmation(tmp_path
 
 
 def test_cost_probe_live_once_persists_latest_p3_preflight_snapshot(tmp_path: Path) -> None:
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    (reports / "cost_probe_summary.json").write_text(
+        json.dumps(
+            {
+                "state": "NO_PLAN_ROWS",
+                "dry_run": True,
+                "live_enabled": False,
+                "no_order_submitted": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     result = {
         "p3_preflight": {
             "state": "READY_FOR_MANUAL_AUTHORIZATION",
+            "offline_plan_state": "NO_PLAN_ROWS",
+            "online_exchange_preflight_state": "READY_FOR_MANUAL_AUTHORIZATION",
+            "effective_preflight_state": "READY_FOR_MANUAL_AUTHORIZATION",
             "manual_probe_symbol": "BTC/USDT",
             "approved_live_order_execution": False,
+            "ready_to_request_manual_live_probe": True,
+            "blockers": [],
         }
     }
 
-    path = _persist_preflight_snapshot(result, tmp_path / "reports")
+    path = _persist_preflight_snapshot(result, reports)
 
     assert path == tmp_path / "reports" / "cost_probe_p3_preflight.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["state"] == "READY_FOR_MANUAL_AUTHORIZATION"
     assert payload["manual_probe_symbol"] == "BTC/USDT"
     assert payload["approved_live_order_execution"] is False
+    summary = json.loads((reports / "cost_probe_summary.json").read_text(encoding="utf-8"))
+    assert summary["state"] == "NO_PLAN_ROWS"
+    assert summary["offline_plan_state"] == "NO_PLAN_ROWS"
+    assert summary["online_exchange_preflight_state"] == "READY_FOR_MANUAL_AUTHORIZATION"
+    assert summary["effective_preflight_state"] == "READY_FOR_MANUAL_AUTHORIZATION"
+    assert summary["effective_preflight_ready"] is True
 
 
 def test_cost_probe_live_once_persists_live_execution_status_for_closed_flat(tmp_path: Path) -> None:
@@ -643,6 +668,7 @@ def test_cost_probe_live_once_exchange_min_preflight_can_clear_pending_blocker(t
     assert result["p3_preflight"]["exchange_min_notional_verified"] is True
     assert result["p3_preflight"]["offline_plan_state"] == "NO_PLAN_ROWS"
     assert result["p3_preflight"]["online_exchange_preflight_state"] == "READY_FOR_MANUAL_AUTHORIZATION"
+    assert result["p3_preflight"]["effective_preflight_state"] == "READY_FOR_MANUAL_AUTHORIZATION"
     assert result["p3_preflight"]["exit_policy"] == "immediate_flat"
     assert result["p3_preflight"]["max_open_seconds"] == 60
     assert (

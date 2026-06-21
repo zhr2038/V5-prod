@@ -94,7 +94,7 @@ COST_DISAGREEMENT_FIELDS = [
     "reason",
     "live_order_effect",
 ]
-P3_MANUAL_PROBE_ALLOWED_SYMBOLS = ("BTC/USDT", "ETH/USDT")
+P3_MANUAL_PROBE_ALLOWED_SYMBOLS = ("BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT")
 P3_MANUAL_PROBE_MAX_NOTIONAL_USDT = 5.0
 P3_MANUAL_PROBE_MAX_OPEN_SECONDS = 60
 P3_POST_PROBE_REQUIRED_EVIDENCE = [
@@ -680,9 +680,10 @@ def build_cost_probe_p3_preflight(
         blockers.append("daily_probe_loss_present")
 
     blockers = sorted(set(blockers))
+    state = "READY_FOR_MANUAL_AUTHORIZATION" if not blockers else "NOT_READY"
     return {
         "generated_at": str(summary.get("generated_at") or ""),
-        "state": "READY_FOR_MANUAL_AUTHORIZATION" if not blockers else "NOT_READY",
+        "state": state,
         "ready_to_request_manual_live_probe": not blockers,
         "manual_authorization_required": True,
         "approved_live_order_execution": False,
@@ -700,6 +701,7 @@ def build_cost_probe_p3_preflight(
         "dry_run_plan_state": summary.get("state"),
         "offline_plan_state": summary.get("state"),
         "online_exchange_preflight_state": "NOT_RUN",
+        "effective_preflight_state": state,
         "dry_run": bool(summary.get("dry_run")),
         "live_enabled": bool(summary.get("live_enabled")),
         "no_order_submitted": bool(summary.get("no_order_submitted", True)),

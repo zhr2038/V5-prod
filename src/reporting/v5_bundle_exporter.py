@@ -1209,6 +1209,22 @@ def _copy_cost_probe_artifacts(staging: Path, reports: Path) -> dict[str, Any]:
             if isinstance(payload, Mapping):
                 summary_state = {
                     "state": payload.get("state", "not_observable"),
+                    "offline_plan_state": payload.get(
+                        "offline_plan_state",
+                        payload.get("state", "not_observable"),
+                    ),
+                    "online_exchange_preflight_state": payload.get(
+                        "online_exchange_preflight_state",
+                        "not_observable",
+                    ),
+                    "effective_preflight_state": payload.get(
+                        "effective_preflight_state",
+                        "not_observable",
+                    ),
+                    "effective_preflight_ready": payload.get(
+                        "effective_preflight_ready",
+                        "not_observable",
+                    ),
                     "dry_run": payload.get("dry_run", "not_observable"),
                     "live_enabled": payload.get("live_enabled", "not_observable"),
                     "no_order_submitted": payload.get("no_order_submitted", "not_observable"),
@@ -1234,6 +1250,18 @@ def _copy_cost_probe_artifacts(staging: Path, reports: Path) -> dict[str, Any]:
                     "manual_probe_symbol": payload.get(
                         "manual_probe_symbol",
                         "not_observable",
+                    ),
+                    "offline_plan_state": payload.get(
+                        "offline_plan_state",
+                        "not_observable",
+                    ),
+                    "online_exchange_preflight_state": payload.get(
+                        "online_exchange_preflight_state",
+                        "not_observable",
+                    ),
+                    "effective_preflight_state": payload.get(
+                        "effective_preflight_state",
+                        payload.get("state", "not_observable"),
                     ),
                     "blockers": payload.get("blockers", "not_observable"),
                 }
