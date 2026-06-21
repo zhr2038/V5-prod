@@ -50,6 +50,8 @@ class _FakeOKX:
         ticker_bids: list[str] | None = None,
         unknown_fee_ccy: bool = False,
         raise_on_emergency_flatten: bool = False,
+        base_fee_qty: str = "0.00000001",
+        lot_sz: str = "0.000001",
     ) -> None:
         self.placed: list[dict] = []
         self.partial_exit = partial_exit
@@ -61,6 +63,8 @@ class _FakeOKX:
         self.ticker_bids = list(ticker_bids or ["49990"])
         self.unknown_fee_ccy = unknown_fee_ccy
         self.raise_on_emergency_flatten = raise_on_emergency_flatten
+        self.base_fee_qty = Decimal(base_fee_qty)
+        self.lot_sz = str(lot_sz)
         self.orders_by_clid: dict[str, dict] = {}
         self.settled_clids: set[str] = set()
         self.cancels: list[dict] = []
@@ -75,7 +79,7 @@ class _FakeOKX:
                             "instId": params["instId"],
                             "state": "live",
                             "minSz": "0.00001",
-                            "lotSz": "0.000001",
+                            "lotSz": self.lot_sz,
                             "tickSz": "0.1",
                         }
                     ],
@@ -139,7 +143,7 @@ class _FakeOKX:
         state = "filled"
         if cl_ord_id.endswith("X") and self.partial_exit:
             state = "partially_filled"
-        fee = Decimal("-0.00000001") if side == "buy" and self.base_fee_on_entry else Decimal("-0.01")
+        fee = -self.base_fee_qty if side == "buy" and self.base_fee_on_entry else Decimal("-0.01")
         fee_ccy = "OKB" if self.unknown_fee_ccy else ("BTC" if side == "buy" and self.base_fee_on_entry else "USDT")
         if cl_ord_id not in self.settled_clids:
             if side == "buy":
@@ -175,7 +179,7 @@ class _FakeOKX:
     def _fill_row(self, order: dict) -> dict:
         cl_ord_id = str(order.get("clOrdId") or "")
         side = str(order.get("side") or "")
-        fee = Decimal("-0.00000001") if side == "buy" and self.base_fee_on_entry else Decimal("-0.01")
+        fee = -self.base_fee_qty if side == "buy" and self.base_fee_on_entry else Decimal("-0.01")
         fee_ccy = "OKB" if self.unknown_fee_ccy else ("BTC" if side == "buy" and self.base_fee_on_entry else "USDT")
         return {
             "instId": str(order.get("instId") or "BTC-USDT"),
@@ -351,6 +355,29 @@ def test_cost_probe_live_once_persists_live_execution_status_for_closed_flat(tmp
     assert payload["exit_submitted"] is True
     assert payload["execution_completed"] is True
     assert payload["eligible_for_live_cost_coverage"] is False
+
+
+def test_cost_probe_live_execution_status_uses_recovered_order_fills(tmp_path: Path) -> None:
+    result = {
+        "state": "RECOVERY_ONLY",
+        "execution_status": "RECOVERY_ONLY",
+        "manual_probe_symbol": "BTC/USDT",
+        "authorization_id": "auth-1",
+        "authorization_consumed": True,
+        "entry_order_id": "entry-1",
+        "exit_order_id": "exit-1",
+        "entry_state": {"accFillSz": "0.00007747"},
+        "exit_state": {"accFillSz": "0.00007739"},
+        "recovery_required": True,
+    }
+
+    path = _persist_live_execution_status(result, tmp_path / "reports")
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["entry_filled"] is True
+    assert payload["exit_filled"] is True
+    assert payload["entry_filled_qty"] == "0.00007747"
+    assert payload["exit_filled_qty"] == "0.00007739"
 
 
 def test_create_cost_probe_authorization_payload_signs_required_context() -> None:
@@ -643,6 +670,32 @@ def test_cost_probe_live_once_exit_uses_available_base_after_base_fee(tmp_path: 
     assert fake.placed[1]["side"] == "sell"
     assert fake.placed[1]["sz"] == "0.000098"
     assert result["entry_state"]["_unsellable_dust_qty"] == "0.000001"
+
+
+def test_cost_probe_live_once_accepts_base_fee_net_exit_as_flat(tmp_path: Path) -> None:
+    cfg = _ready_cost_probe_config(tmp_path)
+    _write_clean_runtime_state(tmp_path)
+    auth_path = _write_auth(tmp_path, cfg=cfg)
+    fake = _FakeOKX(
+        base_fee_on_entry=True,
+        base_fee_qty="0.00000008",
+        lot_sz="0.00000001",
+    )
+
+    result = run_live_probe_once(
+        cfg,
+        reports_dir=tmp_path / "reports",
+        auth_path=auth_path,
+        okx=fake,
+        project_root=tmp_path,
+        execute_live_order=True,
+        operator_confirmed=True,
+    )
+
+    assert result["state"] == "COMPLETED"
+    assert result["flat_verification"]["entry_base_fee_qty"] == "0.00000008"
+    assert result["flat_verification"]["entry_base_fee_reflected_in_exit_qty"] is True
+    assert result["flat_verification"]["flat_verified"] is True
 
 
 def test_cost_probe_live_once_exchange_min_preflight_can_clear_pending_blocker(tmp_path: Path) -> None:

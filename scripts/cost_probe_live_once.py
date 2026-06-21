@@ -1525,11 +1525,13 @@ def _live_execution_status(result: dict[str, Any]) -> dict[str, Any]:
         if isinstance(result.get("flat_verification"), dict)
         else {}
     )
+    entry_state = result.get("entry_state") if isinstance(result.get("entry_state"), dict) else {}
+    exit_state = result.get("exit_state") if isinstance(result.get("exit_state"), dict) else {}
     state = str(result.get("state") or "")
     completed = bool(result.get("execution_completed") or result.get("completed"))
     flat_verified = bool(result.get("flat_verified") or flat_verification.get("flat_verified"))
-    entry_filled_qty = _decimal(result.get("entry_filled_qty"))
-    exit_filled_qty = _decimal(result.get("exit_filled_qty"))
+    entry_filled_qty = _decimal(result.get("entry_filled_qty")) or _filled_qty(entry_state)
+    exit_filled_qty = _decimal(result.get("exit_filled_qty")) or _filled_qty(exit_state)
     entry_client_order_id = str(
         result.get("entry_client_order_id")
         or _payload_cl_ord_id(result.get("entry_payload") if isinstance(result.get("entry_payload"), dict) else None)
@@ -1968,13 +1970,21 @@ def _verify_roundtrip_flat(
     exit_qty = _filled_qty(exit_state)
     emergency_qty = _decimal((emergency or {}).get("filled_qty"))
     total_exit_qty = exit_qty + max(emergency_qty, Decimal("0"))
+    entry_base_fee_qty = _base_fee_qty(entry_state, symbol=symbol)
+    net_entry_qty = max(entry_qty - entry_base_fee_qty, Decimal("0"))
     baseline_balance = _baseline_base_balance(instrument)
     exchange_balance = _query_base_balance(okx, symbol)
     open_order_count = _open_order_count(okx, inst_id=inst_id)
     local_qty = _local_position_qty(cfg, preflight=preflight, symbol=symbol)
     reconcile_refresh = _refresh_reconcile_status(cfg, preflight=preflight, okx=okx, symbol=symbol)
     reconcile = _read_reconcile_status(preflight)
-    exit_fully_filled = total_exit_qty + tolerance >= entry_qty
+    base_fee_reflected_in_exit_qty = (
+        entry_base_fee_qty > 0
+        and total_exit_qty + tolerance >= net_entry_qty
+        and total_exit_qty <= entry_qty + tolerance
+    )
+    required_exit_qty = net_entry_qty if base_fee_reflected_in_exit_qty else entry_qty
+    exit_fully_filled = total_exit_qty + tolerance >= required_exit_qty
     exchange_delta = None if exchange_balance is None else exchange_balance - baseline_balance
     exchange_flat = exchange_delta is not None and abs(exchange_delta) <= tolerance
     local_flat = local_qty is not None and local_qty <= tolerance
@@ -1997,6 +2007,9 @@ def _verify_roundtrip_flat(
         "entry_filled_qty": _decimal_text(entry_qty),
         "exit_filled_qty": _decimal_text(exit_qty),
         "emergency_exit_filled_qty": _decimal_text(emergency_qty),
+        "entry_base_fee_qty": _decimal_text(entry_base_fee_qty),
+        "required_exit_qty": _decimal_text(required_exit_qty),
+        "entry_base_fee_reflected_in_exit_qty": bool(base_fee_reflected_in_exit_qty),
         "lot_sz_tolerance": _decimal_text(tolerance),
         "open_order_count": open_order_count,
         "open_orders_clear": open_orders_clear,
@@ -2396,16 +2409,28 @@ def _fee_usdt(row: dict[str, Any], *, price: Decimal, symbol: str) -> tuple[Deci
 
 
 def _base_fee_usdt(row: dict[str, Any], *, price: Decimal, symbol: str) -> Decimal:
-    base = symbol.upper().replace("-", "/").split("/")[0]
     total = Decimal("0")
     for item in _fill_rows(row) or [row]:
-        ccy = str(item.get("feeCcy") or row.get("feeCcy") or "").upper()
-        if ccy != base:
+        if not _fee_ccy_is_base(item, row=row, symbol=symbol):
             continue
         fill_px = _decimal(item.get("fillPx") or item.get("avgPx") or item.get("px")) or price
         if fill_px > 0:
             total += _decimal(item.get("fee")) * fill_px
     return total
+
+
+def _base_fee_qty(row: dict[str, Any], *, symbol: str) -> Decimal:
+    total = Decimal("0")
+    for item in _fill_rows(row) or [row]:
+        if _fee_ccy_is_base(item, row=row, symbol=symbol):
+            total += abs(_decimal(item.get("fee")))
+    return total
+
+
+def _fee_ccy_is_base(item: dict[str, Any], *, row: dict[str, Any], symbol: str) -> bool:
+    base = symbol.upper().replace("-", "/").split("/")[0]
+    ccy = str(item.get("feeCcy") or row.get("feeCcy") or "").upper()
+    return bool(base and ccy == base)
 
 
 def _base_fee_reflected_in_exit_quantity(
@@ -2415,12 +2440,7 @@ def _base_fee_reflected_in_exit_quantity(
     exit_qty: Decimal,
     symbol: str,
 ) -> bool:
-    base = symbol.upper().replace("-", "/").split("/")[0]
-    base_fee_qty = Decimal("0")
-    for item in _fill_rows(row) or [row]:
-        ccy = str(item.get("feeCcy") or row.get("feeCcy") or "").upper()
-        if ccy == base:
-            base_fee_qty += abs(_decimal(item.get("fee")))
+    base_fee_qty = _base_fee_qty(row, symbol=symbol)
     if base_fee_qty <= 0:
         return False
     exit_gap = max(entry_qty - exit_qty, Decimal("0"))
