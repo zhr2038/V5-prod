@@ -126,8 +126,14 @@ NON_SECRET_CONFIG_KEYS = {
     "api_env_token_loaded",
     "api_env_warning",
     "api_token_env",
+    "authorization_age_sec",
     "authorization_consumed",
+    "authorization_consumed_at",
+    "authorization_expires_at",
+    "authorization_fresh",
     "authorization_id",
+    "authorization_issued_at",
+    "authorization_nonce",
     "authorization_validated",
     "manual_authorization_required",
 }
@@ -1246,6 +1252,26 @@ def _copy_cost_probe_artifacts(staging: Path, reports: Path) -> dict[str, Any]:
                     ),
                     "authorization_consumed": payload.get(
                         "authorization_consumed",
+                        "not_observable",
+                    ),
+                    "authorization_issued_at": payload.get(
+                        "authorization_issued_at",
+                        "not_observable",
+                    ),
+                    "authorization_expires_at": payload.get(
+                        "authorization_expires_at",
+                        "not_observable",
+                    ),
+                    "authorization_age_sec": payload.get(
+                        "authorization_age_sec",
+                        "not_observable",
+                    ),
+                    "authorization_fresh": payload.get(
+                        "authorization_fresh",
+                        "not_observable",
+                    ),
+                    "recovery_required": payload.get(
+                        "recovery_required",
                         "not_observable",
                     ),
                     "execution_completed": payload.get(

@@ -40,6 +40,33 @@ EXECUTION_MAINTENANCE_LOCK_PATH_ENV = "V5_EXECUTION_MAINTENANCE_LOCK"
 GLOBAL_PROBE_LOCK_PATH_ENV = "V5_COST_PROBE_LIVE_LOCK_PATH"
 GLOBAL_PROBE_LOCK_PATH = "/tmp/v5_execution_maintenance.lock"
 LIVE_EXECUTION_STATUS_FILENAME = "cost_probe_live_execution_status.json"
+LIVE_EXECUTION_KNOWN_STATUSES = [
+    "PREFLIGHT_READY",
+    "AUTH_VALIDATED",
+    "AUTH_CONSUMED",
+    "ENTRY_SUBMIT_INTENT",
+    "ENTRY_SUBMITTED",
+    "ENTRY_FILLED",
+    "EXIT_SUBMIT_INTENT",
+    "EXIT_SUBMITTED",
+    "EXIT_FILLED",
+    "CLOSED_FLAT",
+    "INCOMPLETE_KILL_SWITCH",
+    "RECOVERY_REQUIRED",
+    "RECOVERY_ONLY",
+]
+LIVE_EXECUTION_RECOVERY_REQUIRED_STATUSES = {
+    "AUTH_CONSUMED",
+    "ENTRY_SUBMIT_INTENT",
+    "ENTRY_SUBMITTED",
+    "ENTRY_FILLED",
+    "EXIT_SUBMIT_INTENT",
+    "EXIT_SUBMITTED",
+    "EXIT_FILLED",
+    "INCOMPLETE_KILL_SWITCH",
+    "RECOVERY_REQUIRED",
+    "RECOVERY_ONLY",
+}
 AUTHORIZATION_SIGNATURE_FIELDS = (
     "scope",
     "authorization_id",
@@ -137,7 +164,39 @@ def run_live_probe_once(
     project_root: str | Path = PROJECT_ROOT,
     execute_live_order: bool = False,
     operator_confirmed: bool = False,
+    recover_existing_probe: bool = False,
 ) -> dict[str, Any]:
+    if recover_existing_probe:
+        with _global_probe_execution_lock():
+            return _recover_existing_live_probe(
+                cfg,
+                reports_dir=Path(reports_dir),
+                okx=okx,
+                project_root=project_root,
+            )
+    recovery_status = _read_live_execution_status(reports_dir)
+    if _live_execution_recovery_required(recovery_status):
+        return {
+            "state": "NOT_READY",
+            "execution_status": "RECOVERY_REQUIRED",
+            "approved_live_order_execution": False,
+            "live_order_effect": "none_recovery_required_no_order",
+            "blockers": ["cost_probe_recovery_required"],
+            "recovery_required": True,
+            "recovery_only": True,
+            "recovery_reason": "prior_live_cost_probe_status_not_terminal",
+            "prior_live_execution_status": recovery_status,
+            "manual_probe_symbol": str(recovery_status.get("manual_probe_symbol") or ""),
+            "authorization_id": str(recovery_status.get("authorization_id") or ""),
+            "authorization": {
+                "authorization_id": str(recovery_status.get("authorization_id") or ""),
+                "nonce": str(recovery_status.get("authorization_nonce") or ""),
+                "issued_at": str(recovery_status.get("authorization_issued_at") or ""),
+                "expires_at": str(recovery_status.get("authorization_expires_at") or ""),
+            },
+            "entry_client_order_id": str(recovery_status.get("entry_client_order_id") or ""),
+            "exit_client_order_id": str(recovery_status.get("exit_client_order_id") or ""),
+        }
     preflight = build_live_probe_preflight(
         cfg,
         reports_dir=reports_dir,
@@ -173,6 +232,72 @@ def run_live_probe_once(
             "live_order_effect": "none_global_probe_lock_unavailable_no_order",
             "blockers": blockers,
         }
+
+
+def _recover_existing_live_probe(
+    cfg: Any,
+    *,
+    reports_dir: Path,
+    okx: Any,
+    project_root: str | Path = PROJECT_ROOT,
+) -> dict[str, Any]:
+    status = _read_live_execution_status(reports_dir)
+    if not _live_execution_recovery_required(status):
+        return {
+            "state": "NOT_READY",
+            "execution_status": "RECOVERY_ONLY",
+            "approved_live_order_execution": False,
+            "live_order_effect": "none_recovery_not_required_no_order",
+            "blockers": ["cost_probe_recovery_not_required"],
+            "recovery_only": True,
+            "recovery_required": False,
+            "prior_live_execution_status": status,
+        }
+    symbol = str(status.get("manual_probe_symbol") or "")
+    inst_id = symbol.replace("/", "-").upper()
+    entry_cl_ord_id = str(status.get("entry_client_order_id") or "")
+    exit_cl_ord_id = str(status.get("exit_client_order_id") or "")
+    entry_state = (
+        _recover_order_state(okx, inst_id=inst_id, cl_ord_id=entry_cl_ord_id, ord_id=str(status.get("entry_order_id") or ""))
+        if symbol and entry_cl_ord_id
+        else {}
+    )
+    exit_state = (
+        _recover_order_state(okx, inst_id=inst_id, cl_ord_id=exit_cl_ord_id, ord_id=str(status.get("exit_order_id") or ""))
+        if symbol and exit_cl_ord_id
+        else {}
+    )
+    result = {
+        "state": "RECOVERY_ONLY",
+        "execution_status": "RECOVERY_ONLY",
+        "approved_live_order_execution": False,
+        "live_order_effect": "none_recovery_query_only_no_order",
+        "blockers": ["manual_recovery_action_required"],
+        "recovery_only": True,
+        "recovery_required": True,
+        "prior_live_execution_status": status,
+        "manual_probe_symbol": symbol,
+        "authorization_id": str(status.get("authorization_id") or ""),
+        "authorization": {
+            "authorization_id": str(status.get("authorization_id") or ""),
+            "nonce": str(status.get("authorization_nonce") or ""),
+            "issued_at": str(status.get("authorization_issued_at") or ""),
+            "expires_at": str(status.get("authorization_expires_at") or ""),
+            "consumed_at": str(status.get("authorization_consumed_at") or ""),
+        },
+        "authorization_consumed": True,
+        "entry_client_order_id": entry_cl_ord_id,
+        "exit_client_order_id": exit_cl_ord_id,
+        "entry_order_id": str(entry_state.get("ordId") or status.get("entry_order_id") or ""),
+        "exit_order_id": str(exit_state.get("ordId") or status.get("exit_order_id") or ""),
+        "entry_state": entry_state,
+        "exit_state": exit_state,
+        "no_order_submitted": False,
+        "recovery_query_completed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "next_action": "inspect_recovered_order_state_then_manually_cancel_or_flatten_before_new_probe",
+    }
+    _persist_live_execution_status(result, reports_dir)
+    return result
 
 
 def _execute_live_probe(
@@ -242,6 +367,13 @@ def _execute_live_probe(
             "authorization_consumed": False,
         }
     clid_prefix = _client_order_prefix(consumed_auth)
+    _persist_execution_stage(
+        reports_dir,
+        stage="AUTH_CONSUMED",
+        preflight=preflight,
+        authorization=consumed_auth,
+        instrument=instrument,
+    )
     entry_payload = {
         "instId": inst_id,
         "tdMode": "cash",
@@ -258,10 +390,27 @@ def _execute_live_probe(
     entry_cl_ord_id = entry_payload["clOrdId"]
     entry_order_attempted = False
     try:
+        _persist_execution_stage(
+            reports_dir,
+            stage="ENTRY_SUBMIT_INTENT",
+            preflight=preflight,
+            authorization=consumed_auth,
+            instrument=instrument,
+            entry_payload=entry_payload,
+        )
         entry_order_attempted = True
         entry = okx.place_order(entry_payload, exp_time_ms=1500)
         entry_data = _accepted_okx_item(entry, action="entry_order")
         entry_ord_id = str(entry_data.get("ordId") or "")
+        _persist_execution_stage(
+            reports_dir,
+            stage="ENTRY_SUBMITTED",
+            preflight=preflight,
+            authorization=consumed_auth,
+            instrument=instrument,
+            entry_payload=entry_payload,
+            entry_order_id=entry_ord_id,
+        )
         _append_jsonl(
             order_events_path,
             _event(
@@ -284,6 +433,16 @@ def _execute_live_probe(
             cl_ord_id=entry_payload["clOrdId"],
         )
         filled_qty_dec = _filled_qty(entry_state)
+        _persist_execution_stage(
+            reports_dir,
+            stage="ENTRY_FILLED" if filled_qty_dec > Decimal("0") else "ENTRY_SUBMITTED",
+            preflight=preflight,
+            authorization=consumed_auth,
+            instrument=instrument,
+            entry_payload=entry_payload,
+            entry_order_id=str(entry_state.get("ordId") or entry_ord_id),
+            entry_state=entry_state,
+        )
         _append_jsonl(
             order_events_path,
             _event(
@@ -298,7 +457,7 @@ def _execute_live_probe(
             ),
         )
         if filled_qty_dec <= Decimal("0"):
-            return _finish_roundtrip(
+            result = _finish_roundtrip(
                 roundtrip_events_path,
                 symbol=symbol,
                 status="no_entry_fill",
@@ -320,6 +479,14 @@ def _execute_live_probe(
                 completed=False,
                 authorization=consumed_auth,
             )
+            _persist_roundtrip_status(
+                reports_dir,
+                result=result,
+                preflight=preflight,
+                instrument=instrument,
+                authorization=consumed_auth,
+            )
+            return result
         available_before_exit = _query_base_balance(okx, symbol)
         exit_qty, unsellable_dust = _normal_exit_qty(
             entry_qty=filled_qty_dec,
@@ -355,7 +522,7 @@ def _execute_live_probe(
                 exit_state={},
                 emergency=emergency,
             )
-            return _finish_roundtrip(
+            result = _finish_roundtrip(
                 roundtrip_events_path,
                 symbol=symbol,
                 status="no_sellable_exit_qty",
@@ -369,6 +536,14 @@ def _execute_live_probe(
                 completed=False,
                 authorization=consumed_auth,
             )
+            _persist_roundtrip_status(
+                reports_dir,
+                result=result,
+                preflight=preflight,
+                instrument=instrument,
+                authorization=consumed_auth,
+            )
+            return result
         exit_payload = {
             "instId": inst_id,
             "tdMode": "cash",
@@ -378,9 +553,32 @@ def _execute_live_probe(
             "sz": _decimal_text(exit_qty),
             "clOrdId": f"{clid_prefix}X",
         }
+        _persist_execution_stage(
+            reports_dir,
+            stage="EXIT_SUBMIT_INTENT",
+            preflight=preflight,
+            authorization=consumed_auth,
+            instrument=instrument,
+            entry_payload=entry_payload,
+            exit_payload=exit_payload,
+            entry_order_id=str(entry_state.get("ordId") or entry_ord_id),
+            entry_state=entry_state,
+        )
         exit_resp = okx.place_order(exit_payload, exp_time_ms=1500)
         exit_data = _accepted_okx_item(exit_resp, action="exit_order")
         exit_ord_id = str(exit_data.get("ordId") or "")
+        _persist_execution_stage(
+            reports_dir,
+            stage="EXIT_SUBMITTED",
+            preflight=preflight,
+            authorization=consumed_auth,
+            instrument=instrument,
+            entry_payload=entry_payload,
+            exit_payload=exit_payload,
+            entry_order_id=str(entry_state.get("ordId") or entry_ord_id),
+            exit_order_id=exit_ord_id,
+            entry_state=entry_state,
+        )
         _append_jsonl(
             order_events_path,
             _event(
@@ -401,6 +599,19 @@ def _execute_live_probe(
             row=exit_state,
             ord_id=str(exit_state.get("ordId") or exit_ord_id),
             cl_ord_id=exit_payload["clOrdId"],
+        )
+        _persist_execution_stage(
+            reports_dir,
+            stage="EXIT_FILLED" if _filled_qty(exit_state) > Decimal("0") else "EXIT_SUBMITTED",
+            preflight=preflight,
+            authorization=consumed_auth,
+            instrument=instrument,
+            entry_payload=entry_payload,
+            exit_payload=exit_payload,
+            entry_order_id=str(entry_state.get("ordId") or entry_ord_id),
+            exit_order_id=str(exit_state.get("ordId") or exit_ord_id),
+            entry_state=entry_state,
+            exit_state=exit_state,
         )
         _append_jsonl(
             order_events_path,
@@ -448,7 +659,7 @@ def _execute_live_probe(
                 exit_state=exit_state,
                 emergency=emergency,
             )
-            return _finish_roundtrip(
+            result = _finish_roundtrip(
                 roundtrip_events_path,
                 symbol=symbol,
                 status="incomplete_exit",
@@ -462,7 +673,15 @@ def _execute_live_probe(
                 completed=False,
                 authorization=consumed_auth,
             )
-        return _finish_roundtrip(
+            _persist_roundtrip_status(
+                reports_dir,
+                result=result,
+                preflight=preflight,
+                instrument=instrument,
+                authorization=consumed_auth,
+            )
+            return result
+        result = _finish_roundtrip(
             roundtrip_events_path,
             symbol=symbol,
             status="closed",
@@ -475,6 +694,14 @@ def _execute_live_probe(
             completed=True,
             authorization=consumed_auth,
         )
+        _persist_roundtrip_status(
+            reports_dir,
+            result=result,
+            preflight=preflight,
+            instrument=instrument,
+            authorization=consumed_auth,
+        )
+        return result
     except Exception as exc:
         emergency: dict[str, Any] = {}
         kill_switch_written = False
@@ -521,7 +748,7 @@ def _execute_live_probe(
                 exit_state=exit_state,
                 emergency=emergency,
             )
-            _finish_roundtrip(
+            result = _finish_roundtrip(
                 roundtrip_events_path,
                 symbol=symbol,
                 status="exception_after_entry_attempt",
@@ -535,14 +762,33 @@ def _execute_live_probe(
                 completed=False,
                 authorization=consumed_auth,
             )
+            _persist_roundtrip_status(
+                reports_dir,
+                result=result,
+                preflight=preflight,
+                instrument=instrument,
+                authorization=consumed_auth,
+            )
         if not kill_switch_written:
             _write_kill_switch(cfg, reason=f"cost_probe_live_once_error:{exc}")
-        return {
+        result = {
             "state": "ABORTED_KILL_SWITCH_ENABLED",
+            "execution_status": "INCOMPLETE_KILL_SWITCH",
             "live_order_effect": "kill_switch_enabled_after_cost_probe_error",
             "error": str(exc),
             "emergency_flatten": emergency,
+            "authorization": consumed_auth,
+            "authorization_consumed": True,
+            "manual_probe_symbol": symbol,
+            "instrument_preflight": instrument,
+            "entry_client_order_id": entry_cl_ord_id,
+            "entry_order_id": entry_ord_id,
+            "entry_state": entry_state,
+            "exit_state": exit_state,
+            "recovery_required": True,
         }
+        _persist_live_execution_status(result, reports_dir)
+        return result
 
 
 def _instrument_preflight(okx: Any, symbol: str, *, max_notional_usdt: float) -> dict[str, Any]:
@@ -983,6 +1229,39 @@ def _read_authorization(path: str | Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _authorization_age_seconds(issued_at: str) -> int | None:
+    issued = _parse_utc_datetime(issued_at)
+    if issued is None:
+        return None
+    return max(int((datetime.now(UTC) - issued).total_seconds()), 0)
+
+
+def _authorization_fresh(issued_at: str, expires_at: str) -> bool:
+    issued = _parse_utc_datetime(issued_at)
+    expires = _parse_utc_datetime(expires_at)
+    if issued is None or expires is None:
+        return False
+    now = datetime.now(UTC)
+    age = (now - issued).total_seconds()
+    return (
+        issued - timedelta(seconds=AUTHORIZATION_CLOCK_SKEW_SEC) <= now <= expires
+        and age <= AUTHORIZATION_MAX_TTL_SEC + AUTHORIZATION_CLOCK_SKEW_SEC
+    )
+
+
+def _parse_utc_datetime(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
 def _redacted_authorization(auth: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
@@ -1068,7 +1347,7 @@ def _persist_preflight_snapshot(result: dict[str, Any], reports_dir: str | Path)
     reports_path = Path(reports_dir)
     reports_path.mkdir(parents=True, exist_ok=True)
     out = reports_path / "cost_probe_p3_preflight.json"
-    out.write_text(json.dumps(p3, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _atomic_write_json(out, p3)
     return out
 
 
@@ -1077,8 +1356,126 @@ def _persist_live_execution_status(result: dict[str, Any], reports_dir: str | Pa
     reports_path.mkdir(parents=True, exist_ok=True)
     out = reports_path / LIVE_EXECUTION_STATUS_FILENAME
     status = _live_execution_status(result)
-    out.write_text(json.dumps(status, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _atomic_write_json(out, status)
     return out
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    data = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    with tmp.open("w", encoding="utf-8") as fh:
+        fh.write(data)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+    try:
+        directory_fd = os.open(str(path.parent), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _read_live_execution_status(reports_dir: str | Path) -> dict[str, Any]:
+    path = Path(reports_dir) / LIVE_EXECUTION_STATUS_FILENAME
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _live_execution_recovery_required(status: dict[str, Any]) -> bool:
+    if not status:
+        return False
+    current = str(status.get("status") or "").strip()
+    if current not in LIVE_EXECUTION_RECOVERY_REQUIRED_STATUSES:
+        return False
+    if bool(status.get("execution_completed")) and bool(status.get("flat_verified")):
+        return False
+    return True
+
+
+def _persist_execution_stage(
+    reports_dir: Path,
+    *,
+    stage: str,
+    preflight: dict[str, Any],
+    authorization: dict[str, Any] | None = None,
+    instrument: dict[str, Any] | None = None,
+    entry_payload: dict[str, Any] | None = None,
+    exit_payload: dict[str, Any] | None = None,
+    entry_order_id: str = "",
+    exit_order_id: str = "",
+    entry_state: dict[str, Any] | None = None,
+    exit_state: dict[str, Any] | None = None,
+    flat_verification: dict[str, Any] | None = None,
+    recovery_required: bool = True,
+) -> None:
+    result: dict[str, Any] = {
+        **preflight,
+        "state": "LIVE_EXECUTION_IN_PROGRESS",
+        "execution_status": stage,
+        "authorization": authorization or preflight.get("authorization") or {},
+        "authorization_validated": True,
+        "authorization_consumed": bool(authorization),
+        "instrument_preflight": instrument or preflight.get("instrument_preflight") or {},
+        "entry_order_id": entry_order_id,
+        "exit_order_id": exit_order_id,
+        "entry_client_order_id": _payload_cl_ord_id(entry_payload) or _payload_cl_ord_id(entry_state),
+        "exit_client_order_id": _payload_cl_ord_id(exit_payload) or _payload_cl_ord_id(exit_state),
+        "entry_state": entry_state or {},
+        "exit_state": exit_state or {},
+        "flat_verification": flat_verification or {},
+        "approved_live_order_execution": False,
+        "live_order_effect": "live_cost_probe_stage_persisted",
+        "recovery_required": recovery_required,
+    }
+    if entry_state:
+        result["entry_filled_qty"] = _decimal_text(_filled_qty(entry_state))
+    if exit_state:
+        result["exit_filled_qty"] = _decimal_text(_filled_qty(exit_state))
+    _persist_live_execution_status(result, reports_dir)
+
+
+def _payload_cl_ord_id(payload: dict[str, Any] | None) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("clOrdId") or payload.get("client_order_id") or payload.get("cl_ord_id") or "")
+
+
+def _persist_roundtrip_status(
+    reports_dir: Path,
+    *,
+    result: dict[str, Any],
+    preflight: dict[str, Any],
+    instrument: dict[str, Any],
+    authorization: dict[str, Any],
+) -> None:
+    closed_flat = (
+        result.get("state") == "COMPLETED"
+        and bool(result.get("execution_completed"))
+        and bool(result.get("flat_verified"))
+    )
+    payload = {
+        **preflight,
+        **result,
+        "execution_status": "CLOSED_FLAT" if closed_flat else "INCOMPLETE_KILL_SWITCH",
+        "authorization": authorization,
+        "authorization_consumed": True,
+        "instrument_preflight": instrument,
+        "entry_client_order_id": _payload_cl_ord_id(
+            result.get("entry_state") if isinstance(result.get("entry_state"), dict) else None
+        ),
+        "exit_client_order_id": _payload_cl_ord_id(
+            result.get("exit_state") if isinstance(result.get("exit_state"), dict) else None
+        ),
+        "recovery_required": not closed_flat,
+    }
+    _persist_live_execution_status(payload, reports_dir)
 
 
 def _live_execution_status(result: dict[str, Any]) -> dict[str, Any]:
@@ -1099,9 +1496,28 @@ def _live_execution_status(result: dict[str, Any]) -> dict[str, Any]:
     flat_verified = bool(result.get("flat_verified") or flat_verification.get("flat_verified"))
     entry_filled_qty = _decimal(result.get("entry_filled_qty"))
     exit_filled_qty = _decimal(result.get("exit_filled_qty"))
-    entry_submitted = bool(str(result.get("entry_order_id") or "").strip())
-    exit_submitted = bool(str(result.get("exit_order_id") or "").strip())
+    entry_client_order_id = str(
+        result.get("entry_client_order_id")
+        or _payload_cl_ord_id(result.get("entry_payload") if isinstance(result.get("entry_payload"), dict) else None)
+        or _payload_cl_ord_id(result.get("entry_state") if isinstance(result.get("entry_state"), dict) else None)
+        or ""
+    )
+    exit_client_order_id = str(
+        result.get("exit_client_order_id")
+        or _payload_cl_ord_id(result.get("exit_payload") if isinstance(result.get("exit_payload"), dict) else None)
+        or _payload_cl_ord_id(result.get("exit_state") if isinstance(result.get("exit_state"), dict) else None)
+        or ""
+    )
+    entry_order_id = str(result.get("entry_order_id") or "")
+    exit_order_id = str(result.get("exit_order_id") or "")
+    entry_submitted = bool(entry_order_id.strip())
+    exit_submitted = bool(exit_order_id.strip())
     auth_consumed = bool(result.get("authorization_consumed") or str(authorization.get("consumed_at") or "").strip())
+    authorization_issued_at = str(authorization.get("issued_at") or result.get("authorization_issued_at") or "")
+    authorization_expires_at = str(authorization.get("expires_at") or result.get("authorization_expires_at") or "")
+    authorization_consumed_at = str(authorization.get("consumed_at") or result.get("authorization_consumed_at") or "")
+    authorization_age_sec = _authorization_age_seconds(authorization_issued_at)
+    authorization_fresh = _authorization_fresh(authorization_issued_at, authorization_expires_at)
     quote_balance = _decimal_or_none(instrument.get("quote_balance"))
     quote_required = _decimal_or_none(instrument.get("quote_required"))
     quote_balance_sufficient = (
@@ -1110,7 +1526,10 @@ def _live_execution_status(result: dict[str, Any]) -> dict[str, Any]:
         else quote_balance >= quote_required
     )
     status = "NOT_READY"
-    if state == "READY_FOR_OPERATOR_CONFIRMATION":
+    explicit_status = str(result.get("execution_status") or result.get("live_execution_status") or "").strip()
+    if explicit_status in LIVE_EXECUTION_KNOWN_STATUSES:
+        status = explicit_status
+    elif state == "READY_FOR_OPERATOR_CONFIRMATION":
         status = "AUTH_VALIDATED"
     elif state == "COMPLETED" and completed and flat_verified:
         status = "CLOSED_FLAT"
@@ -1122,24 +1541,33 @@ def _live_execution_status(result: dict[str, Any]) -> dict[str, Any]:
         status = "ENTRY_FILLED" if entry_filled_qty > 0 else "ENTRY_SUBMITTED"
     elif state == "NOT_READY" and p3.get("state") == "READY_FOR_MANUAL_AUTHORIZATION":
         status = "PREFLIGHT_READY"
+    authorization_validated = bool(
+        result.get("authorization_validated")
+        or state == "READY_FOR_OPERATOR_CONFIRMATION"
+        or auth_consumed
+    )
+    recovery_required = bool(
+        result.get("recovery_required")
+        or (
+            status in LIVE_EXECUTION_RECOVERY_REQUIRED_STATUSES
+            and not (completed and flat_verified)
+        )
+    )
     return {
         "schema_version": "v5.cost_probe_live_execution_status.v1",
         "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "status": status,
-        "known_statuses": [
-            "PREFLIGHT_READY",
-            "AUTH_VALIDATED",
-            "AUTH_CONSUMED",
-            "ENTRY_SUBMITTED",
-            "ENTRY_FILLED",
-            "EXIT_SUBMITTED",
-            "CLOSED_FLAT",
-            "INCOMPLETE_KILL_SWITCH",
-        ],
+        "known_statuses": LIVE_EXECUTION_KNOWN_STATUSES,
         "source_state": state,
         "manual_probe_symbol": str(result.get("manual_probe_symbol") or p3.get("manual_probe_symbol") or ""),
         "authorization_id": str(authorization.get("authorization_id") or result.get("authorization_id") or ""),
-        "authorization_validated": state == "READY_FOR_OPERATOR_CONFIRMATION",
+        "authorization_nonce": str(authorization.get("nonce") or result.get("authorization_nonce") or ""),
+        "authorization_issued_at": authorization_issued_at,
+        "authorization_expires_at": authorization_expires_at,
+        "authorization_consumed_at": authorization_consumed_at,
+        "authorization_age_sec": authorization_age_sec,
+        "authorization_fresh": authorization_fresh,
+        "authorization_validated": authorization_validated,
         "authorization_consumed": auth_consumed,
         "approved_live_order_execution": bool(result.get("approved_live_order_execution")),
         "live_order_effect": str(result.get("live_order_effect") or ""),
@@ -1150,10 +1578,25 @@ def _live_execution_status(result: dict[str, Any]) -> dict[str, Any]:
         "quote_required": str(instrument.get("quote_required") or ""),
         "quote_balance_sufficient": quote_balance_sufficient,
         "order_plan": instrument.get("order_plan") if isinstance(instrument.get("order_plan"), dict) else {},
+        "runtime_paths": result.get("runtime_paths") if isinstance(result.get("runtime_paths"), dict) else {},
+        "recovery_required": recovery_required,
+        "recovery_only": bool(result.get("recovery_only") or status == "RECOVERY_ONLY"),
+        "recovery_reason": str(result.get("recovery_reason") or ""),
+        "prior_status": str(
+            (result.get("prior_live_execution_status") or {}).get("status")
+            if isinstance(result.get("prior_live_execution_status"), dict)
+            else ""
+        ),
         "no_order_submitted": not entry_submitted and not exit_submitted and not completed,
+        "entry_submit_intent": bool(entry_client_order_id),
+        "entry_client_order_id": entry_client_order_id,
+        "entry_order_id": entry_order_id,
         "entry_submitted": entry_submitted,
         "entry_filled": entry_filled_qty > 0,
         "entry_filled_qty": _decimal_text(entry_filled_qty),
+        "exit_submit_intent": bool(exit_client_order_id),
+        "exit_client_order_id": exit_client_order_id,
+        "exit_order_id": exit_order_id,
         "exit_submitted": exit_submitted,
         "exit_filled": exit_filled_qty > 0,
         "exit_filled_qty": _decimal_text(exit_filled_qty),
@@ -2209,6 +2652,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--auth-file", required=True)
     parser.add_argument("--execute-live-order", action="store_true")
     parser.add_argument("--i-understand-this-submits-live-okx-orders", action="store_true")
+    parser.add_argument(
+        "--recover-existing-cost-probe",
+        action="store_true",
+        help="Query prior staged cost-probe clOrdIds and refuse to submit new orders.",
+    )
     args = parser.parse_args(argv)
 
     from src.execution.okx_private_client import OKXPrivateClient
@@ -2223,6 +2671,7 @@ def main(argv: list[str] | None = None) -> int:
             okx=client,
             execute_live_order=args.execute_live_order,
             operator_confirmed=args.i_understand_this_submits_live_okx_orders,
+            recover_existing_probe=args.recover_existing_cost_probe,
         )
         _persist_preflight_snapshot(result, args.reports_dir)
         _persist_live_execution_status(result, args.reports_dir)

@@ -226,6 +226,18 @@ class _FakeOKX:
         return self.ticker_bids[0]
 
 
+class _InspectingOKX(_FakeOKX):
+    def __init__(self, status_path: Path) -> None:
+        super().__init__()
+        self.status_path = status_path
+        self.intent_status: dict | None = None
+
+    def place_order(self, payload, *, exp_time_ms=None):
+        if payload["side"] == "buy":
+            self.intent_status = json.loads(self.status_path.read_text(encoding="utf-8"))
+        return super().place_order(payload, exp_time_ms=exp_time_ms)
+
+
 @pytest.fixture(autouse=True)
 def _live_probe_test_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("V5_COST_PROBE_AUTH_HMAC_SECRET", "unit-test-secret")
@@ -493,6 +505,75 @@ def test_cost_probe_live_once_execute_uses_entry_and_immediate_exit_with_fake_ok
     assert (tmp_path / "auth.consumed.json").exists()
     assert result["completed"] is True
     assert result["flat_verification"]["flat_verified"] is True
+
+
+def test_cost_probe_live_once_persists_entry_submit_intent_before_order(tmp_path: Path) -> None:
+    cfg = _ready_cost_probe_config(tmp_path)
+    _write_clean_runtime_state(tmp_path)
+    auth_path = _write_auth(tmp_path, cfg=cfg)
+    status_path = tmp_path / "reports" / "cost_probe_live_execution_status.json"
+    fake = _InspectingOKX(status_path)
+
+    result = run_live_probe_once(
+        cfg,
+        reports_dir=tmp_path / "reports",
+        auth_path=auth_path,
+        okx=fake,
+        project_root=tmp_path,
+        execute_live_order=True,
+        operator_confirmed=True,
+    )
+
+    assert result["state"] == "COMPLETED"
+    assert fake.intent_status is not None
+    assert fake.intent_status["status"] == "ENTRY_SUBMIT_INTENT"
+    assert fake.intent_status["authorization_consumed"] is True
+    assert fake.intent_status["entry_client_order_id"].endswith("E")
+    assert fake.intent_status["recovery_required"] is True
+    final_status = json.loads(status_path.read_text(encoding="utf-8"))
+    assert final_status["status"] == "CLOSED_FLAT"
+    assert final_status["recovery_required"] is False
+
+
+def test_cost_probe_live_once_blocks_new_probe_when_prior_status_requires_recovery(
+    tmp_path: Path,
+) -> None:
+    cfg = _ready_cost_probe_config(tmp_path)
+    _write_clean_runtime_state(tmp_path)
+    auth_path = _write_auth(tmp_path, cfg=cfg)
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    (reports / "cost_probe_live_execution_status.json").write_text(
+        json.dumps(
+            {
+                "status": "ENTRY_SUBMITTED",
+                "manual_probe_symbol": "BTC/USDT",
+                "authorization_id": "old-auth",
+                "authorization_nonce": "old-nonce",
+                "entry_client_order_id": "cpoldE",
+                "execution_completed": False,
+                "flat_verified": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    fake = _FakeOKX()
+
+    result = run_live_probe_once(
+        cfg,
+        reports_dir=reports,
+        auth_path=auth_path,
+        okx=fake,
+        project_root=tmp_path,
+        execute_live_order=True,
+        operator_confirmed=True,
+    )
+
+    assert result["state"] == "NOT_READY"
+    assert result["execution_status"] == "RECOVERY_REQUIRED"
+    assert result["blockers"] == ["cost_probe_recovery_required"]
+    assert fake.placed == []
+    assert auth_path.exists()
 
 
 def test_cost_probe_live_once_auth_notional_caps_actual_order_size(tmp_path: Path) -> None:
