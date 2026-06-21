@@ -1066,6 +1066,8 @@ def test_cost_probe_roundtrip_cost_converts_base_fee_to_usdt() -> None:
     assert cost["cost_evidence_complete"] == "true"
     assert cost["entry_has_fill_rows"] == "true"
     assert cost["exit_has_fill_rows"] == "true"
+    assert cost["entry_has_fill_evidence"] == "true"
+    assert cost["exit_has_fill_evidence"] == "true"
 
 
 def test_cost_probe_roundtrip_cost_does_not_double_count_reflected_base_fee() -> None:
@@ -1100,6 +1102,41 @@ def test_cost_probe_roundtrip_cost_does_not_double_count_reflected_base_fee() ->
     assert cost["entry_base_fee_reflected_in_exit_qty"] == "true"
     assert cost["entry_base_fee_ledger_adjustment_usdt"] == "0.05"
     assert cost["net_pnl_usdt"] == "-0.1"
+    assert cost["cost_evidence_complete"] == "true"
+
+
+def test_cost_probe_roundtrip_cost_accepts_order_detail_fill_evidence() -> None:
+    cost = _roundtrip_cost_fields(
+        {
+            "instId": "BTC-USDT",
+            "accFillSz": "0.00007747",
+            "avgPx": "64469.2",
+            "fillSz": "0.00007747",
+            "fillPx": "64469.2",
+            "tradeId": "entry-trade",
+            "fillTime": "1782049315199",
+            "fee": "-0.00000007747",
+            "feeCcy": "BTC",
+        },
+        {
+            "instId": "BTC-USDT",
+            "accFillSz": "0.00007739",
+            "avgPx": "64469.1",
+            "fillSz": "0.00007739",
+            "fillPx": "64469.1",
+            "tradeId": "exit-trade",
+            "fillTime": "1782049316894",
+            "fee": "-0.004989263649",
+            "feeCcy": "USDT",
+        },
+        "BTC/USDT",
+    )
+
+    assert cost["entry_has_fill_rows"] == "false"
+    assert cost["exit_has_fill_rows"] == "false"
+    assert cost["entry_has_fill_evidence"] == "true"
+    assert cost["exit_has_fill_evidence"] == "true"
+    assert cost["fee_conversion_warnings"] == ""
     assert cost["cost_evidence_complete"] == "true"
 
 

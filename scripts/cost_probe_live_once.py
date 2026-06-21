@@ -2297,11 +2297,13 @@ def _roundtrip_cost_fields(entry_state: dict[str, Any], exit_state: dict[str, An
     if entry_notional > 0:
         cost_bps = (Decimal("0") - net_pnl) / entry_notional * Decimal("10000")
     fee_warnings = [*entry_warnings, *exit_warnings]
-    entry_has_fills = bool(_fill_rows(entry_state))
-    exit_has_fills = bool(_fill_rows(exit_state))
+    entry_has_fill_rows = bool(_fill_rows(entry_state))
+    exit_has_fill_rows = bool(_fill_rows(exit_state))
+    entry_has_fill_evidence = _has_fill_evidence(entry_state)
+    exit_has_fill_evidence = _has_fill_evidence(exit_state)
     cost_evidence_complete = (
-        entry_has_fills
-        and exit_has_fills
+        entry_has_fill_evidence
+        and exit_has_fill_evidence
         and entry_qty > 0
         and exit_qty > 0
         and entry_px > 0
@@ -2324,8 +2326,10 @@ def _roundtrip_cost_fields(entry_state: dict[str, Any], exit_state: dict[str, An
         "entry_base_fee_ledger_adjustment_usdt": _decimal_text(
             Decimal("0") - entry_base_fee_usdt if base_fee_reflected_in_exit_qty else Decimal("0")
         ),
-        "entry_has_fill_rows": str(entry_has_fills).lower(),
-        "exit_has_fill_rows": str(exit_has_fills).lower(),
+        "entry_has_fill_rows": str(entry_has_fill_rows).lower(),
+        "exit_has_fill_rows": str(exit_has_fill_rows).lower(),
+        "entry_has_fill_evidence": str(entry_has_fill_evidence).lower(),
+        "exit_has_fill_evidence": str(exit_has_fill_evidence).lower(),
         "fee_conversion_warnings": ";".join(fee_warnings),
         "cost_evidence_complete": str(cost_evidence_complete).lower(),
         "gross_pnl_usdt": _decimal_text(gross_pnl),
@@ -2456,6 +2460,18 @@ def _base_fee_reflected_in_exit_quantity(
 def _fill_rows(row: dict[str, Any]) -> list[dict[str, Any]]:
     rows = row.get("_fills")
     return [dict(item) for item in rows if isinstance(item, dict)] if isinstance(rows, list) else []
+
+
+def _has_fill_evidence(row: dict[str, Any]) -> bool:
+    if _fill_rows(row):
+        return True
+    if _filled_qty(row) <= 0 or _avg_px(row) <= 0:
+        return False
+    if not str(row.get("feeCcy") or "").strip():
+        return False
+    if not any(str(row.get(key) or "").strip() for key in ("tradeId", "fillTime", "uTime", "cTime")):
+        return False
+    return _fee(row) != 0
 
 
 def _query_base_balance(okx: Any, symbol: str) -> Decimal | None:
