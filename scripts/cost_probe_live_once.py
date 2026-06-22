@@ -1510,6 +1510,49 @@ def _persist_roundtrip_status(
         "recovery_required": not closed_flat,
     }
     _persist_live_execution_status(payload, reports_dir)
+    if closed_flat:
+        _persist_terminal_preflight_snapshot(payload, reports_dir)
+
+
+def _persist_terminal_preflight_snapshot(
+    result: dict[str, Any],
+    reports_dir: Path,
+) -> Path | None:
+    p3 = result.get("p3_preflight") if isinstance(result.get("p3_preflight"), dict) else {}
+    if not p3:
+        return None
+    event_ts = str(result.get("event_ts") or datetime.now(UTC).isoformat().replace("+00:00", "Z"))
+    roundtrip_id = str(
+        result.get("roundtrip_id")
+        or f"{str(result.get('entry_order_id') or '').strip()}:{str(result.get('exit_order_id') or '').strip()}".strip(":")
+        or result.get("authorization_id")
+        or ""
+    )
+    terminal = dict(p3)
+    blockers = sorted(
+        {
+            *[str(item) for item in terminal.get("blockers", []) if str(item)],
+            "probe_completed_today",
+        }
+    )
+    terminal.update(
+        {
+            "state": "PROBE_COMPLETED_TODAY",
+            "ready_to_request_manual_live_probe": False,
+            "online_exchange_preflight_state": "PROBE_COMPLETED_TODAY",
+            "effective_preflight_state": "PROBE_COMPLETED_TODAY",
+            "blockers": blockers,
+            "latest_terminal_roundtrip_id": roundtrip_id,
+            "latest_terminal_roundtrip_ts": event_ts,
+            "next_probe_allowed_at": _next_utc_day(event_ts),
+            "next_action": "select_next_probe_symbol_or_wait_until_next_utc_day",
+        }
+    )
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    out = reports_dir / "cost_probe_p3_preflight.json"
+    _atomic_write_json(out, terminal)
+    _persist_effective_preflight_summary(terminal, reports_dir)
+    return out
 
 
 def _live_execution_status(result: dict[str, Any]) -> dict[str, Any]:
@@ -1730,6 +1773,15 @@ def _parse_dt(value: Any) -> datetime | None:
     except ValueError:
         return None
     return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _next_utc_day(value: Any) -> str:
+    parsed = _parse_dt(value)
+    if parsed is None:
+        parsed = datetime.now(UTC)
+    current = parsed.astimezone(UTC)
+    next_day = datetime(current.year, current.month, current.day, tzinfo=UTC) + timedelta(days=1)
+    return next_day.isoformat().replace("+00:00", "Z")
 
 
 def _public_okx_item(okx: Any, path: str, params: dict[str, Any]) -> dict[str, Any]:

@@ -661,6 +661,47 @@ def test_cost_probe_engine_blocks_symbol_roundtrip_limit(tmp_path):
     }
 
 
+def test_cost_probe_p3_marks_same_day_closed_flat_probe_completed(tmp_path):
+    cfg = _ready_cost_probe_config()
+    _write_clean_runtime_state(tmp_path)
+    reports_dir = tmp_path / "out"
+    reports_dir.mkdir()
+    (reports_dir / "cost_probe_live_execution_status.json").write_text(
+        json.dumps(
+            {
+                "status": "CLOSED_FLAT",
+                "generated_at": "2026-06-18T11:45:00Z",
+                "manual_probe_symbol": "BTC/USDT",
+                "entry_order_id": "entry-1",
+                "exit_order_id": "exit-1",
+                "no_order_submitted": False,
+                "execution_completed": True,
+                "flat_verified": True,
+                "reconcile_ok": True,
+                "cost_evidence_complete": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    engine = CostProbeEngine(
+        cfg,
+        reports_dir=reports_dir,
+        generated_at=GENERATED_AT,
+        project_root=tmp_path,
+    )
+    payload = engine.build()
+
+    p3 = payload["p3_preflight"]
+    assert p3["state"] == "PROBE_COMPLETED_TODAY"
+    assert p3["ready_to_request_manual_live_probe"] is False
+    assert "probe_completed_today" in p3["blockers"]
+    assert p3["latest_terminal_roundtrip_id"] == "entry-1:exit-1"
+    assert p3["latest_terminal_roundtrip_ts"] == "2026-06-18T11:45:00Z"
+    assert p3["next_probe_allowed_at"] == "2026-06-19T00:00:00Z"
+    assert p3["next_action"] == "select_next_probe_symbol_or_wait_until_next_utc_day"
+
+
 def _ready_cost_probe_config() -> AppConfig:
     cfg = AppConfig()
     cfg.execution.order_store_path = "runtime/orders.sqlite"

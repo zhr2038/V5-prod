@@ -97,6 +97,7 @@ COST_DISAGREEMENT_FIELDS = [
 P3_MANUAL_PROBE_ALLOWED_SYMBOLS = ("BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT")
 P3_MANUAL_PROBE_MAX_NOTIONAL_USDT = 5.0
 P3_MANUAL_PROBE_MAX_OPEN_SECONDS = 60
+P3_TERMINAL_PROBE_STATUSES = {"closed", "closed_flat", "completed"}
 P3_POST_PROBE_REQUIRED_EVIDENCE = [
     "v5_cost_probe_orders_entry_exit_submitted_for_authorized_symbol",
     "v5_cost_probe_roundtrip_closed_and_flat_for_authorized_symbol",
@@ -332,6 +333,12 @@ class CostProbeEngine:
         roundtrip_rows = [*roundtrip_events, *_read_csv_rows(roundtrips_path)]
         orders = _dedupe_probe_rows(order_rows, key_fn=_probe_order_budget_key)
         roundtrips = _dedupe_probe_rows(roundtrip_rows, key_fn=_probe_roundtrip_budget_key)
+        live_status = _read_json(self.reports_dir / "cost_probe_live_execution_status.json")
+        if live_status_row := _live_execution_status_roundtrip_row(live_status):
+            roundtrips = _dedupe_probe_rows(
+                [*roundtrips, live_status_row],
+                key_fn=_probe_roundtrip_budget_key,
+            )
         symbols = _cost_probe_symbols(self.execution)
         daily_orders = [
             row
@@ -475,6 +482,11 @@ class CostProbeEngine:
             "daily_order_used_count": daily_order_used_count,
             "daily_roundtrip_used_count": len(daily_roundtrips),
             "daily_loss_usdt": daily_loss,
+            "latest_terminal_roundtrip_by_symbol": _terminal_probe_summary_by_symbol(
+                symbols,
+                roundtrips,
+                generated_at=self.generated_at,
+            ),
             "cost_probe_orders_path": str(orders_path),
             "cost_probe_roundtrips_path": str(roundtrips_path),
             "cost_probe_order_events_path": str(order_events_path),
@@ -621,12 +633,25 @@ def build_cost_probe_p3_preflight(
             if str(row.get("plan_status") or "") == "planned" and row.get("symbol")
         ]
     manual_probe_symbol = planned_symbols[0] if len(planned_symbols) == 1 else ""
+    configured_symbols = []
+    for row in plan_rows:
+        symbol = str(row.get("symbol") or "")
+        if symbol and symbol not in configured_symbols:
+            configured_symbols.append(symbol)
+    if not manual_probe_symbol and len(configured_symbols) == 1:
+        terminal_by_symbol = summary.get("latest_terminal_roundtrip_by_symbol")
+        if isinstance(terminal_by_symbol, dict) and configured_symbols[0] in terminal_by_symbol:
+            manual_probe_symbol = configured_symbols[0]
     selected_plan_rows = [
         row
         for row in plan_rows
         if str(row.get("symbol") or "") == manual_probe_symbol
         and str(row.get("plan_status") or "") == "planned"
     ]
+    if not selected_plan_rows:
+        selected_plan_rows = [
+            row for row in plan_rows if str(row.get("symbol") or "") == manual_probe_symbol
+        ]
     selected_plan = selected_plan_rows[0] if len(selected_plan_rows) == 1 else {}
     exit_policy = str(selected_plan.get("exit_policy") or "")
     max_open_seconds = _int_value(selected_plan.get("max_open_seconds"))
@@ -679,12 +704,20 @@ def build_cost_probe_p3_preflight(
     if _float_value(summary.get("daily_loss_usdt")) > 0:
         blockers.append("daily_probe_loss_present")
 
+    terminal_probe = _summary_terminal_probe_for_symbol(summary, manual_probe_symbol)
+    probe_completed_today = bool(terminal_probe.get("same_utc_day"))
+    if probe_completed_today:
+        blockers.append("probe_completed_today")
+
     blockers = sorted(set(blockers))
     state = "READY_FOR_MANUAL_AUTHORIZATION" if not blockers else "NOT_READY"
+    if probe_completed_today:
+        state = "PROBE_COMPLETED_TODAY"
+    ready_to_request = state == "READY_FOR_MANUAL_AUTHORIZATION"
     return {
         "generated_at": str(summary.get("generated_at") or ""),
         "state": state,
-        "ready_to_request_manual_live_probe": not blockers,
+        "ready_to_request_manual_live_probe": ready_to_request,
         "manual_authorization_required": True,
         "approved_live_order_execution": False,
         "live_order_effect": "none_preflight_only_no_order",
@@ -716,9 +749,14 @@ def build_cost_probe_p3_preflight(
             summary.get("daily_roundtrip_used_count")
         ),
         "daily_loss_usdt": _float_value(summary.get("daily_loss_usdt")),
+        "latest_terminal_roundtrip_id": str(terminal_probe.get("roundtrip_id") or ""),
+        "latest_terminal_roundtrip_ts": str(terminal_probe.get("event_ts") or ""),
+        "next_probe_allowed_at": str(terminal_probe.get("next_probe_allowed_at") or ""),
         "next_action": (
             "create_signed_authorization_and_run_no_order_validation"
-            if not blockers
+            if ready_to_request
+            else "select_next_probe_symbol_or_wait_until_next_utc_day"
+            if probe_completed_today
             else "fix_preflight_blockers_before_requesting_live_probe"
         ),
         "post_probe_required_evidence": P3_POST_PROBE_REQUIRED_EVIDENCE,
@@ -1306,6 +1344,99 @@ def _latest_probe_datetime(
         if parsed is not None:
             timestamps.append(parsed)
     return max(timestamps) if timestamps else None
+
+
+def _live_execution_status_roundtrip_row(status: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(status, dict):
+        return None
+    if str(status.get("status") or "").strip().lower() not in P3_TERMINAL_PROBE_STATUSES:
+        return None
+    symbol = _normalize_cost_probe_symbol(status.get("manual_probe_symbol"))
+    if not symbol:
+        return None
+    entry_order_id = str(status.get("entry_order_id") or "").strip()
+    exit_order_id = str(status.get("exit_order_id") or "").strip()
+    roundtrip_id = (
+        str(status.get("roundtrip_id") or "").strip()
+        or f"{entry_order_id}:{exit_order_id}".strip(":")
+        or str(status.get("authorization_id") or "").strip()
+    )
+    return {
+        "generated_at": status.get("generated_at"),
+        "event_ts": status.get("generated_at"),
+        "symbol": symbol,
+        "roundtrip_status": status.get("status"),
+        "roundtrip_id": roundtrip_id,
+        "entry_order_id": entry_order_id,
+        "exit_order_id": exit_order_id,
+        "no_order_submitted": status.get("no_order_submitted", False),
+        "live_order_effect": "live_cost_probe_roundtrip",
+        "net_pnl_usdt": status.get("net_pnl_usdt", 0),
+    }
+
+
+def _terminal_probe_summary_by_symbol(
+    symbols: list[str],
+    roundtrips: list[dict[str, Any]],
+    *,
+    generated_at: datetime,
+) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    wanted = set(symbols)
+    for row in roundtrips:
+        symbol = _normalize_cost_probe_symbol(row.get("symbol"))
+        if symbol not in wanted:
+            continue
+        status = str(row.get("roundtrip_status") or row.get("status") or "").strip().lower()
+        if status not in P3_TERMINAL_PROBE_STATUSES:
+            continue
+        if _json_bool(row.get("no_order_submitted")):
+            continue
+        event_ts = _row_datetime(row)
+        current = out.get(symbol)
+        current_ts = _parse_datetime(current.get("event_ts")) if current else None
+        if current is not None and event_ts is not None and current_ts is not None and event_ts <= current_ts:
+            continue
+        roundtrip_id = (
+            str(row.get("roundtrip_id") or "").strip()
+            or f"{str(row.get('entry_order_id') or '').strip()}:{str(row.get('exit_order_id') or '').strip()}".strip(":")
+        )
+        next_allowed = _next_utc_day(event_ts) if event_ts is not None else ""
+        out[symbol] = {
+            "symbol": symbol,
+            "roundtrip_status": status.upper(),
+            "roundtrip_id": roundtrip_id,
+            "event_ts": event_ts.isoformat().replace("+00:00", "Z") if event_ts is not None else "",
+            "same_utc_day": _same_utc_day(event_ts, generated_at),
+            "next_probe_allowed_at": next_allowed,
+        }
+    return out
+
+
+def _summary_terminal_probe_for_symbol(
+    summary: dict[str, Any],
+    symbol: str,
+) -> dict[str, Any]:
+    if not symbol:
+        return {}
+    values = summary.get("latest_terminal_roundtrip_by_symbol")
+    if not isinstance(values, dict):
+        return {}
+    item = values.get(symbol)
+    return item if isinstance(item, dict) else {}
+
+
+def _next_utc_day(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    current = value.astimezone(UTC)
+    next_day = datetime(
+        current.year,
+        current.month,
+        current.day,
+        tzinfo=UTC,
+    ) + timedelta(days=1)
+    return next_day.isoformat().replace("+00:00", "Z")
 
 
 def _daily_roundtrip_loss_usdt(roundtrips: list[dict[str, Any]]) -> float:

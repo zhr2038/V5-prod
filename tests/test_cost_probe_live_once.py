@@ -22,6 +22,7 @@ from scripts.cost_probe_live_once import (
     _current_code_sha,
     _persist_live_execution_status,
     _persist_preflight_snapshot,
+    _persist_roundtrip_status,
     _reconcile_probe_dust_accepted,
     _roundtrip_cost_fields,
     build_live_probe_preflight,
@@ -387,6 +388,45 @@ def test_cost_probe_live_execution_status_uses_recovered_order_fills(tmp_path: P
     assert payload["exit_filled"] is True
     assert payload["entry_filled_qty"] == "0.00007747"
     assert payload["exit_filled_qty"] == "0.00007739"
+
+
+def test_cost_probe_closed_flat_updates_p3_terminal_snapshot(tmp_path: Path) -> None:
+    reports = tmp_path / "reports"
+    preflight = {
+        "p3_preflight": {
+            "state": "READY_FOR_MANUAL_AUTHORIZATION",
+            "ready_to_request_manual_live_probe": True,
+            "manual_probe_symbol": "BTC/USDT",
+            "blockers": [],
+            "online_exchange_preflight_state": "READY_FOR_MANUAL_AUTHORIZATION",
+            "effective_preflight_state": "READY_FOR_MANUAL_AUTHORIZATION",
+        }
+    }
+    result = {
+        "state": "COMPLETED",
+        "event_ts": "2026-06-21T11:20:30Z",
+        "roundtrip_id": "entry-1:exit-1",
+        "execution_completed": True,
+        "flat_verified": True,
+        "entry_order_id": "entry-1",
+        "exit_order_id": "exit-1",
+    }
+
+    _persist_roundtrip_status(
+        reports,
+        result=result,
+        preflight=preflight,
+        instrument={},
+        authorization={"authorization_id": "auth-1"},
+    )
+
+    p3 = json.loads((reports / "cost_probe_p3_preflight.json").read_text(encoding="utf-8"))
+    assert p3["state"] == "PROBE_COMPLETED_TODAY"
+    assert p3["ready_to_request_manual_live_probe"] is False
+    assert p3["effective_preflight_state"] == "PROBE_COMPLETED_TODAY"
+    assert p3["latest_terminal_roundtrip_id"] == "entry-1:exit-1"
+    assert p3["latest_terminal_roundtrip_ts"] == "2026-06-21T11:20:30Z"
+    assert p3["next_probe_allowed_at"] == "2026-06-22T00:00:00Z"
 
 
 def test_create_cost_probe_authorization_payload_signs_required_context() -> None:
