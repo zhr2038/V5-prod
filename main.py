@@ -1118,6 +1118,7 @@ def _refresh_quant_lab_permission_or_raise(
                 f"fail_policy={getattr(guard.cfg, 'fail_policy', 'sell_only')}"
             )
             audit.save(str(runtime_run_dir))
+        _record_pipeline_stage(audit, runtime_run_dir, "QL_PERMISSION_DONE")
         if log_obj is not None:
             log_obj.warning(
                 "quant-lab permission: decision=%s effective=%s fallback=%s",
@@ -1126,12 +1127,11 @@ def _refresh_quant_lab_permission_or_raise(
                 bool(guard.permission_result.fallback_used),
             )
         if bool(guard.permission_result.fallback_used) and decision == "ABORT":
-            _audit_and_raise(
-                audit,
-                runtime_run_dir,
-                "quant_lab_unavailable",
-                "quant-lab unavailable and quant_lab.fail_policy=abort",
-            )
+            if audit is not None:
+                audit.add_note("QUANT_LAB_PERMISSION_FALLBACK_ABORT_CONTINUE_TO_FINALIZE")
+                audit.save(str(runtime_run_dir))
+            if log_obj is not None:
+                log_obj.warning("quant-lab unavailable; fail_policy=abort blocks orders but run finalization continues")
         return guard
     except RuntimeError:
         raise
@@ -1175,35 +1175,68 @@ def _apply_quant_lab_guard_to_orders(
             final_permission=final_permission,
         )
     before = len(list(orders or []))
-    permission_filtered = guard.filter_orders_by_permission(list(orders or []), guard.permission_result)
+    _record_pipeline_stage(audit, runtime_run_dir, "QL_ORDER_FILTER_START")
     try:
-        regime = str(getattr(guard, "cost_regime", "") or getattr(getattr(guard, "cfg", None), "cost_regime", "normal") or "normal")
-    except Exception:
-        regime = "normal"
-    cost_filtered, _cost_rows = guard.enrich_orders_with_cost(permission_filtered, regime, cfg=cfg)
-    if bool(getattr(guard, "apply_permission_gate", False)):
-        filtered = guard.filter_orders_by_permission(cost_filtered, guard.permission_result)
-    else:
-        filtered = cost_filtered
-    summary = guard.summary_payload(orders_before=before, orders_after=len(filtered))
-    if audit is not None:
-        audit.quant_lab = guard.audit_payload()
-        audit.add_note(
-            "QUANT_LAB_ORDER_FILTER "
-            f"before={summary.get('orders_before')} after={summary.get('orders_after')} "
-            f"filtered={summary.get('orders_filtered')} effective={summary.get('final_permission')} "
-            f"fallback={summary.get('fallback_used')}"
-        )
-        audit.save(str(runtime_run_dir))
-    if log_obj is not None and int(summary.get("orders_filtered", 0) or 0) > 0:
-        log_obj.warning(
-            "quant-lab filtered orders: before=%s after=%s filtered=%s effective=%s",
-            summary.get("orders_before"),
-            summary.get("orders_after"),
-            summary.get("orders_filtered"),
-            summary.get("final_permission"),
-        )
-    return filtered
+        permission_filtered = guard.filter_orders_by_permission(list(orders or []), guard.permission_result)
+        try:
+            regime = str(
+                getattr(guard, "cost_regime", "")
+                or getattr(getattr(guard, "cfg", None), "cost_regime", "normal")
+                or "normal"
+            )
+        except Exception:
+            regime = "normal"
+        cost_filtered, _cost_rows = guard.enrich_orders_with_cost(permission_filtered, regime, cfg=cfg)
+        if bool(getattr(guard, "apply_permission_gate", False)):
+            filtered = guard.filter_orders_by_permission(cost_filtered, guard.permission_result)
+        else:
+            filtered = cost_filtered
+        summary = guard.summary_payload(orders_before=before, orders_after=len(filtered))
+        if audit is not None:
+            audit.quant_lab = guard.audit_payload()
+            audit.add_note(
+                "QUANT_LAB_ORDER_FILTER "
+                f"before={summary.get('orders_before')} after={summary.get('orders_after')} "
+                f"filtered={summary.get('orders_filtered')} effective={summary.get('final_permission')} "
+                f"fallback={summary.get('fallback_used')}"
+            )
+            audit.save(str(runtime_run_dir))
+        if log_obj is not None and int(summary.get("orders_filtered", 0) or 0) > 0:
+            log_obj.warning(
+                "quant-lab filtered orders: before=%s after=%s filtered=%s effective=%s",
+                summary.get("orders_before"),
+                summary.get("orders_after"),
+                summary.get("orders_filtered"),
+                summary.get("final_permission"),
+            )
+        _record_pipeline_stage(audit, runtime_run_dir, "QL_ORDER_FILTER_DONE")
+        return filtered
+    except Exception as exc:
+        if log_obj is not None:
+            log_obj.warning("quant-lab order guard failed; blocking live order intents", exc_info=True)
+        issue = {
+            "code": "quant_lab_order_guard_failed",
+            "severity": "high",
+            "detail": "quant-lab order guard failed; blocked live order intents and continued run finalization",
+            "ts_utc": _utc_now().isoformat().replace("+00:00", "Z"),
+            "evidence": {
+                "run_id": getattr(audit, "run_id", Path(runtime_run_dir).name),
+                "run_dir": str(runtime_run_dir),
+                "orders_before": before,
+                "error_type": type(exc).__name__,
+                "error_message": str(exc)[:500],
+            },
+        }
+        try:
+            if audit is not None:
+                audit.quant_lab = guard.audit_payload()
+                audit.add_note("QUANT_LAB_ORDER_FILTER failed_safe_block after=0")
+                audit.save(str(runtime_run_dir))
+        except Exception:
+            pass
+        _append_audit_high_issue(audit, runtime_run_dir, issue)
+        _record_pipeline_stage(audit, runtime_run_dir, "QL_ORDER_FILTER_DONE")
+        return []
 
 
 def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> Path:
@@ -1765,6 +1798,52 @@ def _audit_and_raise(audit, runtime_run_dir: Path, reject_reason: str, message: 
         audit.add_note(message)
         audit.save(str(runtime_run_dir))
     raise RuntimeError(message)
+
+
+def _record_pipeline_stage(audit: Any, runtime_run_dir: Path, stage: str) -> None:
+    if audit is None:
+        return
+    audit.add_note(f"PIPELINE_STAGE {stage}")
+    audit.save(str(runtime_run_dir))
+
+
+def _write_run_completion_status(
+    runtime_run_dir: Path,
+    *,
+    run_id: str,
+    status: str = "FINALIZED",
+    stages: Iterable[str] | None = None,
+    error: Mapping[str, Any] | None = None,
+) -> Path:
+    normalized_status = str(status or "FINALIZED").strip().upper()
+    payload: dict[str, Any] = {
+        "schema_version": "v5.run_completion.v1",
+        "run_id": str(run_id or Path(runtime_run_dir).name),
+        "status": normalized_status,
+        "run_completion": normalized_status,
+        "run_completed": normalized_status == "FINALIZED",
+        "stages": list(dict.fromkeys(str(stage) for stage in (stages or []) if str(stage).strip())),
+        "ts_utc": _utc_now().isoformat().replace("+00:00", "Z"),
+    }
+    if error:
+        payload["error"] = dict(error)
+    return _atomic_write_json(Path(runtime_run_dir) / "run_completion.json", payload)
+
+
+def _pipeline_stages_from_audit(audit: Any, *extra: str) -> list[str]:
+    stages: list[str] = []
+    for note in getattr(audit, "notes", []) or []:
+        marker = "PIPELINE_STAGE "
+        if marker not in str(note):
+            continue
+        stage = str(note).split(marker, 1)[1].split()[0].strip()
+        if stage and stage not in stages:
+            stages.append(stage)
+    for stage in extra:
+        stage_text = str(stage or "").strip()
+        if stage_text and stage_text not in stages:
+            stages.append(stage_text)
+    return stages
 
 
 def _append_audit_high_issue(audit: Any, runtime_run_dir: Path, issue: dict[str, Any]) -> None:
@@ -2413,6 +2492,7 @@ def _write_candidate_snapshot_best_effort(
         )
         audit.add_note(f"candidate_snapshot rows={candidate_rows}")
         audit.save(str(runtime_run_dir))
+        _record_pipeline_stage(audit, runtime_run_dir, "CANDIDATE_SNAPSHOT_WRITTEN")
         return int(candidate_rows)
     except Exception as exc:
         if log_obj is not None:
@@ -3104,6 +3184,7 @@ def main() -> None:
         precomputed_alpha=alpha_snap,
         precomputed_regime=regime,
     )
+    _record_pipeline_stage(audit, runtime_run_dir, "PIPELINE_DONE")
     if live_whitelist:
         _assert_live_symbol_subset(
             list((out.portfolio.target_weights or {}).keys()),
@@ -3573,6 +3654,7 @@ def main() -> None:
         )
         audit.add_note(f"order_lifecycle decision_rows={order_lifecycle_count}")
         audit.save(str(runtime_run_dir))
+        _record_pipeline_stage(audit, runtime_run_dir, "ORDER_LIFECYCLE_WRITTEN")
     except Exception as exc:
         log.warning("order lifecycle decision export failed: %s", exc, exc_info=True)
         _append_audit_high_issue(
@@ -3695,6 +3777,7 @@ def main() -> None:
         )
         audit.add_note(f"order_lifecycle finalized_rows={len(lifecycle_rows)}")
         audit.save(str(runtime_run_dir))
+        _record_pipeline_stage(audit, runtime_run_dir, "ORDER_LIFECYCLE_WRITTEN")
     except Exception as exc:
         log.warning("order lifecycle finalize export failed: %s", exc, exc_info=True)
         _append_audit_high_issue(
@@ -3891,6 +3974,12 @@ def main() -> None:
         regime=regime,
         portfolio=out.portfolio,
         execution=report,
+    )
+    _record_pipeline_stage(audit, runtime_run_dir, "RUN_FINALIZED")
+    _write_run_completion_status(
+        runtime_run_dir,
+        run_id=run_id,
+        stages=_pipeline_stages_from_audit(audit, "RUN_FINALIZED"),
     )
 
     if is_live:

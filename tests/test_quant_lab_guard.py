@@ -32,6 +32,7 @@ class _Client:
         permission_allowed_live_modes=None,
         permission_live_block_reasons=None,
         deep_health_status="ok",
+        fail_deep_health=False,
     ) -> None:
         self.permission = permission
         self.fail_health = fail_health
@@ -49,6 +50,7 @@ class _Client:
         self.permission_allowed_live_modes = permission_allowed_live_modes
         self.permission_live_block_reasons = list(permission_live_block_reasons or [])
         self.deep_health_status = deep_health_status
+        self.fail_deep_health = fail_deep_health
         self.run_id = "r"
         self.cost_kwargs = []
         self.permission_calls = 0
@@ -59,26 +61,40 @@ class _Client:
         return SimpleNamespace(status="ok", mode="read-only")
 
     def get_deep_health(self):
-        if self.deep_health_status == "critical":
-            raise RuntimeError("deep health critical secret-token")
+        if self.fail_deep_health:
+            raise RuntimeError("deep health unavailable secret-token")
+        is_warning = self.deep_health_status == "warning"
+        is_critical = self.deep_health_status == "critical"
         return SimpleNamespace(
             status=self.deep_health_status,
             mode="read-only",
-            warnings=["cost_health_warning"] if self.deep_health_status == "warning" else [],
+            overall_status=self.deep_health_status,
+            service_health={"status": "OK", "mode": "read-only", "transport": "OK"},
+            data_quality={
+                "status": "CRITICAL" if is_critical else ("WARN" if is_warning else "OK"),
+                "warnings": ["data_health_critical"] if is_critical else (["cost_health_warning"] if is_warning else []),
+            },
+            live_entry_readiness={
+                "status": "BLOCKED" if is_critical else "READY",
+                "veto_status": "VETO_READY",
+                "entry_status": "BLOCKED" if is_critical else "ENTRY_READY",
+                "scale_status": "BLOCKED" if is_critical else "SCALE_READY",
+            },
+            warnings=["data_health_critical"] if is_critical else (["cost_health_warning"] if is_warning else []),
             cost_health={
                 "status": self.deep_health_status,
-                "fallback_ratio": 1.0 if self.deep_health_status == "warning" else 0.0,
+                "fallback_ratio": 1.0 if is_warning else 0.0,
                 "hard_fallback_ratio": 0.0,
-                "soft_fallback_ratio": 1.0 if self.deep_health_status == "warning" else 0.0,
-                "actual_rows": 0 if self.deep_health_status == "warning" else 3,
+                "soft_fallback_ratio": 1.0 if is_warning else 0.0,
+                "actual_rows": 0 if is_warning else 3,
                 "mixed_rows": 0,
-                "proxy_rows": 33 if self.deep_health_status == "warning" else 0,
+                "proxy_rows": 33 if is_warning else 0,
                 "global_default_rows": 0,
-                "proxy_only_count": 33 if self.deep_health_status == "warning" else 0,
-                "symbols_missing_cost": ["ALLO-USDT"] if self.deep_health_status == "warning" else [],
-                "warnings": ["soft_fallback_ratio_gt_0.5"] if self.deep_health_status == "warning" else [],
+                "proxy_only_count": 33 if is_warning else 0,
+                "symbols_missing_cost": ["ALLO-USDT"] if is_warning else [],
+                "warnings": ["soft_fallback_ratio_gt_0.5"] if is_warning else [],
             },
-            data_health={"status": "ok"},
+            data_health={"status": "critical" if is_critical else "ok"},
             risk_permission_dependency_meta={"status": "ok"},
         )
 
@@ -230,12 +246,42 @@ def test_refresh_permission_health_failure_uses_fail_policy_without_permission_c
     assert "secret-token" not in (tmp_path / "usage.jsonl").read_text(encoding="utf-8")
 
 
-def test_refresh_permission_deep_health_failure_uses_fail_policy_without_permission_call(tmp_path: Path) -> None:
+def test_refresh_permission_deep_health_critical_consumes_remote_abort(tmp_path: Path) -> None:
     cfg = AppConfig()
     cfg.quant_lab.enabled = True
     cfg.quant_lab.mode = "enforce"
     cfg.quant_lab.fail_policy = "sell_only"
-    client = _Client(permission="ALLOW", deep_health_status="critical")
+    client = _Client(permission="ABORT", deep_health_status="critical")
+    guard = _guard(tmp_path, cfg, client)
+
+    decision = guard.refresh_permission(include_health=True)
+
+    assert decision == "ABORT"
+    assert client.permission_calls == 1
+    assert guard.permission_result.fallback_used is False
+    assert guard.permission_result.raw_permission_decision == "ABORT"
+    assert guard.permission_result.would_block_if_enforced is True
+    rows = [json.loads(line) for line in (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["event_type"] == "health_check"
+    assert rows[0]["success"] is True
+    assert rows[0]["deep_health_status"] == "critical"
+    assert rows[0]["deep_health_overall_status"] == "critical"
+    assert rows[0]["deep_service_health_status"] == "OK"
+    assert rows[0]["deep_data_quality_status"] == "CRITICAL"
+    assert rows[0]["deep_live_entry_readiness_status"] == "BLOCKED"
+    assert rows[0]["deep_live_entry_veto_status"] == "VETO_READY"
+    assert rows[-1]["event_type"] != "fallback"
+    assert "secret-token" not in (tmp_path / "usage.jsonl").read_text(encoding="utf-8")
+
+
+def test_refresh_permission_deep_health_transport_failure_uses_fail_policy_without_permission_call(
+    tmp_path: Path,
+) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "enforce"
+    cfg.quant_lab.fail_policy = "sell_only"
+    client = _Client(permission="ALLOW", fail_deep_health=True)
     guard = _guard(tmp_path, cfg, client)
 
     decision = guard.refresh_permission(include_health=True)

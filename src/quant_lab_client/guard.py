@@ -1148,6 +1148,19 @@ class QuantLabGuard:
                 deep_data_health = getattr(deep_health, "data_health", {}) if deep_health is not None else {}
                 if not isinstance(deep_data_health, dict):
                     deep_data_health = {}
+                deep_service_health = getattr(deep_health, "service_health", {}) if deep_health is not None else {}
+                if not isinstance(deep_service_health, dict):
+                    deep_service_health = {}
+                deep_data_quality = getattr(deep_health, "data_quality", {}) if deep_health is not None else {}
+                if not isinstance(deep_data_quality, dict):
+                    deep_data_quality = {}
+                deep_live_entry_readiness = (
+                    getattr(deep_health, "live_entry_readiness", {})
+                    if deep_health is not None
+                    else {}
+                )
+                if not isinstance(deep_live_entry_readiness, dict):
+                    deep_live_entry_readiness = {}
                 deep_risk_dependency = (
                     getattr(deep_health, "risk_permission_dependency_meta", {})
                     if deep_health is not None
@@ -1165,7 +1178,14 @@ class QuantLabGuard:
                         "fallback_used": False,
                         "status": getattr(health, "status", "ok"),
                         "deep_health_status": getattr(deep_health, "status", None),
+                        "deep_health_overall_status": getattr(deep_health, "overall_status", None),
                         "deep_health_warnings": list(getattr(deep_health, "warnings", []) or []),
+                        "deep_service_health_status": deep_service_health.get("status"),
+                        "deep_data_quality_status": deep_data_quality.get("status"),
+                        "deep_live_entry_readiness_status": deep_live_entry_readiness.get("status"),
+                        "deep_live_entry_veto_status": deep_live_entry_readiness.get("veto_status"),
+                        "deep_live_entry_status": deep_live_entry_readiness.get("entry_status"),
+                        "deep_live_scale_status": deep_live_entry_readiness.get("scale_status"),
                         "deep_cost_health_status": deep_cost_health.get("status"),
                         "deep_cost_fallback_ratio": deep_cost_health.get("fallback_ratio"),
                         "deep_cost_hard_fallback_ratio": deep_cost_health.get("hard_fallback_ratio"),

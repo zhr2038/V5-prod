@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import csv
 import json
 
 import pytest
 
+from configs.schema import AppConfig
 import main as main_module
+from src.core.models import Order
 from src.core import run_logger
 from src.reporting import budget_state, decision_audit, fill_trade_exporter, metrics, reporting, summary_writer, trade_log
 
@@ -594,6 +597,102 @@ def test_write_summary_keeps_zero_trades_when_trades_csv_empty(monkeypatch, tmp_
     assert summary["turnover_usdt"] == 0.0
     assert summary["fees_usdt_total"] == 0.0
     assert summary["slippage_usdt_total"] == 0.0
+
+
+def test_quant_lab_order_guard_failure_blocks_orders_and_continues_finalization(tmp_path):
+    cfg = AppConfig()
+    audit = decision_audit.DecisionAudit(run_id="guard_fail")
+    run_dir = tmp_path / "reports" / "runs" / "guard_fail"
+
+    class BrokenGuard:
+        client = None
+        cfg = type("Cfg", (), {"cost_regime": "normal"})()
+        permission_result = type("Permission", (), {"permission": "ALLOW", "fallback_used": False})()
+        apply_permission_gate = True
+
+        def record_final_permission(self, **_kwargs):
+            return None
+
+        def filter_orders_by_permission(self, *_args, **_kwargs):
+            raise RuntimeError("quant lab guard broke")
+
+        def audit_payload(self):
+            return {"permission": "ALLOW", "fallback_used": False}
+
+    filtered = main_module._apply_quant_lab_guard_to_orders(
+        cfg=cfg,
+        guard=BrokenGuard(),
+        orders=[Order("BTC/USDT", "buy", "OPEN_LONG", 0.001, 100000.0, {})],
+        audit=audit,
+        runtime_run_dir=run_dir,
+    )
+
+    assert filtered == []
+    persisted = json.loads((run_dir / "decision_audit.json").read_text(encoding="utf-8"))
+    assert any(item["code"] == "quant_lab_order_guard_failed" for item in persisted["issues_to_fix"])
+    assert any("PIPELINE_STAGE QL_ORDER_FILTER_DONE" in note for note in persisted["notes"])
+
+
+def test_zero_order_run_writes_core_completion_artifacts(monkeypatch, tmp_path):
+    monkeypatch.setattr(summary_writer, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(metrics, "PROJECT_ROOT", tmp_path)
+
+    cfg = AppConfig()
+    cfg.quant_lab.enabled = False
+    run_id = "zero_order"
+    reports_dir = tmp_path / "reports"
+    run_dir = reports_dir / "runs" / run_id
+    run_dir.mkdir(parents=True)
+    audit = decision_audit.DecisionAudit(run_id=run_id)
+    main_module._record_pipeline_stage(audit, run_dir, "PIPELINE_DONE")
+    main_module._record_pipeline_stage(audit, run_dir, "QL_PERMISSION_DONE")
+    main_module._record_pipeline_stage(audit, run_dir, "QL_ORDER_FILTER_START")
+    main_module._record_pipeline_stage(audit, run_dir, "QL_ORDER_FILTER_DONE")
+    _write_equity(run_dir, ts="2026-05-15T00:00:00Z", equity=100.0)
+    _write_trades(run_dir, [])
+
+    rows_written = main_module._write_candidate_snapshot_best_effort(
+        cfg=cfg,
+        runtime_run_dir=run_dir,
+        runtime_reports_dir=reports_dir,
+        run_id=run_id,
+        symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"],
+        audit=audit,
+        orders=[],
+        no_signal_reason="quant_lab_remote_abort",
+    )
+    from src.reporting.order_lifecycle import write_order_lifecycle
+
+    lifecycle_rows = write_order_lifecycle(run_dir=run_dir, reports_dir=reports_dir, orders=[], append_reports=True)
+    audit.add_note(f"order_lifecycle finalized_rows={len(lifecycle_rows)}")
+    audit.save(str(run_dir))
+    main_module._record_pipeline_stage(audit, run_dir, "ORDER_LIFECYCLE_WRITTEN")
+    summary = summary_writer.write_summary(str(run_dir))
+    main_module._record_pipeline_stage(audit, run_dir, "RUN_FINALIZED")
+    main_module._write_run_completion_status(
+        run_dir,
+        run_id=run_id,
+        stages=main_module._pipeline_stages_from_audit(audit, "RUN_FINALIZED"),
+    )
+
+    assert rows_written == 4
+    candidate_rows = list(csv.DictReader((run_dir / "candidate_snapshot.csv").read_text(encoding="utf-8").splitlines()))
+    assert [row["symbol"] for row in candidate_rows] == ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"]
+    assert {row["no_signal_reason"] for row in candidate_rows} == {"quant_lab_remote_abort"}
+    assert (run_dir / "order_lifecycle.csv").exists()
+    assert summary["num_trades"] == 0
+    completion = json.loads((run_dir / "run_completion.json").read_text(encoding="utf-8"))
+    assert completion["run_completion"] == "FINALIZED"
+    assert completion["run_completed"] is True
+    assert completion["stages"] == [
+        "PIPELINE_DONE",
+        "QL_PERMISSION_DONE",
+        "QL_ORDER_FILTER_START",
+        "QL_ORDER_FILTER_DONE",
+        "CANDIDATE_SNAPSHOT_WRITTEN",
+        "ORDER_LIFECYCLE_WRITTEN",
+        "RUN_FINALIZED",
+    ]
 
 
 def test_live_finalize_refresh_failure_records_high_issue(monkeypatch, tmp_path):

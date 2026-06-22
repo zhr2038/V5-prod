@@ -87,8 +87,12 @@ def symbol_to_quant_lab_symbol(symbol: str) -> str:
 @dataclass
 class QuantLabHealth:
     status: str = ""
+    overall_status: str = ""
     service: str = ""
     mode: str = ""
+    service_health: Dict[str, Any] = field(default_factory=dict)
+    data_quality: Dict[str, Any] = field(default_factory=dict)
+    live_entry_readiness: Dict[str, Any] = field(default_factory=dict)
     data_health: Dict[str, Any] = field(default_factory=dict)
     cost_health: Dict[str, Any] = field(default_factory=dict)
     risk_permission_dependency_meta: Dict[str, Any] = field(default_factory=dict)
@@ -99,8 +103,14 @@ class QuantLabHealth:
         data = _payload(payload)
         return cls(
             status=str(data.get("status") or ""),
+            overall_status=str(data.get("overall_status") or ""),
             service=str(data.get("service") or ""),
             mode=str(data.get("mode") or ""),
+            service_health=dict(data.get("service_health") or {}) if isinstance(data.get("service_health"), Mapping) else {},
+            data_quality=dict(data.get("data_quality") or {}) if isinstance(data.get("data_quality"), Mapping) else {},
+            live_entry_readiness=dict(data.get("live_entry_readiness") or {})
+            if isinstance(data.get("live_entry_readiness"), Mapping)
+            else {},
             data_health=dict(data.get("data_health") or {}) if isinstance(data.get("data_health"), Mapping) else {},
             cost_health=dict(data.get("cost_health") or {}) if isinstance(data.get("cost_health"), Mapping) else {},
             risk_permission_dependency_meta=dict(data.get("risk_permission_dependency_meta") or {})

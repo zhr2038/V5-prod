@@ -489,7 +489,41 @@ def test_quant_lab_deep_health_warning_is_visible_not_fatal(tmp_path: Path) -> N
     assert health.cost_health == {"status": "warning"}
 
 
-def test_quant_lab_deep_health_critical_fails_fast(tmp_path: Path) -> None:
+def test_quant_lab_deep_health_critical_service_ok_is_visible_not_fatal(tmp_path: Path) -> None:
+    class CriticalHTTP(_HTTP):
+        def get(self, url, params=None, headers=None, timeout=None):
+            if url.endswith("/v1/health/deep"):
+                return _Response(
+                    {
+                        "status": "critical",
+                        "overall_status": "critical",
+                        "service": "quant-lab",
+                        "mode": "read-only",
+                        "service_health": {"status": "OK", "mode": "read-only", "transport": "OK"},
+                        "data_quality": {"status": "CRITICAL"},
+                        "live_entry_readiness": {"status": "BLOCKED", "veto_status": "VETO_READY"},
+                        "warnings": ["data_health_critical"],
+                        "data_health": {"status": "critical"},
+                    }
+                )
+            return super().get(url, params=params, headers=headers, timeout=timeout)
+
+    client = QuantLabClient(
+        base_url="http://quant-lab.local",
+        http_client=CriticalHTTP(),
+        request_log_path=tmp_path / "r.jsonl",
+    )
+
+    health = client.get_deep_health()
+
+    assert health.status == "critical"
+    assert health.overall_status == "critical"
+    assert health.service_health["status"] == "OK"
+    assert health.data_quality["status"] == "CRITICAL"
+    assert health.live_entry_readiness["veto_status"] == "VETO_READY"
+
+
+def test_quant_lab_deep_health_critical_without_service_ok_fails_fast(tmp_path: Path) -> None:
     class CriticalHTTP(_HTTP):
         def get(self, url, params=None, headers=None, timeout=None):
             if url.endswith("/v1/health/deep"):

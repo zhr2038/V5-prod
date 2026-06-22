@@ -1003,9 +1003,13 @@ class QuantLabClient:
             allowed_status.add("warning")
         status_text = str(health.status or "").strip().lower()
         if status_text not in allowed_status:
-            raise QuantLabValidationError(
-                f"quant-lab {endpoint} status is not ok: {health.status!r}"
-            )
+            service_status = ""
+            if endpoint == "/v1/health/deep" and isinstance(getattr(health, "service_health", None), dict):
+                service_status = str(health.service_health.get("status") or "").strip().lower()
+            if endpoint != "/v1/health/deep" or status_text != "critical" or service_status not in {"ok", "healthy"}:
+                raise QuantLabValidationError(
+                    f"quant-lab {endpoint} status is not ok: {health.status!r}"
+                )
         if str(health.mode).lower() != "read-only":
             raise QuantLabValidationError(
                 f"quant-lab {endpoint} mode must be read-only, got {health.mode!r}"
