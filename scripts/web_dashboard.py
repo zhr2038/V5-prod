@@ -185,7 +185,7 @@ def _dashboard_renderer_mode() -> str:
         return "react"
     if raw in {"template", "jinja", "legacy"}:
         return "template"
-    return "template"
+    return "react"
 
 
 def _dashboard_bind_host() -> str:

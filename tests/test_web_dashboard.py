@@ -407,7 +407,23 @@ def _find_headless_browser() -> str | None:
     return None
 
 
-def test_index_renders_monitor_template():
+def test_index_defaults_to_react_dashboard(monkeypatch, tmp_path):
+    monkeypatch.delenv("V5_DASHBOARD_RENDERER", raising=False)
+    module = load_web_dashboard_module()
+    build_root = tmp_path / "web" / "dist"
+    build_root.mkdir(parents=True)
+    (build_root / "index.html").write_text("REACT_DASHBOARD", encoding="utf-8")
+    monkeypatch.setattr(module, "REACT_BUILD_PATH", build_root)
+    client = module.app.test_client()
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == "REACT_DASHBOARD"
+
+
+def test_index_can_render_monitor_template_when_requested(monkeypatch):
+    monkeypatch.setenv("V5_DASHBOARD_RENDERER", "template")
     module = load_web_dashboard_module()
     client = module.app.test_client()
 
