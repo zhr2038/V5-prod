@@ -283,6 +283,8 @@ def test_cost_probe_live_once_waits_for_operator_execution_confirmation(tmp_path
     status = json.loads(status_path.read_text(encoding="utf-8"))
     assert status["status"] == "AUTH_VALIDATED"
     assert status["authorization_validated"] is True
+    assert status["authorization_fresh_now"] is True
+    assert status["authorization_expired_now"] is False
     assert status["no_order_submitted"] is True
     assert status["approved_live_order_execution"] is False
     assert status["instrument_preflight_passed"] is True

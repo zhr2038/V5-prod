@@ -77,7 +77,7 @@ PAYLOAD_DIRS = [
     "raw/reports",
     "summaries",
 ]
-RUN_FILES = ("decision_audit.json", "trades.csv", "equity.jsonl", "summary.json", "candidate_snapshot.csv", "order_lifecycle.csv")
+RUN_FILES = ("decision_audit.json", "trades.csv", "equity.jsonl", "summary.json", "candidate_snapshot.csv", "order_lifecycle.csv", "run_completion.json")
 STATE_FILES = [
     ("reports/kill_switch.json", "raw/state/kill_switch.json", True),
     ("reports/reconcile_status.json", "raw/state/reconcile_status.json", True),
@@ -580,6 +580,8 @@ NON_SECRET_KEYS = {
     "authorization_consumed_at",
     "authorization_expires_at",
     "authorization_fresh",
+    "authorization_fresh_now",
+    "authorization_expired_now",
     "authorization_id",
     "authorization_issued_at",
     "authorization_nonce",
@@ -1044,6 +1046,40 @@ def filter_jsonl_since(text, since_dt):
     return "\n".join(kept) + ("\n" if kept else "")
 
 
+def parse_auth_dt_utc(value):
+    text = str(value or "").strip()
+    if not text or text == "not_observable":
+        return None
+    try:
+        if re.fullmatch(r"\d+(?:\.\d+)?", text):
+            raw = float(text)
+            if raw > 10_000_000_000:
+                raw /= 1000.0
+            return dt.datetime.fromtimestamp(raw, tz=dt.timezone.utc)
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = dt.datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        return parsed.astimezone(dt.timezone.utc)
+    except Exception:
+        return None
+
+
+def authorization_freshness_now_fields(payload):
+    issued_at = parse_auth_dt_utc(payload.get("authorization_issued_at"))
+    expires_at = parse_auth_dt_utc(payload.get("authorization_expires_at"))
+    if issued_at is None or expires_at is None:
+        return {
+            "authorization_fresh_now": "not_observable",
+            "authorization_expired_now": "not_observable",
+        }
+    return {
+        "authorization_fresh_now": issued_at <= NOW <= expires_at,
+        "authorization_expired_now": NOW > expires_at,
+    }
+
+
 def write_text(dest_rel, text):
     dest = OUT / dest_rel
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1121,6 +1157,8 @@ def copy_cost_probe_artifacts():
         if filename.endswith(".json"):
             payload = load_json(source)
             if isinstance(payload, dict):
+                if filename == "cost_probe_live_execution_status.json":
+                    payload = {**payload, **authorization_freshness_now_fields(payload)}
                 text = json.dumps(sanitize_obj(payload), ensure_ascii=False, indent=2) + "\n"
             else:
                 text = sanitize_text(read_text_limited(source, MAX_COPY_BYTES))
@@ -1203,6 +1241,7 @@ def copy_cost_probe_artifacts():
         elif filename == "cost_probe_live_execution_status.json":
             payload = load_json(source)
             if isinstance(payload, dict):
+                freshness_now = authorization_freshness_now_fields(payload)
                 meta["live_execution_status"] = {
                     "status": payload.get("status", "not_observable"),
                     "source_state": payload.get("source_state", "not_observable"),
@@ -1232,6 +1271,14 @@ def copy_cost_probe_artifacts():
                     ),
                     "authorization_fresh": payload.get(
                         "authorization_fresh",
+                        "not_observable",
+                    ),
+                    "authorization_fresh_now": freshness_now.get(
+                        "authorization_fresh_now",
+                        "not_observable",
+                    ),
+                    "authorization_expired_now": freshness_now.get(
+                        "authorization_expired_now",
                         "not_observable",
                     ),
                     "recovery_required": payload.get(

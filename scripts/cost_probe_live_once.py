@@ -1250,6 +1250,13 @@ def _authorization_fresh(issued_at: str, expires_at: str) -> bool:
     )
 
 
+def _authorization_expired(expires_at: str) -> bool:
+    expires = _parse_utc_datetime(expires_at)
+    if expires is None:
+        return False
+    return datetime.now(UTC) > expires
+
+
 def _parse_utc_datetime(value: Any) -> datetime | None:
     text = str(value or "").strip()
     if not text:
@@ -1597,6 +1604,7 @@ def _live_execution_status(result: dict[str, Any]) -> dict[str, Any]:
     authorization_consumed_at = str(authorization.get("consumed_at") or result.get("authorization_consumed_at") or "")
     authorization_age_sec = _authorization_age_seconds(authorization_issued_at)
     authorization_fresh = _authorization_fresh(authorization_issued_at, authorization_expires_at)
+    authorization_expired = _authorization_expired(authorization_expires_at)
     quote_balance = _decimal_or_none(instrument.get("quote_balance"))
     quote_required = _decimal_or_none(instrument.get("quote_required"))
     quote_balance_sufficient = (
@@ -1646,6 +1654,8 @@ def _live_execution_status(result: dict[str, Any]) -> dict[str, Any]:
         "authorization_consumed_at": authorization_consumed_at,
         "authorization_age_sec": authorization_age_sec,
         "authorization_fresh": authorization_fresh,
+        "authorization_fresh_now": authorization_fresh,
+        "authorization_expired_now": authorization_expired,
         "authorization_validated": authorization_validated,
         "authorization_consumed": auth_consumed,
         "approved_live_order_execution": bool(result.get("approved_live_order_execution")),

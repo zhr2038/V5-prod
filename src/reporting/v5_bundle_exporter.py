@@ -131,6 +131,8 @@ NON_SECRET_CONFIG_KEYS = {
     "authorization_consumed_at",
     "authorization_expires_at",
     "authorization_fresh",
+    "authorization_fresh_now",
+    "authorization_expired_now",
     "authorization_id",
     "authorization_issued_at",
     "authorization_nonce",
@@ -1181,6 +1183,20 @@ def _copy_order_lifecycle_files(staging: Path, reports: Path) -> None:
         )
 
 
+def _copy_run_completion_files(staging: Path, reports: Path) -> None:
+    runs_dir = reports / "runs"
+    if not runs_dir.exists():
+        return
+    for path in sorted(runs_dir.rglob("run_completion.json")):
+        payload = _read_json_obj(path)
+        if isinstance(payload, Mapping):
+            text = json.dumps(_sanitize_bundle_obj(payload), ensure_ascii=False, indent=2) + "\n"
+        else:
+            text = _read_text_redacted(path)
+        run_id = path.parent.name
+        _write_text(staging / "raw/recent_runs" / run_id / "run_completion.json", text)
+
+
 def _copy_cost_probe_artifacts(staging: Path, reports: Path) -> dict[str, Any]:
     present: list[str] = []
     missing: list[str] = []
@@ -1195,7 +1211,10 @@ def _copy_cost_probe_artifacts(staging: Path, reports: Path) -> dict[str, Any]:
             continue
         payload = _read_json_obj(source) if source.suffix.lower() == ".json" else None
         if isinstance(payload, Mapping):
-            text = json.dumps(_sanitize_bundle_obj(payload), ensure_ascii=False, indent=2) + "\n"
+            bundle_payload = dict(payload)
+            if filename == "cost_probe_live_execution_status.json":
+                bundle_payload.update(_authorization_freshness_now_fields(bundle_payload))
+            text = json.dumps(_sanitize_bundle_obj(bundle_payload), ensure_ascii=False, indent=2) + "\n"
         else:
             text = _read_text_redacted(source)
         _write_text(staging / "raw/reports" / filename, text)
@@ -1267,6 +1286,7 @@ def _copy_cost_probe_artifacts(staging: Path, reports: Path) -> dict[str, Any]:
                 }
         elif filename == "cost_probe_live_execution_status.json":
             if isinstance(payload, Mapping):
+                freshness_now = _authorization_freshness_now_fields(payload)
                 live_execution_status = {
                     "status": payload.get("status", "not_observable"),
                     "source_state": payload.get("source_state", "not_observable"),
@@ -1296,6 +1316,14 @@ def _copy_cost_probe_artifacts(staging: Path, reports: Path) -> dict[str, Any]:
                     ),
                     "authorization_fresh": payload.get(
                         "authorization_fresh",
+                        "not_observable",
+                    ),
+                    "authorization_fresh_now": freshness_now.get(
+                        "authorization_fresh_now",
+                        "not_observable",
+                    ),
+                    "authorization_expired_now": freshness_now.get(
+                        "authorization_expired_now",
                         "not_observable",
                     ),
                     "recovery_required": payload.get(
@@ -1444,6 +1472,21 @@ def _parse_utc_dt(value: Any) -> Optional[datetime]:
         return parsed.astimezone(timezone.utc)
     except Exception:
         return None
+
+
+def _authorization_freshness_now_fields(payload: Mapping[str, Any]) -> dict[str, Any]:
+    issued_at = _parse_utc_dt(payload.get("authorization_issued_at"))
+    expires_at = _parse_utc_dt(payload.get("authorization_expires_at"))
+    if issued_at is None or expires_at is None:
+        return {
+            "authorization_fresh_now": "not_observable",
+            "authorization_expired_now": "not_observable",
+        }
+    now = datetime.now(timezone.utc)
+    return {
+        "authorization_fresh_now": issued_at <= now <= expires_at,
+        "authorization_expired_now": now > expires_at,
+    }
 
 
 def _is_new_risk_row(row: Mapping[str, Any]) -> bool:
@@ -2804,6 +2847,7 @@ def export_v5_bundle(
         _write_csv(staging / "summaries/order_lifecycle.csv", ORDER_LIFECYCLE_FIELDS, order_lifecycle_rows)
         _copy_candidate_snapshot_files(staging, reports, candidate_rows)
         _copy_order_lifecycle_files(staging, reports)
+        _copy_run_completion_files(staging, reports)
         cost_probe_artifacts = _copy_cost_probe_artifacts(staging, reports)
         _copy_sol_paper_strategy_files(staging, reports)
         _write_csv(

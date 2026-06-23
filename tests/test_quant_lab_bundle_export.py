@@ -340,6 +340,16 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         json.dumps({"run_id": "r1", "num_trades": 0, "budget": {"fills_count_today": 0}}),
         encoding="utf-8",
     )
+    (run_dir / "run_completion.json").write_text(
+        json.dumps(
+            {
+                "run_id": "r1",
+                "finalized": True,
+                "stages": ["CANDIDATE_SNAPSHOT_WRITTEN", "RUN_FINALIZED"],
+            }
+        ),
+        encoding="utf-8",
+    )
     (run_dir / "candidate_snapshot.csv").write_text(
         "\n".join(
             [
@@ -476,6 +486,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
                 "source_state": "NOT_READY",
                 "manual_probe_symbol": "BTC/USDT",
                 "authorization_id": "cost-probe-test-auth",
+                "authorization_issued_at": "2026-05-11T12:00:00Z",
+                "authorization_expires_at": "2026-05-11T12:05:00Z",
+                "authorization_fresh": True,
                 "authorization_validated": False,
                 "authorization_consumed": False,
                 "execution_completed": False,
@@ -537,6 +550,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "summaries/fast_microstructure_strategy_shadow.csv" in names
         assert "raw/recent_runs/r1/candidate_snapshot.csv" in names
         assert "raw/recent_runs/r1/order_lifecycle.csv" in names
+        assert "raw/recent_runs/r1/run_completion.json" in names
         assert "raw/state/auto_risk_eval.json" in names
         assert "raw/reports/event_candidates.json" in names
         assert "raw/effective_live_config.json" in names
@@ -726,9 +740,14 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert manifest["cost_probe_p3_preflight"]["approved_live_order_execution"] is False
         assert cost_probe_live_execution_status["status"] == "PREFLIGHT_READY"
         assert cost_probe_live_execution_status["authorization_id"] == "cost-probe-test-auth"
+        assert cost_probe_live_execution_status["authorization_fresh"] is True
+        assert cost_probe_live_execution_status["authorization_fresh_now"] is False
+        assert cost_probe_live_execution_status["authorization_expired_now"] is True
         assert cost_probe_live_execution_status["authorization_validated"] is False
         assert cost_probe_live_execution_status["authorization_consumed"] is False
         assert manifest["cost_probe_live_execution_status"]["status"] == "PREFLIGHT_READY"
+        assert manifest["cost_probe_live_execution_status"]["authorization_fresh_now"] is False
+        assert manifest["cost_probe_live_execution_status"]["authorization_expired_now"] is True
         assert window["fill_metrics_rows"] == 1
         assert window["candidate_snapshot_rows"] == 1
         assert window["candidate_cost_source_coverage"] == 1.0
@@ -739,6 +758,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert window["cost_probe_p3_preflight"]["manual_authorization_required"] is True
         assert window["cost_probe_p3_preflight"]["state"] == "NOT_READY"
         assert window["cost_probe_live_execution_status"]["status"] == "PREFLIGHT_READY"
+        assert window["cost_probe_live_execution_status"]["authorization_fresh_now"] is False
+        assert window["cost_probe_live_execution_status"]["authorization_expired_now"] is True
         assert config_audit["mode_source"] == "runtime_override"
         assert "api_env_path_present" in config_audit
         assert "api_env_secure_permissions" in config_audit
