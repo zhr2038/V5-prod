@@ -371,6 +371,18 @@ export interface QuantLabCostEstimateData extends UnknownRecord {
   sample_count?: number | null;
   cost_model_version?: string | null;
   as_of_ts?: string | null;
+  cost_age_seconds?: number | null;
+  cost_max_age_seconds?: number | null;
+  cost_freshness_status?: string | null;
+  cost_stale?: boolean | string | number | null;
+  cost_stale_reasons?: unknown[];
+  degraded_cost_model?: boolean | string | number | null;
+  degraded_reason?: string | null;
+  fallback_reason?: string | null;
+  cost_trust_level?: string | null;
+  cost_trust_block_reasons?: unknown[];
+  reason?: string | null;
+  detail?: string | null;
   proxy?: QuantLabProxyMeta;
   data?: UnknownRecord;
 }

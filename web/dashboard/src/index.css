@@ -2556,6 +2556,46 @@ body {
   font-family: var(--mono);
 }
 
+.ql-cost-panel[data-status="stale"],
+.ql-cost-panel[data-status="unavailable"] {
+  border-color: rgba(255, 190, 92, 0.46);
+  box-shadow:
+    0 0 0 1px rgba(255, 190, 92, 0.12),
+    0 24px 70px rgba(10, 7, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.ql-cost-panel[data-status="unavailable"] {
+  border-color: rgba(255, 105, 130, 0.50);
+}
+
+.ql-cost-status-pill {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 190, 92, 0.42);
+  background: rgba(255, 190, 92, 0.10);
+  color: #ffd48a;
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.ql-cost-panel[data-status="fresh"] .ql-cost-status-pill {
+  border-color: rgba(95, 240, 164, 0.35);
+  background: rgba(95, 240, 164, 0.08);
+  color: #9ff7c6;
+}
+
+.ql-cost-panel[data-status="unavailable"] .ql-cost-status-pill {
+  border-color: rgba(255, 113, 136, 0.46);
+  background: rgba(255, 113, 136, 0.10);
+  color: #ff9eae;
+}
+
 .latest-trade-strip {
   margin-top: 10px;
   padding-top: 10px;
@@ -2871,6 +2911,15 @@ body {
   font-family: var(--mono);
   font-size: 15px;
   white-space: nowrap;
+}
+
+.ql-cost-reasons {
+  flex-basis: 100%;
+}
+
+.ql-cost-reasons strong {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .timer-progress-list {

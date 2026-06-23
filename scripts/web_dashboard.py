@@ -3173,6 +3173,72 @@ def _quant_lab_proxy_degraded(reason: str, *, path: str, detail: str = '', statu
     }
 
 
+def _parse_quant_lab_cost_datetime(value: Any) -> Optional[datetime]:
+    text = str(value or '').strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _quant_lab_cost_max_age_seconds() -> float:
+    raw = os.getenv('V5_DASHBOARD_QUANT_LAB_COST_MAX_AGE_SECONDS', '').strip()
+    try:
+        return max(60.0, float(raw)) if raw else 24.0 * 3600.0
+    except (TypeError, ValueError):
+        return 24.0 * 3600.0
+
+
+def _enrich_quant_lab_cost_freshness(payload: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(payload or {})
+    max_age_seconds = _quant_lab_cost_max_age_seconds()
+    as_of = _parse_quant_lab_cost_datetime(out.get('as_of_ts') or (out.get('data') or {}).get('as_of_ts'))
+    age_seconds: Optional[float] = None
+    stale_reasons: List[str] = []
+    if as_of is not None:
+        age_seconds = max(0.0, (_utc_now() - as_of).total_seconds())
+        if age_seconds > max_age_seconds:
+            stale_reasons.append('as_of_ts_too_old')
+    elif out.get('available') is not False:
+        stale_reasons.append('as_of_ts_missing')
+
+    quality = str(out.get('cost_quality') or '').strip().lower()
+    if quality == 'stale':
+        stale_reasons.append('cost_quality_stale')
+    if _dashboard_to_bool(out.get('degraded_cost_model')):
+        stale_reasons.append('degraded_cost_model')
+    for key in ('degraded_reason', 'fallback_reason'):
+        reason = str(out.get(key) or '').strip().lower()
+        if 'stale' in reason:
+            stale_reasons.append(key)
+    block_reasons = out.get('cost_trust_block_reasons')
+    if isinstance(block_reasons, list):
+        stale_reasons.extend(str(reason) for reason in block_reasons if 'stale' in str(reason).lower())
+
+    unique_reasons = list(dict.fromkeys(stale_reasons))
+    available = out.get('available') is not False
+    if not available:
+        freshness_status = 'unavailable'
+    elif unique_reasons:
+        freshness_status = 'stale'
+    elif as_of is None:
+        freshness_status = 'unknown'
+    else:
+        freshness_status = 'fresh'
+
+    out['cost_age_seconds'] = round(age_seconds, 3) if age_seconds is not None else None
+    out['cost_max_age_seconds'] = max_age_seconds
+    out['cost_freshness_status'] = freshness_status
+    out['cost_stale'] = freshness_status == 'stale'
+    out['cost_stale_reasons'] = unique_reasons
+    return out
+
+
 def _quant_lab_proxy_fetch(path: str, params: Optional[Dict[str, Any]] = None, *, ttl_seconds: float = 10.0) -> Dict[str, Any]:
     params = {str(key): value for key, value in dict(params or {}).items() if value not in (None, '')}
     cache_key = _quant_lab_proxy_cache_key(path, params)
@@ -8258,6 +8324,22 @@ def api_quant_lab_cost_estimate():
             notional_usdt = float(request.args.get('notional_usdt') or 0.0)
         except (TypeError, ValueError):
             notional_usdt = 0.0
+        if notional_usdt <= 0.0:
+            return jsonify(
+                _enrich_quant_lab_cost_freshness(
+                    {
+                        **_quant_lab_proxy_degraded(
+                            'notional_required',
+                            path='/v1/costs/estimate',
+                            detail='notional_usdt must be > 0 for dashboard cost estimate',
+                        ),
+                        'symbol': symbol,
+                        'regime': regime,
+                        'notional_usdt': notional_usdt,
+                        'quantile': quantile,
+                    }
+                )
+            )
         payload = _quant_lab_proxy_fetch(
             '/v1/costs/estimate',
             {
@@ -8275,6 +8357,7 @@ def api_quant_lab_cost_estimate():
             },
             ttl_seconds=12.0,
         )
+        payload = _enrich_quant_lab_cost_freshness(payload)
         return jsonify(payload)
     except Exception as exc:
         return jsonify(_quant_lab_proxy_degraded('quant_lab_proxy_internal_error', path='/v1/costs/estimate', detail=str(exc)))

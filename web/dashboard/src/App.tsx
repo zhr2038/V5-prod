@@ -176,7 +176,7 @@ function App() {
   const [health, setHealth] = useState<HealthData | null>(() => readUiCache(UI_CACHE_KEYS.health));
   const [quantLabStatus, setQuantLabStatus] = useState<QuantLabStatusData | null>(() => readUiCache(UI_CACHE_KEYS.quantLabStatus));
   const [quantLabPermission, setQuantLabPermission] = useState<QuantLabPermissionData | null>(() => readUiCache(UI_CACHE_KEYS.quantLabPermission));
-  const [quantLabCost, setQuantLabCost] = useState<QuantLabCostEstimateData | null>(() => readUiCache(UI_CACHE_KEYS.quantLabCost));
+  const [quantLabCost, setQuantLabCost] = useState<QuantLabCostEstimateData | null>(null);
   const [apiTelemetrySeries, setApiTelemetrySeries] = useState<ApiTelemetrySeriesData | null>(null);
   const [updateTime, setUpdateTime] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -207,9 +207,19 @@ function App() {
         setQuantLabPermission(permission);
         writeUiCache(UI_CACHE_KEYS.quantLabPermission, permission);
       }
-      if (cost) {
-        setQuantLabCost(cost);
-        writeUiCache(UI_CACHE_KEYS.quantLabCost, cost);
+      if (symbol) {
+        const nextCost =
+          cost ||
+          ({
+            available: false,
+            status: 'degraded',
+            reason: 'dashboard_fetch_failed',
+            symbol,
+            regime: 'normal',
+            cost_freshness_status: 'unavailable',
+          } as QuantLabCostEstimateData);
+        setQuantLabCost(nextCost);
+        window.localStorage.removeItem(UI_CACHE_KEYS.quantLabCost);
       }
     });
   }, []);

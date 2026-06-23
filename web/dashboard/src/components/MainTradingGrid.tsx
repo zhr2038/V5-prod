@@ -71,6 +71,62 @@ function shortTime(value?: string) {
   return text ? text.slice(5, 16).replace('T', ' ') : '--';
 }
 
+function fullTime(value?: string) {
+  const text = String(value || '').trim();
+  if (!text) return '--';
+  const parsed = Date.parse(text.includes('T') ? text : text.replace(' ', 'T'));
+  if (!Number.isFinite(parsed)) return text.slice(0, 16).replace('T', ' ');
+  return new Date(parsed).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+function boolLike(value: unknown) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const text = String(value ?? '').trim().toLowerCase();
+  return ['1', 'true', 'yes', 'y'].includes(text);
+}
+
+function textList(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+  }
+  const text = String(value ?? '').trim();
+  return text ? text.split(/[;,]/).map((item) => item.trim()).filter(Boolean) : [];
+}
+
+function ageLabel(seconds: unknown) {
+  const value = firstNumber(seconds);
+  if (!Number.isFinite(value)) return '';
+  const sec = Number(value);
+  if (sec >= 86400) return `${(sec / 86400).toFixed(1)} 天`;
+  if (sec >= 3600) return `${(sec / 3600).toFixed(1)} 小时`;
+  if (sec >= 60) return `${(sec / 60).toFixed(0)} 分钟`;
+  return `${sec.toFixed(0)} 秒`;
+}
+
+function reasonLabel(reason: string) {
+  const labels: Record<string, string> = {
+    as_of_ts_too_old: '时间过旧',
+    as_of_ts_missing: '缺少时间',
+    cost_quality_stale: '质量过期',
+    degraded_cost_model: '模型降级',
+    degraded_reason: '降级原因',
+    fallback_reason: '回退原因',
+    stale_cost_bucket: '成本桶过期',
+    sample_count_lt_30: '样本偏少',
+    slippage_not_actual: '滑点非实测',
+    fallback_not_live_safe: '不可用于实盘',
+  };
+  return labels[reason] || reason;
+}
+
 function fmtLatencyMs(value: unknown) {
   const num = firstNumber(value);
   if (!Number.isFinite(num)) return '--';
@@ -283,12 +339,38 @@ function QuantLabCostPanel({ cost }: { cost?: QuantLabCostEstimateData | null })
     data.cost_bps
   );
   const source = firstText(cost?.cost_source, cost?.source, data.cost_source, data.source, cost?.available === false ? 'unavailable' : '');
+  const freshness = firstText(cost?.cost_freshness_status, data.cost_freshness_status, cost?.cost_quality, data.cost_quality, cost?.available === false ? 'unavailable' : '');
+  const trustLevel = firstText(cost?.cost_trust_level, data.cost_trust_level);
+  const staleReasons = [
+    ...textList(cost?.cost_stale_reasons || data.cost_stale_reasons),
+    ...textList(cost?.cost_trust_block_reasons || data.cost_trust_block_reasons),
+  ];
+  const uniqueStaleReasons = [...new Set(staleReasons)];
+  const costAge = ageLabel(firstNumber(cost?.cost_age_seconds, data.cost_age_seconds));
+  const unavailable = cost?.available === false;
+  const stale =
+    unavailable ||
+    freshness.toLowerCase() === 'stale' ||
+    boolLike(cost?.cost_stale ?? data.cost_stale) ||
+    boolLike(cost?.degraded_cost_model ?? data.degraded_cost_model) ||
+    trustLevel.toUpperCase() === 'BLOCK';
+  const statusText = unavailable
+    ? '接口不可用'
+    : stale
+      ? costAge
+        ? `数据过期 ${costAge}`
+        : '数据过期'
+      : freshness || 'fresh';
+  const timestamp = firstText(cost?.as_of_ts, data.as_of_ts);
 
   return (
-    <section className="design-panel ql-cost-panel">
+    <section className="design-panel ql-cost-panel" data-status={unavailable ? 'unavailable' : stale ? 'stale' : 'fresh'}>
       <div className="design-panel-heading">
         <span>中台成本估算 (quant-lab)</span>
-        <small>{firstText(cost?.symbol, data.symbol, '--')} / {firstText(cost?.regime, data.regime, 'normal')}</small>
+        <small>
+          {firstText(cost?.symbol, data.symbol, '--')} / {firstText(cost?.regime, data.regime, 'normal')}
+          <b className="ql-cost-status-pill">{statusText}</b>
+        </small>
       </div>
       <div className="cost-metric-row">
         <div><span>手续费</span><strong>{fmtNum(firstNumber(cost?.fee_bps, data.fee_bps), 2)} bps</strong></div>
@@ -300,7 +382,11 @@ function QuantLabCostPanel({ cost }: { cost?: QuantLabCostEstimateData | null })
         <span>Fallback Level <strong>{firstText(cost?.fallback_level, data.fallback_level, 'NONE')}</strong></span>
         <span>数据来源 <strong>{source || '--'}</strong></span>
         <span>样本数 <strong>{fmtNum(firstNumber(cost?.sample_count, data.sample_count), 0)}</strong></span>
-        <span>更新时间 <strong>{shortTime(firstText(cost?.as_of_ts, data.as_of_ts))}</strong></span>
+        <span>更新时间 <strong>{stale ? fullTime(timestamp) : shortTime(timestamp)}</strong></span>
+        <span>信任 <strong>{trustLevel || '--'}</strong></span>
+        {uniqueStaleReasons.length ? (
+          <span className="ql-cost-reasons">原因 <strong>{uniqueStaleReasons.slice(0, 4).map(reasonLabel).join(' / ')}</strong></span>
+        ) : null}
       </div>
     </section>
   );
