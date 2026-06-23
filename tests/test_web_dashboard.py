@@ -56,10 +56,11 @@ def test_main_trading_grid_marks_stale_quant_lab_costs():
     css = DASHBOARD_CSS_PATH.read_text(encoding="utf-8")
 
     assert "cost_freshness_status" in source
-    assert "data-status={unavailable ? 'unavailable' : stale ? 'stale' : 'fresh'}" in source
+    assert "data-status={pending ? 'pending' : unavailable ? 'unavailable' : stale ? 'stale' : 'fresh'}" in source
     assert "fullTime(timestamp)" in source
     assert "ql-cost-status-pill" in source
     assert '.ql-cost-panel[data-status="stale"]' in css
+    assert '.ql-cost-panel[data-status="pending"]' in css
 
 
 def test_status_ribbon_formats_market_volatility_as_percent_points():

@@ -347,14 +347,18 @@ function QuantLabCostPanel({ cost }: { cost?: QuantLabCostEstimateData | null })
   ];
   const uniqueStaleReasons = [...new Set(staleReasons)];
   const costAge = ageLabel(firstNumber(cost?.cost_age_seconds, data.cost_age_seconds));
+  const pending = !cost;
   const unavailable = cost?.available === false;
   const stale =
-    unavailable ||
+    !pending &&
+    (unavailable ||
     freshness.toLowerCase() === 'stale' ||
     boolLike(cost?.cost_stale ?? data.cost_stale) ||
     boolLike(cost?.degraded_cost_model ?? data.degraded_cost_model) ||
-    trustLevel.toUpperCase() === 'BLOCK';
-  const statusText = unavailable
+    trustLevel.toUpperCase() === 'BLOCK');
+  const statusText = pending
+    ? '等待接口'
+    : unavailable
     ? '接口不可用'
     : stale
       ? costAge
@@ -364,7 +368,7 @@ function QuantLabCostPanel({ cost }: { cost?: QuantLabCostEstimateData | null })
   const timestamp = firstText(cost?.as_of_ts, data.as_of_ts);
 
   return (
-    <section className="design-panel ql-cost-panel" data-status={unavailable ? 'unavailable' : stale ? 'stale' : 'fresh'}>
+    <section className="design-panel ql-cost-panel" data-status={pending ? 'pending' : unavailable ? 'unavailable' : stale ? 'stale' : 'fresh'}>
       <div className="design-panel-heading">
         <span>中台成本估算 (quant-lab)</span>
         <small>

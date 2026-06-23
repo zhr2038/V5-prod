@@ -2569,6 +2569,10 @@ body {
   border-color: rgba(255, 105, 130, 0.50);
 }
 
+.ql-cost-panel[data-status="pending"] {
+  border-color: rgba(116, 159, 205, 0.26);
+}
+
 .ql-cost-status-pill {
   display: inline-flex;
   align-items: center;
@@ -2588,6 +2592,12 @@ body {
   border-color: rgba(95, 240, 164, 0.35);
   background: rgba(95, 240, 164, 0.08);
   color: #9ff7c6;
+}
+
+.ql-cost-panel[data-status="pending"] .ql-cost-status-pill {
+  border-color: rgba(146, 174, 205, 0.30);
+  background: rgba(146, 174, 205, 0.08);
+  color: rgba(211, 226, 242, 0.78);
 }
 
 .ql-cost-panel[data-status="unavailable"] .ql-cost-status-pill {
