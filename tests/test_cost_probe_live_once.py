@@ -615,6 +615,19 @@ def test_cost_probe_live_once_execute_uses_entry_and_immediate_exit_with_fake_ok
     assert roundtrip["entry_has_fill_evidence"] == "true"
     assert roundtrip["exit_has_fill_evidence"] == "true"
     assert "entry_fee_usdt_applied_to_net" in roundtrip
+    _persist_live_execution_status(result, tmp_path / "reports")
+    final_status = json.loads(
+        (tmp_path / "reports" / "cost_probe_live_execution_status.json").read_text(encoding="utf-8")
+    )
+    assert final_status["status"] == "CLOSED_FLAT"
+    assert final_status["manual_probe_symbol"] == "BTC/USDT"
+    assert final_status["authorization_consumed"] is True
+    assert final_status["approved_live_order_execution"] is True
+    assert final_status["no_order_submitted"] is False
+    assert final_status["entry_filled"] is True
+    assert final_status["exit_filled"] is True
+    assert final_status["execution_completed"] is True
+    assert final_status["flat_verified"] is True
 
 
 def test_cost_probe_live_once_persists_entry_submit_intent_before_order(tmp_path: Path) -> None:

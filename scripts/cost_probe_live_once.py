@@ -479,14 +479,13 @@ def _execute_live_probe(
                 completed=False,
                 authorization=consumed_auth,
             )
-            _persist_roundtrip_status(
+            return _persist_roundtrip_status(
                 reports_dir,
                 result=result,
                 preflight=preflight,
                 instrument=instrument,
                 authorization=consumed_auth,
             )
-            return result
         available_before_exit = _query_base_balance(okx, symbol)
         exit_qty, unsellable_dust = _normal_exit_qty(
             entry_qty=filled_qty_dec,
@@ -536,14 +535,13 @@ def _execute_live_probe(
                 completed=False,
                 authorization=consumed_auth,
             )
-            _persist_roundtrip_status(
+            return _persist_roundtrip_status(
                 reports_dir,
                 result=result,
                 preflight=preflight,
                 instrument=instrument,
                 authorization=consumed_auth,
             )
-            return result
         exit_payload = {
             "instId": inst_id,
             "tdMode": "cash",
@@ -673,14 +671,13 @@ def _execute_live_probe(
                 completed=False,
                 authorization=consumed_auth,
             )
-            _persist_roundtrip_status(
+            return _persist_roundtrip_status(
                 reports_dir,
                 result=result,
                 preflight=preflight,
                 instrument=instrument,
                 authorization=consumed_auth,
             )
-            return result
         result = _finish_roundtrip(
             roundtrip_events_path,
             symbol=symbol,
@@ -694,14 +691,13 @@ def _execute_live_probe(
             completed=True,
             authorization=consumed_auth,
         )
-        _persist_roundtrip_status(
+        return _persist_roundtrip_status(
             reports_dir,
             result=result,
             preflight=preflight,
             instrument=instrument,
             authorization=consumed_auth,
         )
-        return result
     except Exception as exc:
         emergency: dict[str, Any] = {}
         kill_switch_written = False
@@ -1495,7 +1491,7 @@ def _persist_roundtrip_status(
     preflight: dict[str, Any],
     instrument: dict[str, Any],
     authorization: dict[str, Any],
-) -> None:
+) -> dict[str, Any]:
     closed_flat = (
         result.get("state") == "COMPLETED"
         and bool(result.get("execution_completed"))
@@ -1519,6 +1515,7 @@ def _persist_roundtrip_status(
     _persist_live_execution_status(payload, reports_dir)
     if closed_flat:
         _persist_terminal_preflight_snapshot(payload, reports_dir)
+    return payload
 
 
 def _persist_terminal_preflight_snapshot(
