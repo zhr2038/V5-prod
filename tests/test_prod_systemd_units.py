@@ -52,6 +52,14 @@ def test_prod_systemd_mapping_sources_are_safe_for_ubuntu_install() -> None:
             assert "/home/ubuntu/clawd/v5-prod" in text, unit
 
 
+def test_web_dashboard_unit_binds_public_interface_for_browser_verification() -> None:
+    service = (PROJECT_ROOT / "deploy" / "systemd" / "v5-web-dashboard.service").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Environment=V5_WEB_HOST=0.0.0.0" in service
+
+
 def test_trade_monitor_timer_runs_after_hourly_live_window() -> None:
     timer = (PROJECT_ROOT / "deploy" / "systemd" / "v5-trade-monitor.timer").read_text(encoding="utf-8")
 
