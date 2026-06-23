@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 
-CANDIDATE_SNAPSHOT_SCHEMA_VERSION = "v5.candidate_snapshot.v2"
+CANDIDATE_SNAPSHOT_SCHEMA_VERSION = "v5.candidate_snapshot.v3"
 
 SPECIFIC_STRATEGY_CANDIDATES = {
     "btc_leadership_probe_strict",
@@ -31,6 +31,14 @@ CANDIDATE_SNAPSHOT_FIELDS = (
     "latest_px",
     "current_px",
     "price_source",
+    "decision_px",
+    "arrival_bid",
+    "arrival_ask",
+    "arrival_mid",
+    "entry_reference_px",
+    "entry_price_source",
+    "price_observable",
+    "price_observability_reason",
     "regime_state",
     "risk_level",
     "current_position",
@@ -349,6 +357,14 @@ def build_candidate_snapshot_rows(
         candidate_price, candidate_price_source = _candidate_snapshot_price(
             symbol=symbol,
             prices=prices,
+            order=order,
+            top=top,
+            explain=explain,
+            router_decision=router_latest,
+        )
+        price_observability = _candidate_price_observability(
+            candidate_price=candidate_price,
+            candidate_price_source=candidate_price_source,
             order=order,
             top=top,
             explain=explain,
@@ -717,6 +733,7 @@ def build_candidate_snapshot_rows(
             "latest_px": candidate_price,
             "current_px": candidate_price,
             "price_source": candidate_price_source,
+            **price_observability,
             "regime_state": _string_or_none(regime_state),
             "risk_level": _string_or_none(risk_level),
             "current_position": current_position,
@@ -870,7 +887,7 @@ def _backfill_legacy_cost_fields(
 ) -> dict[str, Any]:
     out = dict(row)
     if not _missing_value(out.get("cost_source")):
-        return out
+        return _backfill_legacy_price_observability_fields(out)
     cost_bps = _first_float(
         out.get("cost_bps"),
         out.get("selected_total_cost_bps"),
@@ -901,6 +918,56 @@ def _backfill_legacy_cost_fields(
     out["cost_gate_verified"] = False
     out["would_block_by_cost"] = False
     out["cost_reason"] = _first(out.get("cost_reason"), "legacy_candidate_snapshot_schema_backfilled_local_estimate")
+    return _backfill_legacy_price_observability_fields(out)
+
+
+def _backfill_legacy_price_observability_fields(row: Mapping[str, Any]) -> dict[str, Any]:
+    out = dict(row)
+    if not _missing_value(out.get("price_observable")):
+        return out
+    arrival_bid = _first_float(out.get("arrival_bid"))
+    arrival_ask = _first_float(out.get("arrival_ask"))
+    arrival_mid = _first_float(out.get("arrival_mid"))
+    if arrival_mid is None and arrival_bid is not None and arrival_ask is not None:
+        if arrival_bid > 0 and arrival_ask > 0:
+            arrival_mid = (float(arrival_bid) + float(arrival_ask)) / 2.0
+    if arrival_mid is not None and arrival_mid > 0:
+        out["decision_px"] = _first_float(out.get("decision_px"), arrival_mid)
+        out["entry_reference_px"] = _first_float(out.get("entry_reference_px"), arrival_mid)
+        out["entry_price_source"] = _first(out.get("entry_price_source"), "arrival_mid")
+        out["arrival_mid"] = arrival_mid
+        out["price_observable"] = "strong"
+        out["price_observability_reason"] = _first(
+            out.get("price_observability_reason"),
+            "legacy_schema_arrival_mid_available",
+        )
+        return out
+
+    fallback_px = _first_float(
+        out.get("entry_reference_px"),
+        out.get("decision_px"),
+        out.get("entry_px"),
+        out.get("latest_px"),
+        out.get("current_px"),
+    )
+    if fallback_px is not None and fallback_px > 0:
+        source = _first(out.get("price_source"), "legacy_candidate_price")
+        out["decision_px"] = _first_float(out.get("decision_px"), fallback_px)
+        out["entry_reference_px"] = _first_float(out.get("entry_reference_px"), fallback_px)
+        out["entry_price_source"] = _first(out.get("entry_price_source"), "bar_close_fallback")
+        out["price_observable"] = "weak"
+        out["price_observability_reason"] = _first(
+            out.get("price_observability_reason"),
+            f"legacy_bar_close_fallback_no_arrival_mid:{source}",
+        )
+        return out
+
+    out["entry_price_source"] = _first(out.get("entry_price_source"), "missing")
+    out["price_observable"] = "missing"
+    out["price_observability_reason"] = _first(
+        out.get("price_observability_reason"),
+        "legacy_missing_candidate_price",
+    )
     return out
 
 
@@ -954,6 +1021,79 @@ def _candidate_snapshot_price(
         if parsed is not None and parsed > 0:
             return parsed, source
     return None, None
+
+
+def _candidate_price_observability(
+    *,
+    candidate_price: Optional[float],
+    candidate_price_source: Optional[str],
+    order: Any,
+    top: Mapping[str, Any],
+    explain: Mapping[str, Any],
+    router_decision: Mapping[str, Any],
+) -> dict[str, Any]:
+    lifecycle = _first_mapping(_nested_get(order, ("meta", "order_lifecycle")))
+    order_meta = _first_mapping(_nested_get(order, ("meta",)))
+    arrival_bid = _first_float(
+        _nested_get(lifecycle, ("arrival_bid",)),
+        _nested_get(order_meta, ("arrival_bid",)),
+        _nested_get(top, ("arrival_bid",)),
+        _nested_get(explain, ("arrival_bid",)),
+        _nested_get(router_decision, ("arrival_bid",)),
+    )
+    arrival_ask = _first_float(
+        _nested_get(lifecycle, ("arrival_ask",)),
+        _nested_get(order_meta, ("arrival_ask",)),
+        _nested_get(top, ("arrival_ask",)),
+        _nested_get(explain, ("arrival_ask",)),
+        _nested_get(router_decision, ("arrival_ask",)),
+    )
+    arrival_mid = _first_float(
+        _nested_get(lifecycle, ("arrival_mid",)),
+        _nested_get(order_meta, ("arrival_mid",)),
+        _nested_get(top, ("arrival_mid",)),
+        _nested_get(explain, ("arrival_mid",)),
+        _nested_get(router_decision, ("arrival_mid",)),
+    )
+    if arrival_mid is None and arrival_bid is not None and arrival_ask is not None:
+        if arrival_bid > 0 and arrival_ask > 0:
+            arrival_mid = (float(arrival_bid) + float(arrival_ask)) / 2.0
+
+    if arrival_mid is not None and arrival_mid > 0:
+        return {
+            "decision_px": arrival_mid,
+            "arrival_bid": arrival_bid,
+            "arrival_ask": arrival_ask,
+            "arrival_mid": arrival_mid,
+            "entry_reference_px": arrival_mid,
+            "entry_price_source": "arrival_mid",
+            "price_observable": "strong",
+            "price_observability_reason": "arrival_mid_available",
+        }
+
+    if candidate_price is not None and candidate_price > 0:
+        source = str(candidate_price_source or "candidate_price").strip() or "candidate_price"
+        return {
+            "decision_px": candidate_price,
+            "arrival_bid": arrival_bid,
+            "arrival_ask": arrival_ask,
+            "arrival_mid": arrival_mid,
+            "entry_reference_px": candidate_price,
+            "entry_price_source": "bar_close_fallback",
+            "price_observable": "weak",
+            "price_observability_reason": f"bar_close_fallback_no_arrival_mid:{source}",
+        }
+
+    return {
+        "decision_px": None,
+        "arrival_bid": arrival_bid,
+        "arrival_ask": arrival_ask,
+        "arrival_mid": arrival_mid,
+        "entry_reference_px": None,
+        "entry_price_source": "missing",
+        "price_observable": "missing",
+        "price_observability_reason": "missing_candidate_price",
+    }
 
 
 def _ordered_symbols(*groups: Iterable[Any]) -> list[str]:

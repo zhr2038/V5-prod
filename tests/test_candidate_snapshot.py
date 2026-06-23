@@ -68,6 +68,11 @@ def test_candidate_snapshot_builds_symbol_rows_and_stable_ids(tmp_path: Path) ->
         notional_usdt=15.0,
         signal_price=600.0,
         meta={
+            "order_lifecycle": {
+                "arrival_bid": 599.5,
+                "arrival_ask": 600.5,
+                "arrival_mid": 600.0,
+            },
             "expected_edge_bps": 60.0,
             "quant_lab": {
                 "required_edge_bps": 45.0,
@@ -112,6 +117,14 @@ def test_candidate_snapshot_builds_symbol_rows_and_stable_ids(tmp_path: Path) ->
     assert bnb["latest_px"] == 600.0
     assert bnb["current_px"] == 600.0
     assert bnb["price_source"] == "prices"
+    assert bnb["decision_px"] == 600.0
+    assert bnb["arrival_bid"] == 599.5
+    assert bnb["arrival_ask"] == 600.5
+    assert bnb["arrival_mid"] == 600.0
+    assert bnb["entry_reference_px"] == 600.0
+    assert bnb["entry_price_source"] == "arrival_mid"
+    assert bnb["price_observable"] == "strong"
+    assert bnb["price_observability_reason"] == "arrival_mid_available"
     assert bnb["current_weight"] == 0.12
     assert bnb["expected_edge_bps"] == 60.0
     assert bnb["expected_edge_source"] == "order.meta.expected_edge_bps"
@@ -135,6 +148,14 @@ def test_candidate_snapshot_builds_symbol_rows_and_stable_ids(tmp_path: Path) ->
     assert sol["latest_px"] == 151.2
     assert sol["current_px"] == 151.2
     assert sol["price_source"] == "target_execution_explain.latest_px"
+    assert sol["decision_px"] == 151.2
+    assert sol["entry_reference_px"] == 151.2
+    assert sol["entry_price_source"] == "bar_close_fallback"
+    assert sol["price_observable"] == "weak"
+    assert (
+        sol["price_observability_reason"]
+        == "bar_close_fallback_no_arrival_mid:target_execution_explain.latest_px"
+    )
     assert sol["cost_source"] == "local_estimate"
     assert sol["cost_source_quality"] == "local_estimate"
     assert sol["cost_bps"] == 30.0

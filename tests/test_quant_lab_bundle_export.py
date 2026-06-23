@@ -712,12 +712,14 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert candidate_snapshot[0]["cost_source"] == "cost_not_available"
         assert raw_candidate_snapshot == candidate_snapshot
         assert "no_signal_reason" in candidate_snapshot[0]
+        assert "entry_reference_px" in candidate_snapshot[0]
+        assert "price_observable" in candidate_snapshot[0]
         assert order_lifecycle[0]["lifecycle_id"] == "olc_r1_bnb"
         assert order_lifecycle[0]["arrival_mid"] == "600"
         assert order_lifecycle[0]["avg_fill_px"] == "602"
         assert mismatch_rows[0]["high_issue"] == "true"
         assert manifest["run_summary_invalid"] is True
-        assert manifest["candidate_snapshot_schema_version"] == "v5.candidate_snapshot.v2"
+        assert manifest["candidate_snapshot_schema_version"] == "v5.candidate_snapshot.v3"
         assert manifest["candidate_snapshot_rows"] == 1
         assert manifest["candidate_cost_source_coverage"] == 1.0
         assert manifest["order_lifecycle_schema_version"] == "v5.order_lifecycle.v1"
