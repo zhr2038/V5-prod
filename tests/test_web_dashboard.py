@@ -263,6 +263,34 @@ def test_quant_lab_status_api_falls_back_to_light_health_when_deep_missing(monke
     assert payload["detail_source"] == "health_fallback"
 
 
+def test_quant_lab_live_permission_routes_default_to_production_strategy_version(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+    calls = []
+
+    def fake_proxy(path, params=None, **kwargs):
+        calls.append((path, dict(params or {}), dict(kwargs or {})))
+        return {
+            "available": True,
+            "permission": "ABORT",
+            "permission_status": "ACTIVE_ABORT",
+            "strategy": params["strategy"],
+            "version": params["version"],
+        }
+
+    monkeypatch.setattr(module, "_quant_lab_proxy_fetch", fake_proxy)
+
+    response = client.get("/api/quant_lab/live_permission")
+    detail_response = client.get("/api/quant_lab/live_permission_detail")
+
+    assert response.status_code == 200
+    assert detail_response.status_code == 200
+    assert calls == [
+        ("/v1/risk/live-permission", {"strategy": "v5", "version": "5.0.0"}, {"ttl_seconds": 10.0}),
+        ("/v1/risk/live-permission-detail", {"strategy": "v5", "version": "5.0.0"}, {"ttl_seconds": 10.0}),
+    ]
+
+
 def test_quant_lab_cost_estimate_route_is_local_proxy(monkeypatch):
     module = load_web_dashboard_module()
     module._QUANT_LAB_PROXY_CACHE.clear()

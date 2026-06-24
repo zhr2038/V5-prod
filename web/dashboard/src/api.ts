@@ -151,11 +151,11 @@ export const api = {
   liveFollowupBundles: () => fetchJson<LiveFollowupBundlesData>('/api/live_followup_bundles?limit=5'),
   generateLiveFollowupBundle: () => postJson<LiveFollowupBundleGenerateResult>('/api/live_followup_bundles/generate'),
   quantLabStatus: () => fetchJson<QuantLabStatusData>('/api/quant_lab/status'),
-  quantLabLivePermission: (strategy = 'v5', version = 'v1') =>
+  quantLabLivePermission: (strategy = 'v5', version = '5.0.0') =>
     fetchJson<QuantLabPermissionData>(
       `/api/quant_lab/live_permission?strategy=${encodeURIComponent(strategy)}&version=${encodeURIComponent(version)}`
     ),
-  quantLabLivePermissionDetail: (strategy = 'v5', version = 'v1') =>
+  quantLabLivePermissionDetail: (strategy = 'v5', version = '5.0.0') =>
     fetchJson<QuantLabPermissionData>(
       `/api/quant_lab/live_permission_detail?strategy=${encodeURIComponent(strategy)}&version=${encodeURIComponent(version)}`
     ),

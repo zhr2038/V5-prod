@@ -107,7 +107,7 @@ export function OpsRail({
         </div>
         <div className="kv-grid">
           <span>策略</span><strong>{firstText(quantLabPermission?.strategy, permissionDetail.strategy, 'v5')}</strong>
-          <span>版本</span><strong>{firstText(quantLabPermission?.version, permissionDetail.version, 'v1')}</strong>
+          <span>版本</span><strong>{firstText(quantLabPermission?.version, permissionDetail.version, '5.0.0')}</strong>
           <span>新鲜度</span><strong>{fmtNum(firstNumber(quantLabPermission?.freshness_sec, permissionDetail.freshness_sec), 0)}s</strong>
           <span>最大订单</span><strong>{fmtUsd(firstNumber(quantLabPermission?.max_single_order_usdt, permissionDetail.max_single_order_usdt))}</strong>
         </div>

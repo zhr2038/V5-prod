@@ -188,7 +188,7 @@ function App() {
     const notional = Number(focus?.notional_usdt || 0) || 0;
     const [status, permission, cost] = await Promise.all([
       api.quantLabStatus(),
-      api.quantLabLivePermission('v5', 'v1'),
+      api.quantLabLivePermission('v5', '5.0.0'),
       symbol
         ? api.quantLabCostEstimate({
             symbol,

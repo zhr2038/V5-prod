@@ -8276,7 +8276,7 @@ def api_quant_lab_status():
 def api_quant_lab_live_permission():
     try:
         strategy = str(request.args.get('strategy') or 'v5').strip() or 'v5'
-        version = str(request.args.get('version') or 'v1').strip() or 'v1'
+        version = str(request.args.get('version') or '5.0.0').strip() or '5.0.0'
         payload = _quant_lab_proxy_fetch(
             '/v1/risk/live-permission',
             {'strategy': strategy, 'version': version},
@@ -8292,7 +8292,7 @@ def api_quant_lab_live_permission():
 def api_quant_lab_live_permission_detail():
     try:
         strategy = str(request.args.get('strategy') or 'v5').strip() or 'v5'
-        version = str(request.args.get('version') or 'v1').strip() or 'v1'
+        version = str(request.args.get('version') or '5.0.0').strip() or '5.0.0'
         payload = _quant_lab_proxy_fetch(
             '/v1/risk/live-permission-detail',
             {'strategy': strategy, 'version': version},
