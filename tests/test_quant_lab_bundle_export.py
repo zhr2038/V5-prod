@@ -420,10 +420,20 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
             {
                 "generated_at": "2026-05-11T12:31:00Z",
                 "symbol": "BTC/USDT",
+                "authorization_id": "cost-probe-auth-1",
                 "roundtrip_id": "cost-probe-rt-1",
                 "roundtrip_status": "closed",
                 "no_order_submitted": False,
+                "execution_completed": True,
+                "flat_verified": True,
+                "reconcile_ok": True,
+                "cost_evidence_complete": True,
+                "eligible_for_cost_model": True,
+                "entry_order_id": "entry-btc-1",
+                "exit_order_id": "exit-btc-1",
                 "net_pnl_usdt": "-0.01",
+                "roundtrip_cost_bps": "2.1",
+                "bill_match_status": "bill_not_observed",
                 "live_order_effect": "live_cost_probe_roundtrip",
             }
         )
@@ -468,11 +478,15 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         json.dumps(
             {
                 "state": "NOT_READY",
+                "online_exchange_preflight_state": "PROBE_COMPLETED_TODAY",
+                "effective_preflight_state": "PROBE_COMPLETED_TODAY",
+                "effective_preflight_ready": False,
                 "ready_to_request_manual_live_probe": False,
                 "manual_authorization_required": True,
                 "approved_live_order_execution": False,
-                "manual_probe_symbol": "",
-                "blockers": ["dry_run_plan_not_ready"],
+                "manual_probe_symbol": "BTC/USDT",
+                "next_probe_allowed_at": "2026-05-12T00:00:00Z",
+                "blockers": ["probe_completed_today"],
             }
         )
         + "\n",
@@ -569,6 +583,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         cost_usage = tf.extractfile("summaries/quant_lab_cost_usage.csv").read().decode("utf-8")
         runtime_cost_guard = tf.extractfile("summaries/runtime_cost_guard.csv").read().decode("utf-8")
         cost_disagreement = tf.extractfile("summaries/cost_disagreement.csv").read().decode("utf-8")
+        cost_probe_disagreement = (
+            tf.extractfile("summaries/cost_probe_cost_disagreement.csv").read().decode("utf-8")
+        )
         cost_probe_plan = tf.extractfile("summaries/cost_probe_plan.csv").read().decode("utf-8")
         cost_probe_guard = tf.extractfile("summaries/cost_probe_runtime_cost_guard.csv").read().decode("utf-8")
         cost_probe_summary = json.loads(tf.extractfile("summaries/cost_probe_summary.json").read().decode("utf-8"))
@@ -607,13 +624,31 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "selected_entry_gate_cost_bps" in runtime_cost_guard.splitlines()[0]
         assert "quant_lab_roundtrip_cost_bps" in runtime_cost_guard.splitlines()[0]
         assert "v5_runtime_roundtrip_cost_bps" in cost_disagreement.splitlines()[0]
+        assert "authorization_id" in cost_disagreement.splitlines()[0]
+        cost_disagreement_rows = list(csv.DictReader(cost_disagreement.splitlines()))
+        cost_probe_disagreement_rows = list(csv.DictReader(cost_probe_disagreement.splitlines()))
+        assert cost_probe_disagreement_rows == cost_disagreement_rows
+        assert cost_disagreement_rows[0]["symbol"] == "BTC-USDT"
+        assert cost_disagreement_rows[0]["authorization_id"] == "cost-probe-auth-1"
+        assert cost_disagreement_rows[0]["roundtrip_id"] == "cost-probe-rt-1"
+        assert cost_disagreement_rows[0]["status"] == "PASS"
+        assert cost_disagreement_rows[0]["reason"] == "cost_probe_cost_agreement_within_2bps"
+        assert cost_disagreement_rows[0]["v5_roundtrip_cost_bps"] == "2.1"
+        assert cost_disagreement_rows[0]["quant_lab_cost_bps"] == "2.0"
+        assert cost_disagreement_rows[0]["diff_bps"] == "0.10000000000000009"
+        assert cost_disagreement_rows[0]["bill_match_status"] == "bill_not_observed"
         assert "blocked_reasons" in cost_probe_plan.splitlines()[0]
         assert "guard_name" in cost_probe_guard.splitlines()[0]
         assert cost_probe_summary["no_order_submitted"] is True
         assert cost_probe_summary["live_enabled"] is False
+        assert cost_probe_summary["state"] == "PROBE_COMPLETED_TODAY"
+        assert cost_probe_summary["offline_plan_state"] == "DISABLED"
+        assert cost_probe_summary["effective_preflight_state"] == "PROBE_COMPLETED_TODAY"
+        assert cost_probe_summary["manual_probe_symbol"] == "BTC/USDT"
         assert cost_probe_p3_preflight["manual_authorization_required"] is True
         assert cost_probe_p3_preflight["approved_live_order_execution"] is False
         assert cost_probe_p3_preflight["state"] == "NOT_READY"
+        assert cost_probe_p3_preflight["effective_preflight_state"] == "PROBE_COMPLETED_TODAY"
         assert "raw_permission_decision" in compliance.splitlines()[0]
         assert "raw_permission_status" in compliance.splitlines()[0]
         assert "raw_permission_enforceable" in compliance.splitlines()[0]
@@ -735,10 +770,14 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert manifest["cost_probe_artifact_row_counts"]["cost_probe_plan.csv"] == 1
         assert manifest["cost_probe_artifact_row_counts"]["cost_probe_order_events.jsonl"] == 1
         assert manifest["cost_probe_artifact_row_counts"]["cost_probe_roundtrip_events.jsonl"] == 1
-        assert manifest["cost_probe_summary"]["state"] == "DISABLED"
+        assert manifest["cost_probe_artifact_row_counts"]["cost_disagreement.csv"] == 1
+        assert manifest["cost_probe_summary"]["state"] == "PROBE_COMPLETED_TODAY"
+        assert manifest["cost_probe_summary"]["offline_plan_state"] == "DISABLED"
+        assert manifest["cost_probe_summary"]["effective_preflight_state"] == "PROBE_COMPLETED_TODAY"
         assert manifest["cost_probe_summary"]["no_order_submitted"] is True
         assert manifest["cost_probe_p3_preflight"]["manual_authorization_required"] is True
         assert manifest["cost_probe_p3_preflight"]["state"] == "NOT_READY"
+        assert manifest["cost_probe_p3_preflight"]["effective_preflight_state"] == "PROBE_COMPLETED_TODAY"
         assert manifest["cost_probe_p3_preflight"]["approved_live_order_execution"] is False
         assert cost_probe_live_execution_status["status"] == "PREFLIGHT_READY"
         assert cost_probe_live_execution_status["authorization_id"] == "cost-probe-test-auth"
@@ -757,8 +796,12 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert window["cost_probe_artifact_count"] == 10
         assert window["cost_probe_artifacts_missing"] == []
         assert window["cost_probe_artifact_row_counts"]["cost_probe_orders.csv"] == 1
+        assert window["cost_probe_artifact_row_counts"]["cost_disagreement.csv"] == 1
+        assert window["cost_probe_summary"]["state"] == "PROBE_COMPLETED_TODAY"
+        assert window["cost_probe_summary"]["effective_preflight_state"] == "PROBE_COMPLETED_TODAY"
         assert window["cost_probe_p3_preflight"]["manual_authorization_required"] is True
         assert window["cost_probe_p3_preflight"]["state"] == "NOT_READY"
+        assert window["cost_probe_p3_preflight"]["effective_preflight_state"] == "PROBE_COMPLETED_TODAY"
         assert window["cost_probe_live_execution_status"]["status"] == "PREFLIGHT_READY"
         assert window["cost_probe_live_execution_status"]["authorization_fresh_now"] is False
         assert window["cost_probe_live_execution_status"]["authorization_expired_now"] is True

@@ -332,11 +332,20 @@ RUNTIME_COST_GUARD_FIELDS = (
 COST_DISAGREEMENT_FIELDS = (
     "ts_utc",
     "symbol",
+    "authorization_id",
+    "roundtrip_id",
+    "status",
+    "reason",
     "quant_lab_cost_source",
     "quant_lab_roundtrip_cost_bps",
+    "quant_lab_cost_bps",
     "v5_runtime_roundtrip_cost_bps",
+    "v5_roundtrip_cost_bps",
+    "okx_bill_roundtrip_cost_bps",
     "abs_diff_bps",
+    "diff_bps",
     "diff_ratio",
+    "bill_match_status",
     "severity",
     "next_action",
 )
@@ -1197,25 +1206,67 @@ def _copy_run_completion_files(staging: Path, reports: Path) -> None:
         _write_text(staging / "raw/recent_runs" / run_id / "run_completion.json", text)
 
 
-def _copy_cost_probe_artifacts(staging: Path, reports: Path) -> dict[str, Any]:
+def _cost_probe_summary_with_effective_preflight(
+    payload: Mapping[str, Any],
+    p3_payload: Mapping[str, Any],
+) -> Dict[str, Any]:
+    merged: Dict[str, Any] = dict(payload)
+    effective_state = p3_payload.get("effective_preflight_state") or p3_payload.get("state")
+    if effective_state in (None, "", "not_observable"):
+        return merged
+    original_state = merged.get("state", "not_observable")
+    merged.setdefault("offline_plan_state", merged.get("offline_plan_state", original_state))
+    merged["effective_preflight_state"] = effective_state
+    for field in (
+        "online_exchange_preflight_state",
+        "effective_preflight_ready",
+        "effective_preflight_blockers",
+        "manual_probe_symbol",
+        "next_probe_allowed_at",
+        "ready_to_request_manual_live_probe",
+    ):
+        value = p3_payload.get(field)
+        if value not in (None, "", "not_observable"):
+            merged[field] = value
+    if str(original_state or "").strip().upper() in {"", "DISABLED", "NO_PLAN_ROWS", "NOT_READY", "NOT_OBSERVABLE"}:
+        merged["state"] = effective_state
+    return merged
+
+
+def _copy_cost_probe_artifacts(
+    staging: Path,
+    reports: Path,
+    cost_disagreement_rows: list[Dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     present: list[str] = []
     missing: list[str] = []
     row_counts: dict[str, int] = {}
     summary_state: dict[str, Any] = {}
     p3_preflight_state: dict[str, Any] = {}
     live_execution_status: dict[str, Any] = {}
+    p3_payload = _read_json_obj(reports / "cost_probe_p3_preflight.json")
     for filename, summary_rel in COST_PROBE_BUNDLE_ARTIFACTS:
         source = reports / filename
-        if not source.exists():
+        generated_cost_disagreement = filename == "cost_disagreement.csv" and cost_disagreement_rows is not None
+        if not source.exists() and not generated_cost_disagreement:
             missing.append(filename)
+            continue
+        if generated_cost_disagreement:
+            _write_csv(staging / "raw/reports" / filename, COST_DISAGREEMENT_FIELDS, cost_disagreement_rows or [])
+            _write_csv(staging / summary_rel, COST_DISAGREEMENT_FIELDS, cost_disagreement_rows or [])
+            present.append(filename)
+            row_counts[filename] = len(cost_disagreement_rows or [])
             continue
         payload = _read_json_obj(source) if source.suffix.lower() == ".json" else None
         if isinstance(payload, Mapping):
             bundle_payload = dict(payload)
+            if filename == "cost_probe_summary.json" and isinstance(p3_payload, Mapping):
+                bundle_payload = _cost_probe_summary_with_effective_preflight(bundle_payload, p3_payload)
             if filename == "cost_probe_live_execution_status.json":
                 bundle_payload.update(_authorization_freshness_now_fields(bundle_payload))
             text = json.dumps(_sanitize_bundle_obj(bundle_payload), ensure_ascii=False, indent=2) + "\n"
         else:
+            bundle_payload = {}
             text = _read_text_redacted(source)
         _write_text(staging / "raw/reports" / filename, text)
         _write_text(staging / summary_rel, text)
@@ -1225,30 +1276,30 @@ def _copy_cost_probe_artifacts(staging: Path, reports: Path) -> dict[str, Any]:
         elif source.suffix.lower() == ".jsonl":
             row_counts[filename] = sum(1 for line in text.splitlines() if line.strip())
         elif filename == "cost_probe_summary.json":
-            if isinstance(payload, Mapping):
+            if isinstance(bundle_payload, Mapping):
                 summary_state = {
-                    "state": payload.get("state", "not_observable"),
-                    "offline_plan_state": payload.get(
+                    "state": bundle_payload.get("state", "not_observable"),
+                    "offline_plan_state": bundle_payload.get(
                         "offline_plan_state",
-                        payload.get("state", "not_observable"),
+                        bundle_payload.get("state", "not_observable"),
                     ),
-                    "online_exchange_preflight_state": payload.get(
+                    "online_exchange_preflight_state": bundle_payload.get(
                         "online_exchange_preflight_state",
                         "not_observable",
                     ),
-                    "effective_preflight_state": payload.get(
+                    "effective_preflight_state": bundle_payload.get(
                         "effective_preflight_state",
                         "not_observable",
                     ),
-                    "effective_preflight_ready": payload.get(
+                    "effective_preflight_ready": bundle_payload.get(
                         "effective_preflight_ready",
                         "not_observable",
                     ),
-                    "dry_run": payload.get("dry_run", "not_observable"),
-                    "live_enabled": payload.get("live_enabled", "not_observable"),
-                    "no_order_submitted": payload.get("no_order_submitted", "not_observable"),
-                    "planned_rows": payload.get("planned_rows", "not_observable"),
-                    "plan_rows": payload.get("plan_rows", "not_observable"),
+                    "dry_run": bundle_payload.get("dry_run", "not_observable"),
+                    "live_enabled": bundle_payload.get("live_enabled", "not_observable"),
+                    "no_order_submitted": bundle_payload.get("no_order_submitted", "not_observable"),
+                    "planned_rows": bundle_payload.get("planned_rows", "not_observable"),
+                    "plan_rows": bundle_payload.get("plan_rows", "not_observable"),
                 }
         elif filename == "cost_probe_p3_preflight.json":
             if isinstance(payload, Mapping):
@@ -1851,6 +1902,141 @@ def _build_cost_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
             merged.setdefault("warning", "expected_edge_missing_cost_gate_not_verified")
             merged.setdefault("cost_gate_verified", False)
         out.append({field: merged.get(field, "") for field in COST_FIELDS})
+    return out
+
+
+def _first_numeric(row: Mapping[str, Any], fields: Iterable[str]) -> Optional[float]:
+    for field in fields:
+        value = _to_float(row.get(field))
+        if value is not None:
+            return value
+    return None
+
+
+def _latest_ts(row: Mapping[str, Any]) -> Optional[datetime]:
+    return _parse_utc_dt(row.get("ts_utc") or row.get("generated_at") or row.get("timestamp") or row.get("ts"))
+
+
+def _cost_row_symbol(row: Mapping[str, Any]) -> str:
+    return _normalized_symbol(
+        row.get("response_symbol")
+        or row.get("normalized_symbol")
+        or row.get("symbol")
+        or row.get("request_symbol")
+    )
+
+
+def _latest_quant_lab_cost_row(symbol: str, cost_rows: list[Dict[str, Any]]) -> Dict[str, Any]:
+    matches = [row for row in cost_rows if _cost_row_symbol(row) == symbol]
+    if not matches:
+        return {}
+    return max(matches, key=lambda row: _latest_ts(row) or datetime.min.replace(tzinfo=timezone.utc))
+
+
+def _quant_lab_roundtrip_cost_bps(cost_row: Mapping[str, Any]) -> Optional[float]:
+    roundtrip = _first_numeric(
+        cost_row,
+        (
+            "quant_lab_roundtrip_cost_bps",
+            "roundtrip_cost_bps",
+            "roundtrip_total_cost_bps",
+            "roundtrip_all_in_cost_bps",
+        ),
+    )
+    if roundtrip is not None:
+        return roundtrip
+    one_way = _first_numeric(
+        cost_row,
+        (
+            "selected_total_cost_bps",
+            "total_cost_bps_p75",
+            "total_cost_bps",
+            "effective_total_cost_bps",
+            "cost_bps",
+        ),
+    )
+    return one_way * 2.0 if one_way is not None else None
+
+
+def _roundtrip_probe_cost_bps(row: Mapping[str, Any]) -> Optional[float]:
+    return _first_numeric(
+        row,
+        (
+            "roundtrip_cost_bps",
+            "realized_roundtrip_cost_bps",
+            "v5_roundtrip_cost_bps",
+            "v5_runtime_roundtrip_cost_bps",
+        ),
+    )
+
+
+def _okx_bill_roundtrip_cost_bps(row: Mapping[str, Any]) -> Optional[float]:
+    return _first_numeric(row, ("okx_bill_roundtrip_cost_bps", "bill_roundtrip_cost_bps"))
+
+
+def _is_closed_cost_probe_roundtrip(row: Mapping[str, Any]) -> bool:
+    status = str(row.get("roundtrip_status") or row.get("execution_status") or "").strip().lower()
+    if status not in {"closed", "closed_flat"}:
+        return False
+    if _truthy(row.get("no_order_submitted")):
+        return False
+    if row.get("cost_evidence_complete") not in (None, "") and not _truthy(row.get("cost_evidence_complete")):
+        return False
+    return _roundtrip_probe_cost_bps(row) is not None
+
+
+def _disagreement_status(diff_bps: Optional[float]) -> tuple[str, str, str]:
+    if diff_bps is None:
+        return ("not_evaluated", "missing_comparable_cost", "collect_quant_lab_cost_bucket_or_probe_roundtrip")
+    if diff_bps <= 2.0:
+        return ("PASS", "cost_probe_cost_agreement_within_2bps", "record_cost_probe_cost_agreement")
+    if diff_bps <= 5.0:
+        return ("WARN", "cost_probe_cost_disagreement_2_to_5bps", "review_cost_probe_cost_inputs")
+    return ("FAIL", "cost_probe_cost_disagreement_gt_5bps", "fix_cost_probe_cost_disagreement_before_next_probe")
+
+
+def _build_cost_probe_cost_disagreement_rows(
+    reports: Path,
+    cost_rows: list[Dict[str, Any]],
+) -> list[Dict[str, Any]]:
+    roundtrip_rows = [row for row in _read_jsonl(reports / "cost_probe_roundtrip_events.jsonl") if _is_closed_cost_probe_roundtrip(row)]
+    out: list[Dict[str, Any]] = []
+    for row in sorted(roundtrip_rows, key=lambda item: _latest_ts(item) or datetime.min.replace(tzinfo=timezone.utc)):
+        symbol = _normalized_symbol(row.get("symbol"))
+        v5_cost = _roundtrip_probe_cost_bps(row)
+        cost_row = _latest_quant_lab_cost_row(symbol, cost_rows)
+        quant_lab_cost = _quant_lab_roundtrip_cost_bps(cost_row) if cost_row else None
+        diff_bps = abs(v5_cost - quant_lab_cost) if v5_cost is not None and quant_lab_cost is not None else None
+        status, reason, next_action = _disagreement_status(diff_bps)
+        if not cost_row:
+            reason = "quant_lab_cost_bucket_not_observed"
+        diff_ratio = ""
+        if diff_bps is not None and quant_lab_cost not in (None, 0):
+            diff_ratio = diff_bps / abs(quant_lab_cost)
+        okx_bill_cost = _okx_bill_roundtrip_cost_bps(row)
+        bill_match_status = row.get("bill_match_status") or ("bill_not_observed" if okx_bill_cost is None else "observed")
+        out.append(
+            {
+                "ts_utc": row.get("ts_utc") or row.get("generated_at") or row.get("timestamp") or row.get("ts") or "",
+                "symbol": symbol,
+                "authorization_id": row.get("authorization_id", ""),
+                "roundtrip_id": row.get("roundtrip_id", ""),
+                "status": status,
+                "reason": reason,
+                "quant_lab_cost_source": cost_row.get("cost_source") or cost_row.get("source") or "",
+                "quant_lab_roundtrip_cost_bps": quant_lab_cost if quant_lab_cost is not None else "",
+                "quant_lab_cost_bps": quant_lab_cost if quant_lab_cost is not None else "",
+                "v5_runtime_roundtrip_cost_bps": v5_cost if v5_cost is not None else "",
+                "v5_roundtrip_cost_bps": v5_cost if v5_cost is not None else "",
+                "okx_bill_roundtrip_cost_bps": okx_bill_cost if okx_bill_cost is not None else "",
+                "abs_diff_bps": diff_bps if diff_bps is not None else "",
+                "diff_bps": diff_bps if diff_bps is not None else "",
+                "diff_ratio": diff_ratio,
+                "bill_match_status": bill_match_status,
+                "severity": status,
+                "next_action": next_action,
+            }
+        )
     return out
 
 
@@ -2804,6 +2990,7 @@ def export_v5_bundle(
     compliance_rows = _build_compliance_rows(usage_rows)
     permission_rows = _build_permission_audit_rows(usage_rows)
     cost_rows = _build_cost_rows(usage_rows)
+    cost_disagreement_rows = _build_cost_probe_cost_disagreement_rows(reports, cost_rows)
     live_guard_impact_rows = _build_live_guard_impact_rows(usage_rows)
     fallback_rows = _build_fallback_rows(usage_rows + request_rows)
     mode_rows = _build_mode_audit_rows(usage_rows)
@@ -2838,7 +3025,7 @@ def export_v5_bundle(
         _write_csv(staging / "summaries/quant_lab_mode_audit.csv", MODE_AUDIT_FIELDS, mode_rows)
         _write_csv(staging / "summaries/quant_lab_cost_usage.csv", COST_FIELDS, cost_rows)
         _write_csv(staging / "summaries/runtime_cost_guard.csv", RUNTIME_COST_GUARD_FIELDS, [])
-        _write_csv(staging / "summaries/cost_disagreement.csv", COST_DISAGREEMENT_FIELDS, [])
+        _write_csv(staging / "summaries/cost_disagreement.csv", COST_DISAGREEMENT_FIELDS, cost_disagreement_rows)
         _write_csv(staging / "summaries/live_guard_impact.csv", LIVE_GUARD_IMPACT_FIELDS, live_guard_impact_rows)
         _write_csv(staging / "summaries/quant_lab_fallbacks.csv", FALLBACK_FIELDS, fallback_rows)
         _write_csv(staging / "summaries/trade_metrics.csv", TRADE_METRICS_FIELDS, trade_metrics_rows)
@@ -2848,7 +3035,11 @@ def export_v5_bundle(
         _copy_candidate_snapshot_files(staging, reports, candidate_rows)
         _copy_order_lifecycle_files(staging, reports)
         _copy_run_completion_files(staging, reports)
-        cost_probe_artifacts = _copy_cost_probe_artifacts(staging, reports)
+        cost_probe_artifacts = _copy_cost_probe_artifacts(
+            staging,
+            reports,
+            cost_disagreement_rows=cost_disagreement_rows or None,
+        )
         _copy_sol_paper_strategy_files(staging, reports)
         _write_csv(
             staging / "reports/summary_trade_count_mismatch.csv",
