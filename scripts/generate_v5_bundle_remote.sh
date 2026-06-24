@@ -2157,7 +2157,6 @@ def quant_lab_roundtrip_cost_bps(row):
             "quant_lab_roundtrip_cost_bps",
             "roundtrip_cost_bps",
             "roundtrip_total_cost_bps",
-            "roundtrip_all_in_cost_bps",
         ),
     )
     if roundtrip is not None:

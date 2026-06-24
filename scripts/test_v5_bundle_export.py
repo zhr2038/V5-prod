@@ -199,6 +199,7 @@ def fixture_root(root):
                 "cost_source": "bootstrap_cost_probe",
                 "selected_total_cost_bps": 1.0,
                 "total_cost_bps": 1.0,
+                "roundtrip_all_in_cost_bps": 30.0,
             }
         )
         + "\n",
