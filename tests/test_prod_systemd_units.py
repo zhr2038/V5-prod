@@ -60,6 +60,21 @@ def test_web_dashboard_unit_binds_public_interface_for_browser_verification() ->
     assert "Environment=V5_WEB_HOST=0.0.0.0" in service
 
 
+def test_live_followup_bundle_export_grants_dashboard_read_access() -> None:
+    service = (
+        PROJECT_ROOT / "deploy" / "systemd" / "v5-live-followup-bundle-export.service"
+    ).read_text(encoding="utf-8")
+    installer = (PROJECT_ROOT / "scripts" / "install_live_followup_bundle.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "scripts/install_live_followup_bundle.sh" in service
+    assert "Environment=V5_DASHBOARD_BUNDLE_USER=ubuntu" in service
+    assert "install -m 0640 -o root -g v5readonly" in installer
+    assert 'setfacl -m "u:${DASHBOARD_USER}:rx" "${EXPORT_DIR}"' in installer
+    assert 'setfacl -m "u:${DASHBOARD_USER}:r" "${target_path}"' in installer
+
+
 def test_trade_monitor_timer_runs_after_hourly_live_window() -> None:
     timer = (PROJECT_ROOT / "deploy" / "systemd" / "v5-trade-monitor.timer").read_text(encoding="utf-8")
 
