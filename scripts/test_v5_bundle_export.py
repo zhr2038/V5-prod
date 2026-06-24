@@ -187,6 +187,71 @@ def fixture_root(root):
         },
     ]
     write_text(root / "reports/skipped_candidate_labels.jsonl", "\n".join(json.dumps(row) for row in labels) + "\n")
+    write_text(
+        root / "reports/quant_lab_usage.jsonl",
+        json.dumps(
+            {
+                "ts_utc": iso(label_ts),
+                "event_type": "cost_estimate",
+                "symbol": "BTC/USDT",
+                "normalized_symbol": "BTC-USDT",
+                "source": "bootstrap_cost_probe",
+                "cost_source": "bootstrap_cost_probe",
+                "selected_total_cost_bps": 1.0,
+                "total_cost_bps": 1.0,
+            }
+        )
+        + "\n",
+    )
+    write_text(
+        root / "reports/cost_probe_roundtrip_events.jsonl",
+        json.dumps(
+            {
+                "generated_at": iso(label_ts),
+                "symbol": "BTC/USDT",
+                "authorization_id": "cost-probe-auth-1",
+                "roundtrip_id": "cost-probe-rt-1",
+                "roundtrip_status": "closed",
+                "no_order_submitted": False,
+                "execution_completed": True,
+                "flat_verified": True,
+                "reconcile_ok": True,
+                "cost_evidence_complete": True,
+                "eligible_for_cost_model": True,
+                "roundtrip_cost_bps": "2.1",
+                "bill_match_status": "bill_not_observed",
+                "live_order_effect": "live_cost_probe_roundtrip",
+            }
+        )
+        + "\n",
+    )
+    write_json(
+        root / "reports/cost_probe_summary.json",
+        {
+            "state": "DISABLED",
+            "dry_run": True,
+            "live_enabled": False,
+            "no_order_submitted": True,
+        },
+    )
+    write_json(
+        root / "reports/cost_probe_p3_preflight.json",
+        {
+            "state": "NOT_READY",
+            "effective_preflight_state": "PROBE_COMPLETED_TODAY",
+            "online_exchange_preflight_state": "PROBE_COMPLETED_TODAY",
+            "manual_probe_symbol": "BTC/USDT",
+            "ready_to_request_manual_live_probe": False,
+            "manual_authorization_required": True,
+            "approved_live_order_execution": False,
+            "blockers": ["probe_completed_today"],
+        },
+    )
+    write_text(
+        root / "reports/cost_disagreement.csv",
+        "generated_at,symbol,status,reason\n"
+        f"{iso(label_ts)},BTC/USDT,not_evaluated,no_live_probe_roundtrip_no_cost_disagreement\n",
+    )
 
     return run_id
 
@@ -4286,6 +4351,27 @@ def main():
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 market_context = json.loads(tf.extractfile(extract_member(tf, "summaries/market_context.json")).read().decode())
                 report_index = json.loads(tf.extractfile(extract_member(tf, "reports/index.json")).read().decode())
+                cost_disagreement = list(
+                    csv.DictReader(
+                        tf.extractfile(extract_member(tf, "summaries/cost_disagreement.csv"))
+                        .read()
+                        .decode()
+                        .splitlines()
+                    )
+                )
+                cost_probe_disagreement = list(
+                    csv.DictReader(
+                        tf.extractfile(extract_member(tf, "summaries/cost_probe_cost_disagreement.csv"))
+                        .read()
+                        .decode()
+                        .splitlines()
+                    )
+                )
+                cost_probe_summary = json.loads(
+                    tf.extractfile(extract_member(tf, "summaries/cost_probe_summary.json"))
+                    .read()
+                    .decode()
+                )
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
                 labels_lines = tf.extractfile(extract_member(tf, "raw/reports/skipped_candidate_labels.jsonl")).read().decode().splitlines()
 
@@ -4334,6 +4420,15 @@ def main():
             assert market_context["latest_decision_audit"]["run_id"] == run_id, market_context
             assert market_context["no_trade_context"]["trade_observation_status"] == "no_trades", market_context
             assert report_index["links"]["market_context"] == "../summaries/market_context.json", report_index
+            assert cost_probe_disagreement == cost_disagreement, cost_probe_disagreement
+            assert cost_disagreement[0]["symbol"] == "BTC-USDT", cost_disagreement
+            assert cost_disagreement[0]["authorization_id"] == "cost-probe-auth-1", cost_disagreement
+            assert cost_disagreement[0]["status"] == "PASS", cost_disagreement
+            assert cost_disagreement[0]["v5_roundtrip_cost_bps"] == "2.1", cost_disagreement
+            assert cost_disagreement[0]["quant_lab_cost_bps"] == "2.0", cost_disagreement
+            assert cost_probe_summary["state"] == "PROBE_COMPLETED_TODAY", cost_probe_summary
+            assert cost_probe_summary["offline_plan_state"] == "DISABLED", cost_probe_summary
+            assert cost_probe_summary["effective_preflight_state"] == "PROBE_COMPLETED_TODAY", cost_probe_summary
             ml_issue_codes = {"ml_missing_model", "promotion_not_passed", "model_artifact_missing"}
             assert not any(item.get("code") in ml_issue_codes for item in issues["issues"]), issues
             assert "是否真实成交: no / 0" in readme, readme

@@ -739,11 +739,21 @@ COST_DISAGREEMENT_FIELDS = (
     "ts_utc",
     "symbol",
     "strategy_candidate",
+    "authorization_id",
+    "roundtrip_id",
+    "status",
+    "reason",
     "quant_lab_roundtrip_cost_bps",
+    "quant_lab_cost_bps",
     "v5_runtime_roundtrip_cost_bps",
+    "v5_roundtrip_cost_bps",
+    "okx_bill_roundtrip_cost_bps",
     "difference_bps",
     "difference_abs_bps",
+    "diff_bps",
+    "abs_diff_bps",
     "disagreement_level",
+    "bill_match_status",
     "quant_lab_cost_source",
     "v5_cost_source",
     "recommended_owner",
@@ -1147,16 +1157,30 @@ def copy_cost_probe_artifacts():
         "summary": {},
         "p3_preflight": {},
     }
+    p3_source = ROOT / "reports" / "cost_probe_p3_preflight.json"
+    p3_payload = load_json(p3_source) if p3_source.is_file() else None
+    cost_disagreement_rows = build_cost_probe_cost_disagreement_rows()
     for filename, summary_rel in COST_PROBE_BUNDLE_ARTIFACTS:
         src_rel = f"reports/{filename}"
         source = ROOT / src_rel
-        if not source.is_file():
+        generated_cost_disagreement = filename == "cost_disagreement.csv" and bool(cost_disagreement_rows)
+        if not source.is_file() and not generated_cost_disagreement:
             record_missing(src_rel)
             meta["missing"].append(filename)
+            continue
+        if generated_cost_disagreement:
+            write_csv(f"raw/reports/{filename}", cost_disagreement_rows, COST_DISAGREEMENT_FIELDS)
+            write_csv(summary_rel, cost_disagreement_rows, COST_DISAGREEMENT_FIELDS)
+            copied_sources[f"raw/reports/{filename}"] = "generated:cost_probe_cost_disagreement"
+            copied_sources[summary_rel] = "generated:cost_probe_cost_disagreement"
+            meta["present"].append(filename)
+            meta["row_counts"][filename] = len(cost_disagreement_rows)
             continue
         if filename.endswith(".json"):
             payload = load_json(source)
             if isinstance(payload, dict):
+                if filename == "cost_probe_summary.json" and isinstance(p3_payload, dict):
+                    payload = cost_probe_summary_with_effective_preflight(payload, p3_payload)
                 if filename == "cost_probe_live_execution_status.json":
                     payload = {**payload, **authorization_freshness_now_fields(payload)}
                 text = json.dumps(sanitize_obj(payload), ensure_ascii=False, indent=2) + "\n"
@@ -1178,6 +1202,8 @@ def copy_cost_probe_artifacts():
             )
         elif filename == "cost_probe_summary.json":
             payload = load_json(source)
+            if isinstance(payload, dict) and isinstance(p3_payload, dict):
+                payload = cost_probe_summary_with_effective_preflight(payload, p3_payload)
             if isinstance(payload, dict):
                 meta["summary"] = {
                     "state": payload.get("state", "not_observable"),
@@ -2058,6 +2084,218 @@ def write_csv(path, rows, fieldnames):
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
+
+
+def numeric_value(value):
+    if value in (None, "", "null", "not_observable"):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_cost_symbol(value):
+    text = flatten_value(value).strip().upper().replace("_", "-")
+    if not text:
+        return "null"
+    if ":" in text:
+        text = text.rsplit(":", 1)[-1].strip()
+    text = text.replace("/", "-")
+    if "-" in text:
+        parts = [part for part in text.split("-") if part]
+        return "-".join(parts) if parts else text
+    for quote in ("USDT", "USD", "BTC", "ETH"):
+        if text.endswith(quote) and len(text) > len(quote):
+            return f"{text[:-len(quote)]}-{quote}"
+    return text or "null"
+
+
+def parse_event_ts(row):
+    value = row.get("ts_utc") or row.get("generated_at") or row.get("timestamp") or row.get("ts")
+    if value in (None, ""):
+        return dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+    try:
+        parsed = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc) if parsed.tzinfo else parsed.replace(tzinfo=dt.timezone.utc)
+
+
+def first_numeric(row, names):
+    for name in names:
+        value = numeric_value(row.get(name))
+        if value is not None:
+            return value
+    return None
+
+
+def quant_lab_cost_usage_rows_from_reports():
+    rows = []
+    for row in load_jsonl(ROOT / "reports" / "quant_lab_usage.jsonl"):
+        kind = flatten_value(row.get("event_type") or row.get("event_kind")).strip().lower()
+        if kind != "cost_estimate" and not any(isinstance(row.get(key), dict) for key in ("cost", "quant_lab", "cost_estimate")):
+            continue
+        merged = dict(row)
+        for nested_key in ("cost", "quant_lab", "cost_estimate"):
+            nested = row.get(nested_key)
+            if isinstance(nested, dict):
+                for key, value in nested.items():
+                    merged.setdefault(str(key), value)
+        merged.setdefault("request_symbol", merged.get("symbol", ""))
+        merged.setdefault("response_symbol", merged.get("normalized_symbol", merged.get("symbol", "")))
+        merged.setdefault("cost_source", merged.get("source", merged.get("local_cost_source", "")))
+        merged.setdefault("selected_total_cost_bps", merged.get("total_cost_bps", ""))
+        rows.append(merged)
+    return rows
+
+
+def quant_lab_roundtrip_cost_bps(row):
+    roundtrip = first_numeric(
+        row,
+        (
+            "quant_lab_roundtrip_cost_bps",
+            "roundtrip_cost_bps",
+            "roundtrip_total_cost_bps",
+            "roundtrip_all_in_cost_bps",
+        ),
+    )
+    if roundtrip is not None:
+        return roundtrip
+    one_way = first_numeric(
+        row,
+        (
+            "selected_total_cost_bps",
+            "total_cost_bps_p75",
+            "total_cost_bps",
+            "effective_total_cost_bps",
+            "cost_bps",
+        ),
+    )
+    return one_way * 2.0 if one_way is not None else None
+
+
+def latest_quant_lab_cost_row(symbol, cost_rows):
+    matches = [
+        row
+        for row in cost_rows
+        if normalize_cost_symbol(
+            row.get("response_symbol")
+            or row.get("normalized_symbol")
+            or row.get("symbol")
+            or row.get("request_symbol")
+        )
+        == symbol
+    ]
+    if not matches:
+        return {}
+    return max(matches, key=parse_event_ts)
+
+
+def cost_probe_roundtrip_cost_bps(row):
+    return first_numeric(
+        row,
+        (
+            "roundtrip_cost_bps",
+            "realized_roundtrip_cost_bps",
+            "v5_roundtrip_cost_bps",
+            "v5_runtime_roundtrip_cost_bps",
+        ),
+    )
+
+
+def closed_cost_probe_roundtrip_rows():
+    rows = []
+    for row in load_jsonl(ROOT / "reports" / "cost_probe_roundtrip_events.jsonl"):
+        status = flatten_value(row.get("roundtrip_status") or row.get("execution_status")).strip().lower()
+        if status not in {"closed", "closed_flat"}:
+            continue
+        if truthy_text(row.get("no_order_submitted")):
+            continue
+        if row.get("cost_evidence_complete") not in (None, "") and not truthy_text(row.get("cost_evidence_complete")):
+            continue
+        if cost_probe_roundtrip_cost_bps(row) is None:
+            continue
+        rows.append(row)
+    return sorted(rows, key=parse_event_ts)
+
+
+def cost_disagreement_status(diff_bps):
+    if diff_bps is None:
+        return "not_evaluated", "missing_comparable_cost", "collect_quant_lab_cost_bucket_or_probe_roundtrip"
+    if diff_bps <= 2.0:
+        return "PASS", "cost_probe_cost_agreement_within_2bps", "record_cost_probe_cost_agreement"
+    if diff_bps <= 5.0:
+        return "WARN", "cost_probe_cost_disagreement_2_to_5bps", "review_cost_probe_cost_inputs"
+    return "FAIL", "cost_probe_cost_disagreement_gt_5bps", "fix_cost_probe_cost_disagreement_before_next_probe"
+
+
+def build_cost_probe_cost_disagreement_rows():
+    cost_rows = quant_lab_cost_usage_rows_from_reports()
+    rows = []
+    for row in closed_cost_probe_roundtrip_rows():
+        symbol = normalize_cost_symbol(row.get("symbol"))
+        v5_cost = cost_probe_roundtrip_cost_bps(row)
+        cost_row = latest_quant_lab_cost_row(symbol, cost_rows)
+        quant_cost = quant_lab_roundtrip_cost_bps(cost_row) if cost_row else None
+        diff_bps = abs(v5_cost - quant_cost) if v5_cost is not None and quant_cost is not None else None
+        status, reason, next_action = cost_disagreement_status(diff_bps)
+        if not cost_row:
+            reason = "quant_lab_cost_bucket_not_observed"
+        bill_cost = first_numeric(row, ("okx_bill_roundtrip_cost_bps", "bill_roundtrip_cost_bps"))
+        rows.append({
+            "run_id": flatten_value(row.get("run_id") or row.get("roundtrip_id") or "cost_probe"),
+            "ts_utc": flatten_value(row.get("ts_utc") or row.get("generated_at") or row.get("event_ts") or row.get("ts")),
+            "symbol": symbol,
+            "strategy_candidate": flatten_value(row.get("strategy_candidate") or "cost_probe"),
+            "authorization_id": flatten_value(row.get("authorization_id")),
+            "roundtrip_id": flatten_value(row.get("roundtrip_id")),
+            "status": status,
+            "reason": reason,
+            "quant_lab_roundtrip_cost_bps": "" if quant_cost is None else quant_cost,
+            "quant_lab_cost_bps": "" if quant_cost is None else quant_cost,
+            "v5_runtime_roundtrip_cost_bps": "" if v5_cost is None else v5_cost,
+            "v5_roundtrip_cost_bps": "" if v5_cost is None else v5_cost,
+            "okx_bill_roundtrip_cost_bps": "" if bill_cost is None else bill_cost,
+            "difference_bps": "" if diff_bps is None else diff_bps,
+            "difference_abs_bps": "" if diff_bps is None else diff_bps,
+            "diff_bps": "" if diff_bps is None else diff_bps,
+            "abs_diff_bps": "" if diff_bps is None else diff_bps,
+            "disagreement_level": status,
+            "bill_match_status": row.get("bill_match_status") or ("bill_not_observed" if bill_cost is None else "observed"),
+            "quant_lab_cost_source": flatten_value(cost_row.get("cost_source") or cost_row.get("source")),
+            "v5_cost_source": "cost_probe_roundtrip_events",
+            "recommended_owner": "quant_lab" if status in {"WARN", "FAIL"} else "none",
+            "next_action": next_action,
+            "live_order_effect": flatten_value(row.get("live_order_effect") or "live_cost_probe_roundtrip"),
+        })
+    return rows
+
+
+def cost_probe_summary_with_effective_preflight(payload, p3_payload):
+    if not isinstance(payload, dict) or not isinstance(p3_payload, dict):
+        return payload
+    effective_state = p3_payload.get("effective_preflight_state") or p3_payload.get("state")
+    if effective_state in (None, "", "not_observable"):
+        return payload
+    merged = dict(payload)
+    original_state = merged.get("state", "not_observable")
+    merged.setdefault("offline_plan_state", merged.get("offline_plan_state", original_state))
+    merged["effective_preflight_state"] = effective_state
+    for field in (
+        "online_exchange_preflight_state",
+        "effective_preflight_ready",
+        "effective_preflight_blockers",
+        "manual_probe_symbol",
+        "next_probe_allowed_at",
+        "ready_to_request_manual_live_probe",
+    ):
+        value = p3_payload.get(field)
+        if value not in (None, "", "not_observable"):
+            merged[field] = value
+    if flatten_value(original_state).strip().upper() in {"", "DISABLED", "NO_PLAN_ROWS", "NOT_READY", "NOT_OBSERVABLE"}:
+        merged["state"] = effective_state
+    return merged
 
 
 def synthesize_backtest_advisory_reader_if_missing():
@@ -12283,7 +12521,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     )
     write_csv(
         "summaries/cost_disagreement.csv",
-        [],
+        build_cost_probe_cost_disagreement_rows(),
         COST_DISAGREEMENT_FIELDS,
     )
     write_csv(
