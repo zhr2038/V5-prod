@@ -2175,6 +2175,56 @@ def quant_lab_roundtrip_cost_bps(row):
     return one_way * 2.0 if one_way is not None else None
 
 
+_QUANT_LAB_COST_ESTIMATE_API_CACHE = {}
+
+
+def quant_lab_cost_estimate_api_row(symbol):
+    if symbol in _QUANT_LAB_COST_ESTIMATE_API_CACHE:
+        return _QUANT_LAB_COST_ESTIMATE_API_CACHE[symbol]
+    quant_lab_section = yaml_section_text_from_raw("quant_lab")
+    if not parse_bool_text(parse_yaml_scalar(quant_lab_section, "enabled", "false"), False):
+        _QUANT_LAB_COST_ESTIMATE_API_CACHE[symbol] = {}
+        return {}
+    base_url = parse_yaml_scalar(quant_lab_section, "base_url", "http://qyun2.hrhome.top:8027").rstrip("/")
+    token_env = parse_yaml_scalar(quant_lab_section, "api_token_env", "QUANT_LAB_API_TOKEN") or "QUANT_LAB_API_TOKEN"
+    token = os.environ.get(token_env, "").strip()
+    if not token:
+        token = quant_lab_token_from_env_file(parse_yaml_scalar(quant_lab_section, "api_env_path", ""), token_env)
+    headers = {"Accept": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    params = {
+        "symbol": symbol.replace("-", "/"),
+        "regime": "normal",
+        "notional_usdt": "5",
+        "quantile": "p75",
+    }
+    url = f"{base_url}/v1/costs/estimate?{urllib.parse.urlencode(params)}"
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="replace"))
+    except Exception as exc:
+        collection_errors.append({"source": f"quant_lab_cost_estimate_api:{symbol}", "error": repr(exc)})
+        _QUANT_LAB_COST_ESTIMATE_API_CACHE[symbol] = {}
+        return {}
+    if not isinstance(payload, dict):
+        _QUANT_LAB_COST_ESTIMATE_API_CACHE[symbol] = {}
+        return {}
+    row = dict(payload)
+    row.setdefault("event_type", "cost_estimate")
+    row.setdefault("symbol", symbol)
+    row.setdefault("normalized_symbol", symbol)
+    row.setdefault("response_symbol", symbol)
+    row.setdefault("ts_utc", NOW.isoformat().replace("+00:00", "Z"))
+    row.setdefault("source", row.get("cost_source", ""))
+    row.setdefault("cost_source", row.get("source", ""))
+    row.setdefault("selected_total_cost_bps", row.get("total_cost_bps", ""))
+    row.setdefault("source_kind", "quant_lab_cost_estimate_api")
+    _QUANT_LAB_COST_ESTIMATE_API_CACHE[symbol] = row
+    return row
+
+
 def latest_quant_lab_cost_row(symbol, cost_rows):
     matches = [
         row
@@ -2237,6 +2287,11 @@ def build_cost_probe_cost_disagreement_rows():
         symbol = normalize_cost_symbol(row.get("symbol"))
         v5_cost = cost_probe_roundtrip_cost_bps(row)
         cost_row = latest_quant_lab_cost_row(symbol, cost_rows)
+        if not cost_row:
+            api_cost_row = quant_lab_cost_estimate_api_row(symbol)
+            if api_cost_row:
+                cost_rows.append(api_cost_row)
+                cost_row = api_cost_row
         quant_cost = quant_lab_roundtrip_cost_bps(cost_row) if cost_row else None
         diff_bps = abs(v5_cost - quant_cost) if v5_cost is not None and quant_cost is not None else None
         status, reason, next_action = cost_disagreement_status(diff_bps)
