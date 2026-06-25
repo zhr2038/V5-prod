@@ -353,9 +353,7 @@ function QuantLabCostPanel({ cost }: { cost?: QuantLabCostEstimateData | null })
     !pending &&
     (unavailable ||
     freshness.toLowerCase() === 'stale' ||
-    boolLike(cost?.cost_stale ?? data.cost_stale) ||
-    boolLike(cost?.degraded_cost_model ?? data.degraded_cost_model) ||
-    trustLevel.toUpperCase() === 'BLOCK');
+    boolLike(cost?.cost_stale ?? data.cost_stale));
   const statusText = pending
     ? '等待接口'
     : unavailable
