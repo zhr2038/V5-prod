@@ -430,7 +430,7 @@ execution:
   cost_probe_dry_run: true
   cost_probe_live_enabled: false
   cost_probe_symbols:
-    - SOL/USDT
+    - BNB/USDT
   cost_probe_max_notional_usdt: 5.0
   cost_probe_use_exchange_min_notional: true
   cost_probe_max_orders_per_day: 2
