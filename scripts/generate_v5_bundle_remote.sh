@@ -2241,6 +2241,22 @@ def latest_quant_lab_cost_row(symbol, cost_rows):
     return max(matches, key=parse_event_ts)
 
 
+COMPARABLE_COST_PROBE_SOURCES = {
+    "actual_fills",
+    "actual_okx_fills_and_bills",
+    "actual_okx_fills_fee_missing",
+    "bootstrap_cost_probe",
+}
+
+
+def quant_lab_cost_source(row):
+    return flatten_value(row.get("cost_source") or row.get("source")).strip().lower()
+
+
+def comparable_quant_lab_probe_cost_row(row):
+    return quant_lab_cost_source(row) in COMPARABLE_COST_PROBE_SOURCES
+
+
 def cost_probe_roundtrip_cost_bps(row):
     return first_numeric(
         row,
@@ -2271,7 +2287,7 @@ def closed_cost_probe_roundtrip_rows():
 
 def cost_disagreement_status(diff_bps):
     if diff_bps is None:
-        return "not_evaluated", "missing_comparable_cost", "collect_quant_lab_cost_bucket_or_probe_roundtrip"
+        return "INCOMPLETE", "missing_comparable_cost", "collect_quant_lab_cost_bucket_or_probe_roundtrip"
     if diff_bps <= 2.0:
         return "PASS", "cost_probe_cost_agreement_within_2bps", "record_cost_probe_cost_agreement"
     if diff_bps <= 5.0:
@@ -2291,11 +2307,15 @@ def build_cost_probe_cost_disagreement_rows():
             if api_cost_row:
                 cost_rows.append(api_cost_row)
                 cost_row = api_cost_row
-        quant_cost = quant_lab_roundtrip_cost_bps(cost_row) if cost_row else None
+        comparable_cost_row = bool(cost_row and comparable_quant_lab_probe_cost_row(cost_row))
+        quant_cost = quant_lab_roundtrip_cost_bps(cost_row) if comparable_cost_row else None
         diff_bps = abs(v5_cost - quant_cost) if v5_cost is not None and quant_cost is not None else None
         status, reason, next_action = cost_disagreement_status(diff_bps)
         if not cost_row:
             reason = "quant_lab_cost_bucket_not_observed"
+        elif not comparable_cost_row:
+            source = quant_lab_cost_source(cost_row) or "missing"
+            reason = f"quant_lab_cost_bucket_not_comparable:{source}"
         bill_cost = first_numeric(row, ("okx_bill_roundtrip_cost_bps", "bill_roundtrip_cost_bps"))
         rows.append({
             "run_id": flatten_value(row.get("run_id") or row.get("roundtrip_id") or "cost_probe"),

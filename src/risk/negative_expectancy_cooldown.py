@@ -2,6 +2,7 @@
 import csv
 import json
 import logging
+import re
 import sqlite3
 import time
 import hashlib
@@ -15,6 +16,19 @@ from src.execution.fill_store import derive_fill_store_path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 logger = logging.getLogger(__name__)
 RELEASE_START_NOT_OBSERVABLE = "not_observable"
+_COST_PROBE_CLORD_ID_RE = re.compile(r"^cp[0-9a-f]{10}\d{8}[exf]\d*$", re.IGNORECASE)
+_NEGATIVE_EXPECTANCY_EXCLUDED_SCOPES = {
+    "BOOTSTRAP_COST_PROBE",
+    "COST_PROBE",
+    "MAINTENANCE_COST_PROBE",
+    "RECOVERY",
+}
+_NEGATIVE_EXPECTANCY_EXCLUDED_MARKERS = (
+    "bootstrap_cost_probe",
+    "cost_probe",
+    "live_cost_probe",
+    "maintenance_cost_probe",
+)
 
 
 def negative_expectancy_adjusted_block_audit(
@@ -457,6 +471,64 @@ class NegativeExpectancyCooldown:
         req = cls._json_obj(value)
         meta = req.get("_v5_order_meta")
         return dict(meta) if isinstance(meta, dict) else {}
+
+    @staticmethod
+    def _explicit_false(value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, bool):
+            return not value
+        text = str(value).strip().lower()
+        return bool(text) and text in {"0", "false", "no", "off"}
+
+    @classmethod
+    def _negative_expectancy_exclusion_reason(cls, row: Dict[str, Any]) -> str:
+        expanded = cls._expanded_exit_metadata(dict(row or {}))
+        if cls._explicit_false(expanded.get("eligible_for_negative_expectancy")):
+            return "eligible_for_negative_expectancy_false"
+        if cls._explicit_false(expanded.get("eligible_for_alpha_pnl")):
+            return "eligible_for_alpha_pnl_false"
+
+        scope = str(
+            expanded.get("execution_scope")
+            or expanded.get("execution_purpose")
+            or expanded.get("sample_origin")
+            or expanded.get("source")
+            or ""
+        ).strip().upper()
+        if scope in _NEGATIVE_EXPECTANCY_EXCLUDED_SCOPES or "COST_PROBE" in scope:
+            return "execution_scope_excluded"
+
+        marker_keys = (
+            "probe_type",
+            "authorization_id",
+            "cost_probe_id",
+            "cost_probe_roundtrip_id",
+            "cost_sample_origin",
+            "live_order_effect",
+            "event_type",
+            "roundtrip_id",
+            "source",
+            "sample_origin",
+            "reason",
+            "source_reason",
+        )
+        for key in marker_keys:
+            text = str(expanded.get(key) or "").strip().lower().replace("-", "_")
+            if text and any(marker in text for marker in _NEGATIVE_EXPECTANCY_EXCLUDED_MARKERS):
+                return f"{key}_excluded"
+
+        cl_ord_id = str(
+            expanded.get("cl_ord_id")
+            or expanded.get("clOrdId")
+            or expanded.get("client_order_id")
+            or expanded.get("order_key")
+            or ""
+        ).strip()
+        if cl_ord_id and _COST_PROBE_CLORD_ID_RE.match(cl_ord_id):
+            return "cost_probe_client_order_id"
+
+        return ""
 
     @staticmethod
     def _missing_value(value: Any) -> bool:
@@ -1082,6 +1154,8 @@ class NegativeExpectancyCooldown:
             event_meta.setdefault("raw_json", r["raw_json"])
             event_meta.setdefault("cl_ord_id", clid)
             event_meta.setdefault("ord_id", oid)
+            if self._negative_expectancy_exclusion_reason(event_meta):
+                continue
 
             fee_cost_usdt = self._fee_to_usdt_cost(
                 fee=r["fee"],
@@ -1296,6 +1370,8 @@ class NegativeExpectancyCooldown:
                 event_meta.setdefault("cl_ord_id", r["cl_ord_id"])
             if "ord_id" in row_keys:
                 event_meta.setdefault("ord_id", r["ord_id"])
+            if self._negative_expectancy_exclusion_reason(event_meta):
+                continue
 
             fee_cost_usdt = self._orders_fee_to_usdt_best_effort(fee=r["fee"])
 
@@ -1519,6 +1595,8 @@ class NegativeExpectancyCooldown:
             event_ts = int(event["ts"])
             fee_cost_usdt = float(event.get("fee_cost_usdt") or 0.0)
             if qty <= 0 or px <= 0 or event_ts <= 0:
+                continue
+            if self._negative_expectancy_exclusion_reason(dict(event.get("meta") or {})):
                 continue
 
             inv_lots.setdefault(sym, [])

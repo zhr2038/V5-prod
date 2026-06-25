@@ -182,10 +182,10 @@ def test_enforce_active_abort_blocks_new_entry(tmp_path: Path) -> None:
     guard = _guard(tmp_path, cfg, _PermissionClient(permission="ABORT", permission_status="ACTIVE_ABORT"))
 
     result = guard.check_startup_permission(cfg, "permission-contract-run")
-    kept = guard.filter_orders_by_permission([_buy()], result)
+    kept = guard.filter_orders_by_permission([_buy(), _close()], result)
 
     assert result.effective_permission_decision == "ABORT"
-    assert kept == []
+    assert [order.side for order in kept] == ["sell"]
 
 
 def test_enforce_active_sell_only_allows_close_and_blocks_open(tmp_path: Path) -> None:
@@ -328,7 +328,7 @@ def test_enforce_active_abort_not_enforceable_stays_abort(tmp_path: Path) -> Non
     assert result.raw_permission_enforceable is False
     assert result.effective_permission_decision == "ABORT"
     assert "remote_permission_not_enforceable" in result.reasons
-    assert kept == []
+    assert [order.side for order in kept] == ["sell"]
 
 
 def test_enforce_missing_permission_status_and_expiry_degrades_allow(tmp_path: Path) -> None:

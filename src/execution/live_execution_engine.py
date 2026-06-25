@@ -27,7 +27,7 @@ from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
 from src.execution.probe_metadata import PROBE_POSITION_TYPES, position_tags_from_order_meta, probe_type_from_meta
 from src.data.okx_instruments import OKXSpotInstrumentsCache, round_down_to_lot
-from src.quant_lab_client.permissions import is_order_new_risk
+from src.quant_lab_client.permissions import is_order_new_risk, permission_blocks_order
 
 
 log = logging.getLogger(__name__)
@@ -1869,9 +1869,10 @@ class LiveExecutionEngine:
                     permission=quant_lab_permission,
                     quant_lab_meta=quant_lab_meta,
                 )
-        quant_lab_blocked = permission_gate_enforced and (
-            quant_lab_permission == "ABORT"
-            or (quant_lab_permission == "SELL_ONLY" and new_risk)
+        quant_lab_blocked = bool(
+            permission_gate_enforced
+            and quant_lab_permission
+            and permission_blocks_order(quant_lab_permission, o)
         )
         if quant_lab_blocked:
             reason = (

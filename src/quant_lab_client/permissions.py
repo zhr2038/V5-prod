@@ -61,3 +61,12 @@ def is_order_new_risk(order: Any) -> bool:
     except (TypeError, ValueError):
         pass
     return False
+
+
+def permission_blocks_order(permission: Any, order: Any) -> bool:
+    normalized = normalize_permission(permission, allow_local=True)
+    if normalized in {ALLOW, ALLOW_LOCAL}:
+        return False
+    if normalized in {ABORT, SELL_ONLY}:
+        return is_order_new_risk(order)
+    return False

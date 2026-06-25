@@ -173,14 +173,20 @@ def test_guard_sell_only_filters_buy_and_preserves_sell(tmp_path: Path) -> None:
     )
 
 
-def test_guard_abort_filters_all(tmp_path: Path) -> None:
+def test_guard_abort_blocks_new_risk_and_preserves_close(tmp_path: Path) -> None:
     cfg = AppConfig()
     cfg.quant_lab.enabled = True
     cfg.quant_lab.mode = "enforce"
     guard = _guard(tmp_path, cfg, _Client(permission="ABORT"))
     result = guard.check_startup_permission(cfg, "run-1")
-    kept = guard.filter_orders_by_permission([Order("ETH/USDT", "sell", "CLOSE_LONG", 8.0, 200.0, {})], result)
-    assert kept == []
+    kept = guard.filter_orders_by_permission(
+        [
+            Order("BTC/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {}),
+            Order("ETH/USDT", "sell", "CLOSE_LONG", 8.0, 200.0, {}),
+        ],
+        result,
+    )
+    assert [order.symbol for order in kept] == ["ETH/USDT"]
 
 
 def test_guard_audits_api_env_file_status(tmp_path: Path) -> None:

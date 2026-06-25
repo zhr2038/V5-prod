@@ -1933,6 +1933,22 @@ def _latest_quant_lab_cost_row(symbol: str, cost_rows: list[Dict[str, Any]]) -> 
     return max(matches, key=lambda row: _latest_ts(row) or datetime.min.replace(tzinfo=timezone.utc))
 
 
+_COMPARABLE_COST_PROBE_SOURCES = {
+    "actual_fills",
+    "actual_okx_fills_and_bills",
+    "actual_okx_fills_fee_missing",
+    "bootstrap_cost_probe",
+}
+
+
+def _quant_lab_cost_source(cost_row: Mapping[str, Any]) -> str:
+    return str(cost_row.get("cost_source") or cost_row.get("source") or "").strip().lower()
+
+
+def _comparable_quant_lab_probe_cost_row(cost_row: Mapping[str, Any]) -> bool:
+    return _quant_lab_cost_source(cost_row) in _COMPARABLE_COST_PROBE_SOURCES
+
+
 def _quant_lab_roundtrip_cost_bps(cost_row: Mapping[str, Any]) -> Optional[float]:
     roundtrip = _first_numeric(
         cost_row,
@@ -1986,7 +2002,7 @@ def _is_closed_cost_probe_roundtrip(row: Mapping[str, Any]) -> bool:
 
 def _disagreement_status(diff_bps: Optional[float]) -> tuple[str, str, str]:
     if diff_bps is None:
-        return ("not_evaluated", "missing_comparable_cost", "collect_quant_lab_cost_bucket_or_probe_roundtrip")
+        return ("INCOMPLETE", "missing_comparable_cost", "collect_quant_lab_cost_bucket_or_probe_roundtrip")
     if diff_bps <= 2.0:
         return ("PASS", "cost_probe_cost_agreement_within_2bps", "record_cost_probe_cost_agreement")
     if diff_bps <= 5.0:
@@ -2004,11 +2020,15 @@ def _build_cost_probe_cost_disagreement_rows(
         symbol = _normalized_symbol(row.get("symbol"))
         v5_cost = _roundtrip_probe_cost_bps(row)
         cost_row = _latest_quant_lab_cost_row(symbol, cost_rows)
-        quant_lab_cost = _quant_lab_roundtrip_cost_bps(cost_row) if cost_row else None
+        comparable_cost_row = bool(cost_row and _comparable_quant_lab_probe_cost_row(cost_row))
+        quant_lab_cost = _quant_lab_roundtrip_cost_bps(cost_row) if comparable_cost_row else None
         diff_bps = abs(v5_cost - quant_lab_cost) if v5_cost is not None and quant_lab_cost is not None else None
         status, reason, next_action = _disagreement_status(diff_bps)
         if not cost_row:
             reason = "quant_lab_cost_bucket_not_observed"
+        elif not comparable_cost_row:
+            source = _quant_lab_cost_source(cost_row) or "missing"
+            reason = f"quant_lab_cost_bucket_not_comparable:{source}"
         diff_ratio = ""
         if diff_bps is not None and quant_lab_cost not in (None, 0):
             diff_ratio = diff_bps / abs(quant_lab_cost)

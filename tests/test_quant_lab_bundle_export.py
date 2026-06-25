@@ -10,6 +10,7 @@ from pathlib import Path
 
 from src.reporting.v5_bundle_exporter import (
     GIT_COMMAND_TIMEOUT_SEC,
+    _build_cost_probe_cost_disagreement_rows,
     _dedupe_fill_rows,
     _git_command,
     _issues,
@@ -50,6 +51,44 @@ def test_bundle_export_fill_dedupe_uses_normalized_symbol() -> None:
 
     assert len(deduped) == 1
     assert deduped[0]["symbol"] == "BNB/USDT"
+
+
+def test_cost_probe_disagreement_marks_global_default_cost_incomplete(tmp_path: Path) -> None:
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    (reports / "cost_probe_roundtrip_events.jsonl").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-06-25T01:19:58Z",
+                "symbol": "BNB/USDT",
+                "authorization_id": "cost-probe-auth-bnb",
+                "roundtrip_id": "bnb-rt-1",
+                "roundtrip_status": "closed",
+                "no_order_submitted": False,
+                "cost_evidence_complete": True,
+                "roundtrip_cost_bps": "20.08",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rows = _build_cost_probe_cost_disagreement_rows(
+        reports,
+        [
+            {
+                "ts_utc": "2026-06-25T01:18:00Z",
+                "symbol": "BNB/USDT",
+                "source": "global_default",
+                "total_cost_bps": "1.0",
+            }
+        ],
+    )
+
+    assert rows[0]["status"] == "INCOMPLETE"
+    assert rows[0]["reason"] == "quant_lab_cost_bucket_not_comparable:global_default"
+    assert rows[0]["quant_lab_cost_bps"] == ""
+    assert rows[0]["diff_bps"] == ""
 
 
 def test_bundle_issues_flag_permission_contract_and_enforceable_failures() -> None:
@@ -276,12 +315,30 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
                 "fallback_used": False,
             }
         )
-        + "\n"
-        + json.dumps(
-            {
-                "ts": "2026-05-11T13:00:01Z",
-                "run_id": "r1",
-                "event_type": "filter_order",
+            + "\n"
+            + json.dumps(
+                    {
+                            "ts": "2026-05-11T13:00:00.500Z",
+                            "run_id": "r1",
+                            "event_type": "cost_estimate",
+                            "schema_version": "1.0.0",
+                            "contract_version": "v5.quant_lab.telemetry.v2",
+                            "event_id_generation_version": "quant_lab_event_id_v1",
+                            "symbol": "BTC/USDT",
+                        "normalized_symbol": "BTC-USDT",
+                    "total_cost_bps": 1.0,
+                    "selected_total_cost_bps": 1.0,
+                    "source": "bootstrap_cost_probe",
+                    "cost_source": "bootstrap_cost_probe",
+                    "fallback_used": False,
+                }
+            )
+            + "\n"
+            + json.dumps(
+                {
+                    "ts": "2026-05-11T13:00:01Z",
+                    "run_id": "r1",
+                    "event_type": "filter_order",
                 "mode": "shadow",
                 "mode_source": "runtime_override",
                 "called_api": True,
@@ -834,9 +891,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert readiness_snapshot["global_default_cost_count"] == 0
         assert readiness_snapshot["current_contract_global_default_cost_count"] == 0
         assert readiness_snapshot["legacy_global_default_cost_count"] == 0
-        assert window["cost_usage_current_contract_rows"] == 1
+        assert window["cost_usage_current_contract_rows"] == 2
         assert window["cost_usage_legacy_rows"] == 0
-        assert window["post_deployment_cost_usage_rows"] == 1
+        assert window["post_deployment_cost_usage_rows"] == 2
         assert window["post_deployment_global_default_cost_count"] == 0
 
 

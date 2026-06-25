@@ -20,7 +20,7 @@ from .mode import (
     resolve_quant_lab_mode,
 )
 from .models import CostEstimate, GateDecision, QuantLabHealth, RiskPermission, symbol_to_quant_lab_symbol
-from .permissions import ABORT, ALLOW, ALLOW_LOCAL, SELL_ONLY, combine_permissions, is_order_new_risk
+from .permissions import ABORT, ALLOW, ALLOW_LOCAL, SELL_ONLY, combine_permissions, is_order_new_risk, permission_blocks_order
 
 __all__ = [
     "ABORT",
@@ -51,6 +51,7 @@ __all__ = [
     "evaluate_enforce_readiness",
     "is_order_new_risk",
     "load_quant_lab_mode",
+    "permission_blocks_order",
     "resolve_quant_lab_mode",
     "sanitize_quant_lab_obj",
     "summarize_response",

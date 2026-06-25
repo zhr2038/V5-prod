@@ -136,6 +136,95 @@ def test_negative_expectancy_prefers_net_bps_from_fills_with_fee_conversion(tmp_
     assert blocked["metric_used"] == "net_expectancy_bps"
 
 
+def test_negative_expectancy_excludes_cost_probe_fills_before_fifo(tmp_path: Path) -> None:
+    fills_path = tmp_path / "fills.sqlite"
+    store = FillStore(path=str(fills_path))
+    base_ms = _ts_ms("2026-06-25T01:19:58Z")
+    cost_probe_meta = {
+        "_v5_order_meta": {
+            "execution_scope": "MAINTENANCE_COST_PROBE",
+            "eligible_for_alpha_pnl": False,
+            "eligible_for_negative_expectancy": False,
+            "authorization_id": "cost-probe-auth-1",
+            "probe_type": "cost_probe",
+            "live_order_effect": "live_cost_probe_order",
+        }
+    }
+    store.upsert_many(
+        [
+            FillRow(
+                inst_id="BNB-USDT",
+                trade_id="probe-entry",
+                cl_ord_id="cpabcdef123406250119E",
+                ts_ms=base_ms,
+                side="buy",
+                fill_px="700",
+                fill_sz="1",
+                fee="0",
+                fee_ccy="USDT",
+                raw_json=json.dumps(cost_probe_meta),
+            ),
+            FillRow(
+                inst_id="BNB-USDT",
+                trade_id="probe-exit",
+                cl_ord_id="cpabcdef123406250119X",
+                ts_ms=base_ms + 20_000,
+                side="sell",
+                fill_px="613.5556",
+                fill_sz="1",
+                fee="0",
+                fee_ccy="USDT",
+                raw_json=json.dumps(cost_probe_meta),
+            ),
+            FillRow(
+                inst_id="BNB-USDT",
+                trade_id="strategy-entry",
+                cl_ord_id="strategy-entry",
+                ts_ms=base_ms + 60_000,
+                side="buy",
+                fill_px="600",
+                fill_sz="1",
+                fee="0",
+                fee_ccy="USDT",
+                raw_json=json.dumps({"_v5_order_meta": {"execution_scope": "STRATEGY"}}),
+            ),
+            FillRow(
+                inst_id="BNB-USDT",
+                trade_id="strategy-exit",
+                cl_ord_id="strategy-exit",
+                ts_ms=base_ms + 120_000,
+                side="sell",
+                fill_px="606",
+                fill_sz="1",
+                fee="0",
+                fee_ccy="USDT",
+                raw_json=json.dumps({"_v5_order_meta": {"execution_scope": "STRATEGY"}}),
+            ),
+        ]
+    )
+
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=24,
+            min_closed_cycles=1,
+            expectancy_threshold_bps=0.0,
+            state_path=str(tmp_path / "negative_expectancy_state.json"),
+            orders_db_path=str(tmp_path / "orders.sqlite"),
+            fills_db_path=str(fills_path),
+            prefer_net_from_fills=True,
+        )
+    )
+
+    stats = cooldown._scan_expectancy_from_fills(
+        since_ms=base_ms - 1,
+        allowed_symbols={"BNB/USDT"},
+    )
+
+    assert stats["BNB/USDT"]["closed_cycles"] == 1
+    assert stats["BNB/USDT"]["net_expectancy_bps"] == pytest.approx(100.0)
+
+
 def test_negative_expectancy_includes_cycle_when_entry_before_lookback_but_close_inside(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -35,12 +35,43 @@ def _engine(tmp_path: Path, *, quant_lab_mode: str | None = None, okx=None) -> L
     return LiveExecutionEngine(cfg, okx=okx or _OKX(), order_store=store, position_store=pos, run_id="r")
 
 
-def test_live_execution_rejects_quant_lab_abort(tmp_path: Path) -> None:
-    engine = _engine(tmp_path)
+def test_live_execution_allows_quant_lab_abort_close(tmp_path: Path) -> None:
+    engine = _engine(tmp_path, quant_lab_mode="enforce", okx=_AcceptOKX())
+    engine.position_store.upsert_position(
+        Position(
+            symbol="BTC/USDT",
+            qty=0.001,
+            avg_px=100000.0,
+            entry_ts="2026-05-11T00:00:00Z",
+            highest_px=100000.0,
+            last_update_ts="2026-05-11T00:00:00Z",
+            last_mark_px=100000.0,
+            unrealized_pnl_pct=0.0,
+        )
+    )
     order = Order(
         "BTC/USDT",
         "sell",
         "CLOSE_LONG",
+        10.0,
+        100.0,
+        {"quant_lab": {"final_permission": "ABORT", "permission_gate_enforced": True, "filter_reason": "quant_lab_abort"}},
+    )
+
+    result = engine.place(order)
+    row = engine.order_store.get(result.cl_ord_id)
+
+    assert row is not None
+    assert result.state != "REJECTED" or row.last_error_code != "QUANT_LAB_GATE"
+    assert row.last_error_code != "QUANT_LAB_GATE"
+
+
+def test_live_execution_rejects_quant_lab_abort_new_risk(tmp_path: Path) -> None:
+    engine = _engine(tmp_path, quant_lab_mode="enforce")
+    order = Order(
+        "BTC/USDT",
+        "buy",
+        "OPEN_LONG",
         10.0,
         100.0,
         {"quant_lab": {"final_permission": "ABORT", "permission_gate_enforced": True, "filter_reason": "quant_lab_abort"}},

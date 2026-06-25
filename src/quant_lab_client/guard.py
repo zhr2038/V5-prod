@@ -22,7 +22,7 @@ from .cost_gate import CostGateResult, apply_quant_lab_cost_gate, local_cost_det
 from .exceptions import QuantLabError
 from .mode import QuantLabMode, QuantLabModeResolution, evaluate_enforce_readiness, resolve_quant_lab_mode
 from .models import CostEstimate, RiskPermission, symbol_to_quant_lab_symbol
-from .permissions import ABORT, ALLOW, ALLOW_LOCAL, SELL_ONLY, normalize_permission
+from .permissions import ABORT, ALLOW, ALLOW_LOCAL, SELL_ONLY, is_order_new_risk, normalize_permission, permission_blocks_order
 
 
 CONTRACT_VERSION = "v5.quant_lab.telemetry.v2"
@@ -1317,13 +1317,10 @@ class QuantLabGuard:
             would_filter = False
             actually_filtered = False
             reason = ""
-            if permission == ABORT:
+            if permission_blocks_order(permission, order):
                 would_filter = True
-                reason = "quant_lab_abort"
-            elif permission == SELL_ONLY and not _is_sell_or_close(order):
-                would_filter = True
-                reason = "quant_lab_sell_only"
-            elif self.permission_result.allowed_live_modes == [] and not _is_sell_or_close(order):
+                reason = "quant_lab_abort" if permission == ABORT else "quant_lab_sell_only"
+            elif self.permission_result.allowed_live_modes == [] and is_order_new_risk(order):
                 would_filter = True
                 reason = "quant_lab_allowed_live_modes_empty"
             if self.apply_permission_gate:
