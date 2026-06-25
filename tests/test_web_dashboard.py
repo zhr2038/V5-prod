@@ -393,6 +393,61 @@ def test_quant_lab_cost_estimate_route_marks_stale_payload(monkeypatch):
     assert "stale_cost_bucket" in payload["cost_stale_reasons"]
 
 
+def test_quant_lab_cost_estimate_route_keeps_fresh_degraded_payload_non_stale(monkeypatch):
+    module = load_web_dashboard_module()
+    module._QUANT_LAB_PROXY_CACHE.clear()
+
+    class Response:
+        status_code = 200
+        text = "{}"
+
+        def json(self):
+            return {
+                "symbol": "BNB-USDT",
+                "regime": "normal",
+                "total_cost_bps": 13.76,
+                "cost_quality": "bootstrap_cost_probe",
+                "cost_source": "bootstrap_cost_probe",
+                "degraded_cost_model": True,
+                "degraded_reason": "none",
+                "as_of_ts": "2026-06-25T02:16:49Z",
+                "cost_trust_level": "PAPER_ONLY",
+                "cost_trust_block_reasons": [
+                    "degraded_cost_model",
+                    "fallback_not_live_safe",
+                    "sample_count_lt_30",
+                    "slippage_not_actual",
+                ],
+            }
+
+    monkeypatch.setattr(module, "_utc_now", lambda: datetime(2026, 6, 25, 2, 45, tzinfo=timezone.utc))
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "quant_lab": {
+                "enabled": True,
+                "mode": "shadow",
+                "base_url": "http://qyun2.hrhome.top:8027",
+                "timeout_seconds": 2.0,
+            }
+        },
+    )
+    monkeypatch.setattr(module.requests, "get", lambda *args, **kwargs: Response())
+
+    with module.app.test_client() as client:
+        response = client.get("/api/quant_lab/cost_estimate?symbol=BNB-USDT&regime=normal&notional_usdt=5&quantile=p75")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["available"] is True
+    assert payload["cost_freshness_status"] == "fresh"
+    assert payload["cost_stale"] is False
+    assert payload["cost_stale_reasons"] == []
+    assert payload["degraded_cost_model"] is True
+    assert payload["cost_trust_level"] == "PAPER_ONLY"
+
+
 def test_quant_lab_cost_estimate_route_rejects_zero_notional_without_upstream(monkeypatch):
     module = load_web_dashboard_module()
     module._QUANT_LAB_PROXY_CACHE.clear()

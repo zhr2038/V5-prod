@@ -3210,8 +3210,6 @@ def _enrich_quant_lab_cost_freshness(payload: Dict[str, Any]) -> Dict[str, Any]:
     quality = str(out.get('cost_quality') or '').strip().lower()
     if quality == 'stale':
         stale_reasons.append('cost_quality_stale')
-    if _dashboard_to_bool(out.get('degraded_cost_model')):
-        stale_reasons.append('degraded_cost_model')
     for key in ('degraded_reason', 'fallback_reason'):
         reason = str(out.get(key) or '').strip().lower()
         if 'stale' in reason:
