@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { CandlestickChart, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fmtUsd, fmtNum, fmtPct, sideLabels } from '../lib/format';
-import { api } from '../api';
+import { api, dedupeTradeEntries } from '../api';
 import { useInterval } from '../hooks/useInterval';
 import { useDataPulse } from '../hooks/useDataPulse';
 import type { Position, KlineData, PositionKlinePayload, Trade } from '../types';
@@ -618,7 +618,7 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
     [livePositions]
   );
   const sortedTrades = useMemo(
-    () => [...liveTrades].sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a)),
+    () => dedupeTradeEntries(liveTrades).sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a)),
     [liveTrades]
   );
   const normalizedFocusSymbol = useMemo(
@@ -633,7 +633,7 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
   }, [positions]);
 
   useEffect(() => {
-    setLiveTrades(trades);
+    setLiveTrades(dedupeTradeEntries(trades));
   }, [trades]);
 
   useEffect(() => {
@@ -728,7 +728,7 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
     if (document.hidden) return;
     api.trades().then((payload) => {
       const next = Array.isArray(payload?.trades) ? payload.trades : [];
-      setLiveTrades(next);
+      setLiveTrades(dedupeTradeEntries(next));
     });
   }, 5000);
 

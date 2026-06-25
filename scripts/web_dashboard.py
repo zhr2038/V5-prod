@@ -288,6 +288,47 @@ def _sanitize_public_error_text(value: Any, *, default: str = 'internal error') 
     return text
 
 
+def _dashboard_trade_text(value: Any) -> str:
+    return str(value or '').strip()
+
+
+def _dashboard_trade_dedupe_key(trade: Dict[str, Any]) -> str:
+    symbol = _dashboard_trade_text(trade.get('symbol')).upper().replace('/', '-').replace('_', '-')
+    trade_id = _dashboard_trade_text(trade.get('trade_id') or trade.get('fill_id'))
+    if trade_id:
+        return f"trade:{symbol}:{trade_id}"
+    order_id = _dashboard_trade_text(
+        trade.get('order_id')
+        or trade.get('ord_id')
+        or trade.get('client_order_id')
+        or trade.get('cl_ord_id')
+    )
+    return "|".join([
+        "exact",
+        symbol,
+        _dashboard_trade_text(trade.get('time') or trade.get('timestamp')),
+        _dashboard_trade_text(trade.get('side')).lower(),
+        _dashboard_trade_text(trade.get('price')),
+        _dashboard_trade_text(trade.get('qty')),
+        _dashboard_trade_text(trade.get('amount') or trade.get('value')),
+        order_id,
+    ])
+
+
+def _dedupe_dashboard_trades(trades: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    deduped: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for trade in trades:
+        if not isinstance(trade, dict):
+            continue
+        key = _dashboard_trade_dedupe_key(trade)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(trade)
+    return deduped
+
+
 def _json_internal_error_response(
     exc: BaseException,
     *,
@@ -4403,7 +4444,21 @@ def api_trades():
                                 r.get('fee'),
                                 r.get('feeCcy') or r.get('fillFeeCcy'),
                             )
+                            trade_id = str(r.get('tradeId') or r.get('fillId') or '').strip()
+                            order_id = str(r.get('ordId') or '').strip()
+                            client_order_id = str(r.get('clOrdId') or '').strip()
                             trades.append({
+                                'id': trade_id or "|".join([
+                                    inst,
+                                    str(r.get('side', '')),
+                                    str(ts_ms),
+                                    str(round(px, 6)),
+                                    str(round(sz, 8)),
+                                    order_id,
+                                ]),
+                                'trade_id': trade_id,
+                                'order_id': order_id,
+                                'client_order_id': client_order_id,
                                 'symbol': inst,
                                 'side': str(r.get('side', '')),
                                 'price': round(px, 6),
@@ -4456,6 +4511,14 @@ def api_trades():
                         amount = float(row[2] or 0)
                         qty = (amount / price) if price > 0 else 0.0
                         trades.append({
+                            'id': "|".join([
+                                str(row[0]),
+                                str(row[1]),
+                                str(row[6]),
+                                str(round(price, 6)),
+                                str(round(qty, 8)),
+                                str(round(amount, 4)),
+                            ]),
                             'symbol': str(row[0]),
                             'side': str(row[1]),
                             'price': round(price, 6),
@@ -4493,7 +4556,20 @@ def api_trades():
                                 qty = float(r.get('qty') or 0)
                                 if qty <= 0 and price > 0 and amount > 0:
                                     qty = amount / price
+                                trade_id = str(r.get('trade_id') or r.get('fill_id') or '').strip()
+                                order_id = str(r.get('order_id') or r.get('ord_id') or r.get('client_order_id') or '').strip()
                                 trades.append({
+                                    'id': trade_id or "|".join([
+                                        sym,
+                                        str(r.get('side', '')),
+                                        str(r.get('ts', '')),
+                                        str(round(price, 6)),
+                                        str(round(qty, 8)),
+                                        str(round(amount, 4)),
+                                        order_id,
+                                    ]),
+                                    'trade_id': trade_id,
+                                    'order_id': order_id,
                                     'symbol': sym.replace('/USDT', '-USDT'),
                                     'side': str(r.get('side', '')),
                                     'price': round(price, 6),
@@ -4508,7 +4584,7 @@ def api_trades():
                     if len(trades) >= 100:
                         break
 
-        return jsonify({'trades': trades[:100]})
+        return jsonify({'trades': _dedupe_dashboard_trades(trades)[:100]})
     except Exception as e:
         return _json_internal_error_response(e, trades=[])
 

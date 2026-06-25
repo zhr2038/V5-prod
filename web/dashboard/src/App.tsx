@@ -4,7 +4,7 @@ import { TopCommandBar } from './components/TopCommandBar';
 import { StatusRibbon } from './components/StatusRibbon';
 import { MainTradingGrid } from './components/MainTradingGrid';
 import { BundleExportPanel } from './components/BundleExportPanel';
-import { api } from './api';
+import { api, dedupeTradeEntries } from './api';
 import { useInterval } from './hooks/useInterval';
 import type {
   DashboardData,
@@ -135,7 +135,7 @@ function mergeDeferredDashboard(prev: DashboardData | null, deferred: Partial<Da
     ...prev,
     ...deferred,
     alphaScores: pickListWithFallback(deferred.alphaScores, prev.alphaScores),
-    trades: pickListWithFallback(deferred.trades, prev.trades),
+    trades: dedupeTradeEntries(pickListWithFallback(deferred.trades, prev.trades)),
     timers: pickTimersWithFallback(deferred.timers, prev.timers),
     apiTelemetry: pickObjectWithFallback(deferred.apiTelemetry, prev.apiTelemetry),
     slippageInsights: pickObjectWithFallback(deferred.slippageInsights, prev.slippageInsights),
@@ -161,7 +161,7 @@ function dashboardFocusForQuantLab(dashboard?: DashboardData | null) {
   if (firstPosition?.symbol) {
     return { symbol: firstPosition.symbol, notional_usdt: Number(firstPosition.value || 0) || 0 };
   }
-  const latestTrade = [...(dashboard?.trades || [])].sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a))[0];
+  const latestTrade = dedupeTradeEntries(dashboard?.trades).sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a))[0];
   if (latestTrade?.symbol) {
     return { symbol: latestTrade.symbol, notional_usdt: Number(latestTrade.value || 0) || 0 };
   }
@@ -244,7 +244,9 @@ function App() {
     if (d) {
       const nextDashboardBase = {
         ...d,
-        trades: Array.isArray(liveTrades?.trades) && liveTrades.trades.length > 0 ? liveTrades.trades : d.trades,
+        trades: dedupeTradeEntries(
+          Array.isArray(liveTrades?.trades) && liveTrades.trades.length > 0 ? liveTrades.trades : d.trades
+        ),
       } as DashboardData;
       setDashboard((prev) => {
         const merged = prev ? { ...prev, ...nextDashboardBase } : nextDashboardBase;

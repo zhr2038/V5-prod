@@ -9983,6 +9983,67 @@ def test_api_trades_converts_live_base_fee_to_signed_usdt(monkeypatch, tmp_path)
     assert payload["trades"][0]["fee"] == pytest.approx(-5.0)
 
 
+def test_api_trades_dedupes_live_fill_trade_ids_without_collapsing_roundtrip(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setenv("V5_DASHBOARD_ALLOW_LIVE_OKX", "1")
+    monkeypatch.setenv("EXCHANGE_API_KEY", "k")
+    monkeypatch.setenv("EXCHANGE_API_SECRET", "s")
+    monkeypatch.setenv("EXCHANGE_PASSPHRASE", "p")
+
+    def fake_get(url, *args, **kwargs):
+        assert "trade/fills" in url
+        return _DummyResponse({
+            "code": "0",
+            "data": [
+                {
+                    "instId": "ETH-USDT",
+                    "ts": "1782269208000",
+                    "fillPx": "1669.98",
+                    "fillSz": "0.002988",
+                    "fee": "-0.0049899",
+                    "feeCcy": "USDT",
+                    "side": "sell",
+                    "tradeId": "eth-exit-fill",
+                    "ordId": "eth-exit-order",
+                },
+                {
+                    "instId": "ETH-USDT",
+                    "ts": "1782269208000",
+                    "fillPx": "1669.98",
+                    "fillSz": "0.002988",
+                    "fee": "-0.0049899",
+                    "feeCcy": "USDT",
+                    "side": "sell",
+                    "tradeId": "eth-exit-fill",
+                    "ordId": "eth-exit-order",
+                },
+                {
+                    "instId": "ETH-USDT",
+                    "ts": "1782269208000",
+                    "fillPx": "1669.99",
+                    "fillSz": "0.002991",
+                    "fee": "-0.0049949",
+                    "feeCcy": "USDT",
+                    "side": "buy",
+                    "tradeId": "eth-entry-fill",
+                    "ordId": "eth-entry-order",
+                },
+            ],
+        })
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+
+    with module.app.app_context():
+        payload = module.api_trades().get_json()
+
+    assert len(payload["trades"]) == 2
+    assert [trade["trade_id"] for trade in payload["trades"]] == ["eth-exit-fill", "eth-entry-fill"]
+    assert {trade["side"] for trade in payload["trades"]} == {"buy", "sell"}
+    assert payload["trades"][0]["id"] == "eth-exit-fill"
+
+
 def test_api_trades_db_fallback_converts_json_fee_maps_to_signed_usdt(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)

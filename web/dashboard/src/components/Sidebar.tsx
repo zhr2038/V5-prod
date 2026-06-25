@@ -207,8 +207,8 @@ export function Sidebar({
 
       <Section icon={Receipt} title="最近成交" tone="tone-coral">
         <div className="flex flex-col gap-2">
-          {trades.slice(0, 6).map((t, i) => (
-            <div key={i} className="liquid-glass-thin list-row tone-pearl flex items-center justify-between text-xs px-2 py-2">
+          {trades.slice(0, 6).map((t) => (
+            <div key={t.id} className="liquid-glass-thin list-row tone-pearl flex items-center justify-between text-xs px-2 py-2">
               <div className="flex items-center gap-2">
                 <span className="font-medium">{t.symbol.replace('-USDT', '')}</span>
                 <span className={`px-1.5 rounded border ${t.side === 'buy' ? 'text-emerald-300 border-emerald-400/25' : 'text-rose-300 border-rose-400/25'}`}>

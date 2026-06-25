@@ -4,6 +4,7 @@ import { Activity, Clock, Route } from 'lucide-react';
 import { PositionsPanel } from './PositionsPanel';
 import { MarketRadar } from './MarketRadar';
 import { useDataPulse, usePreviousValue } from '../hooks/useDataPulse';
+import { dedupeTradeEntries } from '../api';
 import { fmtNum, fmtPct, fmtUsd, sideLabels } from '../lib/format';
 import type {
   AccountData,
@@ -182,7 +183,7 @@ function buildTelemetryPath(samples: ApiTelemetrySeriesSample[], field: 'p50_lat
 }
 
 function focusTrades(trades: Trade[]) {
-  return [...trades].sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a));
+  return dedupeTradeEntries(trades).sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a));
 }
 
 function HoldingsFocusPanel({ positions, trades, account }: { positions: Position[]; trades: Trade[]; account?: AccountData | null }) {

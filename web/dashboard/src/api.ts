@@ -21,6 +21,12 @@ const API_BASE = '';
 type ApiTradePayload = Partial<Trade> & {
   time?: string;
   amount?: number;
+  trade_id?: string;
+  fill_id?: string;
+  order_id?: string;
+  ord_id?: string;
+  client_order_id?: string;
+  cl_ord_id?: string;
 };
 
 type ApiPositionPayload = Partial<import('./types').Position> & {
@@ -101,23 +107,67 @@ function normalizePositionEntry(position: ApiPositionPayload) {
 function normalizeTradeEntry(trade: ApiTradePayload, index: number): Trade {
   const symbol = normalizeTradeSymbol(trade.symbol);
   const timestamp = String(trade.timestamp || trade.time || '').trim();
+  const side = String(trade.side || 'buy');
   const value = Number(trade.value ?? trade.amount ?? 0) || 0;
   const fee = Math.abs(Number(trade.fee ?? 0) || 0);
   const price = Number(trade.price ?? 0) || 0;
   const qty = Number(trade.qty ?? 0) || 0;
   const derivedQty = qty > 0 ? qty : (price > 0 && value > 0 ? value / price : 0);
+  const sourceId = String(
+    trade.id ||
+    trade.trade_id ||
+    trade.fill_id ||
+    trade.order_id ||
+    trade.ord_id ||
+    trade.client_order_id ||
+    trade.cl_ord_id ||
+    ''
+  ).trim();
+  const fallbackId = [
+    symbol || 'trade',
+    side,
+    timestamp || index,
+    price.toFixed(8),
+    derivedQty.toFixed(12),
+    value.toFixed(8),
+  ].join('|');
 
   return {
-    id: String(trade.id || `${symbol || 'trade'}-${timestamp || index}`),
+    id: sourceId || fallbackId,
     timestamp,
     symbol,
-    side: String(trade.side || 'buy'),
+    side,
     type: String(trade.type || 'REBALANCE'),
     price,
     qty: derivedQty,
     value,
     fee,
   };
+}
+
+function tradeDedupeKey(trade: Trade) {
+  return [
+    String(trade.id || '').trim(),
+    normalizeTradeSymbol(trade.symbol).toUpperCase().replace('/', '-'),
+    String(trade.timestamp || '').trim(),
+    String(trade.side || '').trim().toLowerCase(),
+    Number(trade.price || 0).toFixed(8),
+    Number(trade.qty || 0).toFixed(12),
+    Number(trade.value || 0).toFixed(8),
+  ].join('|');
+}
+
+export function dedupeTradeEntries(trades: Trade[] | undefined | null): Trade[] {
+  if (!Array.isArray(trades)) return [];
+  const seen = new Set<string>();
+  const deduped: Trade[] = [];
+  for (const trade of trades) {
+    const key = tradeDedupeKey(trade);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(trade);
+  }
+  return deduped;
 }
 
 export const api = {
@@ -133,7 +183,7 @@ export const api = {
   trades: async () => {
     const payload = await fetchJson<{ trades?: ApiTradePayload[] }>('/api/trades');
     const trades = Array.isArray(payload?.trades)
-      ? payload.trades.map((trade, index) => normalizeTradeEntry(trade, index))
+      ? dedupeTradeEntries(payload.trades.map((trade, index) => normalizeTradeEntry(trade, index)))
       : [];
     return { trades };
   },
