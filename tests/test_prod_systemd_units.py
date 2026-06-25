@@ -75,6 +75,15 @@ def test_live_followup_bundle_export_grants_dashboard_read_access() -> None:
     assert 'setfacl -m "u:${DASHBOARD_USER}:r" "${target_path}"' in installer
 
 
+def test_live_followup_bundle_export_is_manual_only() -> None:
+    timer = PROJECT_ROOT / "deploy" / "systemd" / "v5-live-followup-bundle-export.timer"
+    docs = (PROJECT_ROOT / "docs" / "V5_TELEMETRY_BUNDLE.md").read_text(encoding="utf-8")
+
+    assert not timer.exists()
+    assert "v5-live-followup-bundle-export.timer" not in docs
+    assert "v5-live-followup-bundle-export.service" in docs
+
+
 def test_trade_monitor_timer_runs_after_hourly_live_window() -> None:
     timer = (PROJECT_ROOT / "deploy" / "systemd" / "v5-trade-monitor.timer").read_text(encoding="utf-8")
 

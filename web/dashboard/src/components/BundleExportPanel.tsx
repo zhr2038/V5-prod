@@ -53,7 +53,7 @@ export function BundleExportPanel() {
   const statusText = useMemo(() => {
     if (generating || isGenerationRunning(generationStatus)) {
       const elapsed = Number(generationStatus?.elapsed_seconds || 0);
-      return elapsed > 0 ? `正在生成今日包 · ${elapsed.toFixed(1)}s` : '正在生成今日包';
+      return elapsed > 0 ? `正在生成导出包 · ${elapsed.toFixed(1)}s` : '正在生成导出包';
     }
     if (lastResult) {
       return lastResult.ok
@@ -112,7 +112,7 @@ export function BundleExportPanel() {
       await refreshBundles();
     }
     if (!result?.ok) {
-      setError(result?.error || '生成今日包失败');
+      setError(result?.error || '生成导出包失败');
     }
     setGenerating(isGenerationRunning(result?.generation));
   }, [generating, refreshBundles]);
@@ -152,13 +152,13 @@ export function BundleExportPanel() {
         <div className="bundle-export-title">
           <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
             <FileArchive className="h-4 w-4" />
-            <span>Follow-up bundle / 今日包导出</span>
+            <span>Follow-up bundle / 手动导出</span>
           </div>
           <div className={`bundle-export-status ${resultTone(lastResult)}`}>{error || statusText}</div>
         </div>
         <div className="bundle-export-actions">
           <label className="bundle-auto-refresh">
-            <span>自动刷新</span>
+            <span>刷新列表</span>
             <input
               type="checkbox"
               checked={autoRefresh}
@@ -182,7 +182,7 @@ export function BundleExportPanel() {
             className="bundle-generate-button"
           >
             <PackageCheck className={`h-4 w-4 ${generating ? 'animate-pulse' : ''}`} />
-            <span>{generating ? '生成中' : '生成今日包'}</span>
+            <span>{generating ? '生成中' : '手动生成一次'}</span>
           </button>
         </div>
       </div>

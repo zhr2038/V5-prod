@@ -20,7 +20,7 @@ Output files:
 
 The exporter writes a `.tmp` archive first, renames it atomically, and writes the SHA256 sidecar after the archive is complete.
 
-Retention is count- and age-bounded. The default keeps the latest 1000 complete bundle archives and removes archives older than 7 days, together with orphaned SHA256 sidecars. This prevents high-frequency timers from accumulating thousands of short-interval bundles while preserving the freshest research evidence.
+Retention is count- and age-bounded. The default keeps the latest 1000 complete bundle archives and removes archives older than 7 days, together with orphaned SHA256 sidecars. This prevents repeated manual exports from accumulating thousands of bundles while preserving the freshest research evidence.
 
 ## Structure
 
@@ -75,15 +75,17 @@ The bundle must not include `.env` files or unredacted secrets. Redacted markers
 
 ## systemd
 
-Install the timer files from `deploy/systemd/` on the V5 production host:
+Install the bundle service from `deploy/systemd/` on the V5 production host.
+The live follow-up bundle is manual-only: it is generated from the Web dashboard
+button or by explicitly starting the service for one run. Do not enable a
+recurring timer for this bundle.
 
 ```bash
 sudo cp deploy/systemd/v5-export-bundle.* /etc/systemd/system/
-sudo cp deploy/systemd/v5-live-followup-bundle-export.* /etc/systemd/system/
+sudo cp deploy/systemd/v5-live-followup-bundle-export.service /etc/systemd/system/
 sudo cp deploy/systemd/v5-quant-lab-selfcheck.* /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now v5-export-bundle.timer
-sudo systemctl enable --now v5-live-followup-bundle-export.timer
 sudo systemctl enable --now v5-quant-lab-selfcheck.timer
 ```
 
