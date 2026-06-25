@@ -345,11 +345,7 @@ class V5Pipeline:
             self.regime_engine = RegimeEngine(cfg.regime, 
                                               use_hmm=getattr(cfg.regime, 'use_hmm', False))
         
-        self.portfolio_engine = PortfolioEngine(
-            alpha_cfg=cfg.alpha,
-            risk_cfg=cfg.risk,
-            timeframe_main=getattr(cfg, "timeframe_main", None),
-        )
+        self.portfolio_engine = PortfolioEngine(alpha_cfg=cfg.alpha, risk_cfg=cfg.risk)
         self.risk_engine = RiskEngine(cfg.risk)
         self.exit_policy = ExitPolicy(ExitConfig(), clock=self.clock)
         
