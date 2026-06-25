@@ -327,6 +327,7 @@ alpha:
     topk_override: null
     n_drop_per_cycle: 1
     hold_cycles: 2
+    hold_timeframe: 1h
     state_path: reports/topk_dropout_state.json
 
   dynamic_ic_weighting:

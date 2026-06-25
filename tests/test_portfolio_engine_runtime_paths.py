@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 from pathlib import Path
 
 from configs.schema import AlphaConfig, RiskConfig
@@ -112,3 +113,81 @@ def test_portfolio_engine_dynamic_max_positions_prefers_latest_eval_history_ts_w
     engine = PortfolioEngine(AlphaConfig(), RiskConfig())
 
     assert engine._get_dynamic_max_positions() == 1
+
+
+def test_topk_dropout_keeps_non_droppable_old_symbol(tmp_path, monkeypatch):
+    monkeypatch.setenv("V5_WORKSPACE", str(tmp_path))
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    alpha = AlphaConfig()
+    alpha.topk_dropout.enabled = True
+    alpha.topk_dropout.topk_override = 1
+    alpha.topk_dropout.n_drop_per_cycle = 1
+    alpha.topk_dropout.hold_cycles = 2
+    alpha.topk_dropout.state_path = "reports/topk_dropout_state.json"
+    engine = PortfolioEngine(alpha, RiskConfig())
+
+    state_path = engine._resolve_runtime_artifact_path(
+        alpha.topk_dropout.state_path,
+        "reports/topk_dropout_state.json",
+    )
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "selected": ["OLD/USDT"],
+                "hold_cycles": {"OLD/USDT": 1},
+                "first_selected_ts": {"OLD/USDT": time.time() - 3600},
+                "updated_ts": int(time.time()),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    selected = engine._apply_topk_dropout(
+        ["NEW/USDT"],
+        selection_scores={"OLD/USDT": 0.1, "NEW/USDT": 10.0},
+        target_k=1,
+    )
+
+    assert selected == ["OLD/USDT"]
+
+
+def test_topk_dropout_uses_timeframe_seconds_before_dropping(tmp_path, monkeypatch):
+    monkeypatch.setenv("V5_WORKSPACE", str(tmp_path))
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr("src.portfolio.portfolio_engine.time.time", lambda: 10_000.0)
+
+    alpha = AlphaConfig()
+    alpha.topk_dropout.enabled = True
+    alpha.topk_dropout.topk_override = 1
+    alpha.topk_dropout.n_drop_per_cycle = 1
+    alpha.topk_dropout.hold_cycles = 2
+    alpha.topk_dropout.hold_timeframe = "15m"
+    alpha.topk_dropout.state_path = "reports/topk_dropout_state.json"
+    engine = PortfolioEngine(alpha, RiskConfig(), timeframe_main="15m")
+
+    state_path = engine._resolve_runtime_artifact_path(
+        alpha.topk_dropout.state_path,
+        "reports/topk_dropout_state.json",
+    )
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "selected": ["OLD/USDT"],
+                "hold_cycles": {"OLD/USDT": 99},
+                "first_selected_ts": {"OLD/USDT": 9_000.0},
+                "updated_ts": 9_000,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    selected = engine._apply_topk_dropout(
+        ["NEW/USDT"],
+        selection_scores={"OLD/USDT": 0.1, "NEW/USDT": 10.0},
+        target_k=1,
+    )
+
+    assert selected == ["OLD/USDT"]

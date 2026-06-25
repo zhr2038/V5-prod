@@ -22,6 +22,7 @@ from src.execution.fill_store import (
 )
 from src.risk.auto_risk_guard import extract_risk_level
 from src.utils.math import clamp
+from src.utils.time import timeframe_seconds
 
 
 def _coalesce(value: Any, default: Any) -> Any:
@@ -84,7 +85,7 @@ class PortfolioEngine:
     以降低换手抖动和边界来回交易。
     """
     
-    def __init__(self, alpha_cfg: AlphaConfig, risk_cfg: RiskConfig):
+    def __init__(self, alpha_cfg: AlphaConfig, risk_cfg: RiskConfig, timeframe_main: Optional[str] = None):
         """初始化投资组合引擎
         
         Args:
@@ -93,6 +94,7 @@ class PortfolioEngine:
         """
         self.alpha_cfg = alpha_cfg
         self.risk_cfg = risk_cfg
+        self.timeframe_main = str(timeframe_main or "").strip() or None
         self.run_id = ""
 
     def set_run_id(self, run_id: Optional[str]) -> None:
@@ -196,13 +198,19 @@ class PortfolioEngine:
             if isinstance(obj, dict):
                 obj.setdefault("selected", [])
                 obj.setdefault("hold_cycles", {})
+                obj.setdefault("first_selected_ts", {})
                 obj.setdefault("updated_ts", 0)
                 return obj
         except Exception:
             pass
-        return {"selected": [], "hold_cycles": {}, "updated_ts": 0}
+        return {"selected": [], "hold_cycles": {}, "first_selected_ts": {}, "updated_ts": 0}
 
-    def _save_topk_state(self, selected: List[str], hold_cycles: Dict[str, int]) -> None:
+    def _save_topk_state(
+        self,
+        selected: List[str],
+        hold_cycles: Dict[str, int],
+        first_selected_ts: Optional[Dict[str, float]] = None,
+    ) -> None:
         try:
             cfg = getattr(self.alpha_cfg, "topk_dropout", None)
             if not cfg:
@@ -215,6 +223,7 @@ class PortfolioEngine:
             obj = {
                 "selected": list(selected or []),
                 "hold_cycles": {k: int(v) for k, v in (hold_cycles or {}).items()},
+                "first_selected_ts": {k: float(v) for k, v in (first_selected_ts or {}).items()},
                 "updated_ts": int(time.time()),
             }
             tmp = p.with_suffix(p.suffix + ".tmp")
@@ -258,11 +267,17 @@ class PortfolioEngine:
 
         n_drop = max(1, int(getattr(cfg, "n_drop_per_cycle", 2) or 2))
         hold_req = max(1, int(getattr(cfg, "hold_cycles", 2) or 2))
+        hold_timeframe = str(getattr(cfg, "hold_timeframe", None) or self.timeframe_main or "").strip() or None
+        hold_req_seconds: Optional[int] = None
+        if hold_timeframe:
+            hold_req_seconds = hold_req * timeframe_seconds(hold_timeframe)
 
         st = self._load_topk_state()
         prev_selected = [s for s in (st.get("selected") or []) if isinstance(s, str)]
         prev_hold = st.get("hold_cycles") or {}
+        prev_first_selected = st.get("first_selected_ts") or {}
         target_k = int(target_k or len(selected) or 0)
+        now_ts = float(time.time())
 
         # 冷启动
         if not prev_selected:
@@ -272,7 +287,8 @@ class PortfolioEngine:
                 preferred=list(selected or []),
             )[:target_k]
             hold_new = {s: 1 for s in selected_sorted}
-            self._save_topk_state(selected_sorted, hold_new)
+            first_new = {s: now_ts for s in selected_sorted}
+            self._save_topk_state(selected_sorted, hold_new, first_selected_ts=first_new)
             return selected_sorted
 
         candidate = list(selected)
@@ -283,7 +299,19 @@ class PortfolioEngine:
         hold_cont = [s for s in prev_selected if s in candidate_set]
 
         # 仅允许替换满足 hold_req 的旧持仓
-        droppable = [s for s in prev_selected if int(prev_hold.get(s, 1)) >= hold_req]
+        def _held_enough(symbol: str) -> bool:
+            cycle_ok = int(prev_hold.get(symbol, 1)) >= hold_req
+            if hold_req_seconds is None:
+                return cycle_ok
+            try:
+                first_ts = float(prev_first_selected.get(symbol))
+            except Exception:
+                first_ts = 0.0
+            if first_ts <= 0.0:
+                return cycle_ok
+            return (now_ts - first_ts) >= float(hold_req_seconds)
+
+        droppable = [s for s in prev_selected if _held_enough(s)]
         # 在 droppable 里优先淘汰当前评分最低者
         droppable_sorted = sorted(droppable, key=lambda s: float(selection_scores.get(s, -1e9)))
 
@@ -294,32 +322,49 @@ class PortfolioEngine:
         kept = [s for s in prev_selected if s not in drop_set]
         merged = kept + [s for s in add_list if s not in kept]
 
-        # 用候选池补齐（避免容量不足）
-        for s in candidate:
-            if s not in merged:
-                merged.append(s)
-
-        # 保持与候选同样容量
-        merged = self._sort_symbols_by_priority(
-            merged,
+        # 先保护未被允许替换的旧标的；只用剩余容量补新候选，避免高分新人绕过 hold_req。
+        protected = self._sort_symbols_by_priority(
+            kept,
             selection_scores=selection_scores,
-            preferred=candidate,
+            preferred=kept,
         )[:target_k]
+        remaining_slots = max(0, target_k - len(protected))
+        if remaining_slots > 0:
+            fill_pool = []
+            for s in add_list + candidate:
+                if s not in protected and s not in fill_pool:
+                    fill_pool.append(s)
+            fill = self._sort_symbols_by_priority(
+                fill_pool,
+                selection_scores=selection_scores,
+                preferred=add_list + candidate,
+            )[:remaining_slots]
+            merged = protected + fill
+        else:
+            merged = protected
 
         # 更新 hold cycle
         hold_new: Dict[str, int] = {}
+        first_new: Dict[str, float] = {}
         for s in merged:
             if s in prev_set and s in hold_cont:
                 hold_new[s] = int(prev_hold.get(s, 1)) + 1
+                first_new[s] = float(prev_first_selected.get(s) or now_ts)
             else:
                 hold_new[s] = 1
+                first_new[s] = now_ts
 
-        self._save_topk_state(merged, hold_new)
+        self._save_topk_state(merged, hold_new, first_selected_ts=first_new)
 
         if audit:
+            hold_timeframe_note = (
+                f" hold_timeframe={hold_timeframe} hold_req_seconds={hold_req_seconds}"
+                if hold_req_seconds is not None
+                else ""
+            )
             audit.add_note(
-                "TopkDropout applied: prev={} cand={} kept={} replace={} hold_req={} n_drop={}"
-                .format(len(prev_selected), len(candidate), len(merged), max_replace, hold_req, n_drop)
+                "TopkDropout applied: prev={} cand={} kept={} replace={} hold_req={} n_drop={}{}"
+                .format(len(prev_selected), len(candidate), len(merged), max_replace, hold_req, n_drop, hold_timeframe_note)
             )
 
         return merged

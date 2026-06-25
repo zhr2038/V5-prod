@@ -263,6 +263,10 @@ class TopkDropoutConfig(BaseModel):
     topk_override: Optional[int] = Field(default=None, ge=1, le=200)
     n_drop_per_cycle: int = Field(default=2, ge=1, le=50)
     hold_cycles: int = Field(default=2, ge=1, le=200)
+    hold_timeframe: Optional[str] = Field(
+        default=None,
+        description="Optional bar timeframe used to enforce hold_cycles as wall-clock bar duration.",
+    )
     state_path: str = Field(default="reports/topk_dropout_state.json")
 
 
