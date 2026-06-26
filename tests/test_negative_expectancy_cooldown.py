@@ -126,6 +126,7 @@ def test_negative_expectancy_prefers_net_bps_from_fills_with_fee_conversion(tmp_
     stats = (state.get("stats") or {}).get("BTC/USDT") or {}
 
     assert stats["source"] == "fills"
+    assert stats["degraded_reason"] == "fills_fifo_fallback"
     assert stats["gross_pnl_sum_usdt"] == 1.0
     assert stats["net_pnl_sum_usdt"] == -0.5
     assert stats["gross_expectancy_bps"] == 100.0
@@ -613,6 +614,105 @@ def test_negative_expectancy_roundtrip_summary_fallback_includes_bnb_closed_cycl
     assert state["symbols"] == {}
 
 
+def test_negative_expectancy_prefers_canonical_roundtrip_over_duplicate_fills(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reports = tmp_path / "reports"
+    fills_path = reports / "fills.sqlite"
+    state_path = reports / "negative_expectancy_state.json"
+    reports.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "config_fingerprint": "sol-canonical-roundtrip-fp",
+                "release_start_ts": _ts_ms("2026-06-25T00:00:00Z"),
+                "symbols": {},
+                "stats": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    FillStore(path=str(fills_path)).upsert_many(
+        [
+            FillRow(
+                inst_id="SOL-USDT",
+                trade_id="sol-entry-a",
+                ts_ms=_ts_ms("2026-06-25T08:01:13Z"),
+                side="buy",
+                fill_px="69.37",
+                fill_sz="0.20",
+                fee="0",
+                fee_ccy="USDT",
+            ),
+            FillRow(
+                inst_id="SOL-USDT",
+                trade_id="sol-entry-b",
+                ts_ms=_ts_ms("2026-06-25T08:01:13Z"),
+                side="buy",
+                fill_px="69.37",
+                fill_sz="0.029552",
+                fee="0",
+                fee_ccy="USDT",
+            ),
+            FillRow(
+                inst_id="SOL-USDT",
+                trade_id="sol-exit",
+                ts_ms=_ts_ms("2026-06-25T14:00:42Z"),
+                side="sell",
+                fill_px="64.79",
+                fill_sz="0.229552",
+                fee="0",
+                fee_ccy="USDT",
+            ),
+        ]
+    )
+    summaries = reports / "summaries"
+    summaries.mkdir(parents=True, exist_ok=True)
+    summaries.joinpath("trades_roundtrips.csv").write_text(
+        "\n".join(
+            [
+                "roundtrip_id,roundtrip_status,open_time_utc,close_time_utc,symbol,qty,entry_px,exit_px,hold_minutes,gross_pnl_usdt,net_pnl_usdt,gross_bps,net_bps,entry_order_id,exit_order_id,exit_reason",
+                "sol-rt-1,closed,2026-06-25T08:01:13.053000Z,2026-06-25T14:00:42.328000Z,SOL/USDT,0.229552,69.37,64.79,359.488,-1.05134816,-1.08214485632,-659.88,-679.5675,entry-ord,exit-ord,rank_exit",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "src.risk.negative_expectancy_cooldown.time.time",
+        lambda: _ts_ms("2026-06-25T15:00:00Z") / 1000.0,
+    )
+
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=72,
+            min_closed_cycles=1,
+            expectancy_threshold_bps=0.0,
+            state_path=str(state_path),
+            orders_db_path=str(reports / "orders.sqlite"),
+            fills_db_path=str(fills_path),
+            prefer_net_from_fills=True,
+            fast_fail_max_hold_minutes=360,
+        )
+    )
+    cooldown.set_scope(whitelist_symbols=["SOL/USDT"], config_fingerprint="sol-canonical-roundtrip-fp")
+
+    state = cooldown.refresh(force=True)
+    stats = state["stats"]["SOL/USDT"]
+
+    assert stats["source"] == "trades_roundtrips_csv"
+    assert stats["closed_cycles"] == 1
+    assert stats["net_pnl_sum_usdt"] == pytest.approx(-1.08214485632)
+    assert stats["net_expectancy_bps"] == pytest.approx(-679.5675)
+    assert stats["degraded_reason"] == "trades_roundtrips.csv fallback uses exported net/gross fields"
+    assert stats["cycle_attributions"][0]["roundtrip_id"] == "sol-rt-1"
+    assert stats["cycle_attributions"][0]["entry_order_id"] == "entry-ord"
+    assert stats["cycle_attributions"][0]["exit_order_id"] == "exit-ord"
+    assert stats["cycle_attributions"][0]["entry_ts"] == "2026-06-25T08:01:13.053000Z"
+    assert "negative_expectancy_roundtrip_mismatch" not in "; ".join(state["warnings"])
+
+
 def test_negative_expectancy_excludes_premature_swing_soft_exit_from_fast_fail(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -758,7 +858,7 @@ def test_negative_expectancy_missing_soft_exit_metadata_is_not_entry_bad(
     assert stats["cycle_attributions"][0]["attribution"] == ["unknown", "exit_metadata_missing"]
 
 
-def test_negative_expectancy_roundtrip_diagnostic_overlay_adjusts_fills_fast_fail(
+def test_negative_expectancy_roundtrip_summary_supersedes_fills_fast_fail(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -837,12 +937,11 @@ def test_negative_expectancy_roundtrip_diagnostic_overlay_adjusts_fills_fast_fai
     state = cooldown.refresh(force=True)
     stats = state["stats"]["BNB/USDT"]
 
-    assert stats["source"] == "fills"
+    assert stats["source"] == "trades_roundtrips_csv"
     assert stats["closed_cycles"] == 1
     assert stats["net_expectancy_bps"] == pytest.approx(-142.95, abs=0.1)
     assert stats["premature_soft_exit_count"] == 1
     assert stats["excluded_from_fast_fail_count"] == 1
-    assert stats["premature_soft_exit_diagnostic_source"] == "trades_roundtrips_csv"
     assert stats["fast_fail_closed_cycles"] == 0
     assert stats["fast_fail_net_expectancy_bps"] == 0.0
     assert stats["exit_bad_cycles"] == 1

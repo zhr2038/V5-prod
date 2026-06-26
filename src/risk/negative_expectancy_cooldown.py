@@ -730,6 +730,20 @@ class NegativeExpectancyCooldown:
             expanded = cls._expanded_exit_metadata(row)
             cycles.append(
                 {
+                    "roundtrip_id": str(expanded.get("roundtrip_id") or ""),
+                    "entry_order_id": str(
+                        expanded.get("entry_order_id")
+                        or expanded.get("entry_ord_id")
+                        or expanded.get("entryOrdId")
+                        or ""
+                    ),
+                    "exit_order_id": str(
+                        expanded.get("exit_order_id")
+                        or expanded.get("exit_ord_id")
+                        or expanded.get("exitOrdId")
+                        or ""
+                    ),
+                    "qty": str(expanded.get("qty") or expanded.get("matched_qty") or ""),
                     "entry_ts": str(
                         expanded.get("entry_ts")
                         or expanded.get("open_time_utc")
@@ -1260,6 +1274,7 @@ class NegativeExpectancyCooldown:
                 fast_fail_closed_notional_usdt=float(st.get("fast_fail_closed_notional_usdt") or 0.0),
                 fast_fail_hold_minutes_sum=float(st.get("fast_fail_hold_minutes_sum") or 0.0),
                 source="fills",
+                degraded_reason="fills_fifo_fallback",
                 closed_cycles_included_by_close_ts=float(st.get("closed_cycles_included_by_close_ts") or 0.0),
                 closed_cycles_with_entry_before_window=float(st.get("closed_cycles_with_entry_before_window") or 0.0),
                 missing_entry_leg_count=float(st.get("missing_entry_leg_count") or 0.0),
@@ -1740,6 +1755,8 @@ class NegativeExpectancyCooldown:
                         sym = self._norm_symbol(str(row.get("symbol") or "").strip())
                         if not sym or (allowed_symbols is not None and sym not in allowed_symbols):
                             continue
+                        if not self._is_negative_expectancy_roundtrip_summary_row(row):
+                            continue
                         close_ms = self._coerce_iso_ms(row.get("close_time_utc") or row.get("exit_ts"))
                         if close_ms is None or int(close_ms) < int(since_ms):
                             continue
@@ -1854,6 +1871,10 @@ class NegativeExpectancyCooldown:
         fills_stats: Dict[str, Dict[str, Any]] = {}
         orders_stats: Dict[str, Dict[str, Any]] = {}
         recent_trade_stats: Dict[str, Dict[str, Any]] = {}
+        roundtrip_stats = self._scan_expectancy_from_roundtrip_summary_csvs(
+            since_ms=since_ms,
+            allowed_symbols=allowed_symbols,
+        )
         if bool(getattr(self.cfg, "prefer_net_from_fills", True)):
             fills_stats = self._scan_expectancy_from_fills(
                 since_ms=since_ms,
@@ -1867,11 +1888,7 @@ class NegativeExpectancyCooldown:
                 since_ms=since_ms,
                 allowed_symbols=allowed_symbols,
             )
-            roundtrip_stats = self._scan_expectancy_from_roundtrip_summary_csvs(
-                since_ms=since_ms,
-                allowed_symbols=allowed_symbols,
-            )
-            return self._merge_missing_symbol_stats(fills_stats, orders_stats, recent_trade_stats, roundtrip_stats)
+            return self._merge_missing_symbol_stats(roundtrip_stats, fills_stats, orders_stats, recent_trade_stats)
         orders_stats = self._scan_expectancy_from_orders(
             since_ms=since_ms,
             allowed_symbols=allowed_symbols,
@@ -1884,11 +1901,7 @@ class NegativeExpectancyCooldown:
             since_ms=since_ms,
             allowed_symbols=allowed_symbols,
         )
-        roundtrip_stats = self._scan_expectancy_from_roundtrip_summary_csvs(
-            since_ms=since_ms,
-            allowed_symbols=allowed_symbols,
-        )
-        return self._merge_missing_symbol_stats(orders_stats, fills_stats, recent_trade_stats, roundtrip_stats)
+        return self._merge_missing_symbol_stats(roundtrip_stats, orders_stats, fills_stats, recent_trade_stats)
 
     @staticmethod
     def _coerce_float(value: Any) -> Optional[float]:
@@ -1913,6 +1926,20 @@ class NegativeExpectancyCooldown:
             return int(dt.astimezone(timezone.utc).timestamp() * 1000)
         except Exception:
             return None
+
+    @classmethod
+    def _is_negative_expectancy_roundtrip_summary_row(cls, row: Dict[str, Any]) -> bool:
+        if cls._negative_expectancy_exclusion_reason(row):
+            return False
+        status = str(
+            row.get("roundtrip_status")
+            or row.get("status")
+            or row.get("execution_status")
+            or ""
+        ).strip().lower()
+        if not status:
+            return True
+        return status in {"closed", "closed_flat"} or status.startswith("closed")
 
     def _roundtrip_summary_path_candidates(self) -> list[Path]:
         orders_parent = Path(self.cfg.orders_db_path).parent
@@ -1942,6 +1969,8 @@ class NegativeExpectancyCooldown:
                     for row in csv.DictReader(fh):
                         sym = self._norm_symbol(str(row.get("symbol") or "").strip())
                         if not sym:
+                            continue
+                        if not self._is_negative_expectancy_roundtrip_summary_row(row):
                             continue
                         close_ms = self._coerce_iso_ms(row.get("close_time_utc") or row.get("exit_ts"))
                         if close_ms is None or int(close_ms) < int(since_ms):
