@@ -538,6 +538,13 @@ class NegativeExpectancyCooldown:
         return text == "" or text.lower() in {"none", "null", "not_observable"}
 
     @classmethod
+    def _first_observed_value(cls, *values: Any) -> Any:
+        for value in values:
+            if not cls._missing_value(value):
+                return value
+        return None
+
+    @classmethod
     def _expanded_exit_metadata(cls, row: Dict[str, Any]) -> Dict[str, Any]:
         out = dict(row or {})
 
@@ -1841,15 +1848,26 @@ class NegativeExpectancyCooldown:
                         if side == "sell" and intent and intent != "CLOSE_LONG":
                             continue
                         event_ts = self._coerce_iso_ms(
-                            row.get("first_fill_ts")
-                            or row.get("last_fill_ts")
-                            or row.get("ts_utc")
-                            or row.get("ts")
+                            self._first_observed_value(
+                                row.get("first_fill_ts"),
+                                row.get("last_fill_ts"),
+                                row.get("ts_utc"),
+                                row.get("ts"),
+                            )
                         )
                         if event_ts is None:
                             continue
-                        qty = self._coerce_float(row.get("filled_qty") or row.get("qty") or row.get("fill_sz"))
-                        px = self._coerce_float(row.get("avg_fill_px") or row.get("fill_px") or row.get("price") or row.get("px"))
+                        qty = self._coerce_float(
+                            self._first_observed_value(row.get("filled_qty"), row.get("qty"), row.get("fill_sz"))
+                        )
+                        px = self._coerce_float(
+                            self._first_observed_value(
+                                row.get("avg_fill_px"),
+                                row.get("fill_px"),
+                                row.get("price"),
+                                row.get("px"),
+                            )
+                        )
                         if qty is None or px is None or float(qty) <= 0.0 or float(px) <= 0.0:
                             continue
                         event_id = (
@@ -1937,19 +1955,19 @@ class NegativeExpectancyCooldown:
                     exit_meta = dict(event.get("meta") or {})
                     ctx = dict(entry_meta)
                     ctx.update(exit_meta)
-                    ctx["entry_ts"] = (
-                        entry_meta.get("first_fill_ts")
-                        or entry_meta.get("last_fill_ts")
-                        or entry_meta.get("ts_utc")
-                        or entry_meta.get("ts")
-                        or self._ms_to_iso(lot.get("ts") or 0)
+                    ctx["entry_ts"] = self._first_observed_value(
+                        entry_meta.get("first_fill_ts"),
+                        entry_meta.get("last_fill_ts"),
+                        entry_meta.get("ts_utc"),
+                        entry_meta.get("ts"),
+                        self._ms_to_iso(lot.get("ts") or 0),
                     )
-                    ctx["exit_ts"] = (
-                        exit_meta.get("first_fill_ts")
-                        or exit_meta.get("last_fill_ts")
-                        or exit_meta.get("ts_utc")
-                        or exit_meta.get("ts")
-                        or self._ms_to_iso(event_ts)
+                    ctx["exit_ts"] = self._first_observed_value(
+                        exit_meta.get("first_fill_ts"),
+                        exit_meta.get("last_fill_ts"),
+                        exit_meta.get("ts_utc"),
+                        exit_meta.get("ts"),
+                        self._ms_to_iso(event_ts),
                     )
                     ctx["entry_order_id"] = entry_meta.get("exchange_order_id") or entry_meta.get("order_id") or ""
                     ctx["exit_order_id"] = exit_meta.get("exchange_order_id") or exit_meta.get("order_id") or ""
