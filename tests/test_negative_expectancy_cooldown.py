@@ -713,6 +713,102 @@ def test_negative_expectancy_prefers_canonical_roundtrip_over_duplicate_fills(
     assert "negative_expectancy_roundtrip_mismatch" not in "; ".join(state["warnings"])
 
 
+def test_negative_expectancy_prefers_order_lifecycle_roundtrip_when_summary_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reports = tmp_path / "reports"
+    fills_path = reports / "fills.sqlite"
+    state_path = reports / "negative_expectancy_state.json"
+    reports.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "config_fingerprint": "sol-lifecycle-roundtrip-fp",
+                "release_start_ts": _ts_ms("2026-06-25T00:00:00Z"),
+                "symbols": {},
+                "stats": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    FillStore(path=str(fills_path)).upsert_many(
+        [
+            FillRow(
+                inst_id="SOL-USDT",
+                trade_id="sol-entry-a",
+                ts_ms=_ts_ms("2026-06-25T08:01:13Z"),
+                side="buy",
+                fill_px="69.37",
+                fill_sz="0.20",
+                fee="0",
+                fee_ccy="USDT",
+            ),
+            FillRow(
+                inst_id="SOL-USDT",
+                trade_id="sol-entry-b",
+                ts_ms=_ts_ms("2026-06-25T08:01:13Z"),
+                side="buy",
+                fill_px="69.37",
+                fill_sz="0.029552",
+                fee="0",
+                fee_ccy="USDT",
+            ),
+            FillRow(
+                inst_id="SOL-USDT",
+                trade_id="sol-exit",
+                ts_ms=_ts_ms("2026-06-25T14:00:42Z"),
+                side="sell",
+                fill_px="64.79",
+                fill_sz="0.229552",
+                fee="0",
+                fee_ccy="USDT",
+            ),
+        ]
+    )
+    reports.joinpath("order_lifecycle.csv").write_text(
+        "\n".join(
+            [
+                "ts_utc,symbol,normalized_symbol,side,intent,order_state,avg_fill_px,filled_qty,fee,fee_ccy,fee_usdt,exchange_order_id,first_fill_ts,last_fill_ts,exit_reason,exit_priority,hold_hours,swing_hold_position,swing_min_hold_hours,exit_blocked_by_min_hold,exited_before_min_hold,max_unrealized_bps",
+                "2026-06-25T08:01:13.268000Z,SOL/USDT,SOL-USDT,buy,OPEN_LONG,FILLED,69.37,0.229782,-0.000229782,,null,entry-ord,,,null,null,null,true,24,null,null,null",
+                "2026-06-25T14:00:43.313000Z,SOL/USDT,SOL-USDT,sell,CLOSE_LONG,FILLED,64.79,0.229552,-0.01487267408,USDT,0.01487267408,exit-ord,2026-06-25T14:00:42.328000Z,2026-06-25T14:00:42.328000Z,profit_taking_stop_loss_hit_hold,hard,5.985,true,24,false,true,10.09",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "src.risk.negative_expectancy_cooldown.time.time",
+        lambda: _ts_ms("2026-06-25T15:00:00Z") / 1000.0,
+    )
+
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=72,
+            min_closed_cycles=1,
+            expectancy_threshold_bps=0.0,
+            state_path=str(state_path),
+            orders_db_path=str(reports / "orders.sqlite"),
+            fills_db_path=str(fills_path),
+            prefer_net_from_fills=True,
+            fast_fail_max_hold_minutes=360,
+        )
+    )
+    cooldown.set_scope(whitelist_symbols=["SOL/USDT"], config_fingerprint="sol-lifecycle-roundtrip-fp")
+
+    state = cooldown.refresh(force=True)
+    stats = state["stats"]["SOL/USDT"]
+
+    assert stats["source"] == "order_lifecycle_csv"
+    assert stats["closed_cycles"] == 1
+    assert stats["net_pnl_sum_usdt"] == pytest.approx(-1.08214485632)
+    assert stats["net_expectancy_bps"] == pytest.approx(-679.5675)
+    assert stats["cycle_attributions"][0]["entry_order_id"] == "entry-ord"
+    assert stats["cycle_attributions"][0]["exit_order_id"] == "exit-ord"
+    assert stats["cycle_attributions"][0]["entry_ts"] == "2026-06-25T08:01:13.268000Z"
+    assert stats["cycle_attributions"][0]["exit_ts"] == "2026-06-25T14:00:42.328000Z"
+
+
 def test_negative_expectancy_excludes_premature_swing_soft_exit_from_fast_fail(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
