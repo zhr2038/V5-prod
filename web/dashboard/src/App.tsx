@@ -130,7 +130,8 @@ function pickTimersWithFallback(
   return { timers: [] };
 }
 
-function pickObjectWithFallback<T extends object | null | undefined>(incoming: T, current: T) {
+function pickObjectWithFallback<T extends object | null | undefined>(incoming: T, current: T, incomingPresent = false) {
+  if (incomingPresent) return incoming;
   const incomingKeys = incoming && typeof incoming === 'object' ? Object.keys(incoming).length : 0;
   const currentKeys = current && typeof current === 'object' ? Object.keys(current).length : 0;
   if (incomingKeys > 0) return incoming;
@@ -149,8 +150,16 @@ function mergeDeferredDashboard(prev: DashboardData | null, deferred: Partial<Da
     alphaScores: pickAuthoritativeList(deferred.alphaScores, prev.alphaScores),
     trades: dedupeTradeEntries(pickAuthoritativeList(deferred.trades, prev.trades)),
     timers: pickTimersWithFallback(deferred.timers, prev.timers),
-    apiTelemetry: pickObjectWithFallback(deferred.apiTelemetry, prev.apiTelemetry),
-    slippageInsights: pickObjectWithFallback(deferred.slippageInsights, prev.slippageInsights),
+    apiTelemetry: pickObjectWithFallback(
+      deferred.apiTelemetry,
+      prev.apiTelemetry,
+      Object.prototype.hasOwnProperty.call(deferred, 'apiTelemetry')
+    ),
+    slippageInsights: pickObjectWithFallback(
+      deferred.slippageInsights,
+      prev.slippageInsights,
+      Object.prototype.hasOwnProperty.call(deferred, 'slippageInsights')
+    ),
   };
 }
 

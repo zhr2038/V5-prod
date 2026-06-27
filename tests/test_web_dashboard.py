@@ -116,12 +116,20 @@ def test_react_dashboard_treats_empty_trade_payload_as_authoritative():
     assert "const hasTimerList = Object.prototype.hasOwnProperty.call(payload, 'timers')" in source
     assert "const hasScoreList = Object.prototype.hasOwnProperty.call(payload, 'alphaScores')" in source
     assert "const hasTradeList = Object.prototype.hasOwnProperty.call(payload, 'trades')" in source
+    assert "const hasTelemetryField = Object.prototype.hasOwnProperty.call(payload, 'apiTelemetry')" in source
+    assert "const hasSlippageField = Object.prototype.hasOwnProperty.call(payload, 'slippageInsights')" in source
     assert "!hasScoreList &&" in source
     assert "!hasTradeList &&" in source
+    assert "!hasTelemetryField &&" in source
+    assert "!hasSlippageField &&" in source
     assert "function pickAuthoritativeList" in source
+    assert "function pickObjectWithFallback<T extends object | null | undefined>(incoming: T, current: T, incomingPresent = false)" in source
+    assert "if (incomingPresent) return incoming;" in source
     assert "alphaScores: pickAuthoritativeList(deferred.alphaScores, prev.alphaScores)" in source
     assert "trades: dedupeTradeEntries(pickAuthoritativeList(deferred.trades, prev.trades))" in source
     assert "if (incoming && Array.isArray(incoming.timers)) return incoming;" in source
+    assert "Object.prototype.hasOwnProperty.call(deferred, 'apiTelemetry')" in source
+    assert "Object.prototype.hasOwnProperty.call(deferred, 'slippageInsights')" in source
     assert "const authoritativeTrades = Array.isArray(liveTrades?.trades) ? liveTrades.trades : d.trades;" in source
     assert "liveTrades.trades.length > 0" not in source
 
