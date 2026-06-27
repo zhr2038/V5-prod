@@ -20,6 +20,7 @@ MARKET_RADAR_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" /
 MAIN_TRADING_GRID_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "MainTradingGrid.tsx"
 OPS_RAIL_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "OpsRail.tsx"
 STATUS_RIBBON_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "StatusRibbon.tsx"
+APP_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "App.tsx"
 DASHBOARD_CSS_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "index.css"
 
 
@@ -98,6 +99,13 @@ def test_ops_rail_reads_nested_live_permission_detail_payload():
     assert "...asRecord(quantLabPermissionDetail?.data)" in source
     assert "permissionDetail.version" in source
     assert "permissionDetail.max_single_order_usdt" in source
+
+
+def test_react_dashboard_startup_cache_is_short_lived():
+    source = APP_TSX_PATH.read_text(encoding="utf-8")
+
+    assert "const UI_CACHE_TTL_MS = 45 * 1000;" in source
+    assert "10 * 60 * 1000" not in source
 
 
 def _utc_epoch_from_text(value: str, fmt: str) -> float:

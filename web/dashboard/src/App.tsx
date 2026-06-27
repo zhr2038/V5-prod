@@ -40,7 +40,7 @@ type IdleWindow = Window & {
   cancelIdleCallback?: (handle: number) => void;
 };
 
-const UI_CACHE_TTL_MS = 10 * 60 * 1000;
+const UI_CACHE_TTL_MS = 45 * 1000;
 const UI_CACHE_KEYS = {
   dashboard: 'v5.dashboard.primary',
   riskGuard: 'v5.dashboard.riskGuard',
