@@ -223,7 +223,9 @@ _OKX_PUBLIC_TICKER_CACHE: Dict[str, tuple[float, float]] = {}
 _OKX_PUBLIC_TICKER_CACHE_LOCK = threading.Lock()
 _OKX_HEALTH_CHECK_CACHE: Dict[tuple[str, str, str], tuple[float, Any, float]] = {}
 _OKX_HEALTH_CHECK_CACHE_LOCK = threading.Lock()
-_DASHBOARD_ROUTE_CACHE: Dict[tuple[str, tuple[tuple[str, str], ...]], tuple[float, Any, int]] = {}
+_DASHBOARD_ROUTE_CACHE: Dict[
+    tuple[str, tuple[tuple[str, str], ...]], tuple[float, Any, int, float, float]
+] = {}
 _DASHBOARD_ROUTE_CACHE_LOCK = threading.Lock()
 _BUNDLE_GENERATE_LOCK = threading.Lock()
 _BUNDLE_GENERATE_STATUS_LOCK = threading.Lock()
@@ -449,18 +451,52 @@ def _cache_json_response(ttl_seconds):
                 if cached and cached[0] > now:
                     cached_response = jsonify(copy.deepcopy(cached[1]))
                     cached_response.status_code = int(cached[2])
+                    _attach_dashboard_route_cache_headers(
+                        cached_response,
+                        hit=True,
+                        ttl_seconds=float(cached[4]),
+                        age_seconds=max(0.0, now - float(cached[3])),
+                    )
                     return cached_response
 
             response = func(*args, **kwargs)
             payload, status_code = _extract_endpoint_json(response)
+            _attach_dashboard_route_cache_headers(
+                response,
+                hit=False,
+                ttl_seconds=ttl,
+                age_seconds=0.0,
+            )
             if status_code < 400 and payload is not None:
                 with _DASHBOARD_ROUTE_CACHE_LOCK:
-                    _DASHBOARD_ROUTE_CACHE[cache_key] = (now + ttl, copy.deepcopy(payload), int(status_code))
+                    _DASHBOARD_ROUTE_CACHE[cache_key] = (
+                        now + ttl,
+                        copy.deepcopy(payload),
+                        int(status_code),
+                        now,
+                        ttl,
+                    )
             return response
 
         return wrapper
 
     return decorator
+
+
+def _attach_dashboard_route_cache_headers(
+    response: Any,
+    *,
+    hit: bool,
+    ttl_seconds: float,
+    age_seconds: float,
+) -> None:
+    response_obj = response[0] if isinstance(response, tuple) and response else response
+    headers = getattr(response_obj, 'headers', None)
+    if headers is None:
+        return
+    headers['X-V5-Dashboard-Route-Cache-Hit'] = 'true' if hit else 'false'
+    headers['X-V5-Dashboard-Route-Cache-Ttl-Seconds'] = f'{max(0.0, float(ttl_seconds)):.3f}'
+    headers['X-V5-Dashboard-Route-Cache-Age-Seconds'] = f'{max(0.0, float(age_seconds)):.3f}'
 
 
 def _dashboard_view_cache_ttl_seconds() -> float:

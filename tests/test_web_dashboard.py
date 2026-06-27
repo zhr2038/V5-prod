@@ -2386,6 +2386,32 @@ def test_cache_json_response_ignores_cachebuster_query_param():
     assert calls["count"] == 1
 
 
+def test_cache_json_response_marks_cache_hit_and_age_headers():
+    module = load_web_dashboard_module()
+    module._DASHBOARD_ROUTE_CACHE.clear()
+    calls = {"count": 0}
+
+    @module._cache_json_response(10.0)
+    def sample():
+        calls["count"] += 1
+        return module.jsonify({"count": calls["count"]})
+
+    with module.app.test_request_context("/api/sample"):
+        first = sample()
+
+    with module.app.test_request_context("/api/sample"):
+        second = sample()
+
+    assert first.headers["X-V5-Dashboard-Route-Cache-Hit"] == "false"
+    assert first.headers["X-V5-Dashboard-Route-Cache-Ttl-Seconds"] == "10.000"
+    assert first.headers["X-V5-Dashboard-Route-Cache-Age-Seconds"] == "0.000"
+    assert second.headers["X-V5-Dashboard-Route-Cache-Hit"] == "true"
+    assert second.headers["X-V5-Dashboard-Route-Cache-Ttl-Seconds"] == "10.000"
+    assert float(second.headers["X-V5-Dashboard-Route-Cache-Age-Seconds"]) >= 0.0
+    assert second.get_json()["count"] == 1
+    assert calls["count"] == 1
+
+
 def test_api_scores_exposes_display_score_rank_and_raw_strength(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
