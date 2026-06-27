@@ -799,14 +799,20 @@ def test_negative_expectancy_prefers_order_lifecycle_roundtrip_when_summary_miss
     state = cooldown.refresh(force=True)
     stats = state["stats"]["SOL/USDT"]
 
-    assert stats["source"] == "order_lifecycle_csv"
+    assert stats["source"] == "strategy_roundtrip_canonical"
+    assert stats["canonical_roundtrip_source"] == "order_lifecycle_csv"
     assert stats["closed_cycles"] == 1
     assert stats["net_pnl_sum_usdt"] == pytest.approx(-1.08214485632)
     assert stats["net_expectancy_bps"] == pytest.approx(-679.5675)
+    assert stats["roundtrip_summary_closed_cycles"] == 1
+    assert stats["roundtrip_summary_net_bps"] == pytest.approx(stats["net_expectancy_bps"])
+    assert stats["mismatch_bps"] == 0.0
     assert stats["cycle_attributions"][0]["entry_order_id"] == "entry-ord"
     assert stats["cycle_attributions"][0]["exit_order_id"] == "exit-ord"
     assert stats["cycle_attributions"][0]["entry_ts"] == "2026-06-25T08:01:13.268000Z"
     assert stats["cycle_attributions"][0]["exit_ts"] == "2026-06-25T14:00:42.328000Z"
+    assert state["roundtrip_summary_net_bps"] == pytest.approx(stats["net_expectancy_bps"])
+    assert state["mismatch_bps"] == 0.0
 
 
 def test_negative_expectancy_excludes_premature_swing_soft_exit_from_fast_fail(

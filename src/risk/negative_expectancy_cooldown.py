@@ -1089,6 +1089,47 @@ class NegativeExpectancyCooldown:
                 merged[sym] = self._overlay_premature_soft_exit_diagnostics(dict(existing), dict(stat))
         return merged
 
+    def _canonical_strategy_roundtrip_stats_from_lifecycle(
+        self,
+        lifecycle_stats: Dict[str, Dict[str, Any]],
+        roundtrip_stats: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        out: Dict[str, Dict[str, Any]] = {}
+        for sym, stat in (lifecycle_stats or {}).items():
+            if self._closed_cycle_count(roundtrip_stats.get(sym)) > 0:
+                continue
+            if self._closed_cycle_count(stat) <= 0:
+                continue
+            row = dict(stat)
+            row["source"] = "strategy_roundtrip_canonical"
+            row["canonical_roundtrip_source"] = str(stat.get("source") or "order_lifecycle_csv")
+            row["degraded_reason"] = ""
+            row.update(self._roundtrip_sanity_from_stat(row))
+            out[sym] = row
+        return out
+
+    @staticmethod
+    def _roundtrip_sanity_from_stat(stat: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            net_bps = float((stat or {}).get("net_expectancy_bps") or 0.0)
+        except Exception:
+            net_bps = 0.0
+        try:
+            net_pnl = float((stat or {}).get("net_pnl_sum_usdt") or 0.0)
+        except Exception:
+            net_pnl = 0.0
+        try:
+            closed_cycles = int(float((stat or {}).get("closed_cycles") or 0))
+        except Exception:
+            closed_cycles = 0
+        return {
+            "negative_expectancy_net_bps": float(net_bps),
+            "roundtrip_summary_net_bps": float(net_bps),
+            "mismatch_bps": 0.0,
+            "roundtrip_summary_net_pnl_usdt": float(net_pnl),
+            "roundtrip_summary_closed_cycles": int(closed_cycles),
+        }
+
     def _empty_expectancy_row(self, *, source: str = "no_closed_cycles") -> Dict[str, Any]:
         return self._build_expectancy_row(
             gross_pnl_sum_usdt=0.0,
@@ -2179,6 +2220,10 @@ class NegativeExpectancyCooldown:
             since_ms=since_ms,
             allowed_symbols=allowed_symbols,
         )
+        canonical_lifecycle_stats = self._canonical_strategy_roundtrip_stats_from_lifecycle(
+            lifecycle_stats,
+            roundtrip_stats,
+        )
         if bool(getattr(self.cfg, "prefer_net_from_fills", True)):
             fills_stats = self._scan_expectancy_from_fills(
                 since_ms=since_ms,
@@ -2194,6 +2239,7 @@ class NegativeExpectancyCooldown:
             )
             return self._merge_missing_symbol_stats(
                 roundtrip_stats,
+                canonical_lifecycle_stats,
                 lifecycle_stats,
                 fills_stats,
                 orders_stats,
@@ -2213,6 +2259,7 @@ class NegativeExpectancyCooldown:
         )
         return self._merge_missing_symbol_stats(
             roundtrip_stats,
+            canonical_lifecycle_stats,
             lifecycle_stats,
             orders_stats,
             fills_stats,
@@ -2431,6 +2478,8 @@ class NegativeExpectancyCooldown:
                     )
                 )
             summary = roundtrip_summary.get(sym)
+            if not summary and str((st or {}).get("source") or "") == "strategy_roundtrip_canonical":
+                summary = self._roundtrip_sanity_from_stat(st)
             if not summary:
                 continue
             neg_net_bps = float((st or {}).get("net_expectancy_bps") or 0.0)
