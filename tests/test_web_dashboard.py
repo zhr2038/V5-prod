@@ -81,6 +81,15 @@ def test_status_ribbon_marks_quant_lab_advisory_permission_not_enforced():
     assert "建议${basePermissionSub} · 未强制" in source
 
 
+def test_status_ribbon_does_not_label_permission_ttl_as_quant_lab_freshness():
+    source = STATUS_RIBBON_TSX_PATH.read_text(encoding="utf-8")
+
+    assert "const qlTimeLabel = ttl === null ? '权限刷新' : '权限有效期';" in source
+    assert "const qlTimeSub = ttl === null ? '已更新前' : '剩余时间';" in source
+    assert "中台新鲜度" not in source
+    assert "TTL 剩余时间" not in source
+
+
 def _utc_epoch_from_text(value: str, fmt: str) -> float:
     return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc).timestamp()
 

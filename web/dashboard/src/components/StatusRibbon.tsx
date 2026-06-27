@@ -197,6 +197,16 @@ export function StatusRibbon({
     ? `API 近${fmtNum(qlLookback, 0)}m ${fmtNum(qlRequestSuccess, 0)}/${fmtNum(qlRequestTotal, 0)}成功 · P95 ${fmtLatencyMs(qlP95Latency)}`
     : `API 延迟 --${qlRequestReason ? ` · ${qlRequestReason}` : ''}`;
   const ttl = ttlRemaining(quantLabPermission);
+  const permissionFreshness = firstNumber(
+    quantLabPermission?.freshness_sec,
+    quantLabPermission?.permission_freshness_seconds,
+    permissionData.freshness_sec,
+    permissionData.permission_freshness_seconds,
+    permissionData.permission_age_sec
+  );
+  const qlTimeLabel = ttl === null ? '权限刷新' : '权限有效期';
+  const qlTimeValue = secondsToClock(ttl === null ? permissionFreshness : ttl);
+  const qlTimeSub = ttl === null ? '已更新前' : '剩余时间';
   const directAllowedModes = textArray(quantLabPermission?.allowed_modes);
   const nestedAllowedModes = textArray(permissionData.allowed_modes);
   const directLiveModes = textArray(quantLabPermission?.allowed_live_modes);
@@ -297,9 +307,9 @@ export function StatusRibbon({
           <div className="ql-api-latency-line">{qlApiLatencySummary}</div>
         </div>
         <div className="ql-ttl">
-          <span>中台新鲜度</span>
-          <strong>{secondsToClock(ttl)}</strong>
-          <small>TTL 剩余时间</small>
+          <span>{qlTimeLabel}</span>
+          <strong>{qlTimeValue}</strong>
+          <small>{qlTimeSub}</small>
           <div className="ql-api-latest">
             <span>{qlLatestEndpoint}</span>
             <b>{fmtLatencyMs(qlLatestLatency)}</b>
