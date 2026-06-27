@@ -103,11 +103,18 @@ def test_ops_rail_reads_nested_live_permission_detail_payload():
     assert "permissionDetail.max_single_order_usdt" in source
 
 
-def test_react_dashboard_startup_cache_is_short_lived():
+def test_react_dashboard_does_not_seed_business_data_from_local_storage():
     source = APP_TSX_PATH.read_text(encoding="utf-8")
 
-    assert "const UI_CACHE_TTL_MS = 45 * 1000;" in source
-    assert "10 * 60 * 1000" not in source
+    assert "const LEGACY_UI_CACHE_KEYS = [" in source
+    assert "clearLegacyUiCache();" in source
+    assert "readUiCache" not in source
+    assert "writeUiCache" not in source
+    assert "useState<DashboardData | null>(null)" in source
+    assert "useState<RiskGuardData | null>(null)" in source
+    assert "useState<HealthData | null>(null)" in source
+    assert "useState<QuantLabStatusData | null>(null)" in source
+    assert "useState<QuantLabPermissionData | null>(null)" in source
 
 
 def test_react_dashboard_treats_empty_trade_payload_as_authoritative():

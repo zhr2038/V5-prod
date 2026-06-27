@@ -40,15 +40,14 @@ type IdleWindow = Window & {
   cancelIdleCallback?: (handle: number) => void;
 };
 
-const UI_CACHE_TTL_MS = 45 * 1000;
-const UI_CACHE_KEYS = {
-  dashboard: 'v5.dashboard.primary',
-  riskGuard: 'v5.dashboard.riskGuard',
-  health: 'v5.dashboard.health',
-  quantLabStatus: 'v5.dashboard.quantLabStatus',
-  quantLabPermission: 'v5.dashboard.quantLabPermission',
-  quantLabCost: 'v5.dashboard.quantLabCost',
-} as const;
+const LEGACY_UI_CACHE_KEYS = [
+  'v5.dashboard.primary',
+  'v5.dashboard.riskGuard',
+  'v5.dashboard.health',
+  'v5.dashboard.quantLabStatus',
+  'v5.dashboard.quantLabPermission',
+  'v5.dashboard.quantLabCost',
+] as const;
 
 function isTouchWebKit() {
   return Boolean(
@@ -57,27 +56,13 @@ function isTouchWebKit() {
   );
 }
 
-function readUiCache<T>(key: string): T | null {
+function clearLegacyUiCache() {
   try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { savedAt?: number; value?: T };
-    if (!parsed?.savedAt || Date.now() - parsed.savedAt > UI_CACHE_TTL_MS) {
+    for (const key of LEGACY_UI_CACHE_KEYS) {
       window.localStorage.removeItem(key);
-      return null;
     }
-    return parsed.value ?? null;
   } catch {
-    return null;
-  }
-}
-
-function writeUiCache<T>(key: string, value: T | null | undefined) {
-  if (!value) return;
-  try {
-    window.localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value }));
-  } catch {
-    // Storage can be unavailable in private modes; polling still remains authoritative.
+    // Storage can be unavailable in private modes; polling remains authoritative.
   }
 }
 
@@ -190,13 +175,13 @@ function dashboardFocusForQuantLab(dashboard?: DashboardData | null) {
 }
 
 function App() {
-  const [dashboard, setDashboard] = useState<DashboardData | null>(() => readUiCache(UI_CACHE_KEYS.dashboard));
-  const [riskGuard, setRiskGuard] = useState<RiskGuardData | null>(() => readUiCache(UI_CACHE_KEYS.riskGuard));
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [riskGuard, setRiskGuard] = useState<RiskGuardData | null>(null);
   const [marketState, setMarketState] = useState<MarketStateData | null>(() => dashboard?.marketState || null);
   const [decisionAudit, setDecisionAudit] = useState<DecisionAuditData | null>(null);
-  const [health, setHealth] = useState<HealthData | null>(() => readUiCache(UI_CACHE_KEYS.health));
-  const [quantLabStatus, setQuantLabStatus] = useState<QuantLabStatusData | null>(() => readUiCache(UI_CACHE_KEYS.quantLabStatus));
-  const [quantLabPermission, setQuantLabPermission] = useState<QuantLabPermissionData | null>(() => readUiCache(UI_CACHE_KEYS.quantLabPermission));
+  const [health, setHealth] = useState<HealthData | null>(null);
+  const [quantLabStatus, setQuantLabStatus] = useState<QuantLabStatusData | null>(null);
+  const [quantLabPermission, setQuantLabPermission] = useState<QuantLabPermissionData | null>(null);
   const [quantLabCost, setQuantLabCost] = useState<QuantLabCostEstimateData | null>(null);
   const [apiTelemetrySeries, setApiTelemetrySeries] = useState<ApiTelemetrySeriesData | null>(null);
   const [updateTime, setUpdateTime] = useState<string>('');
@@ -222,11 +207,9 @@ function App() {
     startTransition(() => {
       if (status) {
         setQuantLabStatus(status);
-        writeUiCache(UI_CACHE_KEYS.quantLabStatus, status);
       }
       if (permission) {
         setQuantLabPermission(permission);
-        writeUiCache(UI_CACHE_KEYS.quantLabPermission, permission);
       }
       if (symbol) {
         const nextCost =
@@ -238,9 +221,8 @@ function App() {
             symbol,
             regime: 'normal',
             cost_freshness_status: 'unavailable',
-          } as QuantLabCostEstimateData);
+        } as QuantLabCostEstimateData);
         setQuantLabCost(nextCost);
-        window.localStorage.removeItem(UI_CACHE_KEYS.quantLabCost);
       }
     });
   }, []);
@@ -270,16 +252,12 @@ function App() {
       } as DashboardData;
       setDashboard((prev) => {
         const merged = prev ? { ...prev, ...nextDashboardBase } : nextDashboardBase;
-        writeUiCache(UI_CACHE_KEYS.dashboard, merged);
         return merged;
       });
       setMarketState(d.marketState || null);
       void loadQuantLab(dashboardFocusForQuantLab(nextDashboardBase));
     }
-    if (r) {
-      setRiskGuard(r);
-      writeUiCache(UI_CACHE_KEYS.riskGuard, r);
-    }
+    if (r) setRiskGuard(r);
     setUpdateTime(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
     setLoading(false);
   }, [loadQuantLab]);
@@ -295,20 +273,17 @@ function App() {
       if (deferred) {
         setDashboard((prev) => {
           const nextDashboard = mergeDeferredDashboard(prev, deferred);
-          writeUiCache(UI_CACHE_KEYS.dashboard, nextDashboard);
           void loadQuantLab(dashboardFocusForQuantLab(nextDashboard));
           return nextDashboard;
         });
       }
       if (dec) setDecisionAudit(dec);
-      if (h) {
-        setHealth(h);
-        writeUiCache(UI_CACHE_KEYS.health, h);
-      }
+      if (h) setHealth(h);
     });
   }, [loadApiTelemetrySeries, loadQuantLab]);
 
   useEffect(() => {
+    clearLegacyUiCache();
     let timeoutId: number | null = null;
     const primaryTimeoutId = globalThis.setTimeout(() => {
       void loadPrimary();
