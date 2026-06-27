@@ -3,7 +3,6 @@ import { LiquidBg } from './components/LiquidBg';
 import { TopCommandBar } from './components/TopCommandBar';
 import { StatusRibbon } from './components/StatusRibbon';
 import { MainTradingGrid } from './components/MainTradingGrid';
-import { BundleExportPanel } from './components/BundleExportPanel';
 import { api, dedupeTradeEntries } from './api';
 import { useInterval } from './hooks/useInterval';
 import type {
@@ -384,10 +383,6 @@ function App() {
             fallback={<DeferredPanelFallback />}
             ExecutionInsightsPanel={ExecutionInsightsPanel}
           />
-        </div>
-
-        <div className="bundle-dock">
-          <BundleExportPanel />
         </div>
 
         {loading && (

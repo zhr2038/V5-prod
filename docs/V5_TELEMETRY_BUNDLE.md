@@ -76,17 +76,23 @@ The bundle must not include `.env` files or unredacted secrets. Redacted markers
 ## systemd
 
 Install the bundle service from `deploy/systemd/` on the V5 production host.
-The live follow-up bundle is manual-only: it is generated from the Web dashboard
-button or by explicitly starting the service for one run. Do not enable a
-recurring timer for this bundle.
+The live follow-up bundle is background telemetry for quant-lab ingest. Keep the
+system timer enabled so qyun2 has fresh read-only V5 evidence before expert-pack
+exports. The Web dashboard must not present these files as user-facing manual
+packages; operator-facing downloads belong to the quant-lab expert-pack export
+page.
 
 ```bash
 sudo cp deploy/systemd/v5-export-bundle.* /etc/systemd/system/
-sudo cp deploy/systemd/v5-live-followup-bundle-export.service /etc/systemd/system/
+sudo cp deploy/systemd/v5-live-followup-bundle-export.* /etc/systemd/system/
 sudo cp deploy/systemd/v5-quant-lab-selfcheck.* /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now v5-export-bundle.timer
+sudo systemctl enable --now v5-live-followup-bundle-export.timer
 sudo systemctl enable --now v5-quant-lab-selfcheck.timer
 ```
+
+The scheduled units are `v5-live-followup-bundle-export.service` and
+`v5-live-followup-bundle-export.timer`.
 
 The remote bundle directory is `/var/lib/v5/exports/bundles`. quant-lab should pull only completed `.tar.gz` files with matching `.sha256` sidecars. If a production service invokes `scripts/generate_v5_bundle_remote.sh` directly, run `python scripts/prune_v5_bundles.py /var/lib/v5/exports/bundles --keep-count 1000 --max-age-days 7` after installing the latest archive.

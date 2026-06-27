@@ -1,0 +1,12 @@
+[Unit]
+Description=Generate V5 live follow-up bundle hourly for quant-lab ingest
+
+[Timer]
+OnCalendar=*-*-* *:05:00
+Persistent=true
+AccuracySec=30s
+RandomizedDelaySec=2m
+Unit=v5-live-followup-bundle-export.service
+
+[Install]
+WantedBy=timers.target

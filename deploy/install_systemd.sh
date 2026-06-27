@@ -198,4 +198,5 @@ sudo systemctl enable --now v5-cost-rollup.timer
 sudo systemctl enable --now v5-spread-rollup.timer
 sudo systemctl enable --now v5-reconcile.timer
 sudo systemctl enable --now v5-ledger.timer
-systemctl list-timers --all | grep -E "v5-(hourly|daily|cost-rollup|spread-rollup|reconcile|ledger)" || true
+sudo systemctl enable --now v5-live-followup-bundle-export.timer
+systemctl list-timers --all | grep -E "v5-(hourly|daily|cost-rollup|spread-rollup|reconcile|ledger|live-followup-bundle-export)" || true
