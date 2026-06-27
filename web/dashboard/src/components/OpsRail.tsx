@@ -85,7 +85,10 @@ export function OpsRail({
   deferredReady = false,
 }: OpsRailProps) {
   const reduceMotion = useReducedMotion();
-  const permissionDetail = asRecord(quantLabPermissionDetail?.data);
+  const permissionDetail = {
+    ...asRecord(quantLabPermissionDetail?.permission),
+    ...asRecord(quantLabPermissionDetail?.data),
+  };
   const gateData = asRecord(quantLabGate?.data);
 
   return (

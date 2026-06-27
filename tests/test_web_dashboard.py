@@ -18,6 +18,7 @@ ML_STATUS_PANEL_JS_PATH = REPO_ROOT / "web" / "static" / "js" / "ml_status_panel
 ML_BAND_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "MLBand.tsx"
 MARKET_RADAR_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "MarketRadar.tsx"
 MAIN_TRADING_GRID_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "MainTradingGrid.tsx"
+OPS_RAIL_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "OpsRail.tsx"
 STATUS_RIBBON_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "StatusRibbon.tsx"
 DASHBOARD_CSS_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "index.css"
 
@@ -88,6 +89,15 @@ def test_status_ribbon_does_not_label_permission_ttl_as_quant_lab_freshness():
     assert "const qlTimeSub = ttl === null ? '已更新前' : '剩余时间';" in source
     assert "中台新鲜度" not in source
     assert "TTL 剩余时间" not in source
+
+
+def test_ops_rail_reads_nested_live_permission_detail_payload():
+    source = OPS_RAIL_TSX_PATH.read_text(encoding="utf-8")
+
+    assert "...asRecord(quantLabPermissionDetail?.permission)" in source
+    assert "...asRecord(quantLabPermissionDetail?.data)" in source
+    assert "permissionDetail.version" in source
+    assert "permissionDetail.max_single_order_usdt" in source
 
 
 def _utc_epoch_from_text(value: str, fmt: str) -> float:
