@@ -113,10 +113,15 @@ def test_react_dashboard_startup_cache_is_short_lived():
 def test_react_dashboard_treats_empty_trade_payload_as_authoritative():
     source = APP_TSX_PATH.read_text(encoding="utf-8")
 
-    assert "const hasTradeList = Array.isArray(payload.trades);" in source
-    assert "return !hasTradeList &&" in source
+    assert "const hasTimerList = Object.prototype.hasOwnProperty.call(payload, 'timers')" in source
+    assert "const hasScoreList = Object.prototype.hasOwnProperty.call(payload, 'alphaScores')" in source
+    assert "const hasTradeList = Object.prototype.hasOwnProperty.call(payload, 'trades')" in source
+    assert "!hasScoreList &&" in source
+    assert "!hasTradeList &&" in source
     assert "function pickAuthoritativeList" in source
+    assert "alphaScores: pickAuthoritativeList(deferred.alphaScores, prev.alphaScores)" in source
     assert "trades: dedupeTradeEntries(pickAuthoritativeList(deferred.trades, prev.trades))" in source
+    assert "if (incoming && Array.isArray(incoming.timers)) return incoming;" in source
     assert "const authoritativeTrades = Array.isArray(liveTrades?.trades) ? liveTrades.trades : d.trades;" in source
     assert "liveTrades.trades.length > 0" not in source
 

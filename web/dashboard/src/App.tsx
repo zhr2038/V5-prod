@@ -83,9 +83,13 @@ function writeUiCache<T>(key: string, value: T | null | undefined) {
 
 function deferredPayloadLooksSparse(payload?: Partial<DashboardData> | null) {
   if (!payload) return true;
+  const hasTimerList = Object.prototype.hasOwnProperty.call(payload, 'timers') && Array.isArray(payload.timers?.timers);
+  const hasScoreList = Object.prototype.hasOwnProperty.call(payload, 'alphaScores') && Array.isArray(payload.alphaScores);
+  const hasTradeList = Object.prototype.hasOwnProperty.call(payload, 'trades') && Array.isArray(payload.trades);
+  const hasTelemetryField = Object.prototype.hasOwnProperty.call(payload, 'apiTelemetry');
+  const hasSlippageField = Object.prototype.hasOwnProperty.call(payload, 'slippageInsights');
   const timerCount = Array.isArray(payload.timers?.timers) ? payload.timers.timers.length : 0;
   const scoreCount = Array.isArray(payload.alphaScores) ? payload.alphaScores.length : 0;
-  const hasTradeList = Array.isArray(payload.trades);
   const telemetryKeys = payload.apiTelemetry && typeof payload.apiTelemetry === 'object'
     ? Object.keys(payload.apiTelemetry).length
     : 0;
@@ -93,15 +97,17 @@ function deferredPayloadLooksSparse(payload?: Partial<DashboardData> | null) {
     ? Object.keys(payload.slippageInsights).length
     : 0;
 
-  return !hasTradeList && timerCount === 0 && scoreCount === 0 && telemetryKeys === 0 && slippageKeys === 0;
-}
-
-function pickListWithFallback<T>(incoming: T[] | undefined, current: T[] | undefined): T[] {
-  if (Array.isArray(incoming) && incoming.length > 0) return incoming;
-  if (Array.isArray(current) && current.length > 0) return current;
-  if (Array.isArray(incoming)) return incoming;
-  if (Array.isArray(current)) return current;
-  return [];
+  return (
+    !hasTimerList &&
+    !hasScoreList &&
+    !hasTradeList &&
+    !hasTelemetryField &&
+    !hasSlippageField &&
+    timerCount === 0 &&
+    scoreCount === 0 &&
+    telemetryKeys === 0 &&
+    slippageKeys === 0
+  );
 }
 
 function pickAuthoritativeList<T>(incoming: T[] | undefined, current: T[] | undefined): T[] {
@@ -116,6 +122,7 @@ function pickTimersWithFallback(
 ): DashboardData['timers'] {
   const incomingTimers = Array.isArray(incoming?.timers) ? incoming.timers : [];
   const currentTimers = Array.isArray(current?.timers) ? current.timers : [];
+  if (incoming && Array.isArray(incoming.timers)) return incoming;
   if (incomingTimers.length > 0 && incoming) return incoming;
   if (currentTimers.length > 0 && current) return current;
   if (incoming) return incoming;
@@ -139,7 +146,7 @@ function mergeDeferredDashboard(prev: DashboardData | null, deferred: Partial<Da
   return {
     ...prev,
     ...deferred,
-    alphaScores: pickListWithFallback(deferred.alphaScores, prev.alphaScores),
+    alphaScores: pickAuthoritativeList(deferred.alphaScores, prev.alphaScores),
     trades: dedupeTradeEntries(pickAuthoritativeList(deferred.trades, prev.trades)),
     timers: pickTimersWithFallback(deferred.timers, prev.timers),
     apiTelemetry: pickObjectWithFallback(deferred.apiTelemetry, prev.apiTelemetry),
