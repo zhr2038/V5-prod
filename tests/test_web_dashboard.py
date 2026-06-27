@@ -246,6 +246,80 @@ def test_quant_lab_proxy_fetch_uses_configured_backend_and_token(monkeypatch):
     assert payload["proxy"]["source"] == "v5_local_proxy"
 
 
+def test_quant_lab_proxy_cache_varies_by_upstream_config(monkeypatch):
+    module = load_web_dashboard_module()
+    module._QUANT_LAB_PROXY_CACHE.clear()
+    config = {
+        "quant_lab": {
+            "enabled": True,
+            "mode": "shadow",
+            "base_url": "http://qyun2-a.example:8027",
+            "timeout_seconds": 1.0,
+        }
+    }
+    calls = []
+
+    class Response:
+        status_code = 200
+        text = "{}"
+
+        def __init__(self, url):
+            self.url = url
+
+        def json(self):
+            return {"status": "ok", "upstream": self.url}
+
+    def fake_get(url, *, params=None, headers=None, timeout=None):
+        calls.append(url)
+        return Response(url)
+
+    monkeypatch.setattr(module, "load_config", lambda: config)
+    monkeypatch.setattr(module.requests, "get", fake_get)
+
+    first = module._quant_lab_proxy_fetch("/v1/health", ttl_seconds=10)
+    config["quant_lab"]["base_url"] = "http://qyun2-b.example:8027"
+    second = module._quant_lab_proxy_fetch("/v1/health", ttl_seconds=10)
+
+    assert first["upstream"] == "http://qyun2-a.example:8027/v1/health"
+    assert second["upstream"] == "http://qyun2-b.example:8027/v1/health"
+    assert calls == [
+        "http://qyun2-a.example:8027/v1/health",
+        "http://qyun2-b.example:8027/v1/health",
+    ]
+
+
+def test_quant_lab_proxy_cache_does_not_survive_disabled_config(monkeypatch):
+    module = load_web_dashboard_module()
+    module._QUANT_LAB_PROXY_CACHE.clear()
+    config = {
+        "quant_lab": {
+            "enabled": True,
+            "mode": "shadow",
+            "base_url": "http://qyun2.hrhome.top:8027",
+            "timeout_seconds": 1.0,
+        }
+    }
+
+    class Response:
+        status_code = 200
+        text = "{}"
+
+        def json(self):
+            return {"status": "ok"}
+
+    monkeypatch.setattr(module, "load_config", lambda: config)
+    monkeypatch.setattr(module.requests, "get", lambda *args, **kwargs: Response())
+
+    first = module._quant_lab_proxy_fetch("/v1/health", ttl_seconds=10)
+    config["quant_lab"]["enabled"] = False
+    second = module._quant_lab_proxy_fetch("/v1/health", ttl_seconds=10)
+
+    assert first["available"] is True
+    assert second["available"] is False
+    assert second["reason"] == "quant_lab_disabled"
+    assert second["proxy"]["cache_hit"] is False
+
+
 def test_quant_lab_status_api_prefers_deep_health(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()

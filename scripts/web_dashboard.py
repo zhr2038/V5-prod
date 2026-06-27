@@ -11,6 +11,7 @@ V5 Web Dashboard - 交易可视化界面
 """
 
 import copy
+import hashlib
 import json
 import math
 import os
@@ -521,7 +522,10 @@ POSITION_KLINE_TIMEFRAMES: Dict[str, Dict[str, Any]] = {
 POSITION_KLINE_DEFAULT_LIMIT = 96
 _OKX_PUBLIC_PROVIDER_CACHE: Dict[str, Optional[OKXCCXTProvider]] = {'provider': None}
 _WORKSPACE_PYTHON_BIN_CACHE: Dict[str, str] = {'value': ''}
-_QUANT_LAB_PROXY_CACHE: Dict[tuple[str, tuple[tuple[str, str], ...]], tuple[float, Dict[str, Any]]] = {}
+_QUANT_LAB_PROXY_CACHE: Dict[
+    tuple[tuple[tuple[str, str], ...], str, tuple[tuple[str, str], ...]],
+    tuple[float, Dict[str, Any]],
+] = {}
 _QUANT_LAB_PROXY_CACHE_LOCK = threading.Lock()
 
 
@@ -3148,13 +3152,30 @@ def _merge_quant_lab_live_health_status(
     return merged
 
 
-def _quant_lab_proxy_cache_key(path: str, params: Dict[str, Any]) -> tuple[str, tuple[tuple[str, str], ...]]:
+def _quant_lab_proxy_cache_scope(qcfg: Dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    token = str(qcfg.get('token') or '')
+    token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()[:16] if token else ''
+    token_meta = qcfg.get('token_meta') or {}
+    return (
+        ('base_url', str(qcfg.get('base_url') or '').rstrip('/')),
+        ('mode', str(qcfg.get('mode') or '')),
+        ('token_loaded', 'true' if token else 'false'),
+        ('token_source', str(token_meta.get('token_source') or '')),
+        ('token_hash', token_hash),
+    )
+
+
+def _quant_lab_proxy_cache_key(
+    path: str,
+    params: Dict[str, Any],
+    qcfg: Dict[str, Any],
+) -> tuple[tuple[tuple[str, str], ...], str, tuple[tuple[str, str], ...]]:
     clean_params = {
         str(key): str(value)
         for key, value in dict(params or {}).items()
         if value not in (None, '')
     }
-    return str(path or ''), tuple(sorted(clean_params.items()))
+    return _quant_lab_proxy_cache_scope(qcfg), str(path or ''), tuple(sorted(clean_params.items()))
 
 
 def _quant_lab_proxy_read_token(quant_lab_cfg: Dict[str, Any]) -> tuple[Optional[str], Dict[str, Any]]:
@@ -3316,7 +3337,14 @@ def _enrich_quant_lab_cost_freshness(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def _quant_lab_proxy_fetch(path: str, params: Optional[Dict[str, Any]] = None, *, ttl_seconds: float = 10.0) -> Dict[str, Any]:
     params = {str(key): value for key, value in dict(params or {}).items() if value not in (None, '')}
-    cache_key = _quant_lab_proxy_cache_key(path, params)
+    qcfg = _quant_lab_proxy_config()
+    if not qcfg.get('enabled'):
+        return _quant_lab_proxy_degraded('quant_lab_disabled', path=path, detail=f"mode {qcfg.get('mode') or 'unknown'}")
+    base_url = str(qcfg.get('base_url') or '').rstrip('/')
+    if not base_url:
+        return _quant_lab_proxy_degraded('quant_lab_base_url_missing', path=path)
+
+    cache_key = _quant_lab_proxy_cache_key(path, params, qcfg)
     now = time.time()
     if ttl_seconds > 0:
         with _QUANT_LAB_PROXY_CACHE_LOCK:
@@ -3327,13 +3355,6 @@ def _quant_lab_proxy_fetch(path: str, params: Optional[Dict[str, Any]] = None, *
             if isinstance(proxy_meta, dict):
                 proxy_meta['cache_hit'] = True
             return payload
-
-    qcfg = _quant_lab_proxy_config()
-    if not qcfg.get('enabled'):
-        return _quant_lab_proxy_degraded('quant_lab_disabled', path=path, detail=f"mode {qcfg.get('mode') or 'unknown'}")
-    base_url = str(qcfg.get('base_url') or '').rstrip('/')
-    if not base_url:
-        return _quant_lab_proxy_degraded('quant_lab_base_url_missing', path=path)
 
     headers = {
         'Accept': 'application/json',
