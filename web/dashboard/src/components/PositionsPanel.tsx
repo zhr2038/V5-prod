@@ -719,16 +719,18 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
   useInterval(() => {
     if (document.hidden) return;
     api.positions().then((payload) => {
-      const next = Array.isArray(payload?.positions) ? payload.positions : [];
-      setLivePositions(next);
+      if (Array.isArray(payload?.positions)) {
+        setLivePositions(payload.positions);
+      }
     });
   }, 5000);
 
   useInterval(() => {
     if (document.hidden) return;
     api.trades().then((payload) => {
-      const next = Array.isArray(payload?.trades) ? payload.trades : [];
-      setLiveTrades(dedupeTradeEntries(next));
+      if (Array.isArray(payload?.trades)) {
+        setLiveTrades(dedupeTradeEntries(payload.trades));
+      }
     });
   }, 5000);
 

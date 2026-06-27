@@ -175,6 +175,7 @@ export const api = {
   dashboardDeferred: () => fetchJson<Partial<DashboardData>>('/api/dashboard?view=deferred'),
   positions: async () => {
     const payload = await fetchJson<{ positions?: ApiPositionPayload[] }>('/api/positions');
+    if (!payload) return null;
     const positions = Array.isArray(payload?.positions)
       ? payload.positions.map((position) => normalizePositionEntry(position))
       : [];
@@ -182,6 +183,7 @@ export const api = {
   },
   trades: async () => {
     const payload = await fetchJson<{ trades?: ApiTradePayload[] }>('/api/trades');
+    if (!payload) return null;
     const trades = Array.isArray(payload?.trades)
       ? dedupeTradeEntries(payload.trades.map((trade, index) => normalizeTradeEntry(trade, index)))
       : [];

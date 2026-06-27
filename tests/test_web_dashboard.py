@@ -21,6 +21,8 @@ MAIN_TRADING_GRID_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "componen
 OPS_RAIL_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "OpsRail.tsx"
 STATUS_RIBBON_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "StatusRibbon.tsx"
 APP_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "App.tsx"
+API_TS_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "api.ts"
+POSITIONS_PANEL_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "PositionsPanel.tsx"
 DASHBOARD_CSS_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "index.css"
 
 
@@ -106,6 +108,29 @@ def test_react_dashboard_startup_cache_is_short_lived():
 
     assert "const UI_CACHE_TTL_MS = 45 * 1000;" in source
     assert "10 * 60 * 1000" not in source
+
+
+def test_react_dashboard_treats_empty_trade_payload_as_authoritative():
+    source = APP_TSX_PATH.read_text(encoding="utf-8")
+
+    assert "const hasTradeList = Array.isArray(payload.trades);" in source
+    assert "return !hasTradeList &&" in source
+    assert "function pickAuthoritativeList" in source
+    assert "trades: dedupeTradeEntries(pickAuthoritativeList(deferred.trades, prev.trades))" in source
+    assert "const authoritativeTrades = Array.isArray(liveTrades?.trades) ? liveTrades.trades : d.trades;" in source
+    assert "liveTrades.trades.length > 0" not in source
+
+
+def test_react_dashboard_keeps_prior_lists_on_fetch_failure_only():
+    api_source = API_TS_PATH.read_text(encoding="utf-8")
+    panel_source = POSITIONS_PANEL_TSX_PATH.read_text(encoding="utf-8")
+
+    assert "if (!payload) return null;" in api_source
+    assert "if (Array.isArray(payload?.positions)) {" in panel_source
+    assert "setLivePositions(payload.positions);" in panel_source
+    assert "if (Array.isArray(payload?.trades)) {" in panel_source
+    assert "setLiveTrades(dedupeTradeEntries(payload.trades));" in panel_source
+    assert "Array.isArray(payload?.trades) ? payload.trades : []" not in panel_source
 
 
 def _utc_epoch_from_text(value: str, fmt: str) -> float:

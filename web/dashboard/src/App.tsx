@@ -85,7 +85,7 @@ function deferredPayloadLooksSparse(payload?: Partial<DashboardData> | null) {
   if (!payload) return true;
   const timerCount = Array.isArray(payload.timers?.timers) ? payload.timers.timers.length : 0;
   const scoreCount = Array.isArray(payload.alphaScores) ? payload.alphaScores.length : 0;
-  const tradeCount = Array.isArray(payload.trades) ? payload.trades.length : 0;
+  const hasTradeList = Array.isArray(payload.trades);
   const telemetryKeys = payload.apiTelemetry && typeof payload.apiTelemetry === 'object'
     ? Object.keys(payload.apiTelemetry).length
     : 0;
@@ -93,12 +93,18 @@ function deferredPayloadLooksSparse(payload?: Partial<DashboardData> | null) {
     ? Object.keys(payload.slippageInsights).length
     : 0;
 
-  return timerCount === 0 && scoreCount === 0 && tradeCount === 0 && telemetryKeys === 0 && slippageKeys === 0;
+  return !hasTradeList && timerCount === 0 && scoreCount === 0 && telemetryKeys === 0 && slippageKeys === 0;
 }
 
 function pickListWithFallback<T>(incoming: T[] | undefined, current: T[] | undefined): T[] {
   if (Array.isArray(incoming) && incoming.length > 0) return incoming;
   if (Array.isArray(current) && current.length > 0) return current;
+  if (Array.isArray(incoming)) return incoming;
+  if (Array.isArray(current)) return current;
+  return [];
+}
+
+function pickAuthoritativeList<T>(incoming: T[] | undefined, current: T[] | undefined): T[] {
   if (Array.isArray(incoming)) return incoming;
   if (Array.isArray(current)) return current;
   return [];
@@ -134,7 +140,7 @@ function mergeDeferredDashboard(prev: DashboardData | null, deferred: Partial<Da
     ...prev,
     ...deferred,
     alphaScores: pickListWithFallback(deferred.alphaScores, prev.alphaScores),
-    trades: dedupeTradeEntries(pickListWithFallback(deferred.trades, prev.trades)),
+    trades: dedupeTradeEntries(pickAuthoritativeList(deferred.trades, prev.trades)),
     timers: pickTimersWithFallback(deferred.timers, prev.timers),
     apiTelemetry: pickObjectWithFallback(deferred.apiTelemetry, prev.apiTelemetry),
     slippageInsights: pickObjectWithFallback(deferred.slippageInsights, prev.slippageInsights),
@@ -241,11 +247,10 @@ function App() {
       api.trades(),
     ]);
     if (d) {
+      const authoritativeTrades = Array.isArray(liveTrades?.trades) ? liveTrades.trades : d.trades;
       const nextDashboardBase = {
         ...d,
-        trades: dedupeTradeEntries(
-          Array.isArray(liveTrades?.trades) && liveTrades.trades.length > 0 ? liveTrades.trades : d.trades
-        ),
+        trades: dedupeTradeEntries(authoritativeTrades),
       } as DashboardData;
       setDashboard((prev) => {
         const merged = prev ? { ...prev, ...nextDashboardBase } : nextDashboardBase;
