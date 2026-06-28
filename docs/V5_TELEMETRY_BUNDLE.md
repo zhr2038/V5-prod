@@ -93,6 +93,8 @@ sudo systemctl enable --now v5-quant-lab-selfcheck.timer
 ```
 
 The scheduled units are `v5-live-followup-bundle-export.service` and
-`v5-live-followup-bundle-export.timer`.
+`v5-live-followup-bundle-export.timer`. The live follow-up timer runs every
+10 minutes so qyun2's 10-minute telemetry sync normally has a fresh completed
+bundle to ingest instead of waiting for the next hourly boundary.
 
 The remote bundle directory is `/var/lib/v5/exports/bundles`. quant-lab should pull only completed `.tar.gz` files with matching `.sha256` sidecars. If a production service invokes `scripts/generate_v5_bundle_remote.sh` directly, run `python scripts/prune_v5_bundles.py /var/lib/v5/exports/bundles --keep-count 1000 --max-age-days 7` after installing the latest archive.

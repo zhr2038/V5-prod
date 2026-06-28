@@ -81,8 +81,10 @@ def test_live_followup_bundle_export_timer_is_background_only() -> None:
     docs = (PROJECT_ROOT / "docs" / "V5_TELEMETRY_BUNDLE.md").read_text(encoding="utf-8")
     app = (PROJECT_ROOT / "web" / "dashboard" / "src" / "App.tsx").read_text(encoding="utf-8")
 
-    assert "OnCalendar=*-*-* *:05:00" in text
+    assert "OnBootSec=3min" in text
+    assert "OnUnitActiveSec=10min" in text
     assert "Unit=v5-live-followup-bundle-export.service" in text
+    assert "10 minutes" in docs
     assert "v5-live-followup-bundle-export.timer" in docs
     assert "v5-live-followup-bundle-export.service" in docs
     assert "BundleExportPanel" not in app

@@ -1,8 +1,9 @@
 [Unit]
-Description=Generate V5 live follow-up bundle hourly for quant-lab ingest
+Description=Generate V5 live follow-up bundle every 10 minutes for quant-lab ingest
 
 [Timer]
-OnCalendar=*-*-* *:05:00
+OnBootSec=3min
+OnUnitActiveSec=10min
 Persistent=true
 AccuracySec=30s
 RandomizedDelaySec=2m
