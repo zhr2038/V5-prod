@@ -1622,6 +1622,11 @@ class DiagnosticsConfig(BaseModel):
         ],
         description="Candidate CSV or expert-pack archive paths for quant-lab paper strategy proposals",
     )
+    quant_lab_paper_strategy_proposals_max_age_minutes: float = Field(
+        default=1440.0,
+        ge=1.0,
+        description="Maximum file mtime age for quant-lab paper strategy proposal sources before they are ignored",
+    )
     enable_live_small_from_quant_lab: bool = Field(
         default=False,
         description="Explicit opt-in before V5 can consume quant-lab LIVE_SMALL_READY notional advice; default false",

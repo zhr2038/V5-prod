@@ -295,6 +295,7 @@ diagnostics:
     - reports/quant_lab_latest_bundle.tar.gz
     - reports/quant_lab/latest_bundle.zip
     - reports/quant_lab/latest_bundle.tar.gz
+  quant_lab_paper_strategy_proposals_max_age_minutes: 1440
   enable_live_small_from_quant_lab: false
   paper_strategy_configs:
     - strategy_id: SOL_PROTECT_ALPHA6_LOW_EXCEPTION_PAPER_V1

@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import tarfile
 import zipfile
 from pathlib import Path
@@ -1224,6 +1225,56 @@ def test_paper_strategy_tracker_prefers_bundle_proposals_over_stale_bare_csv(tmp
     )
     assert by_proposal["SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["suggested_horizon"] == "48h"
     assert "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1" not in by_proposal
+
+
+def test_paper_strategy_tracker_ignores_stale_bundle_proposals(tmp_path: Path) -> None:
+    cfg = _cfg(include_bnb=True)
+    cfg.diagnostics.quant_lab_paper_strategy_proposals_max_age_minutes = 60
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_stale_bundle_proposals"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate_snapshot.csv").write_text(
+        "run_id,ts_utc,symbol,final_decision,strategy_candidate\n",
+        encoding="utf-8",
+    )
+    stale_bundle = tmp_path / "reports" / "quant_lab_latest_bundle.zip"
+    _write_paper_strategy_proposal_zip(
+        stale_bundle,
+        [
+            {
+                "proposal_id": "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+                "strategy_candidate": "v5.f3_dominant_entry",
+                "symbol": "ETH-USDT",
+                "recommended_mode": "paper",
+                "suggested_horizon": "120h",
+            },
+            {
+                "proposal_id": "SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+                "strategy_candidate": "v5.f3_dominant_entry",
+                "symbol": "SOL-USDT",
+                "recommended_mode": "paper",
+                "suggested_horizon": "120h",
+            },
+        ],
+    )
+    stale_s = start_s - 4 * 3600
+    os.utime(stale_bundle, (stale_s, stale_s))
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_stale_bundle_proposals", start_s),
+        market_data_1h={
+            "BNB/USDT": _series("BNB/USDT", start_s, {0: 600.0}),
+            "ETH/USDT": _series("ETH/USDT", start_s, {0: 1600.0}),
+            "SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0}),
+        },
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["proposal_rows"] == 0
+    ack = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_proposal_ack.csv")
+    assert ack == []
 
 
 def test_paper_strategy_tracker_tracks_eth_f3_dominant_48h_candidate(tmp_path: Path) -> None:

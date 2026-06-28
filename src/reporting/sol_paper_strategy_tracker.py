@@ -98,6 +98,14 @@ BOTTOM_ZONE_ADVISORY_CANDIDATES = {
     "bottom_zone_probe_paper",
 }
 
+
+@dataclass(frozen=True)
+class _ProposalSource:
+    path: Path
+    rows: list[dict[str, Any]]
+    is_archive: bool
+    mtime_ms: int
+
 DEFAULT_PAPER_STRATEGY_CONFIGS = [
     {
         "strategy_id": "SOL_PROTECT_ALPHA6_LOW_EXCEPTION_PAPER_V1",
@@ -2125,6 +2133,7 @@ def _read_paper_strategy_proposals(
     run_path: Path,
     reports_dir: Path,
     diagnostics: DiagnosticsConfig,
+    now_ms: int | None = None,
 ) -> list[dict[str, Any]]:
     if not bool(getattr(diagnostics, "quant_lab_paper_strategy_proposals_enabled", True)):
         return []
@@ -2132,8 +2141,15 @@ def _read_paper_strategy_proposals(
         getattr(diagnostics, "quant_lab_paper_strategy_proposals_paths", None)
         or _default_proposal_paths()
     )
-    archive_rows: list[dict[str, Any]] = []
-    direct_rows: list[dict[str, Any]] = []
+    max_age_minutes = float(
+        getattr(diagnostics, "quant_lab_paper_strategy_proposals_max_age_minutes", 1440.0)
+        or 1440.0
+    )
+    if now_ms is None:
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    cutoff_ms = int(now_ms - max_age_minutes * 60_000)
+    archive_sources: list[_ProposalSource] = []
+    direct_sources: list[_ProposalSource] = []
     seen_paths: set[Path] = set()
     for raw_path in configured:
         for path in _candidate_advisory_paths(str(raw_path), run_path=run_path, reports_dir=reports_dir):
@@ -2142,17 +2158,31 @@ def _read_paper_strategy_proposals(
             seen_paths.add(path)
             if not path.is_file():
                 continue
+            try:
+                mtime_ms = int(path.stat().st_mtime * 1000)
+            except OSError:
+                continue
+            if mtime_ms < cutoff_ms:
+                continue
             rows = _read_raw_csv_path(path, target_filename="paper_strategy_proposals.csv")
             if not rows:
                 continue
             if _is_archive_path(path):
-                archive_rows.extend(rows)
+                archive_sources.append(_ProposalSource(path=path, rows=rows, is_archive=True, mtime_ms=mtime_ms))
             else:
-                direct_rows.extend(rows)
+                direct_sources.append(_ProposalSource(path=path, rows=rows, is_archive=False, mtime_ms=mtime_ms))
     # A quant-lab expert/latest bundle is the authoritative current snapshot.  A
     # bare CSV can be left behind by an older export request, so only use it as a
-    # fallback when no bundle provided proposal rows.
-    rows = archive_rows or direct_rows
+    # fallback when no fresh bundle provided proposal rows.  Never union multiple
+    # generations: stale archives can otherwise resurrect old proposal IDs.
+    sources = archive_sources or direct_sources
+    if not sources:
+        return []
+    latest_mtime_ms = max(source.mtime_ms for source in sources)
+    rows: list[dict[str, Any]] = []
+    for source in sources:
+        if source.mtime_ms == latest_mtime_ms:
+            rows.extend(source.rows)
     return _dedupe_rows(
         rows,
         [
@@ -5561,6 +5591,7 @@ def update_sol_paper_strategy_tracker(
         run_path=run_path,
         reports_dir=reports_dir,
         diagnostics=diagnostics,
+        now_ms=asof_ts_ms,
     )
     expanded_advisory_rows = _expanded_universe_advisory_rows(
         advisory_rows,
