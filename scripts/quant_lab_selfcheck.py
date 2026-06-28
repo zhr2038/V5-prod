@@ -43,6 +43,18 @@ def _advisory_item_count(payload: Any) -> int:
     return 1 if payload else 0
 
 
+def _clear_client_caches(client: Any) -> None:
+    cache = getattr(client, "_cache", None)
+    clear = getattr(cache, "clear", None)
+    if callable(clear):
+        clear()
+    for attr in ("_cache_headers", "_stale_cache", "_permission_cache", "_cost_cache"):
+        value = getattr(client, attr, None)
+        clear = getattr(value, "clear", None)
+        if callable(clear):
+            clear()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Read-only quant-lab API selfcheck for V5")
     parser.add_argument("--config", default="configs/config.yaml")
@@ -80,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     client = QuantLabClient.from_config(qcfg, run_id="selfcheck", phase="selfcheck", mode=mode_resolution.mode.value)
     if not bool(getattr(client, "api_token", None)):
         raise QuantLabValidationError("quant-lab selfcheck requires QUANT_LAB_API_TOKEN to be loaded")
+    _clear_client_caches(client)
 
     health_response = client.get_json("/v1/health")
     health = QuantLabHealth.from_payload(health_response.data)
