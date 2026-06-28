@@ -4411,10 +4411,28 @@ def main():
                     .read()
                     .decode()
                 )
+                proposal_ack_reader = csv.DictReader(
+                    tf.extractfile(extract_member(tf, "summaries/paper_strategy_proposal_ack.csv"))
+                    .read()
+                    .decode()
+                    .splitlines()
+                )
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
                 labels_lines = tf.extractfile(extract_member(tf, "raw/reports/skipped_candidate_labels.jsonl")).read().decode().splitlines()
 
             assert raw_effective_config == report_effective_config
+            assert proposal_ack_reader.fieldnames == [
+                "proposal_id",
+                "paper_tracker_id",
+                "accepted",
+                "recommended_mode",
+                "symbol",
+                "strategy_candidate",
+                "suggested_horizon",
+                "proposal_source",
+                "reject_reason",
+                "live_order_effect",
+            ]
             assert json.loads(raw_effective_config)["btc_leadership_probe_enabled"] is True
             keys = [(r["run_id"], r["ts_utc"], r["symbol"], r["skip_reason"]) for r in blocked]
             assert len(keys) == len(set(keys)), keys

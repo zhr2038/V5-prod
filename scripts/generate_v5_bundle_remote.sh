@@ -212,6 +212,7 @@ CURRENT_REPORT_FILES = [
     ("reports/candidate_snapshot.csv", "raw/reports/candidate_snapshot.csv", False),
     ("reports/order_lifecycle.csv", "raw/reports/order_lifecycle.csv", False),
     ("reports/summaries/paper_strategy_runs.csv", "summaries/paper_strategy_runs.csv", False),
+    ("reports/summaries/paper_strategy_proposal_ack.csv", "summaries/paper_strategy_proposal_ack.csv", False),
     ("reports/summaries/paper_strategy_daily.csv", "summaries/paper_strategy_daily.csv", False),
     ("reports/summaries/bnb_paper_strategy_runs.csv", "summaries/bnb_paper_strategy_runs.csv", False),
     ("reports/summaries/bnb_paper_strategy_daily.csv", "summaries/bnb_paper_strategy_daily.csv", False),
@@ -279,6 +280,18 @@ EXPANDED_UNIVERSE_ADVISORY_FIELDS = (
     "would_enter",
     "no_sample_reason",
     "advisory_reason",
+    "live_order_effect",
+)
+PAPER_PROPOSAL_ACK_FIELDS = (
+    "proposal_id",
+    "paper_tracker_id",
+    "accepted",
+    "recommended_mode",
+    "symbol",
+    "strategy_candidate",
+    "suggested_horizon",
+    "proposal_source",
+    "reject_reason",
     "live_order_effect",
 )
 for _expanded_horizon in (4, 8, 12, 24, 48, 72):
@@ -1817,6 +1830,7 @@ def copy_current_reports():
             copy_jsonl_since(src_rel, dest_rel, WINDOW_72H_START, required=required)
         else:
             copy_sanitized(src_rel, dest_rel, required=required)
+    ensure_csv_header("summaries/paper_strategy_proposal_ack.csv", PAPER_PROPOSAL_ACK_FIELDS)
     for src_rel, dest_rel in (
         ("reports/strategy_opportunity_advisory.csv", "raw/reports/strategy_opportunity_advisory.csv"),
         ("reports/quant_lab/strategy_opportunity_advisory.csv", "raw/reports/quant_lab/strategy_opportunity_advisory.csv"),
