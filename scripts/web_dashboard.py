@@ -242,7 +242,9 @@ _BUNDLE_GENERATE_STATUS: Dict[str, Any] = {
     'return_code': None,
 }
 BUNDLE_NAME_RE = re.compile(r'^v5_live_followup_bundle_\d{8}T\d{6}Z\.tar\.gz(?:\.sha256)?$')
-BUNDLE_GENERATION_OUTPUT_KEY_RE = re.compile(r'^(BUNDLE_PATH|SHA256_PATH|SHA256|SIZE_BYTES|HIGH_ISSUES|MEDIUM_ISSUES|FILE_COUNT)=(.*)$')
+BUNDLE_GENERATION_OUTPUT_KEY_RE = re.compile(
+    r'^(BUNDLE_PATH|SHA256_PATH|SHA256|SIZE_BYTES|HIGH_ISSUES|MEDIUM_ISSUES|FILE_COUNT)=(.*)$'
+)
 BUNDLE_SECRET_VALUE_RE = re.compile(
     r'(?i)(authorization|api[_-]?(?:key|secret)|secret|token|cookie|pass(?:word|phrase)|private[_-]?key)'
     r'([\"\']?\s*[:=]\s*[\"\']?)([^\"\'\s,;#}\]]+)'
@@ -3929,6 +3931,89 @@ def _bundle_search_dirs(config: Optional[Dict[str, Any]] = None) -> List[Path]:
     return unique
 
 
+def _is_production_bundle_workspace() -> bool:
+    try:
+        resolved = WORKSPACE.resolve()
+    except Exception:
+        resolved = WORKSPACE
+    value = str(resolved).replace('\\', '/')
+    return value == '/home/ubuntu/clawd/v5-prod' or value.startswith('/home/ubuntu/clawd/v5-prod/')
+
+
+def _bundle_publish_enabled() -> bool:
+    raw = str(os.getenv('V5_DASHBOARD_BUNDLE_PUBLISH', 'auto') or 'auto').strip().lower()
+    if raw in {'0', 'false', 'no', 'off', 'skip', 'disabled'}:
+        return False
+    if raw in {'1', 'true', 'yes', 'on', 'force', 'required'}:
+        return True
+    return _is_production_bundle_workspace()
+
+
+def _bundle_publish_dir(config: Optional[Dict[str, Any]] = None) -> Path:
+    raw_env = str(os.getenv('V5_DASHBOARD_BUNDLE_PUBLISH_DIR') or '').strip()
+    if raw_env:
+        return Path(raw_env).expanduser()
+    cfg = config
+    if cfg is None:
+        try:
+            cfg = load_config()
+        except Exception:
+            cfg = {}
+    quant_lab = cfg.get('quant_lab', {}) if isinstance(cfg, dict) else {}
+    export_dir = quant_lab.get('export_bundle_dir') if isinstance(quant_lab, dict) else None
+    if export_dir:
+        return Path(str(export_dir)).expanduser()
+    return Path('/var/lib/v5/exports/bundles')
+
+
+def _atomic_copy_bundle_file(src: Path, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(f'.{dest.name}.{os.getpid()}.{threading.get_ident()}.tmp')
+    try:
+        shutil.copy2(src, tmp)
+        os.replace(tmp, dest)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _publish_generated_bundle(bundle_path: str, sha256_path: str = '') -> Dict[str, Any]:
+    if not _bundle_publish_enabled():
+        return {'status': 'skipped', 'reason': 'disabled'}
+    bundle = Path(str(bundle_path or '')).expanduser()
+    if not bundle.is_file() or not _is_allowed_bundle_name(bundle.name):
+        raise RuntimeError('generated bundle path is missing or invalid')
+    source_sha = Path(str(sha256_path or f'{bundle}.sha256')).expanduser()
+    if source_sha.is_file() and not _is_allowed_bundle_name(source_sha.name):
+        raise RuntimeError('generated bundle sha256 path is invalid')
+
+    publish_dir = _bundle_publish_dir()
+    target = publish_dir / bundle.name
+    try:
+        same_target = bundle.resolve() == target.resolve()
+    except OSError:
+        same_target = False
+    if not same_target:
+        _atomic_copy_bundle_file(bundle, target)
+
+    target_sha = Path(f'{target}.sha256')
+    if source_sha.is_file():
+        try:
+            same_sha_target = source_sha.resolve() == target_sha.resolve()
+        except OSError:
+            same_sha_target = False
+        if not same_sha_target:
+            _atomic_copy_bundle_file(source_sha, target_sha)
+
+    return {
+        'status': 'published',
+        'bundle_path': str(target),
+        'sha256_path': str(target_sha) if target_sha.is_file() else '',
+    }
+
+
 def _is_allowed_bundle_name(name: str) -> bool:
     return bool(BUNDLE_NAME_RE.match(str(name or '').strip()))
 
@@ -4077,12 +4162,26 @@ def _run_live_followup_bundle_packager() -> tuple[Dict[str, Any], int]:
     elapsed = time.time() - started
     parsed = _parse_bundle_generation_output(proc.stdout)
     ok = proc.returncode == 0
+    publish_result: Dict[str, Any] = {'status': 'not_run'}
+    publish_error = ''
+    if ok:
+        try:
+            publish_result = _publish_generated_bundle(
+                parsed.get('bundle_path', ''),
+                parsed.get('sha256_path', ''),
+            )
+        except Exception as exc:
+            publish_error = _sanitize_public_error_text(exc, default='bundle publish failed')
+            ok = False
     payload = {
         'ok': ok,
         'return_code': proc.returncode,
         'elapsed_seconds': round(elapsed, 2),
         'bundle_path': parsed.get('bundle_path', ''),
         'sha256_path': parsed.get('sha256_path', ''),
+        'published_bundle_path': publish_result.get('bundle_path', ''),
+        'published_sha256_path': publish_result.get('sha256_path', ''),
+        'publish_status': publish_result.get('status', 'not_run'),
         'sha256': parsed.get('sha256', ''),
         'size_bytes': _bundle_int(parsed.get('size_bytes')),
         'high_issues': _bundle_int(parsed.get('high_issues')),
@@ -4093,7 +4192,7 @@ def _run_live_followup_bundle_packager() -> tuple[Dict[str, Any], int]:
         'bundles': _list_live_followup_bundles(limit=5),
     }
     if not ok:
-        payload['error'] = 'bundle generation failed'
+        payload['error'] = publish_error or 'bundle generation failed'
     return payload, 200 if ok else 500
 
 
@@ -4112,6 +4211,9 @@ def _bundle_generation_worker(job_id: str) -> None:
             elapsed_seconds=payload.get('elapsed_seconds', 0.0),
             bundle_path=payload.get('bundle_path', ''),
             sha256_path=payload.get('sha256_path', ''),
+            published_bundle_path=payload.get('published_bundle_path', ''),
+            published_sha256_path=payload.get('published_sha256_path', ''),
+            publish_status=payload.get('publish_status', 'not_run'),
             sha256=payload.get('sha256', ''),
             size_bytes=payload.get('size_bytes', 0),
             high_issues=payload.get('high_issues', 0),

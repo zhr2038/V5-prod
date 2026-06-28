@@ -1009,6 +1009,59 @@ def test_generate_live_followup_bundle_runs_packager(monkeypatch, tmp_path):
     assert calls[0][0][-1] == str(tmp_path)
 
 
+def test_generate_live_followup_bundle_publishes_to_export_dir(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    tmp_bundle_dir = tmp_path / "tmp-bundles"
+    publish_dir = tmp_path / "published-bundles"
+    tmp_bundle_dir.mkdir()
+    publish_dir.mkdir()
+    bundle = tmp_bundle_dir / "v5_live_followup_bundle_20260515T010203Z.tar.gz"
+    bundle.write_bytes(b"bundle")
+    sha_path = Path(f"{bundle}.sha256")
+    sha_path.write_text(f"abc  {bundle.name}\n", encoding="utf-8")
+    monkeypatch.setattr(module, "_bundle_search_dirs", lambda config=None: [publish_dir, tmp_bundle_dir])
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setenv("V5_DASHBOARD_BUNDLE_PUBLISH", "true")
+    monkeypatch.setenv("V5_DASHBOARD_BUNDLE_PUBLISH_DIR", str(publish_dir))
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    (script_dir / "generate_v5_bundle_remote.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=(
+                f"BUNDLE_PATH={bundle}\n"
+                f"SHA256_PATH={sha_path}\n"
+                "SHA256=abc\n"
+                "SIZE_BYTES=6\n"
+                "HIGH_ISSUES=0\n"
+                "MEDIUM_ISSUES=0\n"
+                "FILE_COUNT=42\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/bin/bash" if name == "bash" else None)
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    client = module.app.test_client()
+
+    response = client.post("/api/live_followup_bundles/generate?sync=1")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    published = publish_dir / bundle.name
+    published_sha = Path(f"{published}.sha256")
+    assert payload["ok"] is True
+    assert payload["publish_status"] == "published"
+    assert payload["published_bundle_path"] == str(published)
+    assert payload["published_sha256_path"] == str(published_sha)
+    assert published.read_bytes() == b"bundle"
+    assert published_sha.read_text(encoding="utf-8") == f"abc  {bundle.name}\n"
+    assert payload["bundles"][0]["name"] == bundle.name
+
+
 def test_generate_live_followup_bundle_async_returns_immediately(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     bundle_dir = tmp_path / "bundles"
