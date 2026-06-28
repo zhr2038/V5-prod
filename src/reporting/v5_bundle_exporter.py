@@ -10,6 +10,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -2989,6 +2990,51 @@ def _manifest_metadata(root: Path, reports: Path, usage_rows: list[Dict[str, Any
     }
 
 
+def _refresh_cost_probe_preflight_before_bundle(root: Path, reports: Path) -> Dict[str, Any]:
+    """Refresh read-only cost-probe P3 files so bundles do not ship stale state."""
+
+    script = root / "scripts" / "cost_probe_dry_run.py"
+    config = root / "configs" / "live_prod.yaml"
+    if not script.is_file():
+        return {"status": "skipped", "reason": "cost_probe_dry_run_script_missing"}
+    if not config.is_file():
+        return {"status": "skipped", "reason": "live_prod_config_missing"}
+    try:
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--config",
+                str(config),
+                "--reports-dir",
+                str(reports),
+            ],
+            cwd=str(root),
+            text=True,
+            capture_output=True,
+            timeout=90,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {"status": "failed", "reason": "cost_probe_dry_run_timeout"}
+    except OSError as exc:
+        return {"status": "failed", "reason": "cost_probe_dry_run_unavailable", "error": str(exc)}
+    if proc.returncode != 0:
+        return {
+            "status": "failed",
+            "reason": "cost_probe_dry_run_failed",
+            "returncode": proc.returncode,
+        }
+    p3_path = reports / "cost_probe_p3_preflight.json"
+    summary_path = reports / "cost_probe_summary.json"
+    return {
+        "status": "refreshed",
+        "script": "scripts/cost_probe_dry_run.py",
+        "p3_preflight_present": p3_path.is_file(),
+        "summary_present": summary_path.is_file(),
+    }
+
+
 def export_v5_bundle(
     *,
     reports_dir: str | Path,
@@ -2996,11 +3042,17 @@ def export_v5_bundle(
     window_hours: int = 72,
     include_logs: bool = True,
     include_config: bool = True,
+    refresh_cost_probe_preflight: bool = True,
 ) -> Path:
     reports = Path(reports_dir).resolve()
     root = reports.parent
     out = Path(out_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
+    preflight_refresh = (
+        _refresh_cost_probe_preflight_before_bundle(root, reports)
+        if refresh_cost_probe_preflight
+        else {"status": "skipped", "reason": "disabled"}
+    )
     since = _since_iso(window_hours)
     usage_path = reports / "quant_lab_usage.jsonl"
     requests_path = reports / "quant_lab_requests.jsonl"
@@ -3030,6 +3082,10 @@ def export_v5_bundle(
         if manifest_meta.get("git_dirty")
         else []
     )
+    if preflight_refresh.get("status") == "failed":
+        data_quality_warnings.append(
+            f"cost_probe_preflight_refresh_failed:{preflight_refresh.get('reason', 'unknown')}"
+        )
 
     stamp = _utc_stamp()
     bundle_name = f"v5_live_followup_bundle_{stamp}.tar.gz"
@@ -3094,6 +3150,7 @@ def export_v5_bundle(
                 "cost_probe_live_execution_status": cost_probe_artifacts[
                     "live_execution_status"
                 ],
+                "cost_probe_preflight_refresh": preflight_refresh,
                 "live_guard_would_block_count": len([row for row in live_guard_impact_rows if _live_guard_would_block(row)]),
                 "would_block_count": len([row for row in live_guard_impact_rows if _live_guard_would_block(row)]),
                 "live_guard_actual_block_count": 0,
@@ -3223,6 +3280,7 @@ def export_v5_bundle(
             "cost_probe_live_execution_status": cost_probe_artifacts[
                 "live_execution_status"
             ],
+            "cost_probe_preflight_refresh": preflight_refresh,
             "run_summary_invalid": run_summary_invalid,
             "summary_trade_count_mismatch_high_issue_count": summary_high_issue_count,
             "data_quality_warnings": data_quality_warnings,
@@ -3264,8 +3322,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--keep-count", type=int, default=DEFAULT_KEEP_COUNT)
     parser.add_argument("--max-age-days", type=float, default=DEFAULT_MAX_AGE_DAYS)
     parser.add_argument("--no-prune", action="store_true")
+    parser.add_argument("--no-refresh-cost-probe-preflight", action="store_true")
     args = parser.parse_args(argv)
-    bundle = export_v5_bundle(reports_dir=args.reports_dir, out_dir=args.out_dir, window_hours=args.window_hours)
+    bundle = export_v5_bundle(
+        reports_dir=args.reports_dir,
+        out_dir=args.out_dir,
+        window_hours=args.window_hours,
+        refresh_cost_probe_preflight=not args.no_refresh_cost_probe_preflight,
+    )
     retention = None
     if not args.no_prune:
         retention = prune_v5_bundle_exports(

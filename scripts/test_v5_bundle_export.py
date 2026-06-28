@@ -4305,13 +4305,51 @@ def fixture_matured_skipped_missing_future_px_root(root):
     return entry_run_id
 
 
-def run_bundle(root):
+def write_fake_cost_probe_refresher(root, *, state="READY_FOR_MANUAL_AUTHORIZATION"):
+    script = root / "scripts" / "cost_probe_dry_run.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(
+        "\n".join(
+            [
+                "import argparse, json",
+                "from pathlib import Path",
+                "parser = argparse.ArgumentParser()",
+                "parser.add_argument('--config')",
+                "parser.add_argument('--reports-dir')",
+                "args = parser.parse_args()",
+                "reports = Path(args.reports_dir)",
+                "reports.mkdir(parents=True, exist_ok=True)",
+                "p3 = {",
+                "  'generated_at': '2030-01-01T00:00:00Z',",
+                f"  'state': '{state}',",
+                f"  'effective_preflight_state': '{state}',",
+                "  'online_exchange_preflight_state': 'NOT_RUN',",
+                "  'manual_probe_symbol': 'BNB/USDT',",
+                "  'manual_authorization_required': True,",
+                "  'approved_live_order_execution': False,",
+                "  'ready_to_request_manual_live_probe': True,",
+                "  'no_order_submitted': True,",
+                "}",
+                "summary = {'generated_at': p3['generated_at'], 'state': 'DRY_RUN_PLAN_READY', 'no_order_submitted': True}",
+                "(reports / 'cost_probe_p3_preflight.json').write_text(json.dumps(p3) + '\\n', encoding='utf-8')",
+                "(reports / 'cost_probe_summary.json').write_text(json.dumps(summary) + '\\n', encoding='utf-8')",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def run_bundle(root, env_extra=None):
     script_path = bash_path(SCRIPT)
     root_path = bash_path(root)
     bash_bin = require_executable("bash")
+    env = os.environ.copy()
+    if env_extra:
+        env.update(env_extra)
     proc = subprocess.run(  # noqa: S603 - test invokes the local bundle script with temporary fixture paths.
         [bash_bin, script_path, root_path],
-        env=os.environ.copy(),
+        env=env,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -4436,6 +4474,46 @@ def main():
             assert "closed roundtrip gross/net bps: not_applicable_no_trades" in readme, readme
             assert "probe lifecycle: not_applicable_no_probe_trade" in readme, readme
             assert "ml_live_overlay_status: disabled_in_live_prod" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-cost-probe-preflight-refresh-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_root(root)
+        write_fake_cost_probe_refresher(root)
+        bundle = run_bundle(
+            root,
+            env_extra={
+                "V5_BUNDLE_REFRESH_COST_PROBE_PREFLIGHT": "1",
+                "V5_PROJECT_PYTHON": "python3",
+            },
+        )
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                p3 = json.loads(
+                    tf.extractfile(extract_member(tf, "summaries/cost_probe_p3_preflight.json"))
+                    .read()
+                    .decode()
+                )
+                summary = json.loads(
+                    tf.extractfile(extract_member(tf, "summaries/cost_probe_summary.json"))
+                    .read()
+                    .decode()
+                )
+                manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
+                window = json.loads(
+                    tf.extractfile(extract_member(tf, "summaries/window_summary.json"))
+                    .read()
+                    .decode()
+                )
+
+            assert p3["generated_at"] == "2030-01-01T00:00:00Z", p3
+            assert p3["state"] == "READY_FOR_MANUAL_AUTHORIZATION", p3
+            assert summary["effective_preflight_state"] == "READY_FOR_MANUAL_AUTHORIZATION", summary
+            assert manifest["cost_probe_preflight_refresh"]["status"] == "refreshed", manifest
+            assert window["cost_probe_preflight_refresh"]["status"] == "refreshed", window
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

@@ -154,6 +154,62 @@ def test_bundle_export_windows_raw_quant_lab_jsonl(tmp_path: Path) -> None:
     assert [row["run_id"] for row in request_rows] == ["recent_request"]
 
 
+def test_bundle_export_refreshes_cost_probe_preflight_before_copy(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    reports = root / "reports"
+    out = tmp_path / "bundles"
+    reports.mkdir(parents=True)
+    (reports / "quant_lab_usage.jsonl").write_text("", encoding="utf-8")
+    (reports / "quant_lab_requests.jsonl").write_text("", encoding="utf-8")
+    (root / "configs").mkdir(parents=True)
+    (root / "configs/live_prod.yaml").write_text("execution:\n  cost_probe_enabled: true\n", encoding="utf-8")
+    script = root / "scripts/cost_probe_dry_run.py"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "\n".join(
+            [
+                "import argparse, json",
+                "from pathlib import Path",
+                "parser = argparse.ArgumentParser()",
+                "parser.add_argument('--config')",
+                "parser.add_argument('--reports-dir')",
+                "args = parser.parse_args()",
+                "reports = Path(args.reports_dir)",
+                "reports.mkdir(parents=True, exist_ok=True)",
+                "p3 = {",
+                "  'generated_at': '2030-01-01T00:00:00Z',",
+                "  'state': 'READY_FOR_MANUAL_AUTHORIZATION',",
+                "  'effective_preflight_state': 'READY_FOR_MANUAL_AUTHORIZATION',",
+                "  'manual_probe_symbol': 'BNB/USDT',",
+                "  'manual_authorization_required': True,",
+                "  'approved_live_order_execution': False,",
+                "  'ready_to_request_manual_live_probe': True,",
+                "  'no_order_submitted': True,",
+                "}",
+                "summary = {'generated_at': p3['generated_at'], 'state': 'DRY_RUN_PLAN_READY', 'no_order_submitted': True}",
+                "(reports / 'cost_probe_p3_preflight.json').write_text(json.dumps(p3) + '\\n', encoding='utf-8')",
+                "(reports / 'cost_probe_summary.json').write_text(json.dumps(summary) + '\\n', encoding='utf-8')",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    bundle = export_v5_bundle(reports_dir=reports, out_dir=out, window_hours=72)
+
+    with tarfile.open(bundle, "r:gz") as tf:
+        p3 = json.loads(tf.extractfile("summaries/cost_probe_p3_preflight.json").read().decode("utf-8"))
+        summary = json.loads(tf.extractfile("summaries/cost_probe_summary.json").read().decode("utf-8"))
+        manifest = json.loads(tf.extractfile("manifest.json").read().decode("utf-8"))
+        window = json.loads(tf.extractfile("summaries/window_summary.json").read().decode("utf-8"))
+
+    assert p3["generated_at"] == "2030-01-01T00:00:00Z"
+    assert p3["state"] == "READY_FOR_MANUAL_AUTHORIZATION"
+    assert summary["effective_preflight_state"] == "READY_FOR_MANUAL_AUTHORIZATION"
+    assert manifest["cost_probe_preflight_refresh"]["status"] == "refreshed"
+    assert window["cost_probe_preflight_refresh"]["status"] == "refreshed"
+
+
 def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
     root = tmp_path / "root"
     reports = root / "reports"

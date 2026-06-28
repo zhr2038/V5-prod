@@ -13,6 +13,108 @@ if command -v flock >/dev/null 2>&1; then
   fi
 fi
 
+is_production_root() {
+  local resolved_root
+  resolved_root="$(cd "${ROOT}" 2>/dev/null && pwd -P || printf '%s' "${ROOT}")"
+  case "${resolved_root}" in
+    /home/ubuntu/clawd/v5-prod|/home/ubuntu/clawd/v5-prod/*|/var/lib/v5-prod|/var/lib/v5-prod/*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+refresh_cost_probe_preflight() {
+  local refresh_mode mode_norm required python_bin dry_run_script config_file reports_dir refresh_out refresh_err
+  refresh_mode="${V5_BUNDLE_REFRESH_COST_PROBE_PREFLIGHT:-auto}"
+  mode_norm="$(printf '%s' "${refresh_mode}" | tr '[:upper:]' '[:lower:]')"
+  case "${mode_norm}" in
+    0|false|no|off|skip|disabled)
+      export V5_COST_PROBE_PREFLIGHT_REFRESH_STATUS="skipped"
+      export V5_COST_PROBE_PREFLIGHT_REFRESH_REASON="disabled"
+      echo "COST_PROBE_PREFLIGHT_REFRESH=skipped reason=disabled"
+      return 0
+      ;;
+  esac
+
+  required=0
+  if is_production_root || [[ "${mode_norm}" == "1" || "${mode_norm}" == "true" || "${mode_norm}" == "yes" || "${mode_norm}" == "required" || "${mode_norm}" == "force" ]]; then
+    required=1
+  fi
+
+  dry_run_script="${ROOT}/scripts/cost_probe_dry_run.py"
+  config_file="${ROOT}/configs/live_prod.yaml"
+  reports_dir="${ROOT}/reports"
+  if [[ ! -f "${dry_run_script}" ]]; then
+    if [[ "${required}" == "1" ]]; then
+      echo "ERROR_COST_PROBE_PREFLIGHT_REFRESH_FAILED reason=dry_run_script_missing path=${dry_run_script}" >&2
+      exit 78
+    fi
+    export V5_COST_PROBE_PREFLIGHT_REFRESH_STATUS="skipped"
+    export V5_COST_PROBE_PREFLIGHT_REFRESH_REASON="dry_run_script_missing"
+    echo "WARN_COST_PROBE_PREFLIGHT_REFRESH_SKIPPED reason=dry_run_script_missing path=${dry_run_script}"
+    return 0
+  fi
+  if [[ ! -f "${config_file}" ]]; then
+    if [[ "${required}" == "1" ]]; then
+      echo "ERROR_COST_PROBE_PREFLIGHT_REFRESH_FAILED reason=config_missing path=${config_file}" >&2
+      exit 78
+    fi
+    export V5_COST_PROBE_PREFLIGHT_REFRESH_STATUS="skipped"
+    export V5_COST_PROBE_PREFLIGHT_REFRESH_REASON="config_missing"
+    echo "WARN_COST_PROBE_PREFLIGHT_REFRESH_SKIPPED reason=config_missing path=${config_file}"
+    return 0
+  fi
+
+  python_bin="${V5_PROJECT_PYTHON:-}"
+  if [[ -z "${python_bin}" && -x "${ROOT}/.venv/bin/python" ]]; then
+    python_bin="${ROOT}/.venv/bin/python"
+  fi
+  if [[ -z "${python_bin}" && -x "${ROOT}/.venv/Scripts/python.exe" ]]; then
+    python_bin="${ROOT}/.venv/Scripts/python.exe"
+  fi
+  if [[ -z "${python_bin}" && "${required}" != "1" ]]; then
+    python_bin="$(command -v python3 || true)"
+  fi
+  if [[ -z "${python_bin}" ]]; then
+    if [[ "${required}" == "1" ]]; then
+      echo "ERROR_COST_PROBE_PREFLIGHT_REFRESH_FAILED reason=project_python_missing root=${ROOT}" >&2
+      exit 78
+    fi
+    export V5_COST_PROBE_PREFLIGHT_REFRESH_STATUS="skipped"
+    export V5_COST_PROBE_PREFLIGHT_REFRESH_REASON="project_python_missing"
+    echo "WARN_COST_PROBE_PREFLIGHT_REFRESH_SKIPPED reason=project_python_missing root=${ROOT}"
+    return 0
+  fi
+
+  refresh_out="$(mktemp /tmp/v5_cost_probe_preflight_refresh.XXXXXX.out)"
+  refresh_err="$(mktemp /tmp/v5_cost_probe_preflight_refresh.XXXXXX.err)"
+  if (cd "${ROOT}" && "${python_bin}" "${dry_run_script}" --config "${config_file}" --reports-dir "${reports_dir}" >"${refresh_out}" 2>"${refresh_err}"); then
+    export V5_COST_PROBE_PREFLIGHT_REFRESH_STATUS="refreshed"
+    export V5_COST_PROBE_PREFLIGHT_REFRESH_REASON=""
+    export V5_COST_PROBE_PREFLIGHT_REFRESH_SCRIPT="scripts/cost_probe_dry_run.py"
+    echo "COST_PROBE_PREFLIGHT_REFRESH=refreshed python=${python_bin} reports_dir=${reports_dir}"
+    rm -f "${refresh_out}" "${refresh_err}"
+    return 0
+  fi
+
+  if [[ "${required}" == "1" ]]; then
+    echo "ERROR_COST_PROBE_PREFLIGHT_REFRESH_FAILED python=${python_bin} script=${dry_run_script}" >&2
+    tail -80 "${refresh_err}" >&2 || true
+    rm -f "${refresh_out}" "${refresh_err}"
+    exit 78
+  fi
+  export V5_COST_PROBE_PREFLIGHT_REFRESH_STATUS="failed"
+  export V5_COST_PROBE_PREFLIGHT_REFRESH_REASON="cost_probe_dry_run_failed"
+  echo "WARN_COST_PROBE_PREFLIGHT_REFRESH_FAILED python=${python_bin} script=${dry_run_script}"
+  tail -20 "${refresh_err}" >&2 || true
+  rm -f "${refresh_out}" "${refresh_err}"
+}
+
+refresh_cost_probe_preflight
+
 python3 - "$ROOT" <<'PY'
 import csv
 import datetime as dt
@@ -63,6 +165,11 @@ OUT = Path("/tmp") / BUNDLE_STEM
 TAR = Path(f"{OUT}.tar.gz")
 SHA_PATH = Path(f"{TAR}.sha256")
 ROOT_POSIX = ROOT.as_posix()
+COST_PROBE_PREFLIGHT_REFRESH = {
+    "status": os.environ.get("V5_COST_PROBE_PREFLIGHT_REFRESH_STATUS") or "not_run",
+    "reason": os.environ.get("V5_COST_PROBE_PREFLIGHT_REFRESH_REASON") or "",
+    "script": os.environ.get("V5_COST_PROBE_PREFLIGHT_REFRESH_SCRIPT") or "",
+}
 IS_PRODUCTION_ROOT = (
     ROOT_POSIX == "/home/ubuntu/clawd/v5-prod"
     or ROOT_POSIX.startswith("/home/ubuntu/clawd/v5-prod/")
@@ -15363,6 +15470,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     data_quality_warnings = []
     if provenance_meta.get("code_provenance") == "degraded":
         data_quality_warnings.append(f"dirty_worktree: {provenance_meta.get('provenance_status', not_obs)}")
+    if COST_PROBE_PREFLIGHT_REFRESH.get("status") == "failed":
+        data_quality_warnings.append(
+            f"cost_probe_preflight_refresh_failed:{COST_PROBE_PREFLIGHT_REFRESH.get('reason') or 'unknown'}"
+        )
 
     def live_guard_would_block(row):
         return (
@@ -15419,6 +15530,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "live_execution_status",
             {},
         ),
+        "cost_probe_preflight_refresh": COST_PROBE_PREFLIGHT_REFRESH,
         "router_decision_rows": len(router_rows),
         "has_trade_data": has_trade_data,
         "trade_observation_status": trade_observation_status,
@@ -17224,6 +17336,7 @@ summary_meta.update(
             "live_execution_status",
             {},
         ),
+        "cost_probe_preflight_refresh": COST_PROBE_PREFLIGHT_REFRESH,
     }
 )
 filter_raw_jsonl_outputs_recent_24h()
@@ -17372,6 +17485,7 @@ manifest = {
     "cost_probe_summary": summary_meta.get("cost_probe_summary", {}),
     "cost_probe_p3_preflight": summary_meta.get("cost_probe_p3_preflight", {}),
     "cost_probe_live_execution_status": summary_meta.get("cost_probe_live_execution_status", {}),
+    "cost_probe_preflight_refresh": summary_meta.get("cost_probe_preflight_refresh", {}),
     "trade_state_consistency_rows": int(summary_meta.get("trade_state_consistency_rows", 0) or 0),
     "close_lifecycle_missing_trade_export_count": int(
         summary_meta.get("close_lifecycle_missing_trade_export_count", 0) or 0
