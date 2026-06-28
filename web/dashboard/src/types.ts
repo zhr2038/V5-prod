@@ -341,8 +341,11 @@ export interface QuantLabPermissionData extends UnknownRecord {
   as_of_ts?: string | null;
   expires_at?: string | null;
   freshness_sec?: number | null;
+  permission_freshness_sec?: number | null;
+  permission_freshness_seconds?: number | null;
   ttl_remaining_sec?: number | null;
   reasons?: unknown[];
+  live_block_reasons?: unknown[];
   risk_reason_codes?: unknown[];
   proxy?: QuantLabProxyMeta;
   data?: UnknownRecord;

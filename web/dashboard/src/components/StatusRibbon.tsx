@@ -60,6 +60,12 @@ function textArray(value: unknown) {
     : [];
 }
 
+function textList(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+}
+
 function secondsToClock(seconds: number | null) {
   if (seconds === null) return '--';
   const safe = Math.max(0, Math.floor(seconds));
@@ -199,8 +205,10 @@ export function StatusRibbon({
   const ttl = ttlRemaining(quantLabPermission);
   const permissionFreshness = firstNumber(
     quantLabPermission?.freshness_sec,
+    quantLabPermission?.permission_freshness_sec,
     quantLabPermission?.permission_freshness_seconds,
     permissionData.freshness_sec,
+    permissionData.permission_freshness_sec,
     permissionData.permission_freshness_seconds,
     permissionData.permission_age_sec
   );
@@ -236,6 +244,11 @@ export function StatusRibbon({
     || (allowedAdvisoryModesText.length > 0 && allowedModesText.length === 0)
   );
   const permissionSub = advisoryOnly ? `建议${basePermissionSub} · 未强制` : basePermissionSub;
+  const liveBlockReasons = [
+    ...textList(quantLabPermission?.live_block_reasons),
+    ...textList(permissionData.live_block_reasons),
+  ];
+  const permissionDetailSub = liveBlockReasons.length > 0 ? `阻断 ${liveBlockReasons.length} 项` : qlFreshness;
   const asOf = Date.parse(firstText(quantLabPermission?.as_of_ts, permissionData.as_of_ts));
   const expiresAt = Date.parse(firstText(quantLabPermission?.expires_at, permissionData.expires_at));
   const ttlWindow = Number.isFinite(asOf) && Number.isFinite(expiresAt) && expiresAt > asOf
@@ -303,7 +316,7 @@ export function StatusRibbon({
         <div className="min-w-0">
           <div className="ribbon-label">中台权限</div>
           <div className="ribbon-value">{permission}</div>
-          <div className="ribbon-sub">{permissionSub} · {qlFreshness}</div>
+          <div className="ribbon-sub">{permissionSub} · {permissionDetailSub}</div>
           <div className="ql-api-latency-line">{qlApiLatencySummary}</div>
         </div>
         <div className="ql-ttl">

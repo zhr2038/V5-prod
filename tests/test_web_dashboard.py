@@ -94,6 +94,21 @@ def test_status_ribbon_does_not_label_permission_ttl_as_quant_lab_freshness():
     assert "TTL 剩余时间" not in source
 
 
+def test_status_ribbon_prioritizes_live_block_reasons_over_service_ok():
+    source = STATUS_RIBBON_TSX_PATH.read_text(encoding="utf-8")
+    types_source = (REPO_ROOT / "web" / "dashboard" / "src" / "types.ts").read_text(encoding="utf-8")
+
+    assert "permission_freshness_sec?: number | null;" in types_source
+    assert "live_block_reasons?: unknown[];" in types_source
+    assert "quantLabPermission?.permission_freshness_sec" in source
+    assert "permissionData.permission_freshness_sec" in source
+    assert "const liveBlockReasons = [" in source
+    assert "textList(quantLabPermission?.live_block_reasons)" in source
+    assert "textList(permissionData.live_block_reasons)" in source
+    assert "const permissionDetailSub = liveBlockReasons.length > 0 ? `阻断 ${liveBlockReasons.length} 项` : qlFreshness;" in source
+    assert "{permissionSub} · {permissionDetailSub}" in source
+
+
 def test_ops_rail_reads_nested_live_permission_detail_payload():
     source = OPS_RAIL_TSX_PATH.read_text(encoding="utf-8")
 
