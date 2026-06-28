@@ -2132,7 +2132,8 @@ def _read_paper_strategy_proposals(
         getattr(diagnostics, "quant_lab_paper_strategy_proposals_paths", None)
         or _default_proposal_paths()
     )
-    rows: list[dict[str, Any]] = []
+    archive_rows: list[dict[str, Any]] = []
+    direct_rows: list[dict[str, Any]] = []
     seen_paths: set[Path] = set()
     for raw_path in configured:
         for path in _candidate_advisory_paths(str(raw_path), run_path=run_path, reports_dir=reports_dir):
@@ -2141,7 +2142,17 @@ def _read_paper_strategy_proposals(
             seen_paths.add(path)
             if not path.is_file():
                 continue
-            rows.extend(_read_raw_csv_path(path, target_filename="paper_strategy_proposals.csv"))
+            rows = _read_raw_csv_path(path, target_filename="paper_strategy_proposals.csv")
+            if not rows:
+                continue
+            if _is_archive_path(path):
+                archive_rows.extend(rows)
+            else:
+                direct_rows.extend(rows)
+    # A quant-lab expert/latest bundle is the authoritative current snapshot.  A
+    # bare CSV can be left behind by an older export request, so only use it as a
+    # fallback when no bundle provided proposal rows.
+    rows = archive_rows or direct_rows
     return _dedupe_rows(
         rows,
         [
@@ -2154,6 +2165,11 @@ def _read_paper_strategy_proposals(
             "entry_conditions",
         ],
     )
+
+
+def _is_archive_path(path: Path) -> bool:
+    lower_name = path.name.lower()
+    return lower_name.endswith((".zip", ".tar", ".tar.gz", ".tgz"))
 
 
 def _proposal_horizon_hours(row: Mapping[str, Any]) -> Optional[int]:
