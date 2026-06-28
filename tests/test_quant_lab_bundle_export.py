@@ -625,6 +625,27 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+    (reports / "quant_lab_selfcheck.json").write_text(
+        json.dumps(
+            {
+                "api_token_loaded": True,
+                "api_env_path_present": True,
+                "api_env_secure_permissions": True,
+                "api_env_token_loaded": True,
+                "endpoint_checks": {
+                    "/v1/health/deep": {"ok": True, "status_code": 200},
+                    "/v1/risk/live-permission": {"ok": True, "status_code": 200},
+                    "/v1/strategy-opportunity-advisory/v5-compact": {
+                        "ok": True,
+                        "status_code": 200,
+                        "item_count": 3,
+                    },
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     bundle = export_v5_bundle(reports_dir=reports, out_dir=out, window_hours=24 * 3650)
     sha_path = Path(str(bundle) + ".sha256")
@@ -636,6 +657,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         names = tf.getnames()
         assert "raw/quant_lab/quant_lab_usage.jsonl" in names
         assert "raw/quant_lab/quant_lab_requests.jsonl" in names
+        assert "raw/reports/quant_lab_selfcheck.json" in names
         assert "summaries/quant_lab_compliance.csv" in names
         assert "summaries/quant_lab_permission_audit.csv" in names
         assert "summaries/quant_lab_mode_audit.csv" in names
@@ -645,6 +667,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "summaries/quant_lab_fallbacks.csv" in names
         assert "summaries/enforce_readiness_snapshot.json" in names
         assert "summaries/quant_lab_config_audit.json" in names
+        assert "summaries/quant_lab_selfcheck.json" in names
         assert "summaries/trade_metrics.csv" in names
         assert "summaries/fill_metrics.csv" in names
         assert "summaries/candidate_snapshot.csv" in names
@@ -715,6 +738,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         effective_config_alias = tf.extractfile("raw/effective_live_config.json").read().decode("utf-8")
         effective_config_reports = tf.extractfile("raw/reports/effective_live_config.json").read().decode("utf-8")
         config_audit = json.loads(tf.extractfile("summaries/quant_lab_config_audit.json").read().decode("utf-8"))
+        selfcheck = json.loads(tf.extractfile("summaries/quant_lab_selfcheck.json").read().decode("utf-8"))
         readiness_snapshot = json.loads(tf.extractfile("summaries/enforce_readiness_snapshot.json").read().decode("utf-8"))
         trade_metrics = list(csv.DictReader(tf.extractfile("summaries/trade_metrics.csv").read().decode("utf-8").splitlines()))
         fill_metrics = list(csv.DictReader(tf.extractfile("summaries/fill_metrics.csv").read().decode("utf-8").splitlines()))
@@ -729,6 +753,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         report_index = json.loads(tf.extractfile("reports/index.json").read().decode("utf-8"))
         report_index_html = tf.extractfile("reports/index.html").read().decode("utf-8")
         assert "mode" in compliance.splitlines()[0]
+        assert selfcheck["api_token_loaded"] is True
+        assert selfcheck["endpoint_checks"]["/v1/strategy-opportunity-advisory/v5-compact"]["status_code"] == 200
         assert json.loads(effective_config_alias) == effective_config
         assert effective_config_alias == effective_config_reports
         assert "called_api" in compliance.splitlines()[0]

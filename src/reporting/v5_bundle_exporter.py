@@ -126,7 +126,9 @@ NON_SECRET_CONFIG_KEYS = {
     "api_env_secure_permissions",
     "api_env_token_loaded",
     "api_env_warning",
+    "api_token_loaded",
     "api_token_env",
+    "token_auth_disabled_reason",
     "authorization_age_sec",
     "authorization_consumed",
     "authorization_consumed_at",
@@ -1461,6 +1463,14 @@ def _sanitize_bundle_obj(value: Any) -> Any:
     if isinstance(value, list):
         return [_sanitize_bundle_obj(item) for item in value]
     return sanitize_quant_lab_obj(value)
+
+
+def _read_json_text_sanitized(path: Path) -> str:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return _read_text_redacted(path)
+    return json.dumps(_sanitize_bundle_obj(payload), ensure_ascii=False, indent=2) + "\n"
 
 
 def _read_jsonl(path: Path) -> list[Dict[str, Any]]:
@@ -3095,6 +3105,11 @@ def export_v5_bundle(
     try:
         _write_text(staging / "raw/quant_lab/quant_lab_usage.jsonl", _redact_text(_jsonl_rows_text(usage_rows)))
         _write_text(staging / "raw/quant_lab/quant_lab_requests.jsonl", _redact_text(_jsonl_rows_text(request_rows)))
+        selfcheck_path = reports / "quant_lab_selfcheck.json"
+        if selfcheck_path.exists():
+            selfcheck_text = _read_json_text_sanitized(selfcheck_path)
+            _write_text(staging / "raw/reports/quant_lab_selfcheck.json", selfcheck_text)
+            _write_text(staging / "summaries/quant_lab_selfcheck.json", selfcheck_text)
         _write_csv(staging / "summaries/quant_lab_compliance.csv", COMPLIANCE_FIELDS, compliance_rows)
         _write_csv(staging / "summaries/quant_lab_permission_audit.csv", PERMISSION_AUDIT_FIELDS, permission_rows)
         _write_csv(staging / "summaries/quant_lab_mode_audit.csv", MODE_AUDIT_FIELDS, mode_rows)

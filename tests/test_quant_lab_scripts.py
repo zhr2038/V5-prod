@@ -8,7 +8,7 @@ import pytest
 from configs.schema import AppConfig
 from scripts import quant_lab_mode
 from scripts import quant_lab_selfcheck
-from src.quant_lab_client.models import CostEstimate, QuantLabHealth, RiskPermission
+from src.quant_lab_client.models import CostEstimate
 
 
 def test_quant_lab_selfcheck_does_not_access_okx(monkeypatch, tmp_path: Path, capsys) -> None:
@@ -17,6 +17,13 @@ def test_quant_lab_selfcheck_does_not_access_okx(monkeypatch, tmp_path: Path, ca
     monkeypatch.setattr(quant_lab_selfcheck, "load_config", lambda _path: cfg)
 
     class FakeClient:
+        api_token = "super-secret-token"
+        api_env_path_present = True
+        api_env_secure_permissions = True
+        api_env_token_loaded = True
+        api_env_warning = None
+        token_auth_disabled_reason = None
+
         def __init__(self, *args, **kwargs):
             pass
 
@@ -24,22 +31,47 @@ def test_quant_lab_selfcheck_does_not_access_okx(monkeypatch, tmp_path: Path, ca
         def from_config(cls, *args, **kwargs):
             return cls()
 
-        def get_health(self):
-            return QuantLabHealth(status="ok", service="quant-lab", mode="read-only")
+        @staticmethod
+        def _validate_health(health, *, endpoint: str, allow_warning: bool):
+            assert endpoint in {"/v1/health", "/v1/health/deep"}
+            assert allow_warning is (endpoint == "/v1/health/deep")
 
-        def get_deep_health(self):
-            return QuantLabHealth(
-                status="warning",
-                service="quant-lab",
-                mode="read-only",
-                warnings=["cost_health_warning"],
-                cost_health={"status": "warning"},
-                data_health={"status": "ok"},
-                risk_permission_dependency_meta={"status": "ok"},
-            )
+        def get_json(self, endpoint: str, params=None):
+            class Response:
+                ok = True
+                status_code = 200
+                cached = False
+                error = None
 
-        def get_live_permission(self, *, strategy: str, version: str):
-            return RiskPermission(strategy=strategy, version=version, permission="SELL_ONLY", reasons=["required_alpha_gate_quarantine"])
+                def __init__(self, data):
+                    self.data = data
+
+            if endpoint == "/v1/health":
+                return Response({"status": "ok", "service": "quant-lab", "mode": "read-only"})
+            if endpoint == "/v1/health/deep":
+                return Response(
+                    {
+                        "status": "warning",
+                        "service": "quant-lab",
+                        "mode": "read-only",
+                        "warnings": ["cost_health_warning"],
+                        "cost_health": {"status": "warning"},
+                        "data_health": {"status": "ok"},
+                        "risk_permission_dependency_meta": {"status": "ok"},
+                    }
+                )
+            if endpoint == "/v1/risk/live-permission":
+                return Response(
+                    {
+                        "strategy": params["strategy"],
+                        "version": params["version"],
+                        "permission": "SELL_ONLY",
+                        "reasons": ["required_alpha_gate_quarantine"],
+                    }
+                )
+            if endpoint == "/v1/strategy-opportunity-advisory/v5-compact":
+                return Response({"items": [{"strategy_id": "SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1"}]})
+            raise AssertionError(endpoint)
 
         def estimate_cost(self, **kwargs):
             return CostEstimate(symbol="BTC-USDT", regime="normal", total_cost_bps=1.2, source="public_spread_proxy")
@@ -56,6 +88,13 @@ def test_quant_lab_selfcheck_does_not_access_okx(monkeypatch, tmp_path: Path, ca
     assert payload["deep_health"]["warnings"] == ["cost_health_warning"]
     assert payload["deep_health"]["cost_health"] == {"status": "warning"}
     assert payload["safe_for_new_risk"] is False
+    assert payload["api_token_loaded"] is True
+    assert payload["api_env_token_loaded"] is True
+    assert payload["endpoint_checks"]["/v1/health/deep"]["status_code"] == 200
+    assert payload["endpoint_checks"]["/v1/risk/live-permission"]["permission"] == "SELL_ONLY"
+    advisory_check = payload["endpoint_checks"]["/v1/strategy-opportunity-advisory/v5-compact"]
+    assert advisory_check["status_code"] == 200
+    assert advisory_check["item_count"] == 1
     assert "P@ssw0rd" not in capsys.readouterr().out
 
 
