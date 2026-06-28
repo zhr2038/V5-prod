@@ -141,6 +141,16 @@ def test_react_dashboard_treats_empty_trade_payload_as_authoritative():
     assert "liveTrades.trades.length > 0" not in source
 
 
+def test_react_dashboard_deferred_merge_keeps_fresh_system_status_timestamp():
+    source = APP_TSX_PATH.read_text(encoding="utf-8")
+
+    assert "function pickFreshSystemStatus(" in source
+    assert "if (!incomingRaw && currentRaw) return current;" in source
+    assert "if (incomingEpoch !== null && currentEpoch !== null && incomingEpoch < currentEpoch) return current;" in source
+    assert "const systemStatus = pickFreshSystemStatus(deferred.systemStatus, prev.systemStatus, hasSystemStatus);" in source
+    assert "systemStatus," in source
+
+
 def test_react_dashboard_keeps_prior_lists_on_fetch_failure_only():
     api_source = API_TS_PATH.read_text(encoding="utf-8")
     panel_source = POSITIONS_PANEL_TSX_PATH.read_text(encoding="utf-8")

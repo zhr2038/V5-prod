@@ -124,14 +124,46 @@ function pickObjectWithFallback<T extends object | null | undefined>(incoming: T
   return incoming || current;
 }
 
+function systemStatusEpoch(status?: DashboardData['systemStatus'] | null) {
+  const raw = String(status?.lastUpdate || '').trim();
+  if (!raw) return null;
+  const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function pickFreshSystemStatus(
+  incoming: DashboardData['systemStatus'] | undefined,
+  current: DashboardData['systemStatus'] | undefined,
+  incomingPresent = false
+) {
+  if (!incomingPresent) return current || incoming;
+  if (!incoming) return current;
+  if (!current) return incoming;
+
+  const incomingRaw = String(incoming.lastUpdate || '').trim();
+  const currentRaw = String(current.lastUpdate || '').trim();
+  if (!incomingRaw && currentRaw) return current;
+  if (incomingRaw && !currentRaw) return incoming;
+
+  const incomingEpoch = systemStatusEpoch(incoming);
+  const currentEpoch = systemStatusEpoch(current);
+  if (incomingEpoch === null && currentEpoch !== null) return current;
+  if (incomingEpoch !== null && currentEpoch !== null && incomingEpoch < currentEpoch) return current;
+  return incoming;
+}
+
 function mergeDeferredDashboard(prev: DashboardData | null, deferred: Partial<DashboardData>) {
   if (!prev) return deferred as DashboardData;
+  const hasSystemStatus = Object.prototype.hasOwnProperty.call(deferred, 'systemStatus');
+  const systemStatus = pickFreshSystemStatus(deferred.systemStatus, prev.systemStatus, hasSystemStatus);
   if (deferredPayloadLooksSparse(deferred)) {
-    return deferred.systemStatus ? { ...prev, systemStatus: deferred.systemStatus } : prev;
+    return systemStatus ? { ...prev, systemStatus } : prev;
   }
   return {
     ...prev,
     ...deferred,
+    systemStatus: systemStatus || prev.systemStatus,
     alphaScores: pickAuthoritativeList(deferred.alphaScores, prev.alphaScores),
     trades: dedupeTradeEntries(pickAuthoritativeList(deferred.trades, prev.trades)),
     timers: pickTimersWithFallback(deferred.timers, prev.timers),
