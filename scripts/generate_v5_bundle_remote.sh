@@ -131,6 +131,7 @@ import socket
 import subprocess
 import sys
 import tarfile
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict, deque
@@ -655,19 +656,7 @@ if not IS_PRODUCTION_ROOT:
         if not str(path).startswith("/var/lib/v5-prod")
     ]
 ENTRY_QUALITY_REPORT_API_ENDPOINT_TEMPLATES = [
-    "/v1/reports/entry-quality/{filename}",
-    "/v1/reports/entry_quality/{filename}",
-    "/v1/entry-quality/{filename}",
-    "/v1/entry_quality/{filename}",
-    "/v1/reports/{filename}",
-    "/v1/reports/raw/reports/{filename}",
-    "/v1/raw/reports/{filename}",
     "/v1/reports/download?path=reports/{filename}",
-    "/v1/reports/download?path=raw/reports/{filename}",
-    "/v1/reports/download?path=entry_quality/{filename}",
-    "/v1/report?path=reports/{filename}",
-    "/v1/report?path=raw/reports/{filename}",
-    "/v1/report?path=entry_quality/{filename}",
 ]
 ENTRY_QUALITY_STRATEGY_CANDIDATES = {
     "v5.entry_quality_missed_low_audit",
@@ -1472,6 +1461,16 @@ def parse_bool_text(value, default=False):
     return default
 
 
+def entry_quality_report_api_enabled(quant_lab_section):
+    env_value = os.environ.get("V5_ENTRY_QUALITY_REPORT_API_ENABLED", "").strip()
+    if env_value:
+        return parse_bool_text(env_value, False)
+    return parse_bool_text(
+        parse_yaml_scalar(quant_lab_section, "entry_quality_report_api_enabled", "false"),
+        False,
+    )
+
+
 def quant_lab_token_from_env_file(path_text, token_env):
     if not path_text:
         return ""
@@ -1648,6 +1647,8 @@ def fetch_entry_quality_report_from_api(filename, file_kind):
     quant_lab_section = yaml_section_text_from_raw("quant_lab")
     if not parse_bool_text(parse_yaml_scalar(quant_lab_section, "enabled", "false"), False):
         return "", ""
+    if not entry_quality_report_api_enabled(quant_lab_section):
+        return "", ""
     base_url = parse_yaml_scalar(quant_lab_section, "base_url", "http://qyun2.hrhome.top:8027").rstrip("/")
     token_env = parse_yaml_scalar(quant_lab_section, "api_token_env", "QUANT_LAB_API_TOKEN") or "QUANT_LAB_API_TOKEN"
     token = os.environ.get(token_env, "").strip()
@@ -1684,9 +1685,14 @@ def fetch_entry_quality_report_from_api(filename, file_kind):
                     pass
             if text.strip():
                 return text, f"api:{endpoint}"
+        except urllib.error.HTTPError as exc:
+            if int(getattr(exc, "code", 0) or 0) == 404:
+                errors.append(f"{endpoint}: not_found")
+            else:
+                errors.append(f"{endpoint}: HTTPError_{getattr(exc, 'code', 'unknown')}")
         except Exception as exc:
             errors.append(f"{endpoint}: {type(exc).__name__}")
-    if errors:
+    if errors and not all(str(error).endswith(": not_found") for error in errors):
         collection_errors.append({"source": f"entry_quality_report_api:{filename}", "error": "; ".join(errors[:5])})
     return "", ""
 
@@ -13544,7 +13550,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             collection_errors.append({"source": "entry_quality_api_fallback", "error": "token_missing"})
             return []
         out_rows = []
-        for endpoint in ("/v1/strategy-opportunity-advisory", "/v1/strategy_opportunity_advisory"):
+        for endpoint in ("/v1/strategy-opportunity-advisory/v5-compact", "/v1/strategy-opportunity-advisory"):
             url = f"{base_url}{endpoint}?{urllib.parse.urlencode({'format': 'json'})}"
             req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
             try:

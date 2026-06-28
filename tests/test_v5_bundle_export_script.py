@@ -41,6 +41,33 @@ def test_v5_bundle_export_script_includes_fast_microstructure_shadow_summary() -
     assert '"summaries/fast_microstructure_strategy_shadow.csv"' in script
 
 
+def test_v5_bundle_export_script_does_not_probe_legacy_report_api_paths_by_default() -> None:
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "scripts" / "generate_v5_bundle_remote.sh").read_text(encoding="utf-8")
+
+    assert "V5_ENTRY_QUALITY_REPORT_API_ENABLED" in script
+    assert 'parse_yaml_scalar(quant_lab_section, "entry_quality_report_api_enabled", "false")' in script
+    assert '"/v1/reports/download?path=reports/{filename}"' in script
+    assert '"/v1/reports/entry-quality/{filename}"' not in script
+    assert '"/v1/reports/entry_quality/{filename}"' not in script
+    assert '"/v1/entry-quality/{filename}"' not in script
+    assert '"/v1/entry_quality/{filename}"' not in script
+    assert '"/v1/report?path=reports/{filename}"' not in script
+    assert '"/v1/reports/download?path=raw/reports/{filename}"' not in script
+    assert '"/v1/reports/download?path=entry_quality/{filename}"' not in script
+
+
+def test_v5_bundle_export_script_uses_compact_strategy_advisory_first() -> None:
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "scripts" / "generate_v5_bundle_remote.sh").read_text(encoding="utf-8")
+
+    assert (
+        'for endpoint in ("/v1/strategy-opportunity-advisory/v5-compact", '
+        '"/v1/strategy-opportunity-advisory")'
+    ) in script
+    assert '"/v1/strategy_opportunity_advisory"' not in script
+
+
 def test_v5_bundle_export_script_includes_cost_probe_artifacts() -> None:
     root = Path(__file__).resolve().parents[1]
     script = (root / "scripts" / "generate_v5_bundle_remote.sh").read_text(encoding="utf-8")
