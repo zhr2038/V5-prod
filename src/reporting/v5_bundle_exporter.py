@@ -51,6 +51,7 @@ from src.reporting.sol_paper_strategy_tracker import (
     FAST_MICROSTRUCTURE_STRATEGY_SHADOW_FIELDS,
     LATE_BREAKOUT_FAILURE_PROTECT_FIELDS,
     PAPER_DAILY_FIELDS,
+    PAPER_PROPOSAL_ACK_FIELDS,
     PAPER_RUN_FIELDS,
     PAPER_SLIPPAGE_FIELDS,
     RISK_ON_MULTI_BUY_SHADOW_FIELDS,
@@ -1414,6 +1415,7 @@ def _count_trade_metric_fills(rows: Iterable[Mapping[str, Any]]) -> int:
 def _copy_sol_paper_strategy_files(staging: Path, reports: Path) -> None:
     summary_specs = (
         ("paper_strategy_runs.csv", PAPER_RUN_FIELDS),
+        ("paper_strategy_proposal_ack.csv", PAPER_PROPOSAL_ACK_FIELDS),
         ("paper_strategy_daily.csv", PAPER_DAILY_FIELDS),
         ("bnb_paper_strategy_runs.csv", PAPER_RUN_FIELDS),
         ("bnb_paper_strategy_daily.csv", PAPER_DAILY_FIELDS),

@@ -36,8 +36,11 @@ from src.reporting.skipped_candidate_tracker import (
 SOL_SYMBOL = "SOL/USDT"
 ETH_SYMBOL = "ETH/USDT"
 BNB_SYMBOL = "BNB/USDT"
+SOL_F3_DOMINANT_STRATEGY_ID = "SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1"
 ETH_F3_DOMINANT_STRATEGY_ID = "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1"
 BNB_F3_DOMINANT_STRATEGY_ID = "BNB_F3_DOMINANT_ENTRY_PAPER_V1"
+BNB_F3_DOMINANT_PROPOSAL_ID = "BNB_USDT_F3_DOMINANT_ENTRY_PAPER_V1"
+ETH_F4_VOLUME_EXPANSION_STRATEGY_ID = "ETH_USDT_F4_VOLUME_EXPANSION_ENTRY_PAPER_V1"
 BNB_RISK_ON_BUY_STRATEGY_ID = "BNB_RISK_ON_BUY_PAPER_V1"
 BOTTOM_ZONE_PROBE_STRATEGY_ID = "BOTTOM_ZONE_PROBE_PAPER_V1"
 HYPE_EXPANDED_UNIVERSE_STRATEGY_ID = "HYPE_EXPANDED_UNIVERSE_PAPER_V1"
@@ -52,6 +55,14 @@ ETH_F3_DOMINANT_LIVE_BLOCK_REASONS = [
 BNB_PAPER_LIVE_BLOCK_REASONS = [
     "bnb_paper_only_no_live",
     "bnb_negative_expectancy_recovery_research_only",
+]
+F3_PAPER_LIVE_BLOCK_REASONS = [
+    "f3_dominant_entry_paper_only_no_live",
+    "strategy_proposal_requires_paper_tracker",
+]
+F4_PAPER_LIVE_BLOCK_REASONS = [
+    "f4_volume_expansion_paper_only_no_live",
+    "strategy_proposal_requires_paper_tracker",
 ]
 EXPANDED_UNIVERSE_PAPER_LIVE_BLOCK_REASONS = [
     "expanded_universe_paper_only_no_live",
@@ -185,6 +196,8 @@ DEFAULT_PAPER_STRATEGY_CONFIGS = [
 
 PAPER_RUN_FIELDS = [
     "strategy_id",
+    "proposal_id",
+    "paper_tracker_id",
     "experiment_name",
     "enabled_shadow_only",
     "enable_live_experiment",
@@ -266,6 +279,20 @@ PAPER_RUN_FIELDS = [
     "label_status",
     "label_not_observable_reason",
 ]
+
+PAPER_PROPOSAL_ACK_FIELDS = [
+    "proposal_id",
+    "paper_tracker_id",
+    "accepted",
+    "recommended_mode",
+    "symbol",
+    "strategy_candidate",
+    "suggested_horizon",
+    "proposal_source",
+    "reject_reason",
+    "live_order_effect",
+]
+
 for _horizon in DEFAULT_HORIZONS:
     PAPER_RUN_FIELDS.extend(
         [
@@ -279,6 +306,8 @@ for _horizon in DEFAULT_HORIZONS:
 PAPER_DAILY_FIELDS = [
     "paper_date",
     "strategy_id",
+    "proposal_id",
+    "paper_tracker_id",
     "experiment_name",
     "symbol",
     "entry_count",
@@ -2205,6 +2234,62 @@ def _eth_f3_proposal_to_spec(row: Mapping[str, Any]) -> Optional[dict[str, Any]]
     }
 
 
+def _known_proposal_to_spec(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    proposal_id = str(row.get("proposal_id") or row.get("strategy_id") or "").strip()
+    candidate = _proposal_strategy_candidate(row)
+    symbol = _proposal_symbol(row)
+    mode = str(row.get("recommended_mode") or "").strip().lower().replace("-", "_")
+    if mode and mode != "paper":
+        return None
+    candidate_key = _strategy_key(candidate)
+    horizon = _proposal_horizon_hours(row)
+    if proposal_id == SOL_F3_DOMINANT_STRATEGY_ID or (
+        symbol == SOL_SYMBOL and candidate_key in {"f3_dominant_entry", "v5.f3_dominant_entry"}
+    ):
+        return {
+            "strategy_id": SOL_F3_DOMINANT_STRATEGY_ID,
+            "proposal_id": proposal_id or SOL_F3_DOMINANT_STRATEGY_ID,
+            "experiment_name": "v5.sol_f3_dominant_entry",
+            "source_strategy_candidates": {"f3_dominant_entry", "v5.f3_dominant_entry", "v5.sol_f3_dominant_entry"},
+            "allowed_block_reasons": set(),
+            "symbol": SOL_SYMBOL,
+            "primary_horizon_hours": horizon or 24,
+            "require_protect_level": False,
+            "require_alpha6_buy": False,
+            "require_no_cooldown": False,
+            "extra_live_block_reasons": list(F3_PAPER_LIVE_BLOCK_REASONS),
+            "proposal_present": True,
+            "proposal_source": str(row.get("source_path") or ""),
+            "ignore_strategy_opportunity_advisory": True,
+        }
+    if proposal_id == ETH_F4_VOLUME_EXPANSION_STRATEGY_ID or (
+        symbol == ETH_SYMBOL and candidate_key in {"f4_volume_swing", "f4_volume_expansion_entry", "v5.f4_volume_expansion_entry"}
+    ):
+        return {
+            "strategy_id": ETH_F4_VOLUME_EXPANSION_STRATEGY_ID,
+            "proposal_id": proposal_id or ETH_F4_VOLUME_EXPANSION_STRATEGY_ID,
+            "experiment_name": "v5.eth_f4_volume_expansion_entry",
+            "source_strategy_candidates": {
+                "f4_volume_swing",
+                "f4_volume_expansion_entry",
+                "v5.f4_volume_expansion_entry",
+                "f4_volume_expansion",
+            },
+            "allowed_block_reasons": set(),
+            "symbol": ETH_SYMBOL,
+            "primary_horizon_hours": horizon or 4,
+            "require_protect_level": False,
+            "require_alpha6_buy": False,
+            "require_no_cooldown": False,
+            "min_f4_volume_expansion": 0.0,
+            "extra_live_block_reasons": list(F4_PAPER_LIVE_BLOCK_REASONS),
+            "proposal_present": True,
+            "proposal_source": str(row.get("source_path") or ""),
+            "ignore_strategy_opportunity_advisory": True,
+        }
+    return None
+
+
 def _proposal_matches_spec(row: Mapping[str, Any], spec: Mapping[str, Any]) -> bool:
     proposal_id = str(row.get("proposal_id") or row.get("strategy_id") or "").strip()
     if proposal_id and proposal_id == str(spec.get("strategy_id") or ""):
@@ -2231,6 +2316,53 @@ def _merge_proposal_into_spec(spec: dict[str, Any], row: Mapping[str, Any]) -> N
     spec["proposal_source"] = str(row.get("source_path") or "")
 
 
+def _paper_tracker_id_for_spec(spec: Mapping[str, Any]) -> str:
+    return str(spec.get("paper_tracker_id") or spec.get("strategy_id") or "").strip()
+
+
+def _proposal_id_for_spec(spec: Mapping[str, Any]) -> str:
+    return str(spec.get("proposal_id") or spec.get("strategy_id") or "").strip()
+
+
+def _proposal_ack_rows(
+    diagnostics: DiagnosticsConfig,
+    proposal_rows: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    proposal_list = [dict(row) for row in proposal_rows if isinstance(row, Mapping)]
+    specs = _strategy_configs_with_proposals(diagnostics, proposal_list)
+    rows: list[dict[str, Any]] = []
+    for row in proposal_list:
+        proposal_id = str(row.get("proposal_id") or row.get("strategy_id") or "").strip()
+        if not proposal_id:
+            continue
+        mode = str(row.get("recommended_mode") or "").strip().lower().replace("-", "_")
+        matched_spec: Mapping[str, Any] | None = None
+        for spec in specs:
+            if str(spec.get("proposal_id") or "") == proposal_id or _proposal_matches_spec(row, spec):
+                matched_spec = spec
+                break
+        reject_reason = ""
+        if mode and mode != "paper":
+            reject_reason = "recommended_mode_not_paper"
+        elif matched_spec is None:
+            reject_reason = "no_supported_paper_tracker"
+        rows.append(
+            {
+                "proposal_id": proposal_id,
+                "paper_tracker_id": _paper_tracker_id_for_spec(matched_spec or {}),
+                "accepted": bool(matched_spec is not None and not reject_reason),
+                "recommended_mode": mode or str(row.get("recommended_mode") or ""),
+                "symbol": _proposal_symbol(row),
+                "strategy_candidate": _proposal_strategy_candidate(row),
+                "suggested_horizon": str(row.get("suggested_horizon") or row.get("horizon_hours") or ""),
+                "proposal_source": str(row.get("source_path") or ""),
+                "reject_reason": reject_reason,
+                "live_order_effect": "read_only_no_live_order",
+            }
+        )
+    return rows
+
+
 def _strategy_configs_with_proposals(
     diagnostics: DiagnosticsConfig,
     proposal_rows: Iterable[Mapping[str, Any]],
@@ -2238,12 +2370,13 @@ def _strategy_configs_with_proposals(
     specs = _strategy_configs(diagnostics)
     by_id = {str(spec.get("strategy_id") or ""): spec for spec in specs}
     for row in proposal_rows:
-        spec = _eth_f3_proposal_to_spec(row)
+        spec = _eth_f3_proposal_to_spec(row) or _known_proposal_to_spec(row)
         if spec:
-            existing = by_id.get(ETH_F3_DOMINANT_STRATEGY_ID)
+            strategy_id = str(spec.get("strategy_id") or "")
+            existing = by_id.get(strategy_id)
             if existing is None:
                 specs.append(spec)
-                by_id[ETH_F3_DOMINANT_STRATEGY_ID] = spec
+                by_id[strategy_id] = spec
             else:
                 existing.update(spec)
             continue
@@ -4533,6 +4666,8 @@ def _expanded_paper_advisory_record(
     would_size = _normalize_float(advisory.get("max_paper_notional_usdt"))
     return {
         "strategy_id": str(spec.get("strategy_id") or ""),
+        "proposal_id": _proposal_id_for_spec(spec),
+        "paper_tracker_id": _paper_tracker_id_for_spec(spec),
         "experiment_name": str(spec.get("experiment_name") or ""),
         "enabled_shadow_only": True,
         "enable_live_experiment": False,
@@ -4655,6 +4790,8 @@ def _heartbeat_record(
     )
     return {
         "strategy_id": str(spec.get("strategy_id") or ""),
+        "proposal_id": _proposal_id_for_spec(spec),
+        "paper_tracker_id": _paper_tracker_id_for_spec(spec),
         "experiment_name": str(spec.get("experiment_name") or ""),
         "enabled_shadow_only": True,
         "enable_live_experiment": False,
@@ -4801,6 +4938,8 @@ def _collect_candidates(
             records.append(
                 {
                     "strategy_id": str(spec.get("strategy_id") or ""),
+                    "proposal_id": _proposal_id_for_spec(spec),
+                    "paper_tracker_id": _paper_tracker_id_for_spec(spec),
                     "experiment_name": str(spec.get("experiment_name") or ""),
                     "enabled_shadow_only": enabled_shadow_only,
                     "enable_live_experiment": enable_live_experiment,
@@ -5269,6 +5408,8 @@ def _daily_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         daily_row = {
             "paper_date": paper_date,
             "strategy_id": strategy_id,
+            "proposal_id": rows[0].get("proposal_id") or strategy_id,
+            "paper_tracker_id": rows[0].get("paper_tracker_id") or strategy_id,
             "experiment_name": rows[0].get("experiment_name"),
             "symbol": symbol,
             "entry_count": len(entry_rows),
@@ -5512,6 +5653,7 @@ def update_sol_paper_strategy_tracker(
         _write_records(labels_path, records)
 
     run_rows = [_row_for_csv(record, horizons) for record in records]
+    proposal_ack_rows = _proposal_ack_rows(diagnostics, proposal_rows)
     fields = list(PAPER_RUN_FIELDS)
     for horizon in horizons:
         h = int(horizon)
@@ -5524,6 +5666,7 @@ def update_sol_paper_strategy_tracker(
             if field not in fields:
                 fields.append(field)
     _write_csv(summaries_dir / "paper_strategy_runs.csv", run_rows, fields)
+    _write_csv(summaries_dir / "paper_strategy_proposal_ack.csv", proposal_ack_rows, PAPER_PROPOSAL_ACK_FIELDS)
     _write_csv(summaries_dir / "paper_strategy_daily.csv", _daily_rows(records), PAPER_DAILY_FIELDS)
     _write_csv(summaries_dir / "paper_slippage_coverage.csv", _slippage_rows(records, diagnostics), PAPER_SLIPPAGE_FIELDS)
     bnb_records = _bnb_paper_records(records)
@@ -5625,6 +5768,7 @@ def update_sol_paper_strategy_tracker(
         "bnb_paper_strategy_rows": int(len(bnb_records)),
         "bottom_zone_probe_paper_rows": int(len(bottom_zone_records)),
         "proposal_rows": int(len(proposal_rows)),
+        "paper_strategy_proposal_ack_rows": int(len(proposal_ack_rows)),
         "eth_f3_alpha6_gate_rewrites": int(eth_f3_alpha6_gate_rewrites),
         "labels_path": str(labels_path),
         "summaries_dir": str(summaries_dir),

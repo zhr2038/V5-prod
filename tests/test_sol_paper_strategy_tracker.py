@@ -1064,6 +1064,81 @@ def test_paper_strategy_tracker_adds_eth_f3_heartbeat_from_proposal(tmp_path: Pa
     assert any(row["strategy_id"] == "ETH_USDT_F3_DOMINANT_ENTRY_PAPER_V1" for row in coverage)
 
 
+def test_paper_strategy_tracker_acknowledges_current_quant_lab_proposals(tmp_path: Path) -> None:
+    cfg = _cfg(include_bnb=True)
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_current_proposals"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate_snapshot.csv").write_text(
+        "run_id,ts_utc,symbol,final_decision,strategy_candidate\n",
+        encoding="utf-8",
+    )
+    _write_paper_strategy_proposals(
+        tmp_path / "reports",
+        [
+            {
+                "proposal_id": "BNB_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+                "strategy_candidate": "v5.f3_dominant_entry",
+                "symbol": "BNB-USDT",
+                "recommended_mode": "paper",
+                "suggested_horizon": "120h",
+            },
+            {
+                "proposal_id": "ETH_USDT_F4_VOLUME_EXPANSION_ENTRY_PAPER_V1",
+                "strategy_candidate": "v5.f4_volume_expansion_entry",
+                "symbol": "ETH-USDT",
+                "recommended_mode": "paper",
+                "suggested_horizon": "4h",
+            },
+            {
+                "proposal_id": "SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+                "strategy_candidate": "v5.f3_dominant_entry",
+                "symbol": "SOL-USDT",
+                "recommended_mode": "paper",
+                "suggested_horizon": "12h",
+            },
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_current_proposals", start_s),
+        market_data_1h={
+            "BNB/USDT": _series("BNB/USDT", start_s, {0: 600.0}),
+            "ETH/USDT": _series("ETH/USDT", start_s, {0: 1600.0}),
+            "SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0}),
+        },
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["proposal_rows"] == 3
+    assert result["paper_strategy_proposal_ack_rows"] == 3
+    ack = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_proposal_ack.csv")
+    by_proposal = {row["proposal_id"]: row for row in ack}
+    assert by_proposal["BNB_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["accepted"] == "True"
+    assert by_proposal["BNB_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["paper_tracker_id"] == "BNB_F3_DOMINANT_ENTRY_PAPER_V1"
+    assert by_proposal["SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["accepted"] == "True"
+    assert by_proposal["SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["paper_tracker_id"] == "SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1"
+    assert by_proposal["ETH_USDT_F4_VOLUME_EXPANSION_ENTRY_PAPER_V1"]["accepted"] == "True"
+    assert by_proposal["ETH_USDT_F4_VOLUME_EXPANSION_ENTRY_PAPER_V1"]["paper_tracker_id"] == "ETH_USDT_F4_VOLUME_EXPANSION_ENTRY_PAPER_V1"
+    assert {row["live_order_effect"] for row in ack} == {"read_only_no_live_order"}
+
+    runs = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_runs.csv")
+    run_by_proposal = {row["proposal_id"]: row for row in runs if row["proposal_id"] in by_proposal}
+    assert run_by_proposal["BNB_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["paper_tracker_id"] == "BNB_F3_DOMINANT_ENTRY_PAPER_V1"
+    assert run_by_proposal["BNB_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["strategy_id"] == "BNB_F3_DOMINANT_ENTRY_PAPER_V1"
+    assert run_by_proposal["BNB_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["expected_exit_horizon"] == ""
+    assert run_by_proposal["SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["strategy_id"] == "SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1"
+    assert run_by_proposal["SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["expected_exit_horizon"] == ""
+    assert run_by_proposal["ETH_USDT_F4_VOLUME_EXPANSION_ENTRY_PAPER_V1"]["strategy_id"] == "ETH_USDT_F4_VOLUME_EXPANSION_ENTRY_PAPER_V1"
+
+    daily = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_daily.csv")
+    daily_by_proposal = {row["proposal_id"]: row for row in daily if row["proposal_id"] in by_proposal}
+    assert daily_by_proposal["BNB_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["paper_tracker_id"] == "BNB_F3_DOMINANT_ENTRY_PAPER_V1"
+    assert daily_by_proposal["SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["paper_tracker_id"] == "SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1"
+
+
 def test_paper_strategy_tracker_tracks_eth_f3_dominant_48h_candidate(tmp_path: Path) -> None:
     cfg = _cfg()
     start_s = 1_779_000_000
