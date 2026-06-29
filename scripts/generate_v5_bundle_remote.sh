@@ -3790,7 +3790,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     btc_blocked_rows = []
     maturity_rows = []
     open_position_rows = []
+    unmanaged_open_exposure_rows = []
     open_probe_watch_rows = []
+    position_exposure_consistency_rows = []
     dust_residual_roundtrip_rows = []
     early_exit_rows = []
     high_score_blocked_rows = []
@@ -3818,6 +3820,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     audit_high_score_but_not_executed_count = 0
     dust_residual_position_keys = set()
     dust_residual_row_keys = set()
+    unmanaged_open_exposure_keys = set()
     reason_counts = Counter()
     probe_counts = Counter({field: 0 for field in PROBE_COUNT_FIELDS})
     latest_dust_by_symbol = {}
@@ -4707,7 +4710,102 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         threshold_f = as_float(threshold)
         return value_f is not None and threshold_f is not None and value_f < threshold_f
 
+    def value_exceeds_dust_threshold(value, threshold):
+        value_f = as_float(value)
+        threshold_f = as_float(threshold)
+        return value_f is not None and threshold_f is not None and abs(value_f) >= threshold_f
+
+    def record_unmanaged_open_exposure(
+        symbol,
+        *,
+        qty=None,
+        exchange_qty=None,
+        local_qty=None,
+        exchange_eq_usdt=None,
+        dust_threshold_usdt=None,
+        position_store_qty=None,
+        open_positions_row_present=False,
+        source="bundle_reconcile",
+        reason="exchange_or_local_exposure_above_dust_not_in_open_positions",
+        entry_ts=not_obs,
+        current_px=None,
+        raw=None,
+    ):
+        symbol_text = normalize_trade_symbol_for_contract(symbol).replace("-", "/")
+        if symbol_text in ("", not_obs):
+            symbol_text = flatten_value(symbol)
+        value = as_float(exchange_eq_usdt)
+        threshold = as_float(dust_threshold_usdt)
+        if threshold is None:
+            threshold = dust_threshold_for_symbol(symbol_text)
+        if value is None:
+            px = as_float(current_px)
+            candidate_qty = as_float(first_observed(qty, exchange_qty, local_qty, position_store_qty))
+            if px is not None and candidate_qty is not None:
+                value = abs(candidate_qty * px)
+        row = {
+            "symbol": symbol_text,
+            "entry_ts": flatten_value(entry_ts or not_obs),
+            "qty": fmt_num(first_observed(qty, exchange_qty, local_qty, position_store_qty), 12),
+            "exchange_qty": fmt_num(exchange_qty, 12),
+            "local_qty": fmt_num(local_qty, 12),
+            "exchange_eq_usdt": fmt_num(value, 12),
+            "position_store_qty": fmt_num(position_store_qty, 12),
+            "open_positions_row_present": bool_text(open_positions_row_present),
+            "dust_threshold_usdt": fmt_num(threshold, 12),
+            "status": "OPEN_EXPOSURE_NOT_IN_POSITION_STORE",
+            "reason": flatten_value(reason),
+            "source": flatten_value(source),
+            "current_px": fmt_num(current_px, 10),
+            "raw_json": safe_json(sanitize_obj(raw or {})),
+        }
+        key = (
+            row["symbol"],
+            row["entry_ts"],
+            row["qty"],
+            row["exchange_qty"],
+            row["local_qty"],
+            row["exchange_eq_usdt"],
+            row["source"],
+            row["reason"],
+        )
+        if key in unmanaged_open_exposure_keys:
+            return row
+        unmanaged_open_exposure_keys.add(key)
+        unmanaged_open_exposure_rows.append(row)
+        add_issue(
+            "high",
+            "open_exposure_not_in_position_store",
+            "Exchange/local exposure is above the dust threshold but was not represented in open_positions.",
+            {
+                "symbol": row["symbol"],
+                "exchange_qty": row["exchange_qty"],
+                "local_qty": row["local_qty"],
+                "exchange_eq_usdt": row["exchange_eq_usdt"],
+                "dust_threshold_usdt": row["dust_threshold_usdt"],
+                "source": row["source"],
+                "reason": row["reason"],
+            },
+        )
+        return row
+
     def append_dust_residual_row(status, symbol, qty, residual_value, dust_threshold, diagnosis, open_event=None, close_event=None, reference_px=None):
+        status_text = flatten_value(status)
+        diagnosis_text = flatten_value(diagnosis)
+        if status_text == "open_dust_residual_ignored" and value_exceeds_dust_threshold(residual_value, dust_threshold):
+            status_text = "OPEN_EXPOSURE_NOT_IN_POSITION_STORE"
+            diagnosis_text = "open_exposure_not_in_position_store_remaining_value_exceeds_dust_threshold"
+            record_unmanaged_open_exposure(
+                symbol,
+                qty=qty,
+                exchange_eq_usdt=residual_value,
+                dust_threshold_usdt=dust_threshold,
+                source="dust_residual_roundtrips",
+                reason=diagnosis_text,
+                entry_ts=open_event.get("timestamp", not_obs) if open_event else not_obs,
+                current_px=reference_px,
+                raw={"open_event": sanitize_obj(open_event or {}), "close_event": sanitize_obj(close_event or {})},
+            )
         event = close_event or open_event or {}
         raw_payload = {}
         if open_event:
@@ -4716,7 +4814,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if close_event:
             raw_payload["exit_trade"] = sanitize_obj(close_event.get("raw_item", {}))
             raw_payload["exit_router_decision"] = sanitize_obj(close_event.get("router_info", {}))
-        raw_payload["diagnosis"] = diagnosis
+        raw_payload["diagnosis"] = diagnosis_text
         entry_reason = first_observed(open_event.get("entry_reason") if open_event else not_obs, open_event.get("router_info", {}).get("reason") if open_event else not_obs)
         exit_reason = first_observed(close_event.get("exit_reason") if close_event else not_obs, close_event.get("router_info", {}).get("reason") if close_event else not_obs)
         probe_type = first_observed(
@@ -4741,7 +4839,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "entry_reason": entry_reason,
             "exit_reason": exit_reason,
             "probe_type": probe_type,
-            "roundtrip_status": status,
+            "roundtrip_status": status_text,
             "gross_pnl_usdt": not_obs,
             "fee_total_usdt": not_obs,
             "net_pnl_usdt": not_obs,
@@ -4750,14 +4848,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "hold_minutes": not_obs,
             "remaining_value_usdt": fmt_num(residual_value, 12),
             "dust_threshold_usdt": fmt_num(dust_threshold, 12),
-            "diagnosis": diagnosis,
+            "diagnosis": diagnosis_text,
             "raw_json": safe_json(raw_payload),
         }
         key = (row["roundtrip_status"], row["source_file"], row["row_number"], row["symbol"], row["qty"], row["remaining_value_usdt"])
         if key not in dust_residual_row_keys:
             dust_residual_row_keys.add(key)
             dust_residual_roundtrip_rows.append(row)
-        if "open" in status or "position" in status:
+        if ("open" in status_text or "position" in status_text) and status_text != "OPEN_EXPOSURE_NOT_IN_POSITION_STORE":
             dust_residual_position_keys.add((symbol, row["entry_ts"], row["qty"], row["remaining_value_usdt"]))
         return row
 
@@ -5318,6 +5416,89 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "trade_metrics has counted trades but order_lifecycle.csv is empty.",
             {"trade_metric_fill_count": order_lifecycle_trade_metric_fill_count},
         )
+
+    def build_execution_quality_rows(rows):
+        quality_rows = []
+        for row in rows:
+            state = flatten_value(row.get("order_state")).strip().upper()
+            if state != "FILLED":
+                continue
+            symbol = first_observed(row.get("symbol"), row.get("normalized_symbol"), not_obs)
+            side = flatten_value(row.get("side")).strip().lower()
+            intent = flatten_value(row.get("intent")).strip().upper()
+            arrival_mid = as_float(row.get("arrival_mid"))
+            fill_px = as_float(first_observed(row.get("avg_fill_px"), row.get("fill_px"), row.get("order_px")))
+            notional = as_float(row.get("notional_usdt"))
+            filled_qty = as_float(row.get("filled_qty"))
+            if notional is None and fill_px is not None and filled_qty is not None:
+                notional = abs(fill_px * filled_qty)
+            fee_usdt = as_float(row.get("fee_usdt"))
+            if fee_usdt is None:
+                fee_raw = as_float(row.get("fee"))
+                fee_ccy = flatten_value(row.get("fee_ccy")).upper()
+                if fee_raw is not None and fee_ccy in {"USDT", "USD"}:
+                    fee_usdt = abs(fee_raw)
+            actual_slippage = None
+            reason_parts = []
+            if arrival_mid is None or arrival_mid <= 0:
+                reason_parts.append("arrival_mid_missing")
+            if fill_px is None or fill_px <= 0:
+                reason_parts.append("fill_px_missing")
+            if not reason_parts:
+                if side == "buy" or intent == "OPEN_LONG":
+                    actual_slippage = (fill_px - arrival_mid) / arrival_mid * 10000.0
+                elif side == "sell" or intent == "CLOSE_LONG":
+                    actual_slippage = (arrival_mid - fill_px) / arrival_mid * 10000.0
+                else:
+                    reason_parts.append("side_or_intent_not_directional")
+            actual_fee_bps = None
+            if fee_usdt is not None and notional is not None and notional > 0:
+                actual_fee_bps = abs(fee_usdt) / notional * 10000.0
+            else:
+                fee_bps_fallback = as_float(row.get("fee_bps"))
+                if fee_bps_fallback is not None:
+                    actual_fee_bps = abs(fee_bps_fallback)
+                    reason_parts.append("fee_bps_fallback_used")
+                else:
+                    reason_parts.append("fee_or_notional_missing")
+            actual_all_in = None
+            if actual_slippage is not None and actual_fee_bps is not None:
+                actual_all_in = actual_slippage + actual_fee_bps
+            reported_slippage = as_float(row.get("arrival_slippage_bps"))
+            reported_fee = as_float(row.get("fee_bps"))
+            reported_all_in = as_float(row.get("roundtrip_all_in_cost_bps"))
+            if actual_slippage is not None and reported_slippage is not None and abs(actual_slippage - reported_slippage) > 1.0:
+                reason_parts.append("reported_arrival_slippage_diff_gt_1bps")
+            if actual_all_in is None or any(part.endswith("_missing") for part in reason_parts):
+                status = "NOT_EVALUATED"
+            elif "reported_arrival_slippage_diff_gt_1bps" in reason_parts:
+                status = "WARN"
+            else:
+                status = "PASS"
+            quality_rows.append({
+                "run_id": row.get("run_id", not_obs),
+                "lifecycle_id": row.get("lifecycle_id", not_obs),
+                "ts_utc": first_observed(row.get("last_fill_ts"), row.get("first_fill_ts"), row.get("ts_utc"), row.get("submit_ts"), row.get("decision_ts"), not_obs),
+                "symbol": symbol,
+                "side": side or not_obs,
+                "intent": intent or not_obs,
+                "arrival_mid": fmt_num(arrival_mid, 10),
+                "fill_px": fmt_num(fill_px, 10),
+                "filled_qty": fmt_num(filled_qty, 12),
+                "notional_usdt": fmt_num(notional, 12),
+                "fee_usdt": fmt_num(fee_usdt, 12),
+                "actual_arrival_slippage_bps": fmt_num(actual_slippage, 4),
+                "actual_fee_bps": fmt_num(actual_fee_bps, 4),
+                "actual_all_in_bps": fmt_num(actual_all_in, 4),
+                "reported_arrival_slippage_bps": fmt_num(reported_slippage, 4),
+                "reported_fee_bps": fmt_num(reported_fee, 4),
+                "reported_roundtrip_all_in_cost_bps": fmt_num(reported_all_in, 4),
+                "status": status,
+                "reason": ";".join(dict.fromkeys(reason_parts)) if reason_parts else "ok",
+            })
+        return quality_rows
+
+    execution_quality_rows = build_execution_quality_rows(order_lifecycle_rows)
 
     def lifecycle_timestamp(row):
         return first_observed(
@@ -8132,10 +8313,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         snapshot_present = bool(asset in cash_bal or asset in eq_usd or diff)
         flat_or_dust = False
         if snapshot_present:
-            if ignored_as_dust:
-                flat_or_dust = True
-            elif exchange_value is not None:
+            if exchange_value is not None:
                 flat_or_dust = abs(exchange_value) < dust_threshold
+            elif ignored_as_dust:
+                flat_or_dust = True
             elif exchange_qty is not None:
                 abs_base_tol = numeric_first(thresholds.get("abs_base_tol"), 1e-8) or 1e-8
                 flat_or_dust = abs(exchange_qty) <= abs_base_tol
@@ -8192,9 +8373,26 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         return max(nums) if nums else None
 
     def append_dust_position_from_roundtrip_row(row, current_value, dust_threshold, diagnosis):
-        key = (row.get("symbol"), row.get("entry_ts"), row.get("qty"), fmt_num(current_value, 12))
-        dust_residual_position_keys.add(key)
-        csv_key = ("open_dust_residual_ignored", row.get("source_file"), row.get("row_number"), row.get("symbol"), row.get("qty"), fmt_num(current_value, 12))
+        status = "open_dust_residual_ignored"
+        diagnosis_text = flatten_value(diagnosis)
+        if value_exceeds_dust_threshold(current_value, dust_threshold):
+            status = "OPEN_EXPOSURE_NOT_IN_POSITION_STORE"
+            diagnosis_text = "open_exposure_not_in_position_store_remaining_value_exceeds_dust_threshold"
+            record_unmanaged_open_exposure(
+                row.get("symbol", not_obs),
+                qty=row.get("qty"),
+                exchange_eq_usdt=current_value,
+                dust_threshold_usdt=dust_threshold,
+                source="dust_residual_roundtrips",
+                reason=diagnosis_text,
+                entry_ts=row.get("entry_ts", not_obs),
+                current_px=row.get("price"),
+                raw={"roundtrip_row": sanitize_obj(row)},
+            )
+        else:
+            key = (row.get("symbol"), row.get("entry_ts"), row.get("qty"), fmt_num(current_value, 12))
+            dust_residual_position_keys.add(key)
+        csv_key = (status, row.get("source_file"), row.get("row_number"), row.get("symbol"), row.get("qty"), fmt_num(current_value, 12))
         if csv_key in dust_residual_row_keys:
             return
         dust_residual_row_keys.add(csv_key)
@@ -8214,7 +8412,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "entry_reason": row.get("entry_reason", not_obs),
             "exit_reason": row.get("exit_reason", not_obs),
             "probe_type": row.get("probe_type", not_obs),
-            "roundtrip_status": "open_dust_residual_ignored",
+            "roundtrip_status": status,
             "gross_pnl_usdt": not_obs,
             "fee_total_usdt": row.get("fee_total_usdt", not_obs),
             "net_pnl_usdt": not_obs,
@@ -8223,7 +8421,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "hold_minutes": not_obs,
             "remaining_value_usdt": fmt_num(current_value, 12),
             "dust_threshold_usdt": fmt_num(dust_threshold, 12),
-            "diagnosis": diagnosis,
+            "diagnosis": diagnosis_text,
             "raw_json": row.get("raw_json", "{}"),
         })
 
@@ -8466,6 +8664,102 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if row.get("reason") == "active_probe_ignore_zero_target_close"
     )
     open_position_by_symbol = {row.get("symbol"): row for row in open_position_rows}
+
+    def reconcile_symbols_with_non_usdt_exposure():
+        symbols = set()
+        if not isinstance(reconcile_status, dict) or not reconcile_status:
+            return symbols
+        exchange_snapshot = reconcile_status.get("exchange_snapshot") if isinstance(reconcile_status.get("exchange_snapshot"), dict) else {}
+        cash_bal = exchange_snapshot.get("ccy_cashBal") if isinstance(exchange_snapshot.get("ccy_cashBal"), dict) else {}
+        eq_usd = exchange_snapshot.get("ccy_eqUsd") if isinstance(exchange_snapshot.get("ccy_eqUsd"), dict) else {}
+        for asset in set(cash_bal.keys()) | set(eq_usd.keys()):
+            asset_text = flatten_value(asset).strip().upper()
+            if not asset_text or asset_text in {"USDT", "USD"}:
+                continue
+            symbols.add(f"{asset_text}/USDT")
+        diffs = reconcile_status.get("diffs") if isinstance(reconcile_status.get("diffs"), list) else []
+        for item in diffs:
+            if not isinstance(item, dict):
+                continue
+            asset_text = flatten_value(item.get("ccy")).strip().upper()
+            if not asset_text or asset_text in {"USDT", "USD"}:
+                continue
+            symbols.add(f"{asset_text}/USDT")
+        return symbols
+
+    def current_px_for_symbol(symbol):
+        normalized_symbol = normalize_trade_symbol_for_contract(symbol).replace("-", "/")
+        context = latest_symbol_context.get(normalized_symbol, {})
+        return numeric_first(context.get("current_px"), event_candidate_price_by_symbol.get(normalized_symbol))
+
+    def build_position_exposure_consistency_rows():
+        symbols = set(open_position_by_symbol.keys()) | reconcile_symbols_with_non_usdt_exposure()
+        symbols |= {
+            flatten_value(row.get("symbol"))
+            for row in dust_residual_roundtrip_rows
+            if flatten_value(row.get("symbol")) not in ("", not_obs)
+        }
+        rows = []
+        for symbol in sorted(symbols):
+            if symbol in ("", not_obs):
+                continue
+            snapshot = reconcile_exchange_snapshot_for_symbol(symbol)
+            open_row = open_position_by_symbol.get(symbol)
+            open_present = bool(open_row)
+            current_px = current_px_for_symbol(symbol)
+            position_store_qty = numeric_first(open_row.get("qty") if open_row else None)
+            exchange_qty = snapshot.get("exchange_qty")
+            local_qty = numeric_first(snapshot.get("local_qty"), ledger_qty_for_symbol(symbol))
+            exchange_eq = snapshot.get("exchange_value_usdt")
+            threshold = snapshot.get("dust_threshold_usdt") or dust_threshold_for_symbol(symbol)
+            exposure_value = exchange_eq
+            if exposure_value is None:
+                qty_for_value = numeric_first(exchange_qty, local_qty, position_store_qty)
+                if qty_for_value is not None and current_px is not None:
+                    exposure_value = abs(qty_for_value * current_px)
+            if open_present:
+                status = "PASS"
+                reason = "covered_by_open_positions"
+                if snapshot.get("flat_or_dust"):
+                    status = "POSITION_STORE_PRESENT_BUT_EXCHANGE_FLAT_OR_DUST"
+                    reason = "open_positions_present_but_reconcile_flat_or_dust"
+            elif value_exceeds_dust_threshold(exposure_value, threshold):
+                status = "OPEN_EXPOSURE_NOT_IN_POSITION_STORE"
+                reason = "exchange_or_local_exposure_above_dust_not_in_open_positions"
+                record_unmanaged_open_exposure(
+                    symbol,
+                    qty=numeric_first(exchange_qty, local_qty),
+                    exchange_qty=exchange_qty,
+                    local_qty=local_qty,
+                    exchange_eq_usdt=exposure_value,
+                    dust_threshold_usdt=threshold,
+                    position_store_qty=position_store_qty,
+                    open_positions_row_present=False,
+                    source="reconcile_status",
+                    reason=reason,
+                    current_px=current_px,
+                    raw={"reconcile_snapshot": sanitize_obj(snapshot)},
+                )
+            elif snapshot.get("snapshot_present"):
+                status = "DUST_IGNORED"
+                reason = "exchange_or_local_exposure_below_dust_threshold"
+            else:
+                status = "NOT_OBSERVABLE"
+                reason = "no_reconcile_or_position_store_row"
+            rows.append({
+                "symbol": symbol,
+                "exchange_qty": fmt_num(exchange_qty, 12),
+                "local_qty": fmt_num(local_qty, 12),
+                "exchange_eq_usdt": fmt_num(exposure_value, 12),
+                "position_store_qty": fmt_num(position_store_qty, 12),
+                "open_positions_row_present": bool_text(open_present),
+                "dust_threshold_usdt": fmt_num(threshold, 12),
+                "status": status,
+                "reason": reason,
+            })
+        return rows
+
+    position_exposure_consistency_rows = build_position_exposure_consistency_rows()
 
     def active_probe_state_present(symbol):
         return any(state_present(state, symbol) for state in (profit_state, highest_state, stop_state, fixed_stop_state))
@@ -12518,6 +12812,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         ["run_id", "source_file", "row_number", "timestamp", "symbol", "side", "qty", "price", "entry_ts", "entry_px", "exit_ts", "exit_px", "entry_reason", "exit_reason", "probe_type", "roundtrip_status", "gross_pnl_usdt", "fee_total_usdt", "net_pnl_usdt", "gross_bps", "net_bps", "hold_minutes", "remaining_value_usdt", "dust_threshold_usdt", "diagnosis", "raw_json"],
     )
     write_csv(
+        "summaries/position_exposure_consistency.csv",
+        position_exposure_consistency_rows,
+        ["symbol", "exchange_qty", "local_qty", "exchange_eq_usdt", "position_store_qty", "open_positions_row_present", "dust_threshold_usdt", "status", "reason"],
+    )
+    write_csv(
+        "summaries/unmanaged_open_exposure.csv",
+        unmanaged_open_exposure_rows,
+        ["symbol", "entry_ts", "qty", "exchange_qty", "local_qty", "exchange_eq_usdt", "position_store_qty", "open_positions_row_present", "dust_threshold_usdt", "status", "reason", "source", "current_px", "raw_json"],
+    )
+    write_csv(
         "summaries/open_positions.csv",
         open_position_rows,
         ["symbol", "entry_ts", "entry_px", "qty", "current_px", "current_value_usdt", "notional_entry_usdt", "unrealized_gross_bps", "unrealized_net_bps", "unrealized_net_usdt", "entry_reason", "probe_type", "current_stop_px", "highest_px", "current_level", "regime", "is_probe", "profit_lock_active", "trailing_active"],
@@ -12689,6 +12993,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "summaries/order_lifecycle.csv",
         order_lifecycle_rows,
         ORDER_LIFECYCLE_FIELDS,
+    )
+    write_csv(
+        "summaries/execution_quality.csv",
+        execution_quality_rows,
+        ["run_id", "lifecycle_id", "ts_utc", "symbol", "side", "intent", "arrival_mid", "fill_px", "filled_qty", "notional_usdt", "fee_usdt", "actual_arrival_slippage_bps", "actual_fee_bps", "actual_all_in_bps", "reported_arrival_slippage_bps", "reported_fee_bps", "reported_roundtrip_all_in_cost_bps", "status", "reason"],
     )
     write_csv(
         "summaries/config_runtime_consumption_audit.csv",
@@ -14941,7 +15250,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     open_probe_net_values = [value for value in open_probe_net_values if value is not None]
     dust_residual_position_count = len(dust_residual_position_keys)
     dust_residual_roundtrip_count = len(dust_residual_roundtrip_rows)
-    effective_open_position_count = len(open_position_rows)
+    unmanaged_open_exposure_count = len(unmanaged_open_exposure_rows)
+    position_exposure_consistency_fail_count = sum(
+        1 for row in position_exposure_consistency_rows
+        if row.get("status") == "OPEN_EXPOSURE_NOT_IN_POSITION_STORE"
+    )
+    effective_open_position_count = len(open_position_rows) + unmanaged_open_exposure_count
     active_probe_ignore_zero_target_close_total = sum(
         as_int(row.get("active_probe_ignore_zero_target_close_count"))
         for row in open_probe_watch_rows
@@ -15571,8 +15885,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "last_72h_roundtrip_count": last_72h_roundtrip_count if has_trade_data else not_obs,
         "open_position_count": len(open_position_rows),
         "effective_open_position_count": effective_open_position_count,
+        "unmanaged_open_exposure_count": unmanaged_open_exposure_count,
         "dust_residual_position_count": dust_residual_position_count,
         "dust_residual_roundtrip_count": dust_residual_roundtrip_count,
+        "position_exposure_consistency_rows": len(position_exposure_consistency_rows),
+        "position_exposure_consistency_fail_count": position_exposure_consistency_fail_count,
         "dust_threshold_usdt": global_dust_threshold_usdt,
         "summary_trade_count_mismatch_count": len(summary_trade_count_mismatch_rows),
         "summary_trade_count_mismatch_high_issue_count": sum(
@@ -15590,6 +15907,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "trade_metrics_rows": len(trade_metrics_rows),
         "fill_metrics_rows": len(fill_metrics_rows),
         "order_lifecycle_rows": len(order_lifecycle_rows),
+        "execution_quality_rows": len(execution_quality_rows),
         "order_lifecycle_trade_metric_fill_count": order_lifecycle_trade_metric_fill_count,
         "order_lifecycle_missing_high_issue": order_lifecycle_missing_high_issue,
         "trade_state_consistency_rows": len(trade_state_consistency_rows),
@@ -15995,14 +16313,25 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             open_stop_protection_text = not_obs
     else:
         open_position_text = "no / 0"
-        account_status_text = "flat / dust-only" if dust_residual_position_count else "flat / no observable position"
-        open_pnl_text = "not_applicable_no_open_positions"
-        open_net_bps_text = "not_applicable_no_open_positions"
-        open_stop_protection_text = "not_applicable_no_open_positions"
+        if unmanaged_open_exposure_rows:
+            open_position_text = f"unmanaged / {len(unmanaged_open_exposure_rows)}"
+            account_status_text = "has_unmanaged_open_exposure"
+            open_pnl_text = "not_observable_unmanaged_open_exposure"
+            open_net_bps_text = "not_observable_unmanaged_open_exposure"
+            open_stop_protection_text = "not_observable_unmanaged_open_exposure"
+        else:
+            account_status_text = "flat / dust-only" if dust_residual_position_count else "flat / no observable position"
+            open_pnl_text = "not_applicable_no_open_positions"
+            open_net_bps_text = "not_applicable_no_open_positions"
+            open_stop_protection_text = "not_applicable_no_open_positions"
 
     def write_positions_json_summary():
         raw_state_path = OUT / "raw" / "state" / "positions.json"
-        source_files = ["summaries/open_positions.csv"]
+        source_files = [
+            "summaries/open_positions.csv",
+            "summaries/position_exposure_consistency.csv",
+            "summaries/unmanaged_open_exposure.csv",
+        ]
         fallback_source = "summaries/open_positions.csv"
         raw_state_present = raw_state_path.is_file()
         if raw_state_present:
@@ -16013,11 +16342,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "account_state": account_status_text,
             "open_position_count": len(open_position_rows),
             "effective_open_position_count": effective_open_position_count,
-            "dust_only": bool(not open_position_rows and (dust_only_count or dust_residual_position_count or dust_residual_roundtrip_count)),
+            "unmanaged_open_exposure_count": len(unmanaged_open_exposure_rows),
+            "dust_only": bool(
+                not open_position_rows
+                and not unmanaged_open_exposure_rows
+                and (dust_only_count or dust_residual_position_count or dust_residual_roundtrip_count)
+            ),
             "positions": sanitize_obj(open_position_rows),
+            "unmanaged_open_exposure": sanitize_obj(unmanaged_open_exposure_rows),
+            "position_exposure_consistency_path": "summaries/position_exposure_consistency.csv",
             "source_files": source_files,
             "fallback_source": fallback_source,
-            "schema_version": "v5.positions_summary.v1",
+            "schema_version": "v5.positions_summary.v2",
         }
         text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         write_text("reports/positions.json", text)
@@ -16593,7 +16929,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- probe lifecycle: {probe_lifecycle_text}",
         f"- 是否按 probe exit policy 退出: {probe_exit_policy_text}",
         f"- 平仓后是否仍有 stale state: {'yes' if stale_state_issues else 'no'}",
-        f"- 是否只剩 dust: {'yes' if (dust_only_count or dust_residual_position_count or dust_residual_roundtrip_count) else 'no'}",
+        f"- 是否只剩 dust: {'yes' if (not unmanaged_open_exposure_count and (dust_only_count or dust_residual_position_count or dust_residual_roundtrip_count)) else 'no'}",
         f"- 是否重复生成 exit signal: {'yes' if repeated_exit_issues else 'no'}",
         "",
         "## Open position 检查",
@@ -16602,7 +16938,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- 持仓是否浮盈/浮亏: {open_pnl_text}",
         f"- unrealized net bps: {open_net_bps_text}",
         f"- 当前 stop 是否足够保护浮盈: {open_stop_protection_text}",
+        f"- unmanaged open exposure: {unmanaged_open_exposure_count}",
+        f"- position exposure consistency fail: {position_exposure_consistency_fail_count}",
         f"- dust residual ignored: positions={dust_residual_position_count}, roundtrips={dust_residual_roundtrip_count}",
+        "- output: summaries/position_exposure_consistency.csv, summaries/unmanaged_open_exposure.csv",
         "",
         "## Trade state consistency",
         f"- close_lifecycle_missing_trade_export_count: {window_summary.get('close_lifecycle_missing_trade_export_count', 0)}",
@@ -16910,6 +17249,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "candidate_price_not_observable_rows": candidate_price_observability["price_not_observable_rows"],
         "candidate_price_observability_rate": candidate_price_observability["price_observability_rate"],
         "order_lifecycle_rows": len(order_lifecycle_rows),
+        "execution_quality_rows": len(execution_quality_rows),
         "order_lifecycle_trade_metric_fill_count": order_lifecycle_trade_metric_fill_count,
         "order_lifecycle_missing_high_issue": order_lifecycle_missing_high_issue,
         "trade_state_consistency_rows": len(trade_state_consistency_rows),
@@ -16930,6 +17270,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "positions_json_path": "reports/positions.json",
         "positions_json_fallback_source": positions_json_summary.get("fallback_source", not_obs),
         "positions_json_source_files": positions_json_summary.get("source_files", []),
+        "open_position_count": len(open_position_rows),
+        "effective_open_position_count": effective_open_position_count,
+        "unmanaged_open_exposure_count": unmanaged_open_exposure_count,
+        "position_exposure_consistency_rows": len(position_exposure_consistency_rows),
+        "position_exposure_consistency_fail_count": position_exposure_consistency_fail_count,
         "duplicate_same_hour_completion_count": duplicate_same_hour_completion_count,
         "affected_duplicate_run_hours": affected_duplicate_run_hours,
         "completion_attempts": len(copied_runs),
@@ -17092,6 +17437,8 @@ def write_static_report_index(summary_meta, large_raw_files):
         "account_state": window_summary.get("account_state", "not_observable"),
         "open_position_count": window_summary.get("open_position_count", "not_observable"),
         "effective_open_position_count": window_summary.get("effective_open_position_count", "not_observable"),
+        "unmanaged_open_exposure_count": window_summary.get("unmanaged_open_exposure_count", "not_observable"),
+        "position_exposure_consistency_fail_count": window_summary.get("position_exposure_consistency_fail_count", "not_observable"),
         "latest_trade_count": len(trade_metrics_rows),
         "candidate_snapshot_rows": len(candidate_rows) or int(summary_meta.get("candidate_snapshot_rows", 0) or 0),
         "paper_summary": {
@@ -17494,6 +17841,7 @@ manifest = {
     "candidate_price_not_observable_rows": int(summary_meta.get("candidate_price_not_observable_rows", 0) or 0),
     "candidate_price_observability_rate": summary_meta.get("candidate_price_observability_rate", 0.0),
     "order_lifecycle_rows": int(summary_meta.get("order_lifecycle_rows", 0) or 0),
+    "execution_quality_rows": int(summary_meta.get("execution_quality_rows", 0) or 0),
     "order_lifecycle_trade_metric_fill_count": int(
         summary_meta.get("order_lifecycle_trade_metric_fill_count", 0) or 0
     ),
@@ -17521,6 +17869,11 @@ manifest = {
     "positions_json_path": summary_meta.get("positions_json_path", "not_observable"),
     "positions_json_fallback_source": summary_meta.get("positions_json_fallback_source", "not_observable"),
     "positions_json_source_files": summary_meta.get("positions_json_source_files", []),
+    "open_position_count": int(summary_meta.get("open_position_count", 0) or 0),
+    "effective_open_position_count": int(summary_meta.get("effective_open_position_count", 0) or 0),
+    "unmanaged_open_exposure_count": int(summary_meta.get("unmanaged_open_exposure_count", 0) or 0),
+    "position_exposure_consistency_rows": int(summary_meta.get("position_exposure_consistency_rows", 0) or 0),
+    "position_exposure_consistency_fail_count": int(summary_meta.get("position_exposure_consistency_fail_count", 0) or 0),
     "duplicate_same_hour_completion_count": int(summary_meta.get("duplicate_same_hour_completion_count", 0) or 0),
     "affected_duplicate_run_hours": summary_meta.get("affected_duplicate_run_hours", []),
     "completion_attempts": int(summary_meta.get("completion_attempts", 0) or 0),

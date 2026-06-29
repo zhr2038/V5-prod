@@ -446,6 +446,64 @@ def fixture_dust_residual_root(root):
     return run_id
 
 
+def fixture_unmanaged_open_exposure_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    run_id = now.strftime("%Y%m%d_%H")
+    ts = int(now.timestamp())
+
+    write_text(
+        root / "configs/live_prod.yaml",
+        "execution:\n  dust_usdt_ignore: 1.0\n  min_trade_value_usdt: 10.0\n",
+    )
+    for name in (
+        "kill_switch",
+        "ledger_status",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_json(
+        root / "reports/reconcile_status.json",
+        {
+            "ok": True,
+            "exchange_snapshot": {
+                "ccy_cashBal": {"SOL": "0.213491885", "USDT": "100"},
+                "ccy_eqUsd": {"SOL": "15.73", "USDT": "100"},
+            },
+            "local_snapshot": {"ccy_qty": {"SOL": "0.213705", "USDT": "100"}},
+            "diffs": [
+                {
+                    "ccy": "SOL",
+                    "exchange": "0.213491885",
+                    "local": "0.213705",
+                    "exchange_eq_usdt": "15.73",
+                    "ignored_as_dust": True,
+                }
+            ],
+            "thresholds": {"dust_usdt_ignore": 1.0, "abs_base_tol": 1e-8},
+        },
+    )
+    write_json(root / "reports/ledger_state.json", {"balances": {"SOL": 0.213705, "USDT": 100}})
+    write_json(root / "reports/effective_live_config.json", {"execution": {"dust_usdt_ignore": 1.0, "min_trade_value_usdt": 10.0}})
+    write_json(root / "reports/event_candidates.json", {"regime": "PROTECT", "candidates": [{"symbol": "SOL/USDT", "price": 73.70}]})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(
+        run_dir / "decision_audit.json",
+        {
+            "window_end_ts": ts,
+            "router_decisions": [
+                {"symbol": "SOL/USDT", "action": "skip", "intent": "OPEN_LONG", "side": "buy", "reason": "quant_lab_permission_abort"}
+            ],
+        },
+    )
+    write_text(run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id, "num_trades": 0, "budget": {"fills_count_today": 0}})
+    return run_id
+
+
 def fixture_last_72h_trade_no_24h_root(root):
     fixture_root(root)
     now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
@@ -4784,6 +4842,7 @@ def main():
             with tarfile.open(bundle, "r:gz") as tf:
                 order_lifecycle = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/order_lifecycle.csv")).read().decode().splitlines()))
                 fill_metrics = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/fill_metrics.csv")).read().decode().splitlines()))
+                execution_quality = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/execution_quality.csv")).read().decode().splitlines()))
                 issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
             assert len(fill_metrics) == 1, fill_metrics
@@ -4799,12 +4858,21 @@ def main():
             assert row["fee_usdt"] == "0.0105", row
             assert row["trade_ids"] == "trade-btc-1", row
             assert row["fill_count"] == "1", row
+            assert len(execution_quality) == 1, execution_quality
+            quality = execution_quality[0]
+            expected_slippage = (77383.7 - 77385) / 77385 * 10000.0
+            assert quality["status"] == "PASS", quality
+            assert quality["symbol"] == "BTC/USDT", quality
+            assert abs(float(quality["actual_arrival_slippage_bps"]) - expected_slippage) < 0.01, quality
+            assert abs(float(quality["actual_fee_bps"]) - 10.0) < 0.01, quality
+            assert abs(float(quality["actual_all_in_bps"]) - (expected_slippage + 10.0)) < 0.01, quality
             lifecycle_issues = [
                 item for item in issues["issues"]
                 if item.get("severity") == "high" and item.get("code") == "order_lifecycle_missing_for_trades"
             ]
             assert lifecycle_issues == [], issues
             assert window["order_lifecycle_rows"] == 1, window
+            assert window["execution_quality_rows"] == 1, window
             assert window["order_lifecycle_trade_metric_fill_count"] == 1, window
             assert window["order_lifecycle_missing_high_issue"] is False, window
         finally:
@@ -6867,6 +6935,53 @@ def main():
             ]
             assert len(lifecycle_issues) == 1, high_issues
             assert [item for item in high_issues if item.get("code") != "order_lifecycle_missing_for_trades"] == [], high_issues
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-unmanaged-open-exposure-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_unmanaged_open_exposure_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                open_positions = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/open_positions.csv")).read().decode().splitlines()))
+                exposure_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/position_exposure_consistency.csv")).read().decode().splitlines()))
+                unmanaged_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/unmanaged_open_exposure.csv")).read().decode().splitlines()))
+                dust_roundtrips = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/dust_residual_roundtrips.csv")).read().decode().splitlines()))
+                positions = json.loads(tf.extractfile(extract_member(tf, "reports/positions.json")).read().decode())
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+
+            assert open_positions == [], open_positions
+            sol_exposure = next(row for row in exposure_rows if row["symbol"] == "SOL/USDT")
+            assert sol_exposure["status"] == "OPEN_EXPOSURE_NOT_IN_POSITION_STORE", exposure_rows
+            assert sol_exposure["open_positions_row_present"] == "false", sol_exposure
+            assert float(sol_exposure["exchange_eq_usdt"]) == 15.73, sol_exposure
+            assert unmanaged_rows and unmanaged_rows[0]["symbol"] == "SOL/USDT", unmanaged_rows
+            assert positions["account_state"] == "has_unmanaged_open_exposure", positions
+            assert positions["open_position_count"] == 0, positions
+            assert positions["effective_open_position_count"] == 1, positions
+            assert positions["unmanaged_open_exposure_count"] == 1, positions
+            assert positions["dust_only"] is False, positions
+            assert window["position_exposure_consistency_fail_count"] == 1, window
+            assert window["unmanaged_open_exposure_count"] == 1, window
+            assert manifest["position_exposure_consistency_fail_count"] == 1, manifest
+            assert not [
+                row for row in dust_roundtrips
+                if row["roundtrip_status"] == "open_dust_residual_ignored"
+                and float(row["remaining_value_usdt"] or 0) >= float(row["dust_threshold_usdt"] or 0)
+            ], dust_roundtrips
+            high_exposure_issues = [
+                item for item in issues["issues"]
+                if item.get("severity") == "high" and item.get("code") == "open_exposure_not_in_position_store"
+            ]
+            assert len(high_exposure_issues) == 1, issues
+            assert "account status: has_unmanaged_open_exposure" in readme, readme
+            assert "unmanaged open exposure: 1" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
