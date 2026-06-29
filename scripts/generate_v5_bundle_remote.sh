@@ -5418,6 +5418,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         )
 
     def build_execution_quality_rows(rows):
+        def quality_first_observed(*values):
+            for value in values:
+                if not lifecycle_nullish(value):
+                    return value
+            return not_obs
+
         quality_rows = []
         for row in rows:
             state = flatten_value(row.get("order_state")).strip().upper()
@@ -5478,7 +5484,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             quality_rows.append({
                 "run_id": row.get("run_id", not_obs),
                 "lifecycle_id": row.get("lifecycle_id", not_obs),
-                "ts_utc": first_observed(row.get("last_fill_ts"), row.get("first_fill_ts"), row.get("ts_utc"), row.get("submit_ts"), row.get("decision_ts"), not_obs),
+                "ts_utc": quality_first_observed(row.get("last_fill_ts"), row.get("first_fill_ts"), row.get("ts_utc"), row.get("submit_ts"), row.get("decision_ts")),
                 "symbol": symbol,
                 "side": side or not_obs,
                 "intent": intent or not_obs,
@@ -16325,6 +16331,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             open_net_bps_text = "not_applicable_no_open_positions"
             open_stop_protection_text = "not_applicable_no_open_positions"
 
+    window_summary["account_state"] = account_status_text
+    window_summary["open_position_text"] = open_position_text
+
     def write_positions_json_summary():
         raw_state_path = OUT / "raw" / "state" / "positions.json"
         source_files = [
@@ -17270,6 +17279,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "positions_json_path": "reports/positions.json",
         "positions_json_fallback_source": positions_json_summary.get("fallback_source", not_obs),
         "positions_json_source_files": positions_json_summary.get("source_files", []),
+        "account_state": account_status_text,
         "open_position_count": len(open_position_rows),
         "effective_open_position_count": effective_open_position_count,
         "unmanaged_open_exposure_count": unmanaged_open_exposure_count,
@@ -17869,6 +17879,7 @@ manifest = {
     "positions_json_path": summary_meta.get("positions_json_path", "not_observable"),
     "positions_json_fallback_source": summary_meta.get("positions_json_fallback_source", "not_observable"),
     "positions_json_source_files": summary_meta.get("positions_json_source_files", []),
+    "account_state": summary_meta.get("account_state", "not_observable"),
     "open_position_count": int(summary_meta.get("open_position_count", 0) or 0),
     "effective_open_position_count": int(summary_meta.get("effective_open_position_count", 0) or 0),
     "unmanaged_open_exposure_count": int(summary_meta.get("unmanaged_open_exposure_count", 0) or 0),
