@@ -1894,6 +1894,142 @@ def _load_avg_cost_from_fills(symbol: str, current_qty: float, reports_dir: Opti
     return total_cost / remaining_qty
 
 
+def _normalize_fill_ts_ms(raw_value: Any) -> int:
+    try:
+        value = int(float(raw_value or 0))
+    except (TypeError, ValueError):
+        return 0
+    if value <= 0:
+        return 0
+    if abs(value) < 10_000_000_000:
+        value *= 1000
+    return value
+
+
+def _load_position_lot_metadata_from_fills(
+    symbol: str,
+    current_qty: float,
+    reports_dir: Optional[Path] = None,
+    fills_db: Optional[Path] = None,
+) -> Optional[Dict[str, Any]]:
+    """Rebuild the remaining long position lots from fills for display metadata."""
+    if float(current_qty or 0.0) <= 0:
+        return None
+
+    base_symbol = str(symbol or '').split('/')[0].split('-')[0].upper()
+    inst_id = _to_inst_id(base_symbol)
+    if fills_db is None:
+        fills_db = (reports_dir or REPORTS_DIR) / 'fills.sqlite'
+    if not fills_db.exists() or not inst_id:
+        return None
+
+    try:
+        conn = sqlite3.connect(str(fills_db))
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT side, fill_px, fill_sz, fill_notional, fee, fee_ccy, ts_ms, created_ts_ms, trade_id
+            FROM fills
+            WHERE inst_id = ?
+            ORDER BY ts_ms ASC, created_ts_ms ASC, trade_id ASC
+            """,
+            (inst_id,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+    except Exception:
+        return None
+
+    if not rows:
+        return None
+
+    quote_symbol = inst_id.split('-', 1)[1].upper() if '-' in inst_id else 'USDT'
+    queue: List[List[float]] = []
+
+    for raw_side, fill_px, fill_sz, fill_notional, fee, fee_ccy, ts_ms, created_ts_ms, _trade_id in rows:
+        side = str(raw_side or '').lower()
+        qty = float(fill_sz or 0.0)
+        if qty <= 0:
+            continue
+
+        px = float(fill_px or 0.0)
+        notional = float(fill_notional or 0.0)
+        if notional <= 0 and px > 0:
+            notional = px * qty
+        fee_val = float(fee or 0.0)
+        fee_ccy_norm = str(fee_ccy or '').upper()
+        event_ts_ms = max(_normalize_fill_ts_ms(ts_ms), _normalize_fill_ts_ms(created_ts_ms))
+
+        if side == 'buy':
+            net_base_qty = qty + (fee_val if fee_ccy_norm == base_symbol else 0.0)
+            if net_base_qty <= 1e-12:
+                continue
+            total_quote_cost = notional
+            if fee_ccy_norm == quote_symbol:
+                total_quote_cost += abs(fee_val)
+            queue.append([net_base_qty, total_quote_cost / net_base_qty, float(event_ts_ms)])
+            continue
+
+        if side != 'sell':
+            continue
+
+        remove_qty = qty
+        if fee_ccy_norm == base_symbol:
+            remove_qty += abs(fee_val)
+        while remove_qty > 1e-12 and queue:
+            head_qty, _head_cost, _head_ts = queue[0]
+            if head_qty <= remove_qty + 1e-12:
+                remove_qty -= head_qty
+                queue.pop(0)
+            else:
+                queue[0][0] = head_qty - remove_qty
+                remove_qty = 0.0
+
+    remaining_qty = sum(qty for qty, _cost, _ts in queue)
+    if remaining_qty <= 1e-12:
+        return None
+
+    trim_qty = remaining_qty - float(current_qty)
+    if trim_qty > 1e-8:
+        while trim_qty > 1e-12 and queue:
+            head_qty, _head_cost, _head_ts = queue[0]
+            if head_qty <= trim_qty + 1e-12:
+                trim_qty -= head_qty
+                queue.pop(0)
+            else:
+                queue[0][0] = head_qty - trim_qty
+                trim_qty = 0.0
+
+    remaining_qty = sum(qty for qty, _cost, _ts in queue)
+    if remaining_qty <= 1e-12:
+        return None
+
+    qty_gap = float(current_qty) - remaining_qty
+    if qty_gap > max(1e-4, float(current_qty) * 0.02):
+        return None
+
+    total_cost = sum(qty * cost for qty, cost, _ts in queue)
+    if total_cost <= 0:
+        return None
+
+    lot_ts_values = [int(ts) for qty, _cost, ts in queue if qty > 1e-12 and ts > 0]
+    entry_ts_ms = min(lot_ts_values) if lot_ts_values else 0
+    latest_entry_ts_ms = max(lot_ts_values) if lot_ts_values else 0
+    now_ms = int(time.time() * 1000)
+
+    return {
+        'avg_px': total_cost / remaining_qty,
+        'entry_ts': _format_dashboard_ts_ms(entry_ts_ms) if entry_ts_ms else '',
+        'entry_ts_ms': entry_ts_ms or None,
+        'latest_entry_ts': _format_dashboard_ts_ms(latest_entry_ts_ms) if latest_entry_ts_ms else '',
+        'latest_entry_ts_ms': latest_entry_ts_ms or None,
+        'entry_source': 'fills_fifo',
+        'position_age_seconds': max(0, int((now_ms - entry_ts_ms) / 1000)) if entry_ts_ms else None,
+        'remaining_qty_from_fills': round(remaining_qty, 12),
+        'lot_count': len(queue),
+    }
+
+
 def load_config():
     """加载配置"""
     cfg = load_app_config(
@@ -4986,11 +5122,33 @@ def api_positions():
             symbol = p.get('symbol', '')
             if not symbol:
                 continue
-            avg_cost = _load_avg_cost_from_fills(
+            lot_metadata = _load_position_lot_metadata_from_fills(
                 symbol,
                 float(p.get('qty', 0) or 0.0),
                 fills_db=runtime_paths.fills_db,
             )
+            avg_cost = None
+            if lot_metadata:
+                avg_cost = lot_metadata.get('avg_px')
+                for key in (
+                    'entry_ts',
+                    'entry_ts_ms',
+                    'latest_entry_ts',
+                    'latest_entry_ts_ms',
+                    'entry_source',
+                    'position_age_seconds',
+                    'remaining_qty_from_fills',
+                    'lot_count',
+                ):
+                    value = lot_metadata.get(key)
+                    if value not in (None, ''):
+                        p[key] = value
+            if not avg_cost:
+                avg_cost = _load_avg_cost_from_fills(
+                    symbol,
+                    float(p.get('qty', 0) or 0.0),
+                    fills_db=runtime_paths.fills_db,
+                )
             if avg_cost and avg_cost > 0:
                 p['avg_px'] = round(avg_cost, 6)
 
@@ -6223,7 +6381,11 @@ def api_dashboard():
                 'value': round(value, 4),
                 'pnl': round(pnl, 4),
                 # Keep ratios in decimal form; monitor_v2.html formats them as percentages.
-                'pnlPercent': round(pnl_pct, 4)
+                'pnlPercent': round(pnl_pct, 4),
+                'entryTime': pos.get('entry_ts') or pos.get('entry_time') or '',
+                'entrySource': pos.get('entry_source') or '',
+                'latestEntryTime': pos.get('latest_entry_ts') or '',
+                'positionAgeSeconds': pos.get('position_age_seconds'),
             })
         
         positions_value = float(account_data.get('positions_value_usdt', 0) or 0)

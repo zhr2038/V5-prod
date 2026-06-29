@@ -1726,6 +1726,10 @@ def test_dashboard_api_uses_expected_payload_shapes(monkeypatch):
         "value": 5500.0,
         "quantity": 0.1,
         "pnl_pct": 0.1,
+        "entry_ts": "2026-03-08 19:30:00",
+        "entry_source": "fills_fifo",
+        "latest_entry_ts": "2026-03-08 19:30:00",
+        "position_age_seconds": 5400,
     }]
     account_payload = {
         "cash_usdt": 100.0,
@@ -1823,6 +1827,10 @@ def test_dashboard_api_uses_expected_payload_shapes(monkeypatch):
     assert payload["account"]["maxDrawdown"] == 0.05
     assert payload["positions"][0]["symbol"] == "BTC"
     assert payload["positions"][0]["pnlPercent"] == 0.1
+    assert payload["positions"][0]["entryTime"] == "2026-03-08 19:30:00"
+    assert payload["positions"][0]["entrySource"] == "fills_fifo"
+    assert payload["positions"][0]["latestEntryTime"] == "2026-03-08 19:30:00"
+    assert payload["positions"][0]["positionAgeSeconds"] == 5400
     assert payload["trades"][0]["symbol"] == "BTC/USDT"
     assert payload["alphaScores"][0]["symbol"] == "BTC/USDT"
     assert payload["systemStatus"]["killSwitch"] is True
@@ -9699,6 +9707,86 @@ def test_api_positions_uses_runtime_runs_and_fill_db(monkeypatch, tmp_path):
     assert payload["source"] == "positions_jsonl:20260408_01"
     assert payload["authoritative_snapshot_seen"] is False
     assert seen["fills_db"] == runtime_dir / "fills.sqlite"
+
+
+def test_api_positions_exports_fifo_entry_time_from_remaining_lots(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "execution": {
+                "order_store_path": "reports/shadow_runtime/orders.sqlite",
+                "reconcile_status_path": "reports/shadow_runtime/reconcile_status.json",
+            }
+        },
+    )
+    monkeypatch.setattr(module.requests, "get", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("network down")))
+
+    positions_db = runtime_dir / "positions.sqlite"
+    con = sqlite3.connect(str(positions_db))
+    cur = con.cursor()
+    cur.execute("CREATE TABLE positions (symbol TEXT, qty REAL, avg_px REAL, last_mark_px REAL)")
+    cur.execute("INSERT INTO positions VALUES ('SOL/USDT', 0.2135, 1.0, 73.91)")
+    con.commit()
+    con.close()
+
+    first_buy_ts = 1_710_000_000_000
+    remaining_buy_ts = 1_710_003_600_000
+    sell_ts = 1_710_007_200_000
+    fills_db = runtime_dir / "fills.sqlite"
+    con = sqlite3.connect(str(fills_db))
+    cur = con.cursor()
+    cur.execute(
+        """
+        CREATE TABLE fills (
+          inst_id TEXT,
+          side TEXT,
+          fill_px REAL,
+          fill_sz REAL,
+          fill_notional REAL,
+          fee REAL,
+          fee_ccy TEXT,
+          ts_ms INTEGER,
+          created_ts_ms INTEGER,
+          trade_id TEXT
+        )
+        """
+    )
+    cur.executemany(
+        """
+        INSERT INTO fills (
+          inst_id, side, fill_px, fill_sz, fill_notional, fee, fee_ccy, ts_ms, created_ts_ms, trade_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("SOL-USDT", "buy", 70.0, 0.1, 7.0, 0.0, "USDT", first_buy_ts, first_buy_ts, "b1"),
+            ("SOL-USDT", "buy", 73.84, 0.2135, 15.76484, 0.0, "USDT", remaining_buy_ts, remaining_buy_ts, "b2"),
+            ("SOL-USDT", "sell", 74.0, 0.1, 7.4, 0.0, "USDT", sell_ts, sell_ts, "s1"),
+        ],
+    )
+    con.commit()
+    con.close()
+
+    with module.app.app_context():
+        payload = module.api_positions().get_json()
+
+    row = payload["positions"][0]
+    assert row["symbol"] == "SOL"
+    assert row["avg_px"] == 73.84
+    assert row["entry_ts"] == module._format_dashboard_ts_ms(remaining_buy_ts)
+    assert row["entry_source"] == "fills_fifo"
+    assert row["latest_entry_ts"] == module._format_dashboard_ts_ms(remaining_buy_ts)
+    assert row["lot_count"] == 1
+    assert row["remaining_qty_from_fills"] == 0.2135
 
 
 def test_api_positions_fallback_prefers_positions_file_mtime_over_run_dir_mtime(monkeypatch, tmp_path):

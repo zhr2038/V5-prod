@@ -936,6 +936,11 @@ function renderPositions(positions) {
     return;
   }
 
+  const positionEntryTime = (position) => {
+    const raw = String(position?.entryTime || position?.entry_ts || position?.entry_time || "").trim();
+    return raw ? raw.slice(5, 16).replace("T", " ") : "--";
+  };
+
   if (isMobileViewport()) {
     setHtml("positions-content", `<div class="position-grid">${items.map((p) => {
       const pnlValueRaw = p.pnl ?? p.pnl_value;
@@ -957,7 +962,7 @@ function renderPositions(positions) {
           <div><span class="mini-label">数量</span><span class="mini-value mono">${fmtNum(qty, 4)}</span></div>
           <div><span class="mini-label">现价</span><span class="mini-value mono">${fmtUsd(currentPrice)}</span></div>
           <div><span class="mini-label">浮盈亏</span><span class="mini-value ${pnlClass}">${fmtUsd(pnlValue)}</span></div>
-          <div><span class="mini-label">方向</span><span class="mini-value">${pnlValue >= 0 ? "盈利" : "回撤"}</span></div>
+          <div><span class="mini-label">买入</span><span class="mini-value mono">${esc(positionEntryTime(p))}</span></div>
         </div>
       </div>`;
     }).join("")}</div>`);
@@ -974,6 +979,7 @@ function renderPositions(positions) {
     const pnlClass = pnlValue >= 0 ? "text-green" : "text-red";
     return `<tr>
       <td><strong>${esc(p.symbol || "--")}</strong></td>
+      <td class="text-right mono">${esc(positionEntryTime(p))}</td>
       <td class="text-right mono">${fmtNum(qty, 4)}</td>
       <td class="text-right mono">${fmtUsd(currentPrice)}</td>
       <td class="text-right mono">${fmtUsd(p.value)}</td>
@@ -986,7 +992,7 @@ function renderPositions(positions) {
   setHtml("positions-content", `<div class="table-shell">
     <table>
       <thead>
-        <tr><th>标的</th><th class="text-right">数量</th><th class="text-right">现价</th><th class="text-right">市值</th><th class="text-right">浮盈亏 / 收益率</th></tr>
+        <tr><th>标的</th><th class="text-right">买入时间</th><th class="text-right">数量</th><th class="text-right">现价</th><th class="text-right">市值</th><th class="text-right">浮盈亏 / 收益率</th></tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>

@@ -87,6 +87,11 @@ function fullTime(value?: string) {
   });
 }
 
+function positionEntryTime(position: Position) {
+  const raw = position as unknown as UnknownRecord;
+  return firstText(position.entryTime, raw.entry_ts, raw.entry_time);
+}
+
 function boolLike(value: unknown) {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'number') return value !== 0;
@@ -218,6 +223,7 @@ function HoldingsFocusPanel({ positions, trades, account }: { positions: Positio
             <tr>
               <th>币种</th>
               <th>方向</th>
+              <th>买入时间</th>
               <th>数量</th>
               <th>均价</th>
               <th>浮动盈亏(USDT)</th>
@@ -235,16 +241,24 @@ function HoldingsFocusPanel({ positions, trades, account }: { positions: Positio
         </thead>
         <tbody>
           {hasPositions
-            ? sortedPositions.map((position) => (
-                <tr key={position.symbol}>
-                  <td>{position.symbol.replace('/USDT', '').replace('-USDT', '')}</td>
-                  <td className="text-buy">多</td>
-                  <td>{fmtNum(position.qty, 4)}</td>
-                  <td>{fmtUsd(position.avgPrice)}</td>
-                  <td className={Number(position.pnl || 0) >= 0 ? 'text-buy' : 'text-sell'}>{fmtUsd(position.pnl)}</td>
-                  <td className={Number(position.pnlPercent || 0) >= 0 ? 'text-buy' : 'text-sell'}>{fmtPct(position.pnlPercent)}</td>
-                </tr>
-              ))
+            ? sortedPositions.map((position) => {
+                const entryTime = positionEntryTime(position);
+                const positionAge = ageLabel(position.positionAgeSeconds);
+                return (
+                  <tr key={position.symbol}>
+                    <td>{position.symbol.replace('/USDT', '').replace('-USDT', '')}</td>
+                    <td className="text-buy">多</td>
+                    <td className="position-entry-cell" title={fullTime(entryTime)}>
+                      <span>{shortTime(entryTime)}</span>
+                      {positionAge ? <small>持仓 {positionAge}</small> : null}
+                    </td>
+                    <td>{fmtNum(position.qty, 4)}</td>
+                    <td>{fmtUsd(position.avgPrice)}</td>
+                    <td className={Number(position.pnl || 0) >= 0 ? 'text-buy' : 'text-sell'}>{fmtUsd(position.pnl)}</td>
+                    <td className={Number(position.pnlPercent || 0) >= 0 ? 'text-buy' : 'text-sell'}>{fmtPct(position.pnlPercent)}</td>
+                  </tr>
+                );
+              })
             : sortedTrades.slice(0, 9).map((trade) => (
                 <tr key={trade.id}>
                   <td>{shortTime(trade.timestamp)}</td>
@@ -270,7 +284,7 @@ function HoldingsFocusPanel({ positions, trades, account }: { positions: Positio
       </div>
       {latestTrade && hasPositions ? (
         <div className="latest-trade-strip">
-          <span>最近成交</span>
+          <span>最近成交 <time title={fullTime(latestTrade.timestamp)}>{shortTime(latestTrade.timestamp)}</time></span>
           <strong>{latestTrade.symbol.replace('/USDT', '').replace('-USDT', '')}</strong>
           <em className={latestTrade.side === 'buy' ? 'text-buy' : 'text-sell'}>{sideLabels[latestTrade.side] || latestTrade.side}</em>
           <b>{fmtUsd(latestTrade.price)}</b>

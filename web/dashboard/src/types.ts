@@ -26,6 +26,10 @@ export interface Position {
   value: number;
   pnl: number;
   pnlPercent: number;
+  entryTime?: string;
+  entrySource?: string;
+  latestEntryTime?: string;
+  positionAgeSeconds?: number | null;
 }
 
 export interface Trade {

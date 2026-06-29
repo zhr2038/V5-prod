@@ -2313,6 +2313,19 @@ body {
   font-weight: 700;
 }
 
+.position-entry-cell span {
+  display: block;
+}
+
+.position-entry-cell small {
+  display: block;
+  margin-top: 2px;
+  color: rgba(181, 203, 226, 0.58);
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 750;
+}
+
 .strict-design-grid .material-surface,
 .strict-design-grid .liquid-glass-thick {
   border-radius: 8px;
