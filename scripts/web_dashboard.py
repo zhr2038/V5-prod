@@ -3501,6 +3501,14 @@ def _enrich_quant_lab_cost_freshness(payload: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(payload or {})
     max_age_seconds = _quant_lab_cost_max_age_seconds()
     as_of = _parse_quant_lab_cost_datetime(out.get('as_of_ts') or (out.get('data') or {}).get('as_of_ts'))
+    if not out.get('last_sample_at') and out.get('as_of_ts'):
+        out['last_sample_at'] = out.get('as_of_ts')
+    if not out.get('refreshed_at'):
+        out['refreshed_at'] = _utc_now().strftime('%Y-%m-%dT%H:%M:%SZ')
+    if not out.get('latest_cost_source'):
+        latest_cost_source = out.get('cost_source') or out.get('source') or (out.get('data') or {}).get('cost_source')
+        if latest_cost_source:
+            out['latest_cost_source'] = latest_cost_source
     age_seconds: Optional[float] = None
     stale_reasons: List[str] = []
     if as_of is not None:

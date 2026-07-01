@@ -620,6 +620,9 @@ def test_quant_lab_cost_estimate_route_keeps_fresh_degraded_payload_non_stale(mo
     assert payload["cost_stale_reasons"] == []
     assert payload["degraded_cost_model"] is True
     assert payload["cost_trust_level"] == "PAPER_ONLY"
+    assert payload["last_sample_at"] == "2026-06-25T02:16:49Z"
+    assert payload["refreshed_at"] == "2026-06-25T02:45:00Z"
+    assert payload["latest_cost_source"] == "bootstrap_cost_probe"
 
 
 def test_quant_lab_cost_estimate_route_rejects_zero_notional_without_upstream(monkeypatch):
