@@ -27,6 +27,9 @@ type ApiTradePayload = Partial<Trade> & {
   ord_id?: string;
   client_order_id?: string;
   cl_ord_id?: string;
+  orderId?: string;
+  tradeId?: string;
+  fill_count?: number;
 };
 
 type ApiPositionPayload = Partial<import('./types').Position> & {
@@ -142,6 +145,10 @@ function normalizeTradeEntry(trade: ApiTradePayload, index: number): Trade {
     qty: derivedQty,
     value,
     fee,
+    orderId: String(trade.orderId || trade.order_id || trade.ord_id || trade.client_order_id || trade.cl_ord_id || '').trim() || undefined,
+    tradeId: String(trade.tradeId || trade.trade_id || trade.fill_id || '').trim() || undefined,
+    fillCount: Number(trade.fillCount || trade.fill_count || 1) || 1,
+    aggregated: Boolean(trade.aggregated),
   };
 }
 
@@ -170,6 +177,62 @@ export function dedupeTradeEntries(trades: Trade[] | undefined | null): Trade[] 
   return deduped;
 }
 
+function tradeOrderGroupKey(trade: Trade) {
+  const symbol = normalizeTradeSymbol(trade.symbol).toUpperCase().replace('/', '-');
+  const side = String(trade.side || '').trim().toLowerCase();
+  const orderId = String(trade.orderId || '').trim();
+  if (!orderId) return '';
+  return ['order', symbol, side, orderId].join('|');
+}
+
+function tradeTimestampValue(trade: Trade) {
+  const raw = String(trade.timestamp || '').trim();
+  if (!raw) return 0;
+  const parsed = Date.parse(raw.includes('T') ? raw : raw.replace(' ', 'T'));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function summarizeTradeOrders(trades: Trade[] | undefined | null): Trade[] {
+  const exact = dedupeTradeEntries(trades);
+  const grouped = new Map<string, Trade[]>();
+  const passthrough: Trade[] = [];
+
+  for (const trade of exact) {
+    const key = tradeOrderGroupKey(trade);
+    if (!key) {
+      passthrough.push(trade);
+      continue;
+    }
+    const rows = grouped.get(key) || [];
+    rows.push(trade);
+    grouped.set(key, rows);
+  }
+
+  const summaries: Trade[] = [];
+  for (const [key, rows] of grouped.entries()) {
+    if (rows.length <= 1) {
+      summaries.push(rows[0]);
+      continue;
+    }
+    const latest = rows.reduce((best, row) => (tradeTimestampValue(row) > tradeTimestampValue(best) ? row : best), rows[0]);
+    const qty = rows.reduce((sum, row) => sum + (Number(row.qty) || 0), 0);
+    const value = rows.reduce((sum, row) => sum + (Number(row.value) || 0), 0);
+    const fee = rows.reduce((sum, row) => sum + (Number(row.fee) || 0), 0);
+    summaries.push({
+      ...latest,
+      id: key,
+      price: qty > 0 && value > 0 ? value / qty : latest.price,
+      qty,
+      value,
+      fee,
+      fillCount: rows.reduce((sum, row) => sum + Math.max(1, Number(row.fillCount || 1) || 1), 0),
+      aggregated: true,
+    });
+  }
+
+  return [...passthrough, ...summaries].sort((a, b) => tradeTimestampValue(b) - tradeTimestampValue(a));
+}
+
 export const api = {
   dashboard: () => fetchJson<DashboardData>('/api/dashboard?view=primary'),
   dashboardDeferred: () => fetchJson<Partial<DashboardData>>('/api/dashboard?view=deferred'),
@@ -185,7 +248,7 @@ export const api = {
     const payload = await fetchJson<{ trades?: ApiTradePayload[] }>('/api/trades');
     if (!payload) return null;
     const trades = Array.isArray(payload?.trades)
-      ? dedupeTradeEntries(payload.trades.map((trade, index) => normalizeTradeEntry(trade, index)))
+      ? summarizeTradeOrders(payload.trades.map((trade, index) => normalizeTradeEntry(trade, index)))
       : [];
     return { trades };
   },

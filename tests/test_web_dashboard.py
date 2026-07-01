@@ -61,7 +61,10 @@ def test_main_trading_grid_marks_stale_quant_lab_costs():
 
     assert "cost_freshness_status" in source
     assert "data-status={pending ? 'pending' : unavailable ? 'unavailable' : stale ? 'stale' : 'fresh'}" in source
-    assert "fullTime(timestamp)" in source
+    assert "const sampleTimestamp = firstText(cost?.last_sample_at, data.last_sample_at, cost?.as_of_ts, data.as_of_ts);" in source
+    assert "样本时间" in source
+    assert "接口拉取" in source
+    assert "fullTime(sampleTimestamp)" in source
     assert "ql-cost-status-pill" in source
     assert '.ql-cost-panel[data-status="stale"]' in css
     assert '.ql-cost-panel[data-status="pending"]' in css
@@ -148,7 +151,7 @@ def test_react_dashboard_treats_empty_trade_payload_as_authoritative():
     assert "function pickObjectWithFallback<T extends object | null | undefined>(incoming: T, current: T, incomingPresent = false)" in source
     assert "if (incomingPresent) return incoming;" in source
     assert "alphaScores: pickAuthoritativeList(deferred.alphaScores, prev.alphaScores)" in source
-    assert "trades: dedupeTradeEntries(pickAuthoritativeList(deferred.trades, prev.trades))" in source
+    assert "trades: summarizeTradeOrders(pickAuthoritativeList(deferred.trades, prev.trades))" in source
     assert "if (incoming && Array.isArray(incoming.timers)) return incoming;" in source
     assert "Object.prototype.hasOwnProperty.call(deferred, 'apiTelemetry')" in source
     assert "Object.prototype.hasOwnProperty.call(deferred, 'slippageInsights')" in source
@@ -174,7 +177,7 @@ def test_react_dashboard_keeps_prior_lists_on_fetch_failure_only():
     assert "if (Array.isArray(payload?.positions)) {" in panel_source
     assert "setLivePositions(payload.positions);" in panel_source
     assert "if (Array.isArray(payload?.trades)) {" in panel_source
-    assert "setLiveTrades(dedupeTradeEntries(payload.trades));" in panel_source
+    assert "setLiveTrades(summarizeTradeOrders(payload.trades));" in panel_source
     assert "Array.isArray(payload?.trades) ? payload.trades : []" not in panel_source
 
 
@@ -8525,6 +8528,9 @@ def test_api_cost_calibration_uses_prefixed_runtime_cost_stats_dir(monkeypatch, 
     assert payload["avg_total_cost_bps"] == 1.5
     assert payload["daily_stats"][0]["date"] == "20260408"
     assert payload["last_update"] == "2026-04-08 00:00:00"
+    assert payload["last_sample_day"] == "2026-04-08"
+    assert payload["last_sample_at"] == "2026-04-08 00:00:00"
+    assert payload["refreshed_at"].endswith("Z")
 
 
 def test_api_cost_calibration_ignores_non_dated_stats_files(monkeypatch, tmp_path):
@@ -8613,6 +8619,9 @@ def test_api_cost_calibration_uses_suffixed_runtime_cost_events_dir(monkeypatch,
     assert payload["avg_total_cost_bps"] == 1.5
     assert payload["daily_stats"][0]["date"] == "20260408"
     assert payload["last_update"] == "2026-04-08 00:00:00"
+    assert payload["last_sample_day"] == "2026-04-08"
+    assert payload["last_sample_at"] == "2026-04-08 00:00:00"
+    assert payload["refreshed_at"].endswith("Z")
 
 
 def test_api_cost_calibration_ignores_non_dated_event_files(monkeypatch, tmp_path):
@@ -10380,6 +10389,63 @@ def test_api_trades_dedupes_live_fill_trade_ids_without_collapsing_roundtrip(mon
     assert [trade["trade_id"] for trade in payload["trades"]] == ["eth-exit-fill", "eth-entry-fill"]
     assert {trade["side"] for trade in payload["trades"]} == {"buy", "sell"}
     assert payload["trades"][0]["id"] == "eth-exit-fill"
+
+
+def test_dashboard_trade_display_aggregates_partial_fills_by_order_id():
+    module = load_web_dashboard_module()
+
+    rows = module._aggregate_dashboard_trades_for_display(
+        [
+            {
+                "id": "fill-1",
+                "trade_id": "fill-1",
+                "order_id": "order-sol-buy",
+                "symbol": "SOL-USDT",
+                "side": "buy",
+                "time": "2026-06-29 21:00:01",
+                "price": 73.0,
+                "qty": 0.1,
+                "amount": 7.3,
+                "fee": -0.001,
+            },
+            {
+                "id": "fill-2",
+                "trade_id": "fill-2",
+                "order_id": "order-sol-buy",
+                "symbol": "SOL-USDT",
+                "side": "buy",
+                "time": "2026-06-29 21:00:02",
+                "price": 75.0,
+                "qty": 0.2,
+                "amount": 15.0,
+                "fee": -0.002,
+            },
+            {
+                "id": "exit-fill",
+                "trade_id": "exit-fill",
+                "order_id": "order-sol-sell",
+                "symbol": "SOL-USDT",
+                "side": "sell",
+                "time": "2026-06-29 22:00:00",
+                "price": 76.0,
+                "qty": 0.3,
+                "amount": 22.8,
+                "fee": -0.003,
+            },
+        ]
+    )
+
+    buy_rows = [row for row in rows if row["side"] == "buy"]
+    sell_rows = [row for row in rows if row["side"] == "sell"]
+    assert len(buy_rows) == 1
+    assert len(sell_rows) == 1
+    assert buy_rows[0]["id"] == "order:SOL-USDT:buy:order-sol-buy"
+    assert buy_rows[0]["aggregated"] is True
+    assert buy_rows[0]["fill_count"] == 2
+    assert buy_rows[0]["qty"] == pytest.approx(0.3)
+    assert buy_rows[0]["amount"] == pytest.approx(22.3)
+    assert buy_rows[0]["fee"] == pytest.approx(-0.003)
+    assert buy_rows[0]["price"] == pytest.approx(22.3 / 0.3)
 
 
 def test_api_trades_db_fallback_converts_json_fee_maps_to_signed_usdt(monkeypatch, tmp_path):

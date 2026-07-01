@@ -3,7 +3,7 @@ import { LiquidBg } from './components/LiquidBg';
 import { TopCommandBar } from './components/TopCommandBar';
 import { StatusRibbon } from './components/StatusRibbon';
 import { MainTradingGrid } from './components/MainTradingGrid';
-import { api, dedupeTradeEntries } from './api';
+import { api, summarizeTradeOrders } from './api';
 import { useInterval } from './hooks/useInterval';
 import type {
   DashboardData,
@@ -165,7 +165,7 @@ function mergeDeferredDashboard(prev: DashboardData | null, deferred: Partial<Da
     ...deferred,
     systemStatus: systemStatus || prev.systemStatus,
     alphaScores: pickAuthoritativeList(deferred.alphaScores, prev.alphaScores),
-    trades: dedupeTradeEntries(pickAuthoritativeList(deferred.trades, prev.trades)),
+    trades: summarizeTradeOrders(pickAuthoritativeList(deferred.trades, prev.trades)),
     timers: pickTimersWithFallback(deferred.timers, prev.timers),
     apiTelemetry: pickObjectWithFallback(
       deferred.apiTelemetry,
@@ -199,7 +199,7 @@ function dashboardFocusForQuantLab(dashboard?: DashboardData | null) {
   if (firstPosition?.symbol) {
     return { symbol: firstPosition.symbol, notional_usdt: Number(firstPosition.value || 0) || 0 };
   }
-  const latestTrade = dedupeTradeEntries(dashboard?.trades).sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a))[0];
+  const latestTrade = summarizeTradeOrders(dashboard?.trades).sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a))[0];
   if (latestTrade?.symbol) {
     return { symbol: latestTrade.symbol, notional_usdt: Number(latestTrade.value || 0) || 0 };
   }
@@ -280,7 +280,7 @@ function App() {
       const authoritativeTrades = Array.isArray(liveTrades?.trades) ? liveTrades.trades : d.trades;
       const nextDashboardBase = {
         ...d,
-        trades: dedupeTradeEntries(authoritativeTrades),
+        trades: summarizeTradeOrders(authoritativeTrades),
       } as DashboardData;
       setDashboard((prev) => {
         const merged = prev ? { ...prev, ...nextDashboardBase } : nextDashboardBase;

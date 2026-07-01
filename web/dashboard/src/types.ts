@@ -42,6 +42,10 @@ export interface Trade {
   qty: number;
   value: number;
   fee: number;
+  orderId?: string;
+  tradeId?: string;
+  fillCount?: number;
+  aggregated?: boolean;
 }
 
 export interface AlphaScore {
@@ -378,6 +382,10 @@ export interface QuantLabCostEstimateData extends UnknownRecord {
   sample_count?: number | null;
   cost_model_version?: string | null;
   as_of_ts?: string | null;
+  last_sample_at?: string | null;
+  last_sample_day?: string | null;
+  refreshed_at?: string | null;
+  generated_at?: string | null;
   cost_age_seconds?: number | null;
   cost_max_age_seconds?: number | null;
   cost_freshness_status?: string | null;

@@ -334,6 +334,73 @@ def _dedupe_dashboard_trades(trades: List[Dict[str, Any]]) -> List[Dict[str, Any
     return deduped
 
 
+def _dashboard_trade_order_key(trade: Dict[str, Any]) -> str:
+    symbol = _dashboard_trade_text(trade.get('symbol')).upper().replace('/', '-').replace('_', '-')
+    side = _dashboard_trade_text(trade.get('side')).lower()
+    order_id = _dashboard_trade_text(
+        trade.get('order_id')
+        or trade.get('ord_id')
+        or trade.get('client_order_id')
+        or trade.get('cl_ord_id')
+        or trade.get('orderId')
+    )
+    if not (symbol and side and order_id):
+        return ''
+    return f"order:{symbol}:{side}:{order_id}"
+
+
+def _float_for_dashboard_trade(value: Any) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _aggregate_dashboard_trades_for_display(trades: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    exact = _dedupe_dashboard_trades(trades)
+    passthrough: List[Dict[str, Any]] = []
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for trade in exact:
+        key = _dashboard_trade_order_key(trade)
+        if not key:
+            passthrough.append(trade)
+            continue
+        grouped.setdefault(key, []).append(trade)
+
+    summaries: List[Dict[str, Any]] = list(passthrough)
+    for key, rows in grouped.items():
+        if len(rows) <= 1:
+            summaries.extend(rows)
+            continue
+        latest = max(
+            rows,
+            key=lambda row: _coerce_timestamp_epoch(row.get('time') or row.get('timestamp')) or 0.0,
+        )
+        qty = sum(_float_for_dashboard_trade(row.get('qty')) for row in rows)
+        amount = sum(_float_for_dashboard_trade(row.get('amount') or row.get('value')) for row in rows)
+        fee = sum(_float_for_dashboard_trade(row.get('fee')) for row in rows)
+        price = (amount / qty) if qty > 0 and amount > 0 else _float_for_dashboard_trade(latest.get('price'))
+        merged = dict(latest)
+        merged.update(
+            {
+                'id': key,
+                'price': round(price, 6),
+                'qty': round(qty, 8),
+                'amount': round(amount, 4),
+                'value': round(amount, 4),
+                'fee': round(fee, 6),
+                'fill_count': len(rows),
+                'aggregated': True,
+            }
+        )
+        summaries.append(merged)
+    summaries.sort(
+        key=lambda row: _coerce_timestamp_epoch(row.get('time') or row.get('timestamp')) or 0.0,
+        reverse=True,
+    )
+    return summaries
+
+
 def _json_internal_error_response(
     exc: BaseException,
     *,
@@ -6310,11 +6377,12 @@ def api_dashboard():
                 trades_data = []
             if not isinstance(scores_data, dict):
                 scores_data = {'scores': []}
+            trades_data = _aggregate_dashboard_trades_for_display(trades_data)
 
             trades = []
             for i, trade in enumerate(trades_data[:20]):
                 trades.append({
-                    'id': str(i),
+                    'id': str(trade.get('id') or i),
                     'timestamp': trade.get('time', '') if trade.get('time') else '',
                     'symbol': trade.get('symbol', '').replace('-USDT', '/USDT'),
                     'side': trade.get('side', 'buy'),
@@ -6323,6 +6391,10 @@ def api_dashboard():
                     'qty': float(trade.get('qty', 0) or 0),
                     'value': trade.get('amount', 0),
                     'fee': abs(trade.get('fee', 0)),
+                    'orderId': trade.get('order_id') or trade.get('ord_id') or trade.get('client_order_id') or trade.get('orderId') or '',
+                    'tradeId': trade.get('trade_id') or trade.get('fill_id') or '',
+                    'fillCount': int(float(trade.get('fill_count') or 1)),
+                    'aggregated': bool(trade.get('aggregated')),
                 })
 
             alpha_scores = []
@@ -6451,11 +6523,12 @@ def api_dashboard():
             trades_data = []
         if not isinstance(scores_data, dict):
             scores_data = {'scores': []}
+        trades_data = _aggregate_dashboard_trades_for_display(trades_data)
 
         trades = []
         for i, trade in enumerate(trades_data[:20]):
             trades.append({
-                'id': str(i),
+                'id': str(trade.get('id') or i),
                 'timestamp': trade.get('time', '') if trade.get('time') else '',
                 'symbol': trade.get('symbol', '').replace('-USDT', '/USDT'),
                 'side': trade.get('side', 'buy'),
@@ -6463,7 +6536,11 @@ def api_dashboard():
                 'price': float(trade.get('price', 0) or 0),
                 'qty': float(trade.get('qty', 0) or 0),
                 'value': trade.get('amount', 0),
-                'fee': abs(trade.get('fee', 0))
+                'fee': abs(trade.get('fee', 0)),
+                'orderId': trade.get('order_id') or trade.get('ord_id') or trade.get('client_order_id') or trade.get('orderId') or '',
+                'tradeId': trade.get('trade_id') or trade.get('fill_id') or '',
+                'fillCount': int(float(trade.get('fill_count') or 1)),
+                'aggregated': bool(trade.get('aggregated')),
             })
 
         alpha_scores = []
@@ -6826,10 +6903,14 @@ def api_cost_calibration():
             avg_fee_bps /= total_days
 
         latest_update = ''
+        latest_sample_day = ''
+        latest_sample_at = ''
         if calibration_data:
             latest_day = calibration_data[-1].get('date')
             if isinstance(latest_day, str) and re.fullmatch(r'\d{8}', latest_day):
-                latest_update = _parse_utc_datetime(latest_day, '%Y%m%d').strftime('%Y-%m-%d 00:00:00')
+                latest_sample_day = f"{latest_day[0:4]}-{latest_day[4:6]}-{latest_day[6:8]}"
+                latest_sample_at = _parse_utc_datetime(latest_day, '%Y%m%d').strftime('%Y-%m-%d 00:00:00')
+                latest_update = latest_sample_at
         
         # 获取事件文件数
         event_count = len(dated_event_files)
@@ -6845,6 +6926,9 @@ def api_cost_calibration():
             'daily_stats': calibration_data[-7:],  # 最近7天
             'progress_percent': min(100, int(total_days / 7 * 100)),
             'data_source': data_source,
+            'last_sample_day': latest_sample_day,
+            'last_sample_at': latest_sample_at,
+            'refreshed_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
             'last_update': latest_update,
         })
     except Exception as exc:

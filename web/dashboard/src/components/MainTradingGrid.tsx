@@ -4,7 +4,7 @@ import { Activity, Clock, Route } from 'lucide-react';
 import { PositionsPanel } from './PositionsPanel';
 import { MarketRadar } from './MarketRadar';
 import { useDataPulse, usePreviousValue } from '../hooks/useDataPulse';
-import { dedupeTradeEntries } from '../api';
+import { summarizeTradeOrders } from '../api';
 import { fmtNum, fmtPct, fmtUsd, sideLabels } from '../lib/format';
 import type {
   AccountData,
@@ -188,7 +188,7 @@ function buildTelemetryPath(samples: ApiTelemetrySeriesSample[], field: 'p50_lat
 }
 
 function focusTrades(trades: Trade[]) {
-  return dedupeTradeEntries(trades).sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a));
+  return summarizeTradeOrders(trades).sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a));
 }
 
 function HoldingsFocusPanel({ positions, trades, account }: { positions: Position[]; trades: Trade[]; account?: AccountData | null }) {
@@ -265,7 +265,10 @@ function HoldingsFocusPanel({ positions, trades, account }: { positions: Positio
                   <td>{trade.symbol.replace('/USDT', '').replace('-USDT', '')}</td>
                   <td className={trade.side === 'buy' ? 'text-buy' : 'text-sell'}>{sideLabels[trade.side] || trade.side}</td>
                   <td className={trade.side === 'buy' ? 'text-buy' : 'text-sell'}>{fmtUsd(trade.price)}</td>
-                  <td>{fmtNum(trade.qty, 4)}</td>
+                  <td>
+                    {fmtNum(trade.qty, 4)}
+                    {Number(trade.fillCount || 1) > 1 ? <small className="trade-fill-count">合并 {trade.fillCount} 笔</small> : null}
+                  </td>
                 </tr>
               ))}
           {!hasPositions && !sortedTrades.length ? (
@@ -321,7 +324,10 @@ function HoldingsFocusPanel({ positions, trades, account }: { positions: Positio
                       <td>{trade.symbol.replace('/USDT', '').replace('-USDT', '')}</td>
                       <td className={trade.side === 'buy' ? 'text-buy' : 'text-sell'}>{sideLabels[trade.side] || trade.side}</td>
                       <td className={trade.side === 'buy' ? 'text-buy' : 'text-sell'}>{fmtUsd(trade.price)}</td>
-                      <td>{fmtNum(trade.qty, 4)}</td>
+                      <td>
+                        {fmtNum(trade.qty, 4)}
+                        {Number(trade.fillCount || 1) > 1 ? <small className="trade-fill-count">合并 {trade.fillCount} 笔</small> : null}
+                      </td>
                       <td>{fmtUsd(trade.value)}</td>
                       <td>{fmtUsd(trade.fee)}</td>
                     </tr>
@@ -378,7 +384,9 @@ function QuantLabCostPanel({ cost }: { cost?: QuantLabCostEstimateData | null })
         ? `数据过期 ${costAge}`
         : '数据过期'
       : freshness || 'fresh';
-  const timestamp = firstText(cost?.as_of_ts, data.as_of_ts);
+  const proxy = asRecord(cost?.proxy || data.proxy);
+  const sampleTimestamp = firstText(cost?.last_sample_at, data.last_sample_at, cost?.as_of_ts, data.as_of_ts);
+  const refreshedAt = firstText(cost?.refreshed_at, data.refreshed_at, cost?.generated_at, data.generated_at, proxy.sampled_at);
 
   return (
     <section className="design-panel ql-cost-panel" data-status={pending ? 'pending' : unavailable ? 'unavailable' : stale ? 'stale' : 'fresh'}>
@@ -399,7 +407,8 @@ function QuantLabCostPanel({ cost }: { cost?: QuantLabCostEstimateData | null })
         <span>Fallback Level <strong>{firstText(cost?.fallback_level, data.fallback_level, 'NONE')}</strong></span>
         <span>数据来源 <strong>{source || '--'}</strong></span>
         <span>样本数 <strong>{fmtNum(firstNumber(cost?.sample_count, data.sample_count), 0)}</strong></span>
-        <span>更新时间 <strong>{stale ? fullTime(timestamp) : shortTime(timestamp)}</strong></span>
+        <span>样本时间 <strong>{stale ? fullTime(sampleTimestamp) : shortTime(sampleTimestamp)}</strong></span>
+        {refreshedAt ? <span>接口拉取 <strong>{shortTime(refreshedAt)}</strong></span> : null}
         <span>信任 <strong>{trustLevel || '--'}</strong></span>
         {uniqueStaleReasons.length ? (
           <span className="ql-cost-reasons">原因 <strong>{uniqueStaleReasons.slice(0, 4).map(reasonLabel).join(' / ')}</strong></span>

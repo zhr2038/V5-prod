@@ -2313,6 +2313,15 @@ body {
   font-weight: 700;
 }
 
+.trade-fill-count {
+  display: block;
+  margin-top: 2px;
+  color: rgba(181, 203, 226, 0.58);
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 750;
+}
+
 .position-entry-cell span {
   display: block;
 }
