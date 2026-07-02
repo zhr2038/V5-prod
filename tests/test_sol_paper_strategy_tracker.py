@@ -1129,6 +1129,10 @@ def test_paper_strategy_tracker_acknowledges_current_quant_lab_proposals(tmp_pat
     ack = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_proposal_ack.csv")
     by_proposal = {row["proposal_id"]: row for row in ack}
     assert by_proposal["BNB_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["accepted"] == "True"
+    assert by_proposal["BNB_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["proposal_hash"]
+    assert by_proposal["BNB_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["accepted_at"]
+    assert by_proposal["BNB_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["paper_only"] == "True"
+    assert by_proposal["BNB_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["max_live_notional_usdt"] == "0.0"
     assert by_proposal["BNB_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["paper_tracker_id"] == "BNB_F3_DOMINANT_ENTRY_PAPER_V1"
     assert by_proposal["SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["accepted"] == "True"
     assert by_proposal["SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["paper_tracker_id"] == "SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1"

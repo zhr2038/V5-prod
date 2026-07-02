@@ -285,8 +285,12 @@ EXPANDED_UNIVERSE_ADVISORY_FIELDS = (
 )
 PAPER_PROPOSAL_ACK_FIELDS = (
     "proposal_id",
+    "proposal_hash",
     "paper_tracker_id",
     "accepted",
+    "accepted_at",
+    "paper_only",
+    "max_live_notional_usdt",
     "recommended_mode",
     "symbol",
     "strategy_candidate",

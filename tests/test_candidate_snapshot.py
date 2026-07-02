@@ -72,6 +72,9 @@ def test_candidate_snapshot_builds_symbol_rows_and_stable_ids(tmp_path: Path) ->
                 "arrival_bid": 599.5,
                 "arrival_ask": 600.5,
                 "arrival_mid": 600.0,
+                "quote_ts": "2026-05-15T00:00:01Z",
+                "quote_age_ms": 275,
+                "quote_source": "okx_books5",
             },
             "expected_edge_bps": 60.0,
             "quant_lab": {
@@ -121,6 +124,9 @@ def test_candidate_snapshot_builds_symbol_rows_and_stable_ids(tmp_path: Path) ->
     assert bnb["arrival_bid"] == 599.5
     assert bnb["arrival_ask"] == 600.5
     assert bnb["arrival_mid"] == 600.0
+    assert bnb["quote_ts"] == "2026-05-15T00:00:01Z"
+    assert bnb["quote_age_ms"] == 275.0
+    assert bnb["quote_source"] == "okx_books5"
     assert bnb["entry_reference_px"] == 600.0
     assert bnb["entry_price_source"] == "arrival_mid"
     assert bnb["price_observable"] == "strong"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import tarfile
@@ -290,8 +291,12 @@ PAPER_RUN_FIELDS = [
 
 PAPER_PROPOSAL_ACK_FIELDS = [
     "proposal_id",
+    "proposal_hash",
     "paper_tracker_id",
     "accepted",
+    "accepted_at",
+    "paper_only",
+    "max_live_notional_usdt",
     "recommended_mode",
     "symbol",
     "strategy_candidate",
@@ -2392,11 +2397,16 @@ def _proposal_ack_rows(
             reject_reason = "recommended_mode_not_paper"
         elif matched_spec is None:
             reject_reason = "no_supported_paper_tracker"
+        accepted = bool(matched_spec is not None and not reject_reason)
         rows.append(
             {
                 "proposal_id": proposal_id,
+                "proposal_hash": _proposal_hash(row),
                 "paper_tracker_id": _paper_tracker_id_for_spec(matched_spec or {}),
-                "accepted": bool(matched_spec is not None and not reject_reason),
+                "accepted": accepted,
+                "accepted_at": _proposal_ack_timestamp(row),
+                "paper_only": accepted,
+                "max_live_notional_usdt": 0.0,
                 "recommended_mode": mode or str(row.get("recommended_mode") or ""),
                 "symbol": _proposal_symbol(row),
                 "strategy_candidate": _proposal_strategy_candidate(row),
@@ -2407,6 +2417,24 @@ def _proposal_ack_rows(
             }
         )
     return rows
+
+
+def _proposal_hash(row: Mapping[str, Any]) -> str:
+    payload = {
+        str(key): row.get(key)
+        for key in sorted(row.keys())
+        if str(key) not in {"source_path", "source_bundle_path"}
+    }
+    material = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _proposal_ack_timestamp(row: Mapping[str, Any]) -> str:
+    for key in ("accepted_at", "generated_at", "as_of_ts", "created_at", "proposal_ts"):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return value
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _strategy_configs_with_proposals(

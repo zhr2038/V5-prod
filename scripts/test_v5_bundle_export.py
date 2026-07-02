@@ -4481,8 +4481,12 @@ def main():
             assert raw_effective_config == report_effective_config
             assert proposal_ack_reader.fieldnames == [
                 "proposal_id",
+                "proposal_hash",
                 "paper_tracker_id",
                 "accepted",
+                "accepted_at",
+                "paper_only",
+                "max_live_notional_usdt",
                 "recommended_mode",
                 "symbol",
                 "strategy_candidate",
