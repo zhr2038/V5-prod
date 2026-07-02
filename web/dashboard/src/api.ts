@@ -39,6 +39,12 @@ type ApiPositionPayload = Partial<import('./types').Position> & {
   pnl_pct?: number;
   value_usdt?: number;
   price?: number;
+  entry_ts?: string;
+  entry_time?: string;
+  entry_source?: string;
+  latest_entry_ts?: string;
+  latest_entry_time?: string;
+  position_age_seconds?: number | null;
 };
 
 export interface QuantLabCostEstimateParams {
@@ -95,6 +101,11 @@ function normalizePositionEntry(position: ApiPositionPayload) {
   const value = Number(position.value ?? position.value_usdt ?? 0) || 0;
   const pnl = Number(position.pnl ?? position.pnl_value ?? 0) || 0;
   const pnlPercent = Number(position.pnlPercent ?? position.pnl_pct ?? 0) || 0;
+  const entryTime = String(position.entryTime || position.entry_ts || position.entry_time || '').trim();
+  const latestEntryTime = String(position.latestEntryTime || position.latest_entry_ts || position.latest_entry_time || '').trim();
+  const entrySource = String(position.entrySource || position.entry_source || '').trim();
+  const positionAgeSeconds =
+    position.positionAgeSeconds ?? position.position_age_seconds ?? null;
 
   return {
     symbol: String(position.symbol || ''),
@@ -104,6 +115,10 @@ function normalizePositionEntry(position: ApiPositionPayload) {
     value,
     pnl,
     pnlPercent,
+    entryTime,
+    entrySource,
+    latestEntryTime,
+    positionAgeSeconds,
   };
 }
 

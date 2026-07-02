@@ -181,6 +181,19 @@ def test_react_dashboard_keeps_prior_lists_on_fetch_failure_only():
     assert "Array.isArray(payload?.trades) ? payload.trades : []" not in panel_source
 
 
+def test_react_positions_poll_preserves_entry_time_fields():
+    api_source = API_TS_PATH.read_text(encoding="utf-8")
+
+    assert "entry_ts?: string;" in api_source
+    assert "entry_source?: string;" in api_source
+    assert "latest_entry_ts?: string;" in api_source
+    assert "position_age_seconds?: number | null;" in api_source
+    assert "const entryTime = String(position.entryTime || position.entry_ts || position.entry_time || '').trim();" in api_source
+    assert "const latestEntryTime = String(position.latestEntryTime || position.latest_entry_ts || position.latest_entry_time || '').trim();" in api_source
+    assert "const entrySource = String(position.entrySource || position.entry_source || '').trim();" in api_source
+    assert "position.positionAgeSeconds ?? position.position_age_seconds ?? null" in api_source
+
+
 def _utc_epoch_from_text(value: str, fmt: str) -> float:
     return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc).timestamp()
 
