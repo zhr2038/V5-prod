@@ -5228,6 +5228,25 @@ def api_positions():
                 p['avg_px'] = round(avg_cost, 6)
 
         for p in positions:
+            entry_ts = (
+                p.get('entry_ts')
+                or p.get('entry_time')
+                or _format_dashboard_ts_ms(p.get('entry_ts_ms'))
+                or p.get('latest_entry_ts')
+                or p.get('latest_entry_time')
+                or _format_dashboard_ts_ms(p.get('latest_entry_ts_ms'))
+            )
+            latest_entry_ts = (
+                p.get('latest_entry_ts')
+                or p.get('latest_entry_time')
+                or _format_dashboard_ts_ms(p.get('latest_entry_ts_ms'))
+                or entry_ts
+            )
+            if entry_ts:
+                p['entry_ts'] = entry_ts
+            if latest_entry_ts:
+                p['latest_entry_ts'] = latest_entry_ts
+
             avg_px = float(p.get('avg_px', 0))
             last_px = float(p.get('last_price', 0))
             if avg_px > 0 and last_px > 0:
@@ -6462,9 +6481,24 @@ def api_dashboard():
                 'pnl': round(pnl, 4),
                 # Keep ratios in decimal form; monitor_v2.html formats them as percentages.
                 'pnlPercent': round(pnl_pct, 4),
-                'entryTime': pos.get('entry_ts') or pos.get('entry_time') or '',
+                'entryTime': (
+                    pos.get('entry_ts')
+                    or pos.get('entry_time')
+                    or _format_dashboard_ts_ms(pos.get('entry_ts_ms'))
+                    or pos.get('latest_entry_ts')
+                    or pos.get('latest_entry_time')
+                    or _format_dashboard_ts_ms(pos.get('latest_entry_ts_ms'))
+                    or ''
+                ),
+                'entryTimeMs': pos.get('entry_ts_ms'),
                 'entrySource': pos.get('entry_source') or '',
-                'latestEntryTime': pos.get('latest_entry_ts') or '',
+                'latestEntryTime': (
+                    pos.get('latest_entry_ts')
+                    or pos.get('latest_entry_time')
+                    or _format_dashboard_ts_ms(pos.get('latest_entry_ts_ms'))
+                    or ''
+                ),
+                'latestEntryTimeMs': pos.get('latest_entry_ts_ms'),
                 'positionAgeSeconds': pos.get('position_age_seconds'),
             })
         

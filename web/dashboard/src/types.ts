@@ -27,8 +27,10 @@ export interface Position {
   pnl: number;
   pnlPercent: number;
   entryTime?: string;
+  entryTimeMs?: number | null;
   entrySource?: string;
   latestEntryTime?: string;
+  latestEntryTimeMs?: number | null;
   positionAgeSeconds?: number | null;
 }
 

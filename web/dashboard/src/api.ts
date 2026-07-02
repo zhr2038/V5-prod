@@ -40,9 +40,11 @@ type ApiPositionPayload = Partial<import('./types').Position> & {
   value_usdt?: number;
   price?: number;
   entry_ts?: string;
+  entry_ts_ms?: number | string | null;
   entry_time?: string;
   entry_source?: string;
   latest_entry_ts?: string;
+  latest_entry_ts_ms?: number | string | null;
   latest_entry_time?: string;
   position_age_seconds?: number | null;
 };
@@ -94,6 +96,28 @@ function normalizeTradeSymbol(symbol: unknown): string {
   return raw.replace('-USDT', '/USDT');
 }
 
+function formatChinaTimestampFromMs(rawValue: unknown): string {
+  if (rawValue === null || rawValue === undefined || rawValue === '') return '';
+  const num = Number(rawValue);
+  if (!Number.isFinite(num) || num <= 0) return '';
+  const ms = Math.abs(num) < 10_000_000_000 ? num * 1000 : num;
+  const date = new Date(ms + 8 * 60 * 60 * 1000);
+  if (!Number.isFinite(date.getTime())) return '';
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return [
+    `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`,
+    `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`,
+  ].join(' ');
+}
+
+function firstPositionTimestamp(...values: unknown[]): string {
+  for (const value of values) {
+    const text = String(value ?? '').trim();
+    if (text && text !== '0') return text;
+  }
+  return '';
+}
+
 function normalizePositionEntry(position: ApiPositionPayload) {
   const qty = Number(position.qty ?? 0) || 0;
   const avgPrice = Number(position.avgPrice ?? position.avg_px ?? 0) || 0;
@@ -101,8 +125,21 @@ function normalizePositionEntry(position: ApiPositionPayload) {
   const value = Number(position.value ?? position.value_usdt ?? 0) || 0;
   const pnl = Number(position.pnl ?? position.pnl_value ?? 0) || 0;
   const pnlPercent = Number(position.pnlPercent ?? position.pnl_pct ?? 0) || 0;
-  const entryTime = String(position.entryTime || position.entry_ts || position.entry_time || '').trim();
-  const latestEntryTime = String(position.latestEntryTime || position.latest_entry_ts || position.latest_entry_time || '').trim();
+  const latestEntryTime = firstPositionTimestamp(
+    position.latestEntryTime,
+    position.latest_entry_ts,
+    position.latest_entry_time,
+    formatChinaTimestampFromMs(position.latestEntryTimeMs),
+    formatChinaTimestampFromMs(position.latest_entry_ts_ms),
+  );
+  const entryTime = firstPositionTimestamp(
+    position.entryTime,
+    position.entry_ts,
+    position.entry_time,
+    formatChinaTimestampFromMs(position.entryTimeMs),
+    formatChinaTimestampFromMs(position.entry_ts_ms),
+    latestEntryTime,
+  );
   const entrySource = String(position.entrySource || position.entry_source || '').trim();
   const positionAgeSeconds =
     position.positionAgeSeconds ?? position.position_age_seconds ?? null;

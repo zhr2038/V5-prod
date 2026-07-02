@@ -89,7 +89,14 @@ function fullTime(value?: string) {
 
 function positionEntryTime(position: Position) {
   const raw = position as unknown as UnknownRecord;
-  return firstText(position.entryTime, raw.entry_ts, raw.entry_time);
+  return firstText(
+    position.entryTime,
+    raw.entry_ts,
+    raw.entry_time,
+    position.latestEntryTime,
+    raw.latest_entry_ts,
+    raw.latest_entry_time,
+  );
 }
 
 function boolLike(value: unknown) {

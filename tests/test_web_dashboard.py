@@ -183,15 +183,22 @@ def test_react_dashboard_keeps_prior_lists_on_fetch_failure_only():
 
 def test_react_positions_poll_preserves_entry_time_fields():
     api_source = API_TS_PATH.read_text(encoding="utf-8")
+    grid_source = MAIN_TRADING_GRID_TSX_PATH.read_text(encoding="utf-8")
 
     assert "entry_ts?: string;" in api_source
+    assert "entry_ts_ms?: number | string | null;" in api_source
     assert "entry_source?: string;" in api_source
     assert "latest_entry_ts?: string;" in api_source
+    assert "latest_entry_ts_ms?: number | string | null;" in api_source
     assert "position_age_seconds?: number | null;" in api_source
-    assert "const entryTime = String(position.entryTime || position.entry_ts || position.entry_time || '').trim();" in api_source
-    assert "const latestEntryTime = String(position.latestEntryTime || position.latest_entry_ts || position.latest_entry_time || '').trim();" in api_source
+    assert "function formatChinaTimestampFromMs(rawValue: unknown): string" in api_source
+    assert "formatChinaTimestampFromMs(position.entry_ts_ms)" in api_source
+    assert "formatChinaTimestampFromMs(position.latest_entry_ts_ms)" in api_source
+    assert "latestEntryTime," in api_source
     assert "const entrySource = String(position.entrySource || position.entry_source || '').trim();" in api_source
     assert "position.positionAgeSeconds ?? position.position_age_seconds ?? null" in api_source
+    assert "position.latestEntryTime" in grid_source
+    assert "raw.latest_entry_ts" in grid_source
 
 
 def _utc_epoch_from_text(value: str, fmt: str) -> float:
@@ -2324,6 +2331,9 @@ def test_dashboard_api_reuses_positions_endpoint_within_request(monkeypatch, tmp
                 "value_usdt": 25.0,
                 "pnl_value": 5.0,
                 "pnl_pct": 0.25,
+                "entry_ts_ms": 1_710_000_000_000,
+                "latest_entry_ts_ms": 1_710_003_600_000,
+                "entry_source": "fills_fifo",
             }]
         })
 
@@ -2345,6 +2355,9 @@ def test_dashboard_api_reuses_positions_endpoint_within_request(monkeypatch, tmp
     payload = response.get_json()
     assert calls["positions"] == 1
     assert payload["positions"][0]["symbol"] == "ETH"
+    assert payload["positions"][0]["entryTime"] == module._format_dashboard_ts_ms(1_710_000_000_000)
+    assert payload["positions"][0]["latestEntryTime"] == module._format_dashboard_ts_ms(1_710_003_600_000)
+    assert payload["positions"][0]["entrySource"] == "fills_fifo"
     assert payload["account"]["positionsValue"] == 25.0
     assert payload["account"]["totalEquity"] == 125.0
 
