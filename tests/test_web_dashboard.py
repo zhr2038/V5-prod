@@ -9821,8 +9821,13 @@ def test_api_positions_exports_fifo_entry_time_from_remaining_lots(monkeypatch, 
     assert row["symbol"] == "SOL"
     assert row["avg_px"] == 73.84
     assert row["entry_ts"] == module._format_dashboard_ts_ms(remaining_buy_ts)
+    assert row["entryTime"] == module._format_dashboard_ts_ms(remaining_buy_ts)
+    assert row["entryTimeMs"] == remaining_buy_ts
     assert row["entry_source"] == "fills_fifo"
     assert row["latest_entry_ts"] == module._format_dashboard_ts_ms(remaining_buy_ts)
+    assert row["latestEntryTime"] == module._format_dashboard_ts_ms(remaining_buy_ts)
+    assert row["latestEntryTimeMs"] == remaining_buy_ts
+    assert row["positionAgeSeconds"] == row["position_age_seconds"]
     assert row["lot_count"] == 1
     assert row["remaining_qty_from_fills"] == 0.2135
 

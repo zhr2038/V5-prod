@@ -5244,8 +5244,16 @@ def api_positions():
             )
             if entry_ts:
                 p['entry_ts'] = entry_ts
+                p['entryTime'] = entry_ts
             if latest_entry_ts:
                 p['latest_entry_ts'] = latest_entry_ts
+                p['latestEntryTime'] = latest_entry_ts
+            if p.get('entry_ts_ms') is not None:
+                p['entryTimeMs'] = p.get('entry_ts_ms')
+            if p.get('latest_entry_ts_ms') is not None:
+                p['latestEntryTimeMs'] = p.get('latest_entry_ts_ms')
+            if p.get('position_age_seconds') is not None:
+                p['positionAgeSeconds'] = p.get('position_age_seconds')
 
             avg_px = float(p.get('avg_px', 0))
             last_px = float(p.get('last_price', 0))
