@@ -205,6 +205,9 @@ def test_react_positions_poll_preserves_entry_time_fields():
     assert "position.positionAgeSeconds ?? position.position_age_seconds ?? null" in api_source
     assert "position.latestEntryTime" in grid_source
     assert "raw.latest_entry_ts" in grid_source
+    assert "function latestBuyTradeTimeForPosition(position: Position, trades: Trade[])" in grid_source
+    assert "String(trade.side || '').toLowerCase() === 'buy'" in grid_source
+    assert "const entryTime = positionEntryTime(position, sortedTrades);" in grid_source
 
 
 def _utc_epoch_from_text(value: str, fmt: str) -> float:
@@ -9838,6 +9841,105 @@ def test_api_positions_exports_fifo_entry_time_from_remaining_lots(monkeypatch, 
     assert row["positionAgeSeconds"] == row["position_age_seconds"]
     assert row["lot_count"] == 1
     assert row["remaining_qty_from_fills"] == 0.2135
+
+
+def test_api_positions_falls_back_to_latest_buy_fill_entry_time(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "execution": {
+                "order_store_path": "reports/shadow_runtime/orders.sqlite",
+                "reconcile_status_path": "reports/shadow_runtime/reconcile_status.json",
+            }
+        },
+    )
+    monkeypatch.setattr(module, "_load_position_lot_metadata_from_fills", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module.requests, "get", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("network down")))
+
+    positions_db = runtime_dir / "positions.sqlite"
+    con = sqlite3.connect(str(positions_db))
+    cur = con.cursor()
+    cur.execute("CREATE TABLE positions (symbol TEXT, qty REAL, avg_px REAL, last_mark_px REAL)")
+    cur.execute("INSERT INTO positions VALUES ('SOL/USDT', 0.19469311, 81.38, 81.6)")
+    con.commit()
+    con.close()
+
+    previous_sell_ts = 1_782_956_450_000
+    latest_buy_ts = 1_782_997_249_865
+    fills_db = runtime_dir / "fills.sqlite"
+    con = sqlite3.connect(str(fills_db))
+    cur = con.cursor()
+    cur.execute(
+        """
+        CREATE TABLE fills (
+          inst_id TEXT,
+          side TEXT,
+          fill_px REAL,
+          fill_sz REAL,
+          fill_notional REAL,
+          fee REAL,
+          fee_ccy TEXT,
+          ts_ms INTEGER,
+          created_ts_ms INTEGER,
+          trade_id TEXT
+        )
+        """
+    )
+    cur.executemany(
+        """
+        INSERT INTO fills (
+          inst_id, side, fill_px, fill_sz, fill_notional, fee, fee_ccy, ts_ms, created_ts_ms, trade_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("SOL-USDT", "sell", 79.47, 0.202358, 16.08139, -0.016081, "USDT", previous_sell_ts, previous_sell_ts, "s1"),
+            ("SOL-USDT", "buy", 81.38, 0.194888, 15.862, -0.000194888, "SOL", latest_buy_ts, latest_buy_ts, "b1"),
+        ],
+    )
+    con.commit()
+    con.close()
+
+    with module.app.app_context():
+        payload = module.api_positions().get_json()
+
+    row = payload["positions"][0]
+    assert row["symbol"] == "SOL"
+    assert row["entry_ts"] == module._format_dashboard_ts_ms(latest_buy_ts)
+    assert row["entryTime"] == module._format_dashboard_ts_ms(latest_buy_ts)
+    assert row["entryTimeMs"] == latest_buy_ts
+    assert row["entry_source"] == "fills_latest_buy_fallback"
+    assert row["latestEntryTime"] == module._format_dashboard_ts_ms(latest_buy_ts)
+    assert row["positionAgeSeconds"] == row["position_age_seconds"]
+
+
+def test_api_positions_latest_buy_fallback_ignores_closed_roundtrip(tmp_path):
+    module = load_web_dashboard_module()
+
+    fills_db = tmp_path / "fills.sqlite"
+    con = sqlite3.connect(str(fills_db))
+    cur = con.cursor()
+    cur.execute("CREATE TABLE fills (inst_id TEXT, side TEXT, ts_ms INTEGER, created_ts_ms INTEGER)")
+    cur.executemany(
+        "INSERT INTO fills VALUES (?, ?, ?, ?)",
+        [
+            ("SOL-USDT", "buy", 1_782_997_249_865, 1_782_997_249_865),
+            ("SOL-USDT", "sell", 1_783_054_847_931, 1_783_054_847_931),
+        ],
+    )
+    con.commit()
+    con.close()
+
+    assert module._load_position_entry_time_fallback_from_fills("SOL", fills_db=fills_db) is None
 
 
 def test_api_positions_fallback_prefers_positions_file_mtime_over_run_dir_mtime(monkeypatch, tmp_path):

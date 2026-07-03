@@ -2097,6 +2097,63 @@ def _load_position_lot_metadata_from_fills(
     }
 
 
+def _load_position_entry_time_fallback_from_fills(
+    symbol: str,
+    fills_db: Optional[Path] = None,
+) -> Optional[Dict[str, Any]]:
+    """Return a display-only entry time when the latest buy is newer than the latest sell."""
+    base_symbol = str(symbol or '').split('/')[0].split('-')[0].upper()
+    inst_id = _to_inst_id(base_symbol)
+    if fills_db is None:
+        fills_db = REPORTS_DIR / 'fills.sqlite'
+    if not fills_db.exists() or not inst_id:
+        return None
+
+    try:
+        conn = sqlite3.connect(str(fills_db))
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT side, ts_ms, created_ts_ms
+            FROM fills
+            WHERE inst_id = ?
+            ORDER BY ts_ms DESC, created_ts_ms DESC
+            """,
+            (inst_id,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+    except Exception:
+        return None
+
+    latest_buy_ts_ms = 0
+    latest_sell_ts_ms = 0
+    for raw_side, ts_ms, created_ts_ms in rows:
+        event_ts_ms = max(_normalize_fill_ts_ms(ts_ms), _normalize_fill_ts_ms(created_ts_ms))
+        if event_ts_ms <= 0:
+            continue
+        side = str(raw_side or '').lower()
+        if side == 'buy' and latest_buy_ts_ms <= 0:
+            latest_buy_ts_ms = event_ts_ms
+        elif side == 'sell' and latest_sell_ts_ms <= 0:
+            latest_sell_ts_ms = event_ts_ms
+        if latest_buy_ts_ms > 0 and latest_sell_ts_ms > 0:
+            break
+
+    if latest_buy_ts_ms <= 0 or latest_buy_ts_ms < latest_sell_ts_ms:
+        return None
+
+    now_ms = int(time.time() * 1000)
+    return {
+        'entry_ts': _format_dashboard_ts_ms(latest_buy_ts_ms),
+        'entry_ts_ms': latest_buy_ts_ms,
+        'latest_entry_ts': _format_dashboard_ts_ms(latest_buy_ts_ms),
+        'latest_entry_ts_ms': latest_buy_ts_ms,
+        'entry_source': 'fills_latest_buy_fallback',
+        'position_age_seconds': max(0, int((now_ms - latest_buy_ts_ms) / 1000)),
+    }
+
+
 def load_config():
     """加载配置"""
     cfg = load_app_config(
@@ -5218,6 +5275,23 @@ def api_positions():
                     value = lot_metadata.get(key)
                     if value not in (None, ''):
                         p[key] = value
+            if not p.get('entry_ts') and not p.get('entry_ts_ms'):
+                fallback_metadata = _load_position_entry_time_fallback_from_fills(
+                    symbol,
+                    fills_db=runtime_paths.fills_db,
+                )
+                if fallback_metadata:
+                    for key in (
+                        'entry_ts',
+                        'entry_ts_ms',
+                        'latest_entry_ts',
+                        'latest_entry_ts_ms',
+                        'entry_source',
+                        'position_age_seconds',
+                    ):
+                        value = fallback_metadata.get(key)
+                        if value not in (None, ''):
+                            p[key] = value
             if not avg_cost:
                 avg_cost = _load_avg_cost_from_fills(
                     symbol,

@@ -87,7 +87,22 @@ function fullTime(value?: string) {
   });
 }
 
-function positionEntryTime(position: Position) {
+function displayBaseSymbol(value?: string) {
+  return String(value || '').trim().toUpperCase().replace('/USDT', '').replace('-USDT', '');
+}
+
+function latestBuyTradeTimeForPosition(position: Position, trades: Trade[]) {
+  const positionBase = displayBaseSymbol(position.symbol);
+  if (!positionBase) return '';
+  const match = trades.find((trade) => (
+    displayBaseSymbol(trade.symbol) === positionBase &&
+    String(trade.side || '').toLowerCase() === 'buy' &&
+    String(trade.timestamp || '').trim()
+  ));
+  return match?.timestamp || '';
+}
+
+function positionEntryTime(position: Position, trades: Trade[] = []) {
   const raw = position as unknown as UnknownRecord;
   return firstText(
     position.entryTime,
@@ -96,6 +111,7 @@ function positionEntryTime(position: Position) {
     position.latestEntryTime,
     raw.latest_entry_ts,
     raw.latest_entry_time,
+    latestBuyTradeTimeForPosition(position, trades),
   );
 }
 
@@ -249,7 +265,7 @@ function HoldingsFocusPanel({ positions, trades, account }: { positions: Positio
         <tbody>
           {hasPositions
             ? sortedPositions.map((position) => {
-                const entryTime = positionEntryTime(position);
+                const entryTime = positionEntryTime(position, sortedTrades);
                 const positionAge = ageLabel(position.positionAgeSeconds);
                 return (
                   <tr key={position.symbol}>
