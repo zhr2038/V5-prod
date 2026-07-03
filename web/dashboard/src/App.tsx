@@ -1,4 +1,4 @@
-import { lazy, startTransition, useEffect, useState, useCallback } from 'react';
+import { lazy, startTransition, useEffect, useRef, useState, useCallback } from 'react';
 import { LiquidBg } from './components/LiquidBg';
 import { TopCommandBar } from './components/TopCommandBar';
 import { StatusRibbon } from './components/StatusRibbon';
@@ -194,11 +194,26 @@ function tradeTimeValue(trade: Trade) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function dashboardFocusForQuantLab(dashboard?: DashboardData | null) {
-  const firstPosition = dashboard?.positions?.[0];
-  if (firstPosition?.symbol) {
-    return { symbol: firstPosition.symbol, notional_usdt: Number(firstPosition.value || 0) || 0 };
+function positionFocusFromDashboard(dashboard?: DashboardData | null) {
+  const positions = Array.isArray(dashboard?.positions) ? dashboard.positions : [];
+  let bestSymbol = '';
+  let bestNotional = -1;
+  for (const position of positions) {
+    const symbol = String(position?.symbol || '').trim();
+    if (!symbol) continue;
+    const notional = Math.max(0, Number(position.value || 0) || 0);
+    if (notional > bestNotional) {
+      bestSymbol = symbol;
+      bestNotional = notional;
+    }
   }
+  if (!bestSymbol) return null;
+  return { symbol: bestSymbol, notional_usdt: Math.max(0, bestNotional) };
+}
+
+function dashboardFocusForQuantLab(dashboard?: DashboardData | null) {
+  const positionFocus = positionFocusFromDashboard(dashboard);
+  if (positionFocus) return positionFocus;
   const latestTrade = summarizeTradeOrders(dashboard?.trades).sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a))[0];
   if (latestTrade?.symbol) {
     return { symbol: latestTrade.symbol, notional_usdt: Number(latestTrade.value || 0) || 0 };
@@ -219,7 +234,23 @@ function App() {
   const [updateTime, setUpdateTime] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [showDeferredPanels, setShowDeferredPanels] = useState(false);
+  const manualFocusRef = useRef(false);
   const [focusSymbol, setFocusSymbol] = useState('BNB-USDT');
+
+  const syncPositionFocus = useCallback((nextDashboard: DashboardData) => {
+    if (manualFocusRef.current) return;
+    const positionFocus = positionFocusFromDashboard(nextDashboard);
+    const nextFocusSymbol = quantLabSymbol(positionFocus?.symbol);
+    if (!nextFocusSymbol) return;
+    startTransition(() => {
+      setFocusSymbol((current) => (current === nextFocusSymbol ? current : nextFocusSymbol));
+    });
+  }, []);
+
+  const handleSymbolSearch = useCallback((symbol: string) => {
+    manualFocusRef.current = true;
+    setFocusSymbol(symbol);
+  }, []);
 
   const loadQuantLab = useCallback(async (focus?: { symbol?: string; notional_usdt?: number } | null) => {
     const symbol = quantLabSymbol(focus?.symbol);
@@ -286,13 +317,14 @@ function App() {
         const merged = prev ? { ...prev, ...nextDashboardBase } : nextDashboardBase;
         return merged;
       });
+      syncPositionFocus(nextDashboardBase);
       setMarketState(d.marketState || null);
       void loadQuantLab(dashboardFocusForQuantLab(nextDashboardBase));
     }
     if (r) setRiskGuard(r);
     setUpdateTime(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
     setLoading(false);
-  }, [loadQuantLab]);
+  }, [loadQuantLab, syncPositionFocus]);
 
   const loadSecondary = useCallback(async () => {
     void loadApiTelemetrySeries();
@@ -382,7 +414,7 @@ function App() {
             void loadQuantLab(dashboardFocusForQuantLab(dashboard));
             void loadApiTelemetrySeries();
           }}
-          onSymbolSearch={setFocusSymbol}
+          onSymbolSearch={handleSymbolSearch}
         />
 
         <StatusRibbon

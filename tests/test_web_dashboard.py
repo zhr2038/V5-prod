@@ -159,6 +159,19 @@ def test_react_dashboard_treats_empty_trade_payload_as_authoritative():
     assert "liveTrades.trades.length > 0" not in source
 
 
+def test_react_dashboard_chart_focus_tracks_active_position_until_manual_search():
+    source = APP_TSX_PATH.read_text(encoding="utf-8")
+
+    assert "function positionFocusFromDashboard(dashboard?: DashboardData | null)" in source
+    assert "const positionFocus = positionFocusFromDashboard(dashboard);" in source
+    assert "const manualFocusRef = useRef(false);" in source
+    assert "const syncPositionFocus = useCallback((nextDashboard: DashboardData) => {" in source
+    assert "if (manualFocusRef.current) return;" in source
+    assert "syncPositionFocus(nextDashboardBase);" in source
+    assert "manualFocusRef.current = true;" in source
+    assert "onSymbolSearch={handleSymbolSearch}" in source
+
+
 def test_react_dashboard_deferred_merge_keeps_fresh_system_status_timestamp():
     source = APP_TSX_PATH.read_text(encoding="utf-8")
 
