@@ -118,6 +118,15 @@ function firstPositionTimestamp(...values: unknown[]): string {
   return '';
 }
 
+function firstNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    if (value === null || value === undefined || value === '') continue;
+    const num = Number(value);
+    if (Number.isFinite(num)) return num;
+  }
+  return null;
+}
+
 function normalizePositionEntry(position: ApiPositionPayload) {
   const qty = Number(position.qty ?? 0) || 0;
   const avgPrice = Number(position.avgPrice ?? position.avg_px ?? 0) || 0;
@@ -125,6 +134,8 @@ function normalizePositionEntry(position: ApiPositionPayload) {
   const value = Number(position.value ?? position.value_usdt ?? 0) || 0;
   const pnl = Number(position.pnl ?? position.pnl_value ?? 0) || 0;
   const pnlPercent = Number(position.pnlPercent ?? position.pnl_pct ?? 0) || 0;
+  const entryTimeMs = firstNumber(position.entryTimeMs, position.entry_ts_ms);
+  const latestEntryTimeMs = firstNumber(position.latestEntryTimeMs, position.latest_entry_ts_ms);
   const latestEntryTime = firstPositionTimestamp(
     position.latestEntryTime,
     position.latest_entry_ts,
@@ -153,8 +164,10 @@ function normalizePositionEntry(position: ApiPositionPayload) {
     pnl,
     pnlPercent,
     entryTime,
+    entryTimeMs,
     entrySource,
     latestEntryTime,
+    latestEntryTimeMs,
     positionAgeSeconds,
   };
 }
@@ -286,8 +299,25 @@ export function summarizeTradeOrders(trades: Trade[] | undefined | null): Trade[
 }
 
 export const api = {
-  dashboard: () => fetchJson<DashboardData>('/api/dashboard?view=primary'),
-  dashboardDeferred: () => fetchJson<Partial<DashboardData>>('/api/dashboard?view=deferred'),
+  dashboard: async () => {
+    const payload = await fetchJson<DashboardData & { positions?: ApiPositionPayload[] }>('/api/dashboard?view=primary');
+    if (!payload) return null;
+    return {
+      ...payload,
+      positions: Array.isArray(payload.positions)
+        ? payload.positions.map((position) => normalizePositionEntry(position))
+        : [],
+    };
+  },
+  dashboardDeferred: async () => {
+    const payload = await fetchJson<Partial<DashboardData> & { positions?: ApiPositionPayload[] }>('/api/dashboard?view=deferred');
+    if (!payload) return null;
+    if (!Array.isArray(payload.positions)) return payload;
+    return {
+      ...payload,
+      positions: payload.positions.map((position) => normalizePositionEntry(position)),
+    };
+  },
   positions: async () => {
     const payload = await fetchJson<{ positions?: ApiPositionPayload[] }>('/api/positions');
     if (!payload) return null;

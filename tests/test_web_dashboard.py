@@ -194,7 +194,13 @@ def test_react_positions_poll_preserves_entry_time_fields():
     assert "function formatChinaTimestampFromMs(rawValue: unknown): string" in api_source
     assert "formatChinaTimestampFromMs(position.entry_ts_ms)" in api_source
     assert "formatChinaTimestampFromMs(position.latest_entry_ts_ms)" in api_source
+    assert "const entryTimeMs = firstNumber(position.entryTimeMs, position.entry_ts_ms);" in api_source
+    assert "const latestEntryTimeMs = firstNumber(position.latestEntryTimeMs, position.latest_entry_ts_ms);" in api_source
+    assert "positions: Array.isArray(payload.positions)" in api_source
+    assert "payload.positions.map((position) => normalizePositionEntry(position))" in api_source
+    assert "entryTimeMs," in api_source
     assert "latestEntryTime," in api_source
+    assert "latestEntryTimeMs," in api_source
     assert "const entrySource = String(position.entrySource || position.entry_source || '').trim();" in api_source
     assert "position.positionAgeSeconds ?? position.position_age_seconds ?? null" in api_source
     assert "position.latestEntryTime" in grid_source
@@ -2331,9 +2337,10 @@ def test_dashboard_api_reuses_positions_endpoint_within_request(monkeypatch, tmp
                 "value_usdt": 25.0,
                 "pnl_value": 5.0,
                 "pnl_pct": 0.25,
-                "entry_ts_ms": 1_710_000_000_000,
-                "latest_entry_ts_ms": 1_710_003_600_000,
-                "entry_source": "fills_fifo",
+                "entryTimeMs": 1_710_000_000_000,
+                "latestEntryTimeMs": 1_710_003_600_000,
+                "entrySource": "fills_fifo",
+                "positionAgeSeconds": 3600,
             }]
         })
 
@@ -2358,6 +2365,7 @@ def test_dashboard_api_reuses_positions_endpoint_within_request(monkeypatch, tmp
     assert payload["positions"][0]["entryTime"] == module._format_dashboard_ts_ms(1_710_000_000_000)
     assert payload["positions"][0]["latestEntryTime"] == module._format_dashboard_ts_ms(1_710_003_600_000)
     assert payload["positions"][0]["entrySource"] == "fills_fifo"
+    assert payload["positions"][0]["positionAgeSeconds"] == 3600
     assert payload["account"]["positionsValue"] == 25.0
     assert payload["account"]["totalEquity"] == 125.0
 

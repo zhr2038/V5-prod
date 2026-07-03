@@ -6480,6 +6480,15 @@ def api_dashboard():
                 pnl_pct = ((cur_price - avg_price) / avg_price) if avg_price > 0 and cur_price > 0 else 0
             else:
                 pnl_pct = float(raw_pnl_pct or 0)
+            entry_time_ms = pos.get('entry_ts_ms')
+            if entry_time_ms is None:
+                entry_time_ms = pos.get('entryTimeMs')
+            latest_entry_time_ms = pos.get('latest_entry_ts_ms')
+            if latest_entry_time_ms is None:
+                latest_entry_time_ms = pos.get('latestEntryTimeMs')
+            position_age_seconds = pos.get('position_age_seconds')
+            if position_age_seconds is None:
+                position_age_seconds = pos.get('positionAgeSeconds')
             positions.append({
                 'symbol': pos.get('symbol', ''),
                 'qty': qty,
@@ -6492,22 +6501,25 @@ def api_dashboard():
                 'entryTime': (
                     pos.get('entry_ts')
                     or pos.get('entry_time')
-                    or _format_dashboard_ts_ms(pos.get('entry_ts_ms'))
+                    or pos.get('entryTime')
+                    or _format_dashboard_ts_ms(entry_time_ms)
                     or pos.get('latest_entry_ts')
                     or pos.get('latest_entry_time')
-                    or _format_dashboard_ts_ms(pos.get('latest_entry_ts_ms'))
+                    or pos.get('latestEntryTime')
+                    or _format_dashboard_ts_ms(latest_entry_time_ms)
                     or ''
                 ),
-                'entryTimeMs': pos.get('entry_ts_ms'),
-                'entrySource': pos.get('entry_source') or '',
+                'entryTimeMs': entry_time_ms,
+                'entrySource': pos.get('entry_source') or pos.get('entrySource') or '',
                 'latestEntryTime': (
                     pos.get('latest_entry_ts')
                     or pos.get('latest_entry_time')
-                    or _format_dashboard_ts_ms(pos.get('latest_entry_ts_ms'))
+                    or pos.get('latestEntryTime')
+                    or _format_dashboard_ts_ms(latest_entry_time_ms)
                     or ''
                 ),
-                'latestEntryTimeMs': pos.get('latest_entry_ts_ms'),
-                'positionAgeSeconds': pos.get('position_age_seconds'),
+                'latestEntryTimeMs': latest_entry_time_ms,
+                'positionAgeSeconds': position_age_seconds,
             })
         
         positions_value = float(account_data.get('positions_value_usdt', 0) or 0)
