@@ -19,7 +19,20 @@ def normalize_permission(value: Any, *, allow_local: bool = False) -> str:
         return ALLOW
     if raw in {"SELL_ONLY", "SELLONLY", "SELL", "LIQUIDATE_ONLY", "QUARANTINE"}:
         return SELL_ONLY
-    if raw in {"ABORT", "DENY", "DENIED", "BLOCK", "BLOCKED", "HALT", "KILL", "STOP"}:
+    if raw in {
+        "ABORT",
+        "DENY",
+        "DENIED",
+        "BLOCK",
+        "BLOCKED",
+        "HALT",
+        "KILL",
+        "STOP",
+        "UNAVAILABLE",
+        "NOT_AVAILABLE",
+        "NOT_OBSERVABLE",
+        "NO_FRESH_PERMISSION",
+    }:
         return ABORT
     raise QuantLabPermissionError(f"unsupported quant-lab permission: {value!r}")
 

@@ -188,6 +188,28 @@ def test_enforce_active_abort_blocks_new_entry(tmp_path: Path) -> None:
     assert [order.side for order in kept] == ["sell"]
 
 
+def test_enforce_unavailable_remote_permission_blocks_new_entry(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, "enforce")
+    guard = _guard(
+        tmp_path,
+        cfg,
+        _PermissionClient(
+            permission="UNAVAILABLE",
+            permission_status="NO_FRESH_PERMISSION",
+            enforceable=False,
+        ),
+    )
+
+    result = guard.check_startup_permission(cfg, "permission-contract-run")
+    kept = guard.filter_orders_by_permission([_buy(), _close()], result)
+
+    assert result.raw_permission_decision == "ABORT"
+    assert result.effective_permission_decision == "SELL_ONLY"
+    assert result.permission == "SELL_ONLY"
+    assert result.would_block_if_enforced is True
+    assert [order.side for order in kept] == ["sell"]
+
+
 def test_enforce_active_sell_only_allows_close_and_blocks_open(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path, "enforce")
     guard = _guard(tmp_path, cfg, _PermissionClient(permission="SELL_ONLY", permission_status="ACTIVE_SELL_ONLY"))
