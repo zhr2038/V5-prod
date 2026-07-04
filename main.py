@@ -2020,6 +2020,7 @@ def _write_candidate_snapshot_for_run(
     equity_usdt: Any,
     orders: list[Any],
     no_signal_reasons: Optional[dict[str, Any]] = None,
+    top_of_book: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> int:
     from src.reporting.candidate_snapshot import (
         build_candidate_snapshot_rows,
@@ -2072,6 +2073,7 @@ def _write_candidate_snapshot_for_run(
         no_signal_reasons=no_signal_reasons,
         symbol_cost_table=symbol_cost_table,
         quant_lab_cost_cache=quant_lab_cost_cache,
+        top_of_book=top_of_book,
         **candidate_snapshot_cost_defaults(cfg),
     )
     write_candidate_snapshot(
@@ -2469,6 +2471,7 @@ def _write_candidate_snapshot_best_effort(
     equity_usdt: Any = None,
     orders: Iterable[Any] = (),
     no_signal_reason: str | None = None,
+    top_of_book: Mapping[str, Mapping[str, Any]] | None = None,
     log_obj: Any = None,
 ) -> int:
     symbol_scope = _candidate_snapshot_symbol_scope(symbols)
@@ -2489,6 +2492,7 @@ def _write_candidate_snapshot_best_effort(
             equity_usdt=equity_usdt,
             orders=list(orders or []),
             no_signal_reasons=no_signal_reasons,
+            top_of_book=top_of_book,
         )
         audit.add_note(f"candidate_snapshot rows={candidate_rows}")
         audit.save(str(runtime_run_dir))
@@ -3591,6 +3595,7 @@ def main() -> None:
         prices=dict(prices or {}),
         equity_usdt=eq,
         orders=list(orders or []),
+        top_of_book=latest_top_of_book,
         log_obj=log,
     )
 

@@ -185,6 +185,49 @@ def test_candidate_snapshot_builds_symbol_rows_and_stable_ids(tmp_path: Path) ->
     assert per_run_rows[0]["candidate_id"] == bnb["candidate_id"]
 
 
+def test_candidate_snapshot_uses_top_of_book_for_unordered_candidate_arrival_mid() -> None:
+    audit = SimpleNamespace(
+        top_scores=[{"symbol": "SOL/USDT", "score": 0.83, "rank": 1}],
+        targets_pre_risk={"SOL/USDT": 0.10},
+        targets_post_risk={"SOL/USDT": 0.0},
+        router_decisions=[
+            {"symbol": "SOL/USDT", "action": "skip", "reason": "protect_entry_alpha6_score_too_low"}
+        ],
+        target_execution_explain=[],
+        strategy_signals=[],
+    )
+
+    rows = build_candidate_snapshot_rows(
+        run_id="run_quote_only",
+        ts_utc="2026-05-15T00:00:00Z",
+        symbols=["SOL/USDT"],
+        audit=audit,
+        local_cost_bps=30.0,
+        top_of_book={
+            "SOL/USDT": {
+                "bid": 149.9,
+                "ask": 150.1,
+                "quote_ts": "2026-05-15T00:00:01Z",
+                "quote_age_ms": 250,
+                "source": "okx_books5",
+            }
+        },
+    )
+
+    sol = rows[0]
+    assert sol["decision_px"] == 150.0
+    assert sol["arrival_bid"] == 149.9
+    assert sol["arrival_ask"] == 150.1
+    assert sol["arrival_mid"] == 150.0
+    assert sol["quote_ts"] == "2026-05-15T00:00:01Z"
+    assert sol["quote_age_ms"] == 250.0
+    assert sol["quote_source"] == "okx_books5"
+    assert sol["entry_reference_px"] == 150.0
+    assert sol["entry_price_source"] == "arrival_mid"
+    assert sol["price_observable"] == "strong"
+    assert sol["price_observability_reason"] == "arrival_mid_available"
+
+
 def test_candidate_snapshot_uses_quant_lab_cost_estimates_for_blocked_candidate() -> None:
     audit = SimpleNamespace(
         top_scores=[{"symbol": "BTC/USDT", "score": 0.70, "rank": 1}],

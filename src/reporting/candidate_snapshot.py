@@ -288,6 +288,7 @@ def build_candidate_snapshot_rows(
     no_signal_reasons: Mapping[str, Any] | None = None,
     symbol_cost_table: Mapping[str, Mapping[str, Any]] | None = None,
     quant_lab_cost_cache: Mapping[str, Mapping[str, Any]] | None = None,
+    top_of_book: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     prices = dict(prices or {})
     target_weights_raw = dict(target_weights_raw or getattr(audit, "targets_pre_risk", {}) or {})
@@ -302,6 +303,7 @@ def build_candidate_snapshot_rows(
     quant_lab_costs = _quant_lab_cost_lookup(getattr(audit, "quant_lab", {}) or {})
     symbol_cost_table = dict(symbol_cost_table or {})
     quant_lab_cost_cache = dict(quant_lab_cost_cache or {})
+    top_of_book = dict(top_of_book or {})
     no_signal_reasons = dict(no_signal_reasons or {})
     order_lookup = _orders_by_symbol(orders)
     position_lookup = _positions_by_symbol(positions)
@@ -357,6 +359,7 @@ def build_candidate_snapshot_rows(
         position = position_lookup.get(symbol)
         router_rows = router_decisions.get(symbol, [])
         router_latest = router_rows[-1] if router_rows else {}
+        quote = _lookup_symbol_mapping(top_of_book, symbol)
         candidate_price, candidate_price_source = _candidate_snapshot_price(
             symbol=symbol,
             prices=prices,
@@ -372,6 +375,7 @@ def build_candidate_snapshot_rows(
             top=top,
             explain=explain,
             router_decision=router_latest,
+            quote=quote,
         )
         current_position = _float_or_none(getattr(position, "qty", None))
         current_weight = _current_weight(position, candidate_price, equity_usdt)
@@ -1034,6 +1038,7 @@ def _candidate_price_observability(
     top: Mapping[str, Any],
     explain: Mapping[str, Any],
     router_decision: Mapping[str, Any],
+    quote: Mapping[str, Any],
 ) -> dict[str, Any]:
     lifecycle = _first_mapping(_nested_get(order, ("meta", "order_lifecycle")))
     order_meta = _first_mapping(_nested_get(order, ("meta",)))
@@ -1043,6 +1048,10 @@ def _candidate_price_observability(
         _nested_get(top, ("arrival_bid",)),
         _nested_get(explain, ("arrival_bid",)),
         _nested_get(router_decision, ("arrival_bid",)),
+        _nested_get(quote, ("arrival_bid",)),
+        _nested_get(quote, ("bid",)),
+        _nested_get(quote, ("bid_px",)),
+        _nested_get(quote, ("best_bid",)),
     )
     arrival_ask = _first_float(
         _nested_get(lifecycle, ("arrival_ask",)),
@@ -1050,6 +1059,10 @@ def _candidate_price_observability(
         _nested_get(top, ("arrival_ask",)),
         _nested_get(explain, ("arrival_ask",)),
         _nested_get(router_decision, ("arrival_ask",)),
+        _nested_get(quote, ("arrival_ask",)),
+        _nested_get(quote, ("ask",)),
+        _nested_get(quote, ("ask_px",)),
+        _nested_get(quote, ("best_ask",)),
     )
     arrival_mid = _first_float(
         _nested_get(lifecycle, ("arrival_mid",)),
@@ -1057,6 +1070,9 @@ def _candidate_price_observability(
         _nested_get(top, ("arrival_mid",)),
         _nested_get(explain, ("arrival_mid",)),
         _nested_get(router_decision, ("arrival_mid",)),
+        _nested_get(quote, ("arrival_mid",)),
+        _nested_get(quote, ("mid",)),
+        _nested_get(quote, ("mid_px",)),
     )
     quote_ts = _first(
         _nested_get(lifecycle, ("quote_ts",)),
@@ -1074,6 +1090,11 @@ def _candidate_price_observability(
         _nested_get(router_decision, ("quote_ts",)),
         _nested_get(router_decision, ("arrival_quote_ts",)),
         _nested_get(router_decision, ("book_ts",)),
+        _nested_get(quote, ("quote_ts",)),
+        _nested_get(quote, ("arrival_quote_ts",)),
+        _nested_get(quote, ("book_ts",)),
+        _nested_get(quote, ("ts",)),
+        _nested_get(quote, ("timestamp",)),
     )
     quote_age_ms = _first_float(
         _nested_get(lifecycle, ("quote_age_ms",)),
@@ -1091,6 +1112,10 @@ def _candidate_price_observability(
         _nested_get(router_decision, ("quote_age_ms",)),
         _nested_get(router_decision, ("arrival_quote_age_ms",)),
         _nested_get(router_decision, ("book_age_ms",)),
+        _nested_get(quote, ("quote_age_ms",)),
+        _nested_get(quote, ("arrival_quote_age_ms",)),
+        _nested_get(quote, ("book_age_ms",)),
+        _nested_get(quote, ("age_ms",)),
     )
     quote_source = _first(
         _nested_get(lifecycle, ("quote_source",)),
@@ -1108,6 +1133,10 @@ def _candidate_price_observability(
         _nested_get(router_decision, ("quote_source",)),
         _nested_get(router_decision, ("arrival_quote_source",)),
         _nested_get(router_decision, ("book_source",)),
+        _nested_get(quote, ("quote_source",)),
+        _nested_get(quote, ("arrival_quote_source",)),
+        _nested_get(quote, ("book_source",)),
+        _nested_get(quote, ("source",)),
     )
     if arrival_mid is None and arrival_bid is not None and arrival_ask is not None:
         if arrival_bid > 0 and arrival_ask > 0:

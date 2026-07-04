@@ -1,0 +1,13 @@
+[Unit]
+Description=Sync latest quant-lab expert pack for V5 paper-only proposal readers
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/clawd/v5-prod
+ExecStart=/home/ubuntu/clawd/v5-prod/.venv/bin/python scripts/sync_quant_lab_latest_bundle.py
+NoNewPrivileges=true
+PrivateTmp=true
