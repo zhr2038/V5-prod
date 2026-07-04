@@ -2313,6 +2313,33 @@ def _known_proposal_to_spec(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
             "proposal_source": str(row.get("source_path") or ""),
             "ignore_strategy_opportunity_advisory": True,
         }
+    if proposal_id in {BNB_F3_DOMINANT_PROPOSAL_ID, BNB_F3_DOMINANT_STRATEGY_ID} or (
+        symbol == BNB_SYMBOL and candidate_key in {"f3_dominant_entry", "v5.f3_dominant_entry"}
+    ):
+        return {
+            "strategy_id": BNB_F3_DOMINANT_STRATEGY_ID,
+            "proposal_id": proposal_id or BNB_F3_DOMINANT_PROPOSAL_ID,
+            "experiment_name": "v5.bnb_f3_dominant_entry",
+            "source_strategy_candidates": {
+                "f3_dominant_entry",
+                "v5.f3_dominant_entry",
+                "v5.bnb_f3_dominant_entry",
+            },
+            "allowed_block_reasons": set(),
+            "symbol": BNB_SYMBOL,
+            "primary_horizon_hours": horizon or 24,
+            "require_protect_level": False,
+            "require_no_cooldown": False,
+            "require_alpha6_buy": True,
+            "min_alpha6_score": 0.9,
+            "require_expected_edge_gt_required": True,
+            "require_cost_gate_verified": True,
+            "allowed_current_regimes": sorted(BNB_ALLOWED_PAPER_REGIMES),
+            "extra_live_block_reasons": list(BNB_PAPER_LIVE_BLOCK_REASONS),
+            "proposal_present": True,
+            "proposal_source": str(row.get("source_path") or ""),
+            "ignore_strategy_opportunity_advisory": True,
+        }
     if proposal_id == ETH_F4_VOLUME_EXPANSION_STRATEGY_ID or (
         symbol == ETH_SYMBOL and candidate_key in {"f4_volume_swing", "f4_volume_expansion_entry", "v5.f4_volume_expansion_entry"}
     ):

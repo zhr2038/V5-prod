@@ -1155,6 +1155,89 @@ def test_paper_strategy_tracker_acknowledges_current_quant_lab_proposals(tmp_pat
     assert daily_by_proposal["SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1"]["paper_tracker_id"] == "SOL_USDT_F3_DOMINANT_ENTRY_PAPER_V1"
 
 
+def test_paper_strategy_tracker_acks_bnb_f3_proposal_without_configured_bnb_tracker(
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg(include_bnb=False)
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_bnb_known_proposal"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate_snapshot.csv").write_text(
+        "run_id,ts_utc,symbol,final_decision,strategy_candidate\n",
+        encoding="utf-8",
+    )
+    _write_paper_strategy_proposals(
+        tmp_path / "reports",
+        [
+            {
+                "proposal_id": "BNB_USDT_F3_DOMINANT_ENTRY_PAPER_V1",
+                "strategy_candidate": "v5.f3_dominant_entry",
+                "symbol": "BNB-USDT",
+                "recommended_mode": "paper",
+                "suggested_horizon": "24h",
+            }
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_bnb_known_proposal", start_s),
+        market_data_1h={"BNB/USDT": _series("BNB/USDT", start_s, {0: 600.0})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["proposal_rows"] == 1
+    assert result["paper_strategy_proposal_ack_rows"] == 1
+    ack = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_proposal_ack.csv")
+    assert ack[0]["proposal_id"] == "BNB_USDT_F3_DOMINANT_ENTRY_PAPER_V1"
+    assert ack[0]["accepted"] == "True"
+    assert ack[0]["paper_tracker_id"] == "BNB_F3_DOMINANT_ENTRY_PAPER_V1"
+    assert ack[0]["reject_reason"] == ""
+    assert ack[0]["max_live_notional_usdt"] == "0.0"
+    assert ack[0]["live_order_effect"] == "read_only_no_live_order"
+
+
+def test_paper_strategy_tracker_rejects_unsupported_proposal_with_reason(tmp_path: Path) -> None:
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    run_dir = tmp_path / "reports" / "runs" / "r_unknown_proposal"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate_snapshot.csv").write_text(
+        "run_id,ts_utc,symbol,final_decision,strategy_candidate\n",
+        encoding="utf-8",
+    )
+    _write_paper_strategy_proposals(
+        tmp_path / "reports",
+        [
+            {
+                "proposal_id": "DOGE_USDT_UNKNOWN_ENTRY_PAPER_V1",
+                "strategy_candidate": "v5.unknown_entry",
+                "symbol": "DOGE-USDT",
+                "recommended_mode": "paper",
+                "suggested_horizon": "24h",
+            }
+        ],
+    )
+
+    result = update_sol_paper_strategy_tracker(
+        run_dir=run_dir,
+        audit=_audit("r_unknown_proposal", start_s),
+        market_data_1h={"DOGE/USDT": _series("DOGE/USDT", start_s, {0: 0.2})},
+        cfg=cfg,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert result["proposal_rows"] == 1
+    assert result["paper_strategy_proposal_ack_rows"] == 1
+    ack = _read_csv(tmp_path / "reports" / "summaries" / "paper_strategy_proposal_ack.csv")
+    assert ack[0]["proposal_id"] == "DOGE_USDT_UNKNOWN_ENTRY_PAPER_V1"
+    assert ack[0]["accepted"] == "False"
+    assert ack[0]["paper_tracker_id"] == ""
+    assert ack[0]["reject_reason"] == "no_supported_paper_tracker"
+    assert ack[0]["live_order_effect"] == "read_only_no_live_order"
+
+
 def test_paper_strategy_tracker_prefers_bundle_proposals_over_stale_bare_csv(tmp_path: Path) -> None:
     cfg = _cfg(include_bnb=True)
     start_s = 1_779_000_000
