@@ -42,6 +42,34 @@ def _series(sym: str, close: float) -> MarketSeries:
     )
 
 
+def test_candidate_snapshot_top_of_book_scope_matches_rendered_candidate_symbols() -> None:
+    audit = SimpleNamespace(
+        top_scores=[{"symbol": "SOL-USDT"}],
+        target_execution_explain=[{"symbol": "ADA/USDT"}],
+        router_decisions=[{"symbol": "BCH-USDT"}],
+        strategy_signals=[{"signals": [{"symbol": "AI-USDT"}]}],
+        targets_pre_risk={"BASED-USDT": 0.10},
+        targets_post_risk={"ETH/USDT": 0.0},
+    )
+
+    scope = main_module._candidate_snapshot_top_of_book_scope(
+        scored_symbols=["BTC/USDT"],
+        managed_symbols=["ETH/USDT"],
+        audit=audit,
+    )
+
+    assert scope == [
+        "BTC/USDT",
+        "ETH/USDT",
+        "SOL/USDT",
+        "ADA/USDT",
+        "BCH/USDT",
+        "AI/USDT",
+        "BASED/USDT",
+        "BNB/USDT",
+    ]
+
+
 def _regime() -> RegimeResult:
     return RegimeResult(
         state=RegimeState.TRENDING,

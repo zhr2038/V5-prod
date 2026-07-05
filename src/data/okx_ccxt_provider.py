@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import time
-from typing import Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 import ccxt  # type: ignore
 import requests
@@ -331,30 +332,84 @@ class OKXCCXTProvider(MarketDataProvider):
                 continue
         return out
 
-    def fetch_top_of_book(self, symbols: List[str]) -> Dict[str, Dict[str, float]]:
-        """Return {symbol: {bid, ask}} using ccxt tickers."""
-        out: Dict[str, Dict[str, float]] = {}
-        try:
-            tickers = None
-            if hasattr(self.ex, "fetch_tickers"):
-                try:
-                    tickers = self.ex.fetch_tickers(symbols)
-                except Exception:
-                    tickers = None
-            if tickers is None:
-                tickers = {s: self.ex.fetch_ticker(s) for s in symbols}
+    def fetch_top_of_book(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Return {symbol: {bid, ask, mid}} using ccxt tickers.
 
-            for s in symbols:
-                t = (tickers or {}).get(s) or {}
-                bid = t.get("bid")
-                ask = t.get("ask")
-                if bid is None or ask is None:
+        The quote set feeds read-only candidate observability. A bad or
+        unsupported symbol must not blank the whole batch.
+        """
+        requested = list(dict.fromkeys(str(symbol or "").strip() for symbol in symbols or []))
+        requested = [symbol for symbol in requested if symbol]
+        out: Dict[str, Dict[str, Any]] = {}
+        tickers: Dict[str, Any] = {}
+        if hasattr(self.ex, "fetch_tickers"):
+            try:
+                fetched = self.ex.fetch_tickers(requested)
+                if isinstance(fetched, dict):
+                    tickers = fetched
+            except Exception:
+                tickers = {}
+
+        now_ms = int(time.time() * 1000)
+        for symbol in requested:
+            ticker = self._ticker_for_symbol(symbol, tickers)
+            if not ticker:
+                try:
+                    ticker = self.ex.fetch_ticker(symbol)
+                except Exception:
                     continue
+            bid = ticker.get("bid")
+            ask = ticker.get("ask")
+            if bid is None or ask is None:
+                continue
+            try:
                 bid_f = float(bid)
                 ask_f = float(ask)
-                if bid_f <= 0 or ask_f <= 0:
-                    continue
-                out[s] = {"bid": bid_f, "ask": ask_f}
-        except Exception:
-            return out
+            except (TypeError, ValueError):
+                continue
+            if bid_f <= 0 or ask_f <= 0:
+                continue
+            mid = (bid_f + ask_f) / 2.0
+            row: Dict[str, Any] = {
+                "bid": bid_f,
+                "ask": ask_f,
+                "mid": mid,
+                "arrival_bid": bid_f,
+                "arrival_ask": ask_f,
+                "arrival_mid": mid,
+                "source": "ccxt_ticker",
+            }
+            timestamp = self._ticker_timestamp_ms(ticker)
+            if timestamp is not None:
+                row["quote_age_ms"] = max(0, now_ms - timestamp)
+                row["quote_ts"] = datetime.fromtimestamp(timestamp / 1000.0, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+            out[symbol] = row
         return out
+
+    @staticmethod
+    def _ticker_for_symbol(symbol: str, tickers: Dict[str, Any]) -> Dict[str, Any]:
+        aliases = {
+            symbol,
+            symbol.upper(),
+            symbol.upper().replace("/", "-"),
+            symbol.upper().replace("-", "/"),
+        }
+        for alias in aliases:
+            ticker = tickers.get(alias)
+            if isinstance(ticker, dict):
+                return ticker
+        return {}
+
+    @staticmethod
+    def _ticker_timestamp_ms(ticker: Dict[str, Any]) -> int | None:
+        for key in ("timestamp", "ts"):
+            value = ticker.get(key)
+            if value in (None, ""):
+                continue
+            try:
+                parsed = int(float(value))
+            except (TypeError, ValueError):
+                continue
+            if parsed > 0:
+                return parsed
+        return None

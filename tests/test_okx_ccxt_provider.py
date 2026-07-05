@@ -7,6 +7,11 @@ from src.data.okx_ccxt_provider import OKXCCXTProvider
 class _FakeOKX:
     def __init__(self, *_args, **_kwargs):
         self.market_by_symbol = {}
+        self.tickers = {}
+        self.single_tickers = {}
+        self.fail_fetch_tickers = False
+        self.fail_symbols = set()
+        self.fetch_ticker_calls = []
 
     def load_markets(self):
         return None
@@ -15,6 +20,17 @@ class _FakeOKX:
         if symbol in self.market_by_symbol:
             return self.market_by_symbol[symbol]
         raise KeyError(symbol)
+
+    def fetch_tickers(self, symbols):
+        if self.fail_fetch_tickers:
+            raise RuntimeError("batch failed")
+        return dict(self.tickers)
+
+    def fetch_ticker(self, symbol):
+        self.fetch_ticker_calls.append(symbol)
+        if symbol in self.fail_symbols:
+            raise RuntimeError(f"{symbol} unavailable")
+        return dict(self.single_tickers.get(symbol) or {})
 
 
 def _provider(monkeypatch: pytest.MonkeyPatch) -> OKXCCXTProvider:
@@ -49,3 +65,24 @@ def test_symbol_to_inst_id_prefers_ccxt_market_id(monkeypatch: pytest.MonkeyPatc
     provider.ex.market_by_symbol["BTC/USDT"] = {"id": "BTC-USDT"}
 
     assert provider._symbol_to_inst_id("BTC/USDT") == "BTC-USDT"
+
+
+def test_fetch_top_of_book_keeps_valid_quotes_when_batch_or_symbol_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _provider(monkeypatch)
+    provider.ex.fail_fetch_tickers = True
+    provider.ex.fail_symbols.add("BAD/USDT")
+    provider.ex.single_tickers = {
+        "BTC/USDT": {"bid": 100.0, "ask": 100.2, "timestamp": 1_700_000_000_000},
+        "SOL/USDT": {"bid": 50.0, "ask": 50.2, "timestamp": 1_700_000_000_500},
+    }
+    monkeypatch.setattr(okx_ccxt_provider.time, "time", lambda: 1_700_000_001.0)
+
+    quotes = provider.fetch_top_of_book(["BTC/USDT", "BAD/USDT", "SOL/USDT"])
+
+    assert set(quotes) == {"BTC/USDT", "SOL/USDT"}
+    assert quotes["BTC/USDT"]["mid"] == pytest.approx(100.1)
+    assert quotes["BTC/USDT"]["arrival_mid"] == pytest.approx(100.1)
+    assert quotes["BTC/USDT"]["quote_age_ms"] == 1000
+    assert quotes["SOL/USDT"]["quote_ts"] == "2023-11-14T22:13:20.500000Z"

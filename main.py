@@ -2456,6 +2456,55 @@ def _candidate_snapshot_symbol_scope(*groups: Iterable[Any]) -> list[str]:
     return symbols
 
 
+def _candidate_snapshot_top_of_book_scope(
+    *,
+    scored_symbols: Iterable[Any],
+    managed_symbols: Iterable[Any],
+    audit: Any,
+) -> list[str]:
+    audit_symbols: list[str] = []
+    for attr in ("top_scores", "target_execution_explain", "router_decisions", "strategy_signals"):
+        audit_symbols.extend(_collect_symbols_from_payload(getattr(audit, attr, None)))
+    for attr in ("targets_pre_risk", "targets_post_risk"):
+        payload = getattr(audit, attr, None)
+        if isinstance(payload, Mapping):
+            audit_symbols.extend(
+                symbol for symbol in (_slash_symbol(key) for key in payload.keys()) if symbol
+            )
+    return _candidate_snapshot_symbol_scope(scored_symbols, managed_symbols, audit_symbols)
+
+
+def _collect_symbols_from_payload(payload: Any, *, _depth: int = 0) -> list[str]:
+    if payload is None or _depth > 4:
+        return []
+    if isinstance(payload, str):
+        return []
+    symbols: list[str] = []
+    if isinstance(payload, Mapping):
+        for key, value in payload.items():
+            key_text = str(key or "").strip().lower()
+            if key_text in {"symbol", "v5_symbol", "normalized_symbol", "request_symbol", "response_symbol"}:
+                normalized = _slash_symbol(value)
+                if normalized:
+                    symbols.append(normalized)
+                continue
+            if isinstance(value, Mapping) or isinstance(value, (list, tuple, set)):
+                symbols.extend(_collect_symbols_from_payload(value, _depth=_depth + 1))
+        return symbols
+    if isinstance(payload, Iterable):
+        for item in payload:
+            symbols.extend(_collect_symbols_from_payload(item, _depth=_depth + 1))
+    return symbols
+
+
+def _slash_symbol(value: Any) -> str:
+    text = str(value or "").strip().upper().replace("_", "/").replace("-", "/")
+    parts = [part for part in text.split("/") if part]
+    if len(parts) >= 2:
+        return f"{parts[0]}/{parts[1]}"
+    return text
+
+
 def _write_candidate_snapshot_best_effort(
     *,
     cfg: AppConfig,
@@ -3251,13 +3300,29 @@ def main() -> None:
         from src.reporting.spread_snapshots import append_spread_snapshot
 
         tob = {}
+        top_of_book_symbols = _candidate_snapshot_top_of_book_scope(
+            scored_symbols=scored_symbols,
+            managed_symbols=managed_symbols,
+            audit=audit,
+        )
         if hasattr(provider, "fetch_top_of_book"):
-            tob = provider.fetch_top_of_book(scored_symbols)
+            tob = provider.fetch_top_of_book(top_of_book_symbols)
         latest_top_of_book = dict(tob or {})
+        missing_top_of_book = [
+            sym
+            for sym in top_of_book_symbols
+            if sym not in latest_top_of_book and sym.replace("/", "-") not in latest_top_of_book
+        ]
+        if missing_top_of_book:
+            audit.add_note(
+                "top_of_book partial coverage: "
+                f"{len(top_of_book_symbols) - len(missing_top_of_book)}/{len(top_of_book_symbols)} "
+                f"missing={missing_top_of_book[:10]}"
+            )
 
         selected = set(getattr(out.portfolio, "selected", []) or [])
         rows = []
-        for sym in scored_symbols:
+        for sym in top_of_book_symbols:
             ba = tob.get(sym) or {}
             bid = ba.get("bid")
             ask = ba.get("ask")
