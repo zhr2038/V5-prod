@@ -27,7 +27,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 from urllib.parse import quote
 
 # Ensure repo-local imports work even when the script is launched outside the repo root.
@@ -3558,6 +3558,7 @@ def _enrich_quant_lab_cost_freshness(payload: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(payload or {})
     max_age_seconds = _quant_lab_cost_max_age_seconds()
     as_of = _parse_quant_lab_cost_datetime(out.get('as_of_ts') or (out.get('data') or {}).get('as_of_ts'))
+    is_bootstrap_probe = _quant_lab_cost_payload_uses_bootstrap_probe(out)
     if not out.get('last_sample_at') and out.get('as_of_ts'):
         out['last_sample_at'] = out.get('as_of_ts')
     if not out.get('refreshed_at'):
@@ -3570,7 +3571,7 @@ def _enrich_quant_lab_cost_freshness(payload: Dict[str, Any]) -> Dict[str, Any]:
     stale_reasons: List[str] = []
     if as_of is not None:
         age_seconds = max(0.0, (_utc_now() - as_of).total_seconds())
-        if age_seconds > max_age_seconds:
+        if age_seconds > max_age_seconds and not is_bootstrap_probe:
             stale_reasons.append('as_of_ts_too_old')
     elif out.get('available') is not False:
         stale_reasons.append('as_of_ts_missing')
@@ -3603,6 +3604,26 @@ def _enrich_quant_lab_cost_freshness(payload: Dict[str, Any]) -> Dict[str, Any]:
     out['cost_stale'] = freshness_status == 'stale'
     out['cost_stale_reasons'] = unique_reasons
     return out
+
+
+def _quant_lab_cost_payload_uses_bootstrap_probe(payload: Mapping[str, Any]) -> bool:
+    data = payload.get('data')
+    candidates = [
+        payload.get('cost_source'),
+        payload.get('source'),
+        payload.get('latest_cost_source'),
+        payload.get('cost_quality'),
+    ]
+    if isinstance(data, Mapping):
+        candidates.extend(
+            [
+                data.get('cost_source'),
+                data.get('source'),
+                data.get('latest_cost_source'),
+                data.get('cost_quality'),
+            ]
+        )
+    return any(str(value or '').strip().lower() == 'bootstrap_cost_probe' for value in candidates)
 
 
 def _quant_lab_proxy_fetch(path: str, params: Optional[Dict[str, Any]] = None, *, ttl_seconds: float = 10.0) -> Dict[str, Any]:
