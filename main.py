@@ -2461,8 +2461,14 @@ def _candidate_snapshot_top_of_book_scope(
     scored_symbols: Iterable[Any],
     managed_symbols: Iterable[Any],
     audit: Any,
+    observability_symbols: Iterable[Any] = (),
 ) -> list[str]:
     audit_symbols: list[str] = []
+    normalized_observability_symbols = [
+        symbol
+        for symbol in (_slash_symbol(value) for value in observability_symbols or [])
+        if symbol
+    ]
     for attr in ("top_scores", "target_execution_explain", "router_decisions", "strategy_signals"):
         audit_symbols.extend(_collect_symbols_from_payload(getattr(audit, attr, None)))
     for attr in ("targets_pre_risk", "targets_post_risk"):
@@ -2471,7 +2477,12 @@ def _candidate_snapshot_top_of_book_scope(
             audit_symbols.extend(
                 symbol for symbol in (_slash_symbol(key) for key in payload.keys()) if symbol
             )
-    return _candidate_snapshot_symbol_scope(scored_symbols, managed_symbols, audit_symbols)
+    return _candidate_snapshot_symbol_scope(
+        scored_symbols,
+        managed_symbols,
+        normalized_observability_symbols,
+        audit_symbols,
+    )
 
 
 def _collect_symbols_from_payload(payload: Any, *, _depth: int = 0) -> list[str]:
@@ -3303,6 +3314,7 @@ def main() -> None:
         top_of_book_symbols = _candidate_snapshot_top_of_book_scope(
             scored_symbols=scored_symbols,
             managed_symbols=managed_symbols,
+            observability_symbols=getattr(cfg, "symbols", []) or [],
             audit=audit,
         )
         if hasattr(provider, "fetch_top_of_book"):

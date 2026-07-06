@@ -70,6 +70,34 @@ def test_candidate_snapshot_top_of_book_scope_matches_rendered_candidate_symbols
     ]
 
 
+def test_candidate_snapshot_top_of_book_scope_includes_read_only_observability_universe() -> None:
+    audit = SimpleNamespace(
+        top_scores=[],
+        target_execution_explain=[],
+        router_decisions=[],
+        strategy_signals=[],
+        targets_pre_risk={},
+        targets_post_risk={},
+    )
+
+    scope = main_module._candidate_snapshot_top_of_book_scope(
+        scored_symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"],
+        managed_symbols=["SOL/USDT"],
+        observability_symbols=["ADA-USDT", "AI/USDT", "HYPE-USDT"],
+        audit=audit,
+    )
+
+    assert scope == [
+        "BTC/USDT",
+        "ETH/USDT",
+        "SOL/USDT",
+        "BNB/USDT",
+        "ADA/USDT",
+        "AI/USDT",
+        "HYPE/USDT",
+    ]
+
+
 def _regime() -> RegimeResult:
     return RegimeResult(
         state=RegimeState.TRENDING,
