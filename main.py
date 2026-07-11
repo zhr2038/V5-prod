@@ -3307,11 +3307,11 @@ def main() -> None:
 
     # F1.2 spread snapshot (records even when no orders/fills)
     latest_top_of_book = {}
+    paper_observation_symbols = []
     try:
         from src.reporting.spread_snapshots import append_spread_snapshot
 
         tob = {}
-        paper_observation_symbols = []
         try:
             from src.paper_runtime import paper_runtime_observation_symbols
 
@@ -3712,11 +3712,40 @@ def main() -> None:
 
     # Contract-driven Paper Runtime is isolated from real orders and positions.
     try:
-        from src.paper_runtime import run_generic_paper_runtime
+        from src.paper_runtime import (
+            paper_runtime_observation_symbols,
+            run_generic_paper_runtime,
+            supplement_paper_runtime_market_data,
+        )
+
+        if not paper_observation_symbols:
+            paper_observation_symbols = paper_runtime_observation_symbols(
+                cfg,
+                run_dir=runtime_run_dir,
+            )
+        generic_paper_market_data = supplement_paper_runtime_market_data(
+            provider=provider,
+            market_data_1h=md_1h,
+            observation_symbols=paper_observation_symbols,
+            timeframe=cfg.timeframe_main,
+            limit=24 * 60,
+            end_ts_ms=end_ts_ms,
+        )
+        paper_market_data_coverage = sum(
+            1
+            for symbol in paper_observation_symbols
+            if symbol in generic_paper_market_data
+            or symbol.replace("/", "-") in generic_paper_market_data
+        )
+        audit.add_note(
+            "paper runtime market data coverage: "
+            f"{paper_market_data_coverage}/{len(paper_observation_symbols)} "
+            "proposal-only; live scoring universe unchanged"
+        )
 
         generic_paper_result = run_generic_paper_runtime(
             run_dir=str(runtime_run_dir),
-            market_data_1h=md_1h,
+            market_data_1h=generic_paper_market_data,
             top_of_book=latest_top_of_book,
             cfg=cfg,
             audit=audit,

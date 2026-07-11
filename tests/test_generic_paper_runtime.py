@@ -17,7 +17,10 @@ from src.paper_runtime.contracts import (
     paper_proposal_hash,
 )
 from src.paper_runtime.dsl import PaperRuleInterpreter
-from src.paper_runtime.runtime import run_generic_paper_runtime
+from src.paper_runtime.runtime import (
+    run_generic_paper_runtime,
+    supplement_paper_runtime_market_data,
+)
 from src.reporting.v5_bundle_exporter import export_v5_bundle
 
 
@@ -202,6 +205,7 @@ def test_first_three_generic_proposals_ack_and_open_without_live_side_effects(tm
         csv.DictReader((reports / "summaries/paper_strategy_proposal_ack.csv").open())
     )
     assert {row["accepted"] for row in ack_rows} == {"True"}
+    assert all(len(row["source_v5_commit"]) == 40 for row in ack_rows)
     assert not any(
         row["reject_reason"] == "no_supported_paper_tracker" for row in ack_rows
     )
@@ -396,6 +400,72 @@ def test_missing_quote_records_not_observable_without_virtual_position(tmp_path)
     assert signals[0]["observability"] == "NOT_OBSERVABLE"
     assert signals[0]["valid_for_promotion"] == "False"
     assert states[0]["open_paper_position"] == "False"
+
+
+def test_missing_market_signal_is_idempotent_within_hour(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    _write_proposals(proposals_path, [_proposal("NO_MARKET_PAPER", "TRX/USDT")])
+    cfg = _cfg(tmp_path, proposals_path)
+
+    for run_name, observed_at in (
+        ("first", NOW),
+        ("same-hour", NOW + timedelta(minutes=30)),
+        ("next-hour", NOW + timedelta(hours=1)),
+    ):
+        run_generic_paper_runtime(
+            run_dir=reports / "runs" / run_name,
+            market_data_1h={},
+            top_of_book={},
+            cfg=cfg,
+            audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+            now=observed_at,
+        )
+
+    signals = list(
+        csv.DictReader((reports / "summaries/paper_strategy_signals.csv").open())
+    )
+    daily = list(
+        csv.DictReader((reports / "summaries/paper_strategy_daily.csv").open())
+    )
+    assert len(signals) == 2
+    assert len({row["signal_id"] for row in signals}) == 2
+    assert daily[-1]["arrival_mid_coverage"] == "0.0"
+    persisted = json.loads(
+        Path(cfg.quant_lab.paper_runtime.state_path).read_text(encoding="utf-8")
+    )
+    assert next(iter(persisted["daily_buckets"].values()))["signal_count"] == 2
+
+
+def test_paper_market_data_supplement_does_not_replace_live_series():
+    live_series = object()
+    paper_series = object()
+
+    class Provider:
+        calls = []
+
+        def fetch_ohlcv(self, symbols, **kwargs):
+            self.calls.append((list(symbols), kwargs))
+            return {"BTC/USDT": object(), "TAO/USDT": paper_series}
+
+    provider = Provider()
+    merged = supplement_paper_runtime_market_data(
+        provider=provider,
+        market_data_1h={"BTC/USDT": live_series},
+        observation_symbols=["BTC/USDT", "TAO-USDT"],
+        timeframe="1h",
+        limit=1440,
+        end_ts_ms=123,
+    )
+
+    assert merged["BTC/USDT"] is live_series
+    assert merged["TAO/USDT"] is paper_series
+    assert provider.calls == [
+        (
+            ["TAO/USDT"],
+            {"timeframe": "1h", "limit": 1440, "end_ts_ms": 123},
+        )
+    ]
 
 
 def test_runtime_accepts_production_provider_quote_timestamp_shape(tmp_path):

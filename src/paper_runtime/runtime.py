@@ -6,10 +6,12 @@ import json
 import math
 import os
 import statistics
+import subprocess
 import tempfile
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +82,42 @@ def paper_runtime_observation_symbols(
     except Exception:
         pass
     return sorted(symbols)[: runtime_cfg.max_observation_symbols]
+
+
+def supplement_paper_runtime_market_data(
+    *,
+    provider: Any,
+    market_data_1h: Mapping[str, Any],
+    observation_symbols: Iterable[str],
+    timeframe: str,
+    limit: int,
+    end_ts_ms: int | None = None,
+) -> dict[str, Any]:
+    """Fetch proposal-only bars without changing the live scoring universe."""
+    merged = dict(market_data_1h or {})
+    missing = [
+        _slash_symbol(symbol)
+        for symbol in observation_symbols
+        if _slash_symbol(symbol) and _lookup_symbol(merged, symbol) is None
+    ]
+    missing = list(dict.fromkeys(missing))
+    if not missing:
+        return merged
+    fetch = getattr(provider, "fetch_ohlcv", None)
+    if not callable(fetch):
+        raise AttributeError("market data provider does not support fetch_ohlcv")
+    fetched = fetch(
+        missing,
+        timeframe=timeframe,
+        limit=limit,
+        end_ts_ms=end_ts_ms,
+    )
+    if not isinstance(fetched, Mapping):
+        raise TypeError("paper runtime OHLCV fetch must return a mapping")
+    for key, value in fetched.items():
+        if _lookup_symbol(merged, key) is None:
+            merged[str(key)] = value
+    return merged
 
 
 def run_generic_paper_runtime(
@@ -210,10 +248,13 @@ def run_generic_paper_runtime(
             )
 
     max_history = runtime_cfg.max_history_records
-    state_signals = [*(state.get("signals") or []), *signal_rows][-max_history:]
+    combined_signals = [*(state.get("signals") or []), *signal_rows]
+    state_signals = _dedupe_rows(combined_signals, "signal_id")[-max_history:]
     state_runs = [*(state.get("runs") or []), *new_run_rows][-max_history:]
     daily_buckets = state.get("daily_buckets")
-    rebuild_daily_buckets = not isinstance(daily_buckets, dict)
+    rebuild_daily_buckets = not isinstance(daily_buckets, dict) or len(
+        state_signals
+    ) != len(combined_signals)
     if rebuild_daily_buckets:
         daily_buckets = {}
     _update_daily_buckets(
@@ -321,6 +362,13 @@ def _advance_tracker(
         now=now,
     )
     if not context:
+        observation_key = _signal_observation_key(context, now)
+        if (
+            str(tracker.get("last_unobservable_observation_key") or "")
+            == observation_key
+        ):
+            return
+        tracker["last_unobservable_observation_key"] = observation_key
         signal_rows.append(
             _signal_row(proposal, tracker, now, {}, {}, False, "NO_MARKET_DATA")
         )
@@ -782,7 +830,7 @@ def _accepted_ack_row(
         live_order_effect="none",
         accepted_at=_datetime(tracker.get("created_at")) or now,
         expires_at=proposal.expires_at,
-        source_v5_commit=os.environ.get("V5_GIT_COMMIT", ""),
+        source_v5_commit=_source_v5_commit(),
     )
     return {
         **ack.model_dump(mode="json"),
@@ -820,7 +868,7 @@ def _rejected_ack_row(
         "rules_locked": False,
         "live_order_effect": "none",
         "expires_at": str(row.get("expires_at") or ""),
-        "source_v5_commit": os.environ.get("V5_GIT_COMMIT", ""),
+        "source_v5_commit": _source_v5_commit(),
         "source_v5_bundle_sha256": "",
         "schema_version": PAPER_RUNTIME_SCHEMA_VERSION,
     }
@@ -852,7 +900,9 @@ def _signal_row(
     return {
         "schema_version": PAPER_RUNTIME_SCHEMA_VERSION,
         "signal_id": hashlib.sha256(
-            f"{proposal.proposal_hash}|{context.get('bar_ts')}|entry".encode("utf-8")
+            f"{proposal.proposal_hash}|{_signal_observation_key(context, now)}|entry".encode(
+                "utf-8"
+            )
         ).hexdigest()[:32],
         "proposal_id": proposal.proposal_id,
         "tracker_id": tracker.get("tracker_id"),
@@ -881,6 +931,51 @@ def _signal_row(
         "real_cost_canary_ready": context.get("real_cost_canary_ready"),
         "real_funds_sufficient": context.get("real_funds_sufficient"),
     }
+
+
+def _signal_observation_key(context: Mapping[str, Any], now: datetime) -> str:
+    bar_ts = str(context.get("bar_ts") or "").strip()
+    if bar_ts:
+        return bar_ts
+    hour = now.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+    return hour.isoformat().replace("+00:00", "Z")
+
+
+def _dedupe_rows(rows: Iterable[Mapping[str, Any]], key: str) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    indexes: dict[str, int] = {}
+    for raw in rows:
+        row = dict(raw)
+        value = str(row.get(key) or "").strip()
+        if not value:
+            output.append(row)
+            continue
+        if value in indexes:
+            output[indexes[value]] = row
+            continue
+        indexes[value] = len(output)
+        output.append(row)
+    return output
+
+
+def _source_v5_commit() -> str:
+    return str(os.environ.get("V5_GIT_COMMIT") or "").strip() or _repo_commit()
+
+
+@lru_cache(maxsize=1)
+def _repo_commit() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.strip()
 
 
 def _registry_row(tracker: Mapping[str, Any]) -> dict[str, Any]:
