@@ -80,6 +80,27 @@ def test_live_prod_explicitly_enables_quant_lab_shadow() -> None:
     assert cfg.quant_lab.cost_missing_edge_policy["shadow"] == "record_only"
     assert cfg.quant_lab.cost_missing_edge_policy["cost_only"] == "block"
     assert cfg.quant_lab.cost_missing_edge_policy["enforce"] == "block"
+    assert cfg.quant_lab.paper_runtime.enabled is True
+    assert cfg.quant_lab.paper_runtime.live_order_effect == "none"
+    assert cfg.quant_lab.canary.enabled is False
+    assert cfg.quant_lab.canary.strategy_whitelist == []
+    assert cfg.quant_lab.canary.never_block_exits is True
+
+
+def test_generic_paper_and_canary_configs_fail_closed() -> None:
+    with pytest.raises(ValueError, match="live_order_effect must remain none"):
+        QuantLabConfig(paper_runtime={"live_order_effect": "orders"})
+    with pytest.raises(ValueError, match="never_block_exits must remain true"):
+        QuantLabConfig(canary={"never_block_exits": False})
+    with pytest.raises(ValueError, match="explicit strategy_whitelist"):
+        QuantLabConfig(
+            mode="enforce", fail_policy="sell_only", canary={"enabled": True}
+        )
+    with pytest.raises(ValueError, match="requires quant_lab.mode=enforce"):
+        QuantLabConfig(
+            mode="shadow",
+            canary={"enabled": True, "strategy_whitelist": ["TEST_PAPER"]},
+        )
 
 
 def test_quant_lab_invalid_missing_edge_policy_raises() -> None:

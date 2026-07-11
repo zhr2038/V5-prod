@@ -646,6 +646,29 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+    summaries = reports / "summaries"
+    summaries.mkdir()
+    (summaries / "paper_strategy_registry.csv").write_text(
+        "schema_version,proposal_id,proposal_hash,tracker_id,strategy_id,strategy_version,strategy_family,symbol,timeframe,state,rules_locked,paper_only,live_order_effect,created_at,updated_at\n"
+        "v5.generic_paper_runtime.v1,TRX_ALT_IMPULSE_48H_PAPER_V1,hash-trx,paper:trx,trx_alt_impulse,1,alt_impulse,TRX/USDT,1h,WAITING_SIGNAL,true,true,none,2026-05-11T12:00:00Z,2026-05-11T13:00:00Z\n",
+        encoding="utf-8",
+    )
+    (summaries / "quant_lab_contract_status.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "v5.generic_paper_runtime.v1",
+                "contract_version": "quant-lab.paper-strategy.v1",
+                "paper_runtime_enabled": True,
+                "paper_runtime_live_order_effect": "none",
+                "quant_lab_mode": "shadow",
+                "canary_enabled": False,
+                "real_order_calls": 0,
+                "real_position_mutations": 0,
+                "generated_at": "2026-05-11T13:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
 
     bundle = export_v5_bundle(reports_dir=reports, out_dir=out, window_hours=24 * 3650)
     sha_path = Path(str(bundle) + ".sha256")
@@ -694,7 +717,17 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "summaries/cost_probe_runtime_cost_guard.csv" in names
         assert "summaries/cost_probe_cost_disagreement.csv" in names
         assert "summaries/paper_strategy_runs.csv" in names
+        assert "summaries/paper_strategy_proposal_ack.csv" in names
         assert "summaries/paper_strategy_daily.csv" in names
+        assert "summaries/paper_strategy_registry.csv" in names
+        assert "summaries/paper_strategy_state.csv" in names
+        assert "summaries/paper_strategy_signals.csv" in names
+        assert "summaries/paper_strategy_quote_coverage.csv" in names
+        assert "summaries/paper_strategy_cost_evidence.csv" in names
+        assert "summaries/paper_strategy_errors.csv" in names
+        assert "summaries/paper_strategy_restart_recovery.csv" in names
+        assert "summaries/quant_lab_contract_status.json" in names
+        assert "summaries/fill_bill_cost_reconciliation.csv" in names
         assert "summaries/paper_slippage_coverage.csv" in names
         assert "summaries/risk_on_multi_buy_shadow.csv" in names
         assert "summaries/fast_microstructure_strategy_shadow.csv" in names
@@ -746,6 +779,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         candidate_snapshot = list(csv.DictReader(tf.extractfile("summaries/candidate_snapshot.csv").read().decode("utf-8").splitlines()))
         raw_candidate_snapshot = list(csv.DictReader(tf.extractfile("raw/reports/candidate_snapshot.csv").read().decode("utf-8").splitlines()))
         order_lifecycle = list(csv.DictReader(tf.extractfile("summaries/order_lifecycle.csv").read().decode("utf-8").splitlines()))
+        paper_registry = list(csv.DictReader(tf.extractfile("summaries/paper_strategy_registry.csv").read().decode("utf-8").splitlines()))
+        paper_contract = json.loads(tf.extractfile("summaries/quant_lab_contract_status.json").read().decode("utf-8"))
+        fill_bill_reconciliation = list(csv.DictReader(tf.extractfile("summaries/fill_bill_cost_reconciliation.csv").read().decode("utf-8").splitlines()))
         mismatch_rows = list(csv.DictReader(tf.extractfile("reports/summary_trade_count_mismatch.csv").read().decode("utf-8").splitlines()))
         manifest = json.loads(tf.extractfile("manifest.json").read().decode("utf-8"))
         window = json.loads(tf.extractfile("summaries/window_summary.json").read().decode("utf-8"))
@@ -891,6 +927,13 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert order_lifecycle[0]["lifecycle_id"] == "olc_r1_bnb"
         assert order_lifecycle[0]["arrival_mid"] == "600"
         assert order_lifecycle[0]["avg_fill_px"] == "602"
+        assert paper_registry[0]["proposal_id"] == "TRX_ALT_IMPULSE_48H_PAPER_V1"
+        assert paper_registry[0]["live_order_effect"] == "none"
+        assert paper_contract["quant_lab_mode"] == "shadow"
+        assert paper_contract["canary_enabled"] is False
+        assert paper_contract["real_order_calls"] == 0
+        assert paper_contract["real_position_mutations"] == 0
+        assert fill_bill_reconciliation == []
         assert mismatch_rows[0]["high_issue"] == "true"
         assert manifest["run_summary_invalid"] is True
         assert manifest["candidate_snapshot_schema_version"] == "v5.candidate_snapshot.v3"
@@ -898,6 +941,10 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert manifest["candidate_cost_source_coverage"] == 1.0
         assert manifest["order_lifecycle_schema_version"] == "v5.order_lifecycle.v1"
         assert manifest["order_lifecycle_rows"] == 1
+        assert manifest["fill_bill_reconciliation_schema_version"] == "v5.fill_bill_cost_reconciliation.v1"
+        assert manifest["fill_bill_reconciliation_rows"] == 0
+        assert manifest["fill_bill_match_status_counts"] == {}
+        assert manifest["fill_bill_cost_evidence_counts"] == {}
         assert manifest["summary_trade_count_mismatch_high_issue_count"] == 1
         assert manifest["trade_export_schema_version"] == "v5.trade_export.v1"
         assert manifest["summary_metrics_version"] == "v5.summary_metrics.v1"
@@ -932,6 +979,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert window["candidate_snapshot_rows"] == 1
         assert window["candidate_cost_source_coverage"] == 1.0
         assert window["order_lifecycle_rows"] == 1
+        assert window["fill_bill_reconciliation_rows"] == 0
+        assert window["fill_bill_match_status_counts"] == {}
+        assert window["fill_bill_cost_evidence_counts"] == {}
         assert window["cost_probe_artifact_count"] == 10
         assert window["cost_probe_artifacts_missing"] == []
         assert window["cost_probe_artifact_row_counts"]["cost_probe_orders.csv"] == 1

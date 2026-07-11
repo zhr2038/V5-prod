@@ -3311,10 +3311,23 @@ def main() -> None:
         from src.reporting.spread_snapshots import append_spread_snapshot
 
         tob = {}
+        paper_observation_symbols = []
+        try:
+            from src.paper_runtime import paper_runtime_observation_symbols
+
+            paper_observation_symbols = paper_runtime_observation_symbols(
+                cfg,
+                run_dir=runtime_run_dir,
+            )
+        except Exception as exc:
+            log.warning("paper runtime observation scope failed: %s", exc)
         top_of_book_symbols = _candidate_snapshot_top_of_book_scope(
             scored_symbols=scored_symbols,
             managed_symbols=managed_symbols,
-            observability_symbols=getattr(cfg, "symbols", []) or [],
+            observability_symbols=[
+                *(getattr(cfg, "symbols", []) or []),
+                *paper_observation_symbols,
+            ],
             audit=audit,
         )
         if hasattr(provider, "fetch_top_of_book"):
@@ -3696,6 +3709,31 @@ def main() -> None:
             )
     except Exception as e:
         log.warning(f"SOL paper strategy tracker failed: {e}")
+
+    # Contract-driven Paper Runtime is isolated from real orders and positions.
+    try:
+        from src.paper_runtime import run_generic_paper_runtime
+
+        generic_paper_result = run_generic_paper_runtime(
+            run_dir=str(runtime_run_dir),
+            market_data_1h=md_1h,
+            top_of_book=latest_top_of_book,
+            cfg=cfg,
+            audit=audit,
+        )
+        audit.add_note(
+            "GENERIC_PAPER_RUNTIME "
+            f"accepted={generic_paper_result.get('accepted', 0)} "
+            f"trackers={generic_paper_result.get('trackers', 0)} "
+            f"closed={generic_paper_result.get('closed_trades', 0)} "
+            "live_order_effect=none"
+        )
+        if generic_paper_result.get("errors"):
+            log.warning("generic Paper Runtime degraded: %s", generic_paper_result)
+    except Exception as e:
+        log.warning(
+            "generic Paper Runtime failed without affecting live execution: %s", e
+        )
 
     # Read-only quant-lab entry-quality advisory. It must never hard-block orders.
     try:

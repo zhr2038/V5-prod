@@ -749,6 +749,27 @@ quant_lab:
     required_level_for_canary: CANARY
     required_level_for_normal_live: SCALE_READY
     canary_max_notional_usdt: 20.0
+  paper_runtime:
+    enabled: true
+    live_order_effect: none
+    state_path: state/paper_runtime/state.json
+    max_trackers: 100
+    max_history_records: 5000
+    max_quote_age_seconds: 120
+    default_fee_bps: 10.0
+    default_slippage_bps: 2.0
+    max_observation_symbols: 100
+    observation_timeout_seconds: 2.0
+  canary:
+    enabled: false
+    strategy_whitelist: []
+    max_notional_usdt: 20
+    max_total_exposure_usdt: 20
+    max_open_positions: 1
+    never_block_exits: true
+    require_permission_status: ACTIVE_ALLOW
+    require_cost_trust_level: CANARY
+    require_paper_promotion_ready: true
   quant_lab_shadow_live_canary_whitelist_enabled: false
   quant_lab_shadow_live_canary_whitelist:
     - BTC_STRICT_PROBE

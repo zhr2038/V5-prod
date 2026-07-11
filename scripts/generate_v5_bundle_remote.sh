@@ -159,6 +159,11 @@ from src.reporting.final_score_alpha6_conflict import (
     build_conflict_rows as report_build_final_score_alpha6_conflict_rows,
     is_final_score_alpha6_conflict_candidate as report_final_score_alpha6_conflict_candidate,
 )
+from src.reporting.fill_bill_reconciliation import (
+    FILL_BILL_RECONCILIATION_FIELDS,
+    FILL_BILL_RECONCILIATION_SCHEMA_VERSION,
+    reconcile_runtime_cost_databases,
+)
 NOW = dt.datetime.now(dt.timezone.utc)
 STAMP = NOW.strftime("%Y%m%dT%H%M%SZ")
 BUNDLE_STEM = f"v5_live_followup_bundle_{STAMP}"
@@ -215,6 +220,14 @@ CURRENT_REPORT_FILES = [
     ("reports/summaries/paper_strategy_runs.csv", "summaries/paper_strategy_runs.csv", False),
     ("reports/summaries/paper_strategy_proposal_ack.csv", "summaries/paper_strategy_proposal_ack.csv", False),
     ("reports/summaries/paper_strategy_daily.csv", "summaries/paper_strategy_daily.csv", False),
+    ("reports/summaries/paper_strategy_registry.csv", "summaries/paper_strategy_registry.csv", False),
+    ("reports/summaries/paper_strategy_state.csv", "summaries/paper_strategy_state.csv", False),
+    ("reports/summaries/paper_strategy_signals.csv", "summaries/paper_strategy_signals.csv", False),
+    ("reports/summaries/paper_strategy_quote_coverage.csv", "summaries/paper_strategy_quote_coverage.csv", False),
+    ("reports/summaries/paper_strategy_cost_evidence.csv", "summaries/paper_strategy_cost_evidence.csv", False),
+    ("reports/summaries/paper_strategy_errors.csv", "summaries/paper_strategy_errors.csv", False),
+    ("reports/summaries/paper_strategy_restart_recovery.csv", "summaries/paper_strategy_restart_recovery.csv", False),
+    ("reports/summaries/quant_lab_contract_status.json", "summaries/quant_lab_contract_status.json", False),
     ("reports/summaries/bnb_paper_strategy_runs.csv", "summaries/bnb_paper_strategy_runs.csv", False),
     ("reports/summaries/bnb_paper_strategy_daily.csv", "summaries/bnb_paper_strategy_daily.csv", False),
     ("reports/summaries/paper_slippage_coverage.csv", "summaries/paper_slippage_coverage.csv", False),
@@ -1218,6 +1231,37 @@ def ensure_csv_header(dest_rel, fields):
     copied_sources[dest_rel] = "generated empty header"
     notes.append(f"generated empty summary header: {dest_rel}")
     return True
+
+
+def write_fill_bill_reconciliation_report():
+    dest_rel = "summaries/fill_bill_cost_reconciliation.csv"
+    try:
+        rows = reconcile_runtime_cost_databases(ROOT / "reports")
+    except Exception as exc:
+        rows = []
+        collection_errors.append(
+            {
+                "source": "reports/*fills*.sqlite + reports/*bills*.sqlite",
+                "dest": dest_rel,
+                "error": repr(exc),
+            }
+        )
+    dest = OUT / dest_rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with dest.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(FILL_BILL_RECONCILIATION_FIELDS))
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field) for field in FILL_BILL_RECONCILIATION_FIELDS})
+    copied_sources[dest_rel] = "generated from bounded read-only fills/bills reconciliation"
+    status_counts = Counter(str(row.get("bill_match_status") or "UNKNOWN") for row in rows)
+    evidence_counts = Counter(str(row.get("cost_evidence_status") or "UNKNOWN") for row in rows)
+    return {
+        "fill_bill_reconciliation_schema_version": FILL_BILL_RECONCILIATION_SCHEMA_VERSION,
+        "fill_bill_reconciliation_rows": len(rows),
+        "fill_bill_match_status_counts": dict(status_counts),
+        "fill_bill_cost_evidence_counts": dict(evidence_counts),
+    }
 
 
 def copy_sanitized(src_rel, dest_rel, required=False, limit=MAX_COPY_BYTES):
@@ -17698,6 +17742,7 @@ copy_sanitized("configs/live_prod.yaml", "raw/config_live_prod.yaml", required=T
 for src_rel, dest_rel, required in STATE_FILES:
     copy_sanitized(src_rel, dest_rel, required=required)
 copy_current_reports()
+fill_bill_reconciliation_meta = write_fill_bill_reconciliation_report()
 cost_probe_artifact_meta = copy_cost_probe_artifacts()
 synthesize_backtest_advisory_reader_if_missing()
 provenance_meta = build_provenance_meta()
@@ -17718,6 +17763,7 @@ summary_meta.update(
             {},
         ),
         "cost_probe_preflight_refresh": COST_PROBE_PREFLIGHT_REFRESH,
+        **fill_bill_reconciliation_meta,
     }
 )
 filter_raw_jsonl_outputs_recent_24h()
@@ -17753,6 +17799,9 @@ sanity = {
     "contains summaries/quant_lab_cost_usage.csv": (OUT / "summaries/quant_lab_cost_usage.csv").is_file(),
     "contains summaries/quant_lab_fallbacks.csv": (OUT / "summaries/quant_lab_fallbacks.csv").is_file(),
     "contains summaries/candidate_snapshot.csv": (OUT / "summaries/candidate_snapshot.csv").is_file(),
+    "contains summaries/fill_bill_cost_reconciliation.csv": (
+        OUT / "summaries/fill_bill_cost_reconciliation.csv"
+    ).is_file(),
     "contains summaries/candidate_snapshot_price_observability.json": (
         OUT / "summaries/candidate_snapshot_price_observability.json"
     ).is_file(),
@@ -17860,6 +17909,18 @@ manifest = {
         summary_meta.get("order_lifecycle_trade_metric_fill_count", 0) or 0
     ),
     "order_lifecycle_missing_high_issue": bool(summary_meta.get("order_lifecycle_missing_high_issue", False)),
+    "fill_bill_reconciliation_schema_version": summary_meta.get(
+        "fill_bill_reconciliation_schema_version",
+        FILL_BILL_RECONCILIATION_SCHEMA_VERSION,
+    ),
+    "fill_bill_reconciliation_rows": int(
+        summary_meta.get("fill_bill_reconciliation_rows", 0) or 0
+    ),
+    "fill_bill_match_status_counts": summary_meta.get("fill_bill_match_status_counts", {}),
+    "fill_bill_cost_evidence_counts": summary_meta.get(
+        "fill_bill_cost_evidence_counts",
+        {},
+    ),
     "cost_probe_artifact_count": int(summary_meta.get("cost_probe_artifact_count", 0) or 0),
     "cost_probe_artifacts_present": summary_meta.get("cost_probe_artifacts_present", []),
     "cost_probe_artifacts_missing": summary_meta.get("cost_probe_artifacts_missing", []),

@@ -35,6 +35,11 @@ from src.reporting.candidate_snapshot import (
 )
 from src.reporting.bnb_strong_alpha6_bypass_shadow import BYPASS_SHADOW_FIELDS
 from src.reporting.final_score_alpha6_conflict import CONFLICT_FIELDS
+from src.reporting.fill_bill_reconciliation import (
+    FILL_BILL_RECONCILIATION_FIELDS,
+    FILL_BILL_RECONCILIATION_SCHEMA_VERSION,
+    reconcile_runtime_cost_databases,
+)
 from src.reporting.order_lifecycle import (
     ORDER_LIFECYCLE_FIELDS,
     ORDER_LIFECYCLE_SCHEMA_VERSION,
@@ -90,6 +95,45 @@ NEGATIVE_EXPECTANCY_ATTRIBUTION_FIELDS = (
     "would_unblock_if_adjusted",
     "block_attribution_conflict",
 )
+
+GENERIC_PAPER_REPORT_FIELDS = {
+    "paper_strategy_registry.csv": (
+        "schema_version", "proposal_id", "proposal_hash", "tracker_id",
+        "strategy_id", "strategy_version", "strategy_family", "symbol",
+        "timeframe", "state", "rules_locked", "paper_only",
+        "live_order_effect", "created_at", "updated_at",
+    ),
+    "paper_strategy_state.csv": (
+        "schema_version", "tracker_id", "proposal_id", "strategy_id", "symbol",
+        "state", "paper_trade_id", "open_paper_position",
+        "cooldown_remaining_bars", "last_processed_bar_ts", "updated_at",
+    ),
+    "paper_strategy_signals.csv": (
+        "schema_version", "signal_id", "proposal_id", "tracker_id",
+        "strategy_id", "strategy_version", "symbol", "signal_ts", "decision_ts",
+        "signal_type", "triggered", "observability", "arrival_bid", "arrival_ask",
+        "arrival_mid", "spread_bps", "quote_timestamp", "quote_age_seconds",
+        "price_source", "fallback_level", "valid_for_promotion",
+    ),
+    "paper_strategy_quote_coverage.csv": (
+        "schema_version", "proposal_id", "strategy_id", "symbol",
+        "candidate_signal_count", "observable_quote_count", "arrival_mid_coverage",
+        "stale_quote_rate", "quote_fallback_rate", "target_coverage",
+    ),
+    "paper_strategy_cost_evidence.csv": (
+        "schema_version", "proposal_id", "strategy_id", "symbol",
+        "required_cost_trust_level", "closed_trade_count", "cost_observed_count",
+        "cost_source", "cost_trust_level", "valid_for_live_coverage",
+    ),
+    "paper_strategy_errors.csv": (
+        "schema_version", "ts_utc", "proposal_id", "error_code", "error_type",
+        "error_message", "live_order_effect",
+    ),
+    "paper_strategy_restart_recovery.csv": (
+        "recovered_at", "tracker_id", "proposal_id", "state",
+        "open_trade_preserved", "schema_version",
+    ),
+}
 
 
 GIT_COMMAND_TIMEOUT_SEC = 10
@@ -1444,6 +1488,33 @@ def _copy_sol_paper_strategy_files(staging: Path, reports: Path) -> None:
             _write_text(dest, _redact_text(src.read_text(encoding="utf-8", errors="replace")))
         else:
             _write_csv(dest, fields, [])
+    for filename, fields in GENERIC_PAPER_REPORT_FIELDS.items():
+        src = reports / "summaries" / filename
+        dest = staging / "summaries" / filename
+        if src.is_file():
+            _write_text(dest, _redact_text(src.read_text(encoding="utf-8", errors="replace")))
+        else:
+            _write_csv(dest, fields, [])
+    contract_status = reports / "summaries" / "quant_lab_contract_status.json"
+    if contract_status.is_file():
+        _write_text(
+            staging / "summaries" / "quant_lab_contract_status.json",
+            _read_json_text_sanitized(contract_status),
+        )
+    else:
+        _write_text(
+            staging / "summaries" / "quant_lab_contract_status.json",
+            json.dumps(
+                {
+                    "schema_version": "v5.generic_paper_runtime.v1",
+                    "status": "not_observable",
+                    "live_order_effect": "none",
+                },
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n",
+        )
     labels = reports / "sol_paper_strategy_labels.jsonl"
     if labels.is_file():
         _write_maybe_filtered_raw_text(
@@ -3084,6 +3155,15 @@ def export_v5_bundle(
         _read_order_lifecycle_rows(reports),
         fill_metrics_rows,
     )
+    fill_bill_reconciliation_rows = reconcile_runtime_cost_databases(reports)
+    fill_bill_status_counts = _live_guard_value_mix(
+        fill_bill_reconciliation_rows,
+        "bill_match_status",
+    )
+    fill_bill_evidence_counts = _live_guard_value_mix(
+        fill_bill_reconciliation_rows,
+        "cost_evidence_status",
+    )
     trade_metric_fill_count = _count_trade_metric_fills(trade_metrics_rows)
     order_lifecycle_missing_for_trades = trade_metric_fill_count > 0 and not order_lifecycle_rows
     summary_high_issue_count = len([row for row in mismatch_rows if str(row.get("high_issue")) == "true"])
@@ -3124,6 +3204,11 @@ def export_v5_bundle(
         _write_csv(staging / "summaries/fill_metrics.csv", FILL_METRICS_FIELDS, fill_metrics_rows)
         _write_csv(staging / "summaries/candidate_snapshot.csv", CANDIDATE_SNAPSHOT_FIELDS, candidate_rows)
         _write_csv(staging / "summaries/order_lifecycle.csv", ORDER_LIFECYCLE_FIELDS, order_lifecycle_rows)
+        _write_csv(
+            staging / "summaries/fill_bill_cost_reconciliation.csv",
+            FILL_BILL_RECONCILIATION_FIELDS,
+            fill_bill_reconciliation_rows,
+        )
         _copy_candidate_snapshot_files(staging, reports, candidate_rows)
         _copy_order_lifecycle_files(staging, reports)
         _copy_run_completion_files(staging, reports)
@@ -3158,6 +3243,9 @@ def export_v5_bundle(
                 "order_lifecycle_rows": len(order_lifecycle_rows),
                 "order_lifecycle_trade_metric_fill_count": trade_metric_fill_count,
                 "order_lifecycle_missing_high_issue": order_lifecycle_missing_for_trades,
+                "fill_bill_reconciliation_rows": len(fill_bill_reconciliation_rows),
+                "fill_bill_match_status_counts": fill_bill_status_counts,
+                "fill_bill_cost_evidence_counts": fill_bill_evidence_counts,
                 "cost_probe_artifact_count": len(cost_probe_artifacts["present"]),
                 "cost_probe_artifacts_present": cost_probe_artifacts["present"],
                 "cost_probe_artifacts_missing": cost_probe_artifacts["missing"],
@@ -3229,6 +3317,30 @@ def export_v5_bundle(
                     *(
                         [
                             {
+                                "code": "fill_fee_missing",
+                                "severity": "medium",
+                                "detail": "Recent fills have no usable fill or bill fee; cost remains partial.",
+                                "count": fill_bill_status_counts.get("FEE_MISSING", 0),
+                            }
+                        ]
+                        if fill_bill_status_counts.get("FEE_MISSING", 0) > 0
+                        else []
+                    ),
+                    *(
+                        [
+                            {
+                                "code": "fill_bill_fee_mismatch",
+                                "severity": "medium",
+                                "detail": "Recent fill and bill fees disagree; conservative mixed cost is retained.",
+                                "count": fill_bill_status_counts.get("FEE_MISMATCH", 0),
+                            }
+                        ]
+                        if fill_bill_status_counts.get("FEE_MISMATCH", 0) > 0
+                        else []
+                    ),
+                    *(
+                        [
+                            {
                                 "code": "dirty_worktree",
                                 "severity": "medium",
                                 "detail": "V5-prod worktree is dirty; code provenance is degraded.",
@@ -3288,6 +3400,12 @@ def export_v5_bundle(
             "order_lifecycle_rows": len(order_lifecycle_rows),
             "order_lifecycle_trade_metric_fill_count": trade_metric_fill_count,
             "order_lifecycle_missing_high_issue": order_lifecycle_missing_for_trades,
+            "fill_bill_reconciliation_schema_version": (
+                FILL_BILL_RECONCILIATION_SCHEMA_VERSION
+            ),
+            "fill_bill_reconciliation_rows": len(fill_bill_reconciliation_rows),
+            "fill_bill_match_status_counts": fill_bill_status_counts,
+            "fill_bill_cost_evidence_counts": fill_bill_evidence_counts,
             "cost_probe_artifact_count": len(cost_probe_artifacts["present"]),
             "cost_probe_artifacts_present": cost_probe_artifacts["present"],
             "cost_probe_artifacts_missing": cost_probe_artifacts["missing"],

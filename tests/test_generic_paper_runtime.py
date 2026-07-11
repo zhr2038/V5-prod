@@ -1,0 +1,915 @@
+import csv
+import json
+import tarfile
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from pydantic import ValidationError
+
+from configs.schema import AppConfig
+from src.core.models import MarketSeries
+from src.paper_runtime.contracts import (
+    PAPER_STRATEGY_CONTRACT_VERSION,
+    PaperRule,
+    PaperStrategyProposal,
+    paper_proposal_hash,
+)
+from src.paper_runtime.dsl import PaperRuleInterpreter
+from src.paper_runtime.runtime import run_generic_paper_runtime
+from src.reporting.v5_bundle_exporter import export_v5_bundle
+
+
+NOW = datetime(2026, 7, 11, 0, 0, tzinfo=UTC)
+
+
+def _proposal(
+    strategy_id: str,
+    symbol: str,
+    *,
+    entry_rule: dict | None = None,
+    exit_rule: dict | None = None,
+    max_holding_bars: int = 8,
+    cooldown_bars: int = 0,
+    required_cost_trust_level: str = "PAPER_ONLY",
+) -> PaperStrategyProposal:
+    payload = {
+        "contract_version": PAPER_STRATEGY_CONTRACT_VERSION,
+        "proposal_id": f"{strategy_id}:1.0.0",
+        "strategy_id": strategy_id,
+        "strategy_version": "1.0.0",
+        "strategy_family": "generic_test",
+        "symbol": symbol,
+        "timeframe": "1h",
+        "direction": "long",
+        "entry_rule": entry_rule
+        or {"operator": "momentum_gt", "field": "momentum_8", "value": 0},
+        "exit_rule": exit_rule
+        or {"operator": "max_holding_bars", "value": max_holding_bars},
+        "max_holding_bars": max_holding_bars,
+        "min_holding_bars": 1,
+        "cooldown_bars": cooldown_bars,
+        "signal_confirmation_bars": 1,
+        "cost_quantile": "p75",
+        "minimum_expected_edge_bps": 0.0,
+        "paper_notional_usdt": 20.0,
+        "paper_only": True,
+        "live_order_effect": "none",
+        "max_live_notional_usdt": 0.0,
+        "created_at": "2026-07-10T00:00:00+00:00",
+        "expires_at": "2026-08-10T00:00:00+00:00",
+        "source_pack_sha256": "",
+        "source_dataset_versions": {"alpha_discovery_board": "v1"},
+        "required_market_fields": ["bid", "ask", "mid", "momentum_8"],
+        "required_cost_trust_level": required_cost_trust_level,
+        "lifecycle_state": "PAPER_PROPOSAL_READY",
+        "lifecycle_reason": "test",
+        "blocked_reasons": ["v5_ack_required"],
+        "next_required_actions": ["sync_to_v5"],
+    }
+    payload["proposal_hash"] = paper_proposal_hash(payload)
+    return PaperStrategyProposal.model_validate(payload)
+
+
+def _write_proposals(path: Path, proposals: list[PaperStrategyProposal]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for proposal in proposals:
+        row = proposal.model_dump(mode="json")
+        for field in (
+            "entry_rule",
+            "exit_rule",
+            "source_dataset_versions",
+            "required_market_fields",
+            "blocked_reasons",
+            "next_required_actions",
+        ):
+            row[field] = json.dumps(row[field], sort_keys=True)
+        row["recommended_mode"] = "paper"
+        rows.append(row)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _write_raw_proposal_rows(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _series(symbol: str, *, bars: int = 32, last_ts: int | None = None) -> MarketSeries:
+    start = int((NOW - timedelta(hours=bars)).timestamp() * 1000)
+    timestamps = [start + index * 3_600_000 for index in range(bars)]
+    if last_ts is not None:
+        timestamps[-1] = last_ts
+    closes = [100.0 + index for index in range(bars)]
+    volumes = [100.0 + index for index in range(bars - 1)] + [1000.0]
+    return MarketSeries(
+        symbol=symbol,
+        timeframe="1h",
+        ts=timestamps,
+        open=closes,
+        high=[value + 1 for value in closes],
+        low=[value - 1 for value in closes],
+        close=closes,
+        volume=volumes,
+    )
+
+
+def _cfg(tmp_path: Path, proposals_path: Path) -> AppConfig:
+    cfg = AppConfig()
+    cfg.quant_lab.mode = "shadow"
+    cfg.quant_lab.paper_runtime.enabled = True
+    cfg.quant_lab.paper_runtime.state_path = str(tmp_path / "paper_runtime_state.json")
+    cfg.quant_lab.canary.enabled = False
+    cfg.diagnostics.quant_lab_paper_strategy_proposals_paths = [str(proposals_path)]
+    cfg.diagnostics.quant_lab_paper_strategy_proposals_max_age_minutes = 100_000
+    return cfg
+
+
+def _quote(price: float, now: datetime = NOW) -> dict:
+    return {
+        "bid": price - 0.1,
+        "ask": price + 0.1,
+        "mid": price,
+        "timestamp": now.isoformat(),
+    }
+
+
+def _provider_quote(price: float, now: datetime = NOW) -> dict:
+    return {
+        "bid": price - 0.1,
+        "ask": price + 0.1,
+        "mid": price,
+        "quote_ts": now.isoformat().replace("+00:00", "Z"),
+        "source": "ccxt_ticker",
+    }
+
+
+def test_first_three_generic_proposals_ack_and_open_without_live_side_effects(tmp_path):
+    reports = tmp_path / "reports"
+    run_dir = reports / "runs" / "run-1"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    proposals = [
+        _proposal(
+            "TRX_ALT_IMPULSE_48H_PAPER",
+            "TRX/USDT",
+            entry_rule={
+                "operator": "all",
+                "children": [
+                    {
+                        "operator": "regime_in",
+                        "field": "market_regime",
+                        "values": ["ALT_IMPULSE"],
+                    },
+                    {"operator": "momentum_gt", "field": "momentum_24", "value": 0},
+                ],
+            },
+            max_holding_bars=48,
+        ),
+        _proposal("BCH_F3_F4_DEDUP_72H_PAPER", "BCH/USDT", max_holding_bars=72),
+        _proposal("TAO_F3_F4_DEDUP_8H_PAPER", "TAO/USDT", max_holding_bars=8),
+    ]
+    _write_proposals(proposals_path, proposals)
+    cfg = _cfg(tmp_path, proposals_path)
+    market = {
+        symbol: _series(symbol) for symbol in ("TRX/USDT", "BCH/USDT", "TAO/USDT")
+    }
+    books = {symbol: _quote(100.0 + index) for index, symbol in enumerate(market)}
+    audit = SimpleNamespace(
+        regime="ALT_IMPULSE", quant_lab={"permission_status": "ACTIVE_ABORT"}
+    )
+
+    result = run_generic_paper_runtime(
+        run_dir=run_dir,
+        market_data_1h=market,
+        top_of_book=books,
+        cfg=cfg,
+        audit=audit,
+        now=NOW,
+    )
+
+    assert result["accepted"] == 3
+    assert result["rejected"] == 0
+    assert result["trackers"] == 3
+    assert result["live_order_effect"] == "none"
+    ack_rows = list(
+        csv.DictReader((reports / "summaries/paper_strategy_proposal_ack.csv").open())
+    )
+    assert {row["accepted"] for row in ack_rows} == {"True"}
+    assert not any(
+        row["reject_reason"] == "no_supported_paper_tracker" for row in ack_rows
+    )
+    state_rows = list(
+        csv.DictReader((reports / "summaries/paper_strategy_state.csv").open())
+    )
+    assert {row["state"] for row in state_rows} == {"PAPER_OPEN"}
+    contract = json.loads(
+        (reports / "summaries/quant_lab_contract_status.json").read_text()
+    )
+    assert contract["real_order_calls"] == 0
+    assert contract["real_position_mutations"] == 0
+    assert cfg.quant_lab.mode == "shadow"
+    assert cfg.quant_lab.canary.enabled is False
+
+
+def test_runtime_exit_restart_recovery_and_same_bar_idempotency(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    proposal = _proposal(
+        "GENERIC_ONE_BAR_PAPER",
+        "TRX/USDT",
+        entry_rule={"operator": "gt", "field": "close", "value": 0},
+        exit_rule={"operator": "max_holding_bars", "value": 1},
+        max_holding_bars=1,
+    )
+    _write_proposals(proposals_path, [proposal])
+    cfg = _cfg(tmp_path, proposals_path)
+    audit = SimpleNamespace(regime="NORMAL", quant_lab={})
+    first_series = _series("TRX/USDT")
+
+    first = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "run-1",
+        market_data_1h={"TRX/USDT": first_series},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=audit,
+        now=NOW,
+    )
+    duplicate = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "run-1",
+        market_data_1h={"TRX/USDT": first_series},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=audit,
+        now=NOW,
+    )
+    next_ts = first_series.ts[-1] + 3_600_000
+    closed = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "run-2",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT", last_ts=next_ts)},
+        top_of_book={"TRX/USDT": _quote(102.0, NOW + timedelta(hours=1))},
+        cfg=cfg,
+        audit=audit,
+        now=NOW + timedelta(hours=1),
+    )
+
+    assert first["closed_trades"] == 0
+    assert duplicate["signals"] == 0
+    assert closed["closed_trades"] == 1
+    runs = list(csv.DictReader((reports / "summaries/paper_strategy_runs.csv").open()))
+    assert len([row for row in runs if row.get("paper_trade_id")]) == 1
+    assert runs[0]["valid_for_promotion"] == "True"
+    assert runs[0]["would_enter"] == "True"
+    assert runs[0]["would_exit"] == "True"
+    assert runs[0]["paper_pnl_bps"] == runs[0]["net_pnl_bps"]
+    assert runs[0]["paper_tracker_id"] == f"paper:{proposal.proposal_id}"
+    recovery = list(
+        csv.DictReader(
+            (reports / "summaries/paper_strategy_restart_recovery.csv").open()
+        )
+    )
+    assert recovery and recovery[0]["open_trade_preserved"] == "True"
+    ack_rows = list(
+        csv.DictReader((reports / "summaries/paper_strategy_proposal_ack.csv").open())
+    )
+    assert len(ack_rows) == 1
+    assert (
+        datetime.fromisoformat(ack_rows[0]["accepted_at"].replace("Z", "+00:00")) == NOW
+    )
+
+
+def test_same_proposal_sent_ten_times_creates_one_tracker_and_one_ack(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    proposal = _proposal("TEN_RETRY_PAPER", "TRX/USDT")
+    _write_proposals(proposals_path, [proposal] * 10)
+    cfg = _cfg(tmp_path, proposals_path)
+
+    result = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "run-1",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+
+    ack_rows = list(
+        csv.DictReader((reports / "summaries/paper_strategy_proposal_ack.csv").open())
+    )
+    state = json.loads(Path(cfg.quant_lab.paper_runtime.state_path).read_text())
+    assert result["accepted"] == 1
+    assert result["trackers"] == 1
+    assert len(ack_rows) == 1
+    assert len(state["trackers"]) == 1
+
+
+def test_expired_source_does_not_replace_locked_ack_and_open_trade_can_exit(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    proposal = _proposal(
+        "EXPIRING_OPEN_PAPER",
+        "TRX/USDT",
+        entry_rule={"operator": "gt", "field": "close", "value": 0},
+        exit_rule={"operator": "max_holding_bars", "value": 1},
+        max_holding_bars=1,
+    )
+    _write_proposals(proposals_path, [proposal])
+    cfg = _cfg(tmp_path, proposals_path)
+    audit = SimpleNamespace(regime="NORMAL", quant_lab={})
+    series = _series("TRX/USDT")
+
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "open",
+        market_data_1h={"TRX/USDT": series},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=audit,
+        now=NOW,
+    )
+
+    raw = proposal.model_dump(mode="json")
+    raw["created_at"] = (NOW - timedelta(days=2)).isoformat()
+    raw["expires_at"] = (NOW - timedelta(days=1)).isoformat()
+    for field in (
+        "entry_rule",
+        "exit_rule",
+        "source_dataset_versions",
+        "required_market_fields",
+        "blocked_reasons",
+        "next_required_actions",
+    ):
+        raw[field] = json.dumps(raw[field], sort_keys=True)
+    raw["recommended_mode"] = "paper"
+    _write_raw_proposal_rows(proposals_path, [raw])
+
+    result = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "expired-but-open",
+        market_data_1h={
+            "TRX/USDT": _series("TRX/USDT", last_ts=series.ts[-1] + 3_600_000)
+        },
+        top_of_book={"TRX/USDT": _quote(102.0, NOW + timedelta(hours=1))},
+        cfg=cfg,
+        audit=audit,
+        now=NOW + timedelta(hours=1),
+    )
+
+    ack_rows = list(
+        csv.DictReader((reports / "summaries/paper_strategy_proposal_ack.csv").open())
+    )
+    runs = list(csv.DictReader((reports / "summaries/paper_strategy_runs.csv").open()))
+    assert result["accepted"] == 1
+    assert result["closed_trades"] == 1
+    assert len(ack_rows) == 1
+    assert ack_rows[0]["accepted"] == "True"
+    assert ack_rows[0]["reject_reason"] == ""
+    assert len(runs) == 1
+
+
+def test_missing_quote_records_not_observable_without_virtual_position(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    _write_proposals(proposals_path, [_proposal("NO_QUOTE_PAPER", "TRX/USDT")])
+    cfg = _cfg(tmp_path, proposals_path)
+
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "run-1",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+
+    signals = list(
+        csv.DictReader((reports / "summaries/paper_strategy_signals.csv").open())
+    )
+    states = list(
+        csv.DictReader((reports / "summaries/paper_strategy_state.csv").open())
+    )
+    assert signals[0]["observability"] == "NOT_OBSERVABLE"
+    assert signals[0]["valid_for_promotion"] == "False"
+    assert states[0]["open_paper_position"] == "False"
+
+
+def test_runtime_accepts_production_provider_quote_timestamp_shape(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    _write_proposals(proposals_path, [_proposal("PROVIDER_QUOTE_PAPER", "TRX/USDT")])
+    cfg = _cfg(tmp_path, proposals_path)
+
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "run-1",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={"TRX/USDT": _provider_quote(100.0)},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+
+    signal = list(
+        csv.DictReader((reports / "summaries/paper_strategy_signals.csv").open())
+    )[0]
+    assert signal["observability"] == "OBSERVABLE"
+    assert signal["quote_timestamp"].startswith("2026-07-11T00:00:00")
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        {"bid": 99.9, "ask": 100.1, "mid": 100.0},
+        {
+            "bid": 100.1,
+            "ask": 99.9,
+            "mid": 100.0,
+            "timestamp": NOW.isoformat(),
+        },
+    ],
+)
+def test_quote_requires_timestamp_and_sane_top_of_book(tmp_path, quote):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    _write_proposals(proposals_path, [_proposal("INVALID_QUOTE_PAPER", "TRX/USDT")])
+    cfg = _cfg(tmp_path, proposals_path)
+
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "run-1",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={"TRX/USDT": quote},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+
+    signal = list(
+        csv.DictReader((reports / "summaries/paper_strategy_signals.csv").open())
+    )[0]
+    state = list(
+        csv.DictReader((reports / "summaries/paper_strategy_state.csv").open())
+    )[0]
+    assert signal["observability"] == "NOT_OBSERVABLE"
+    assert state["open_paper_position"] == "False"
+
+
+def test_stale_quote_is_not_observable_and_cannot_open(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    _write_proposals(proposals_path, [_proposal("STALE_QUOTE_PAPER", "TRX/USDT")])
+    cfg = _cfg(tmp_path, proposals_path)
+    stale_at = NOW - timedelta(
+        seconds=cfg.quant_lab.paper_runtime.max_quote_age_seconds + 1
+    )
+
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "run-1",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={"TRX/USDT": _quote(100.0, stale_at)},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+
+    signal = list(
+        csv.DictReader((reports / "summaries/paper_strategy_signals.csv").open())
+    )[0]
+    state = list(
+        csv.DictReader((reports / "summaries/paper_strategy_state.csv").open())
+    )[0]
+    assert signal["observability"] == "STALE"
+    assert signal["valid_for_promotion"] == "False"
+    assert state["open_paper_position"] == "False"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_reason"),
+    [
+        (
+            {"contract_version": "quant_lab.paper_strategy.v999"},
+            "unsupported_contract_version",
+        ),
+        (
+            {"entry_rule": {"operator": "python_eval", "field": "close", "value": 1}},
+            "unsupported_operator",
+        ),
+        (
+            {
+                "created_at": "2026-07-01T00:00:00+00:00",
+                "expires_at": "2026-07-10T00:00:00+00:00",
+            },
+            "proposal_expired",
+        ),
+    ],
+)
+def test_invalid_contract_rows_receive_standard_rejections(
+    tmp_path, mutation, expected_reason
+):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    proposal = _proposal("REJECTED_CONTRACT_PAPER", "TRX/USDT")
+    raw = proposal.model_dump(mode="json")
+    raw.update(mutation)
+    for field in (
+        "entry_rule",
+        "exit_rule",
+        "source_dataset_versions",
+        "required_market_fields",
+        "blocked_reasons",
+        "next_required_actions",
+    ):
+        raw[field] = json.dumps(raw[field], sort_keys=True)
+    raw["recommended_mode"] = "paper"
+    _write_raw_proposal_rows(proposals_path, [raw])
+    cfg = _cfg(tmp_path, proposals_path)
+
+    result = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "run-1",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+
+    ack = list(
+        csv.DictReader((reports / "summaries/paper_strategy_proposal_ack.csv").open())
+    )[0]
+    assert result["trackers"] == 0
+    assert ack["accepted"] == "False"
+    assert ack["reject_reason"] == expected_reason
+
+
+def test_proposal_source_failure_is_contained_without_live_effect(
+    tmp_path, monkeypatch
+):
+    from src.paper_runtime import runtime
+
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    cfg = _cfg(tmp_path, proposals_path)
+
+    def fail_source(*args, **kwargs):
+        raise TimeoutError("quant-lab proposal sync timed out")
+
+    monkeypatch.setattr(runtime, "_proposal_rows", fail_source)
+    result = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "run-1",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+
+    errors = list(
+        csv.DictReader((reports / "summaries/paper_strategy_errors.csv").open())
+    )
+    assert result["errors"] == 1
+    assert result["live_order_effect"] == "none"
+    assert errors[0]["error_code"] == "proposal_source_read_failed"
+
+
+def test_pending_exit_retries_after_quote_recovers(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    proposal = _proposal(
+        "EXIT_RETRY_PAPER",
+        "TRX/USDT",
+        entry_rule={"operator": "gt", "field": "close", "value": 0},
+        exit_rule={"operator": "max_holding_bars", "value": 1},
+        max_holding_bars=1,
+    )
+    _write_proposals(proposals_path, [proposal])
+    cfg = _cfg(tmp_path, proposals_path)
+    audit = SimpleNamespace(regime="NORMAL", quant_lab={})
+    series = _series("TRX/USDT")
+
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "open",
+        market_data_1h={"TRX/USDT": series},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=audit,
+        now=NOW,
+    )
+    state_path = Path(cfg.quant_lab.paper_runtime.state_path)
+    persisted = json.loads(state_path.read_text())
+    tracker = persisted["trackers"][proposal.proposal_id]
+    tracker["state"] = "PAPER_EXIT_PENDING"
+    state_path.write_text(json.dumps(persisted), encoding="utf-8")
+
+    missing_quote = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "pending",
+        market_data_1h={
+            "TRX/USDT": _series("TRX/USDT", last_ts=series.ts[-1] + 3_600_000)
+        },
+        top_of_book={},
+        cfg=cfg,
+        audit=audit,
+        now=NOW + timedelta(hours=1),
+    )
+    recovered = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "closed",
+        market_data_1h={
+            "TRX/USDT": _series("TRX/USDT", last_ts=series.ts[-1] + 7_200_000)
+        },
+        top_of_book={"TRX/USDT": _quote(101.0, NOW + timedelta(hours=2))},
+        cfg=cfg,
+        audit=audit,
+        now=NOW + timedelta(hours=2),
+    )
+
+    assert missing_quote["closed_trades"] == 0
+    assert recovered["closed_trades"] == 1
+    final_state = list(
+        csv.DictReader((reports / "summaries/paper_strategy_state.csv").open())
+    )[0]
+    assert final_state["state"] == "WAITING_SIGNAL"
+
+
+def test_daily_evidence_is_cumulative_and_proxy_cost_stays_paper_only(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    proposal = _proposal(
+        "CUMULATIVE_DAILY_PAPER",
+        "TRX/USDT",
+        entry_rule={"operator": "gt", "field": "close", "value": 0},
+        exit_rule={"operator": "max_holding_bars", "value": 1},
+        max_holding_bars=1,
+        required_cost_trust_level="CANARY",
+    )
+    _write_proposals(proposals_path, [proposal])
+    cfg = _cfg(tmp_path, proposals_path)
+    audit = SimpleNamespace(regime="NORMAL", quant_lab={})
+    series = _series("TRX/USDT")
+
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "day-1",
+        market_data_1h={"TRX/USDT": series},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=audit,
+        now=NOW,
+    )
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "day-2",
+        market_data_1h={
+            "TRX/USDT": _series("TRX/USDT", last_ts=series.ts[-1] + 3_600_000)
+        },
+        top_of_book={"TRX/USDT": _quote(102.0, NOW + timedelta(days=1))},
+        cfg=cfg,
+        audit=audit,
+        now=NOW + timedelta(days=1),
+    )
+
+    daily = list(
+        csv.DictReader((reports / "summaries/paper_strategy_daily.csv").open())
+    )
+    latest = sorted(daily, key=lambda row: row["paper_date"])[-1]
+    cost = list(
+        csv.DictReader((reports / "summaries/paper_strategy_cost_evidence.csv").open())
+    )[0]
+    run = list(csv.DictReader((reports / "summaries/paper_strategy_runs.csv").open()))[
+        0
+    ]
+
+    assert latest["paper_days"] == "2"
+    assert latest["strategy_candidate"] == "generic_test"
+    assert latest["heartbeat_day_count"] == "2"
+    assert latest["entry_day_count"] == "1"
+    assert latest["cumulative_would_enter_count"] == "1"
+    assert latest["closed_entries"] == "1"
+    assert latest["paper_pnl_day_count"] == "1"
+    assert latest["spread_observation_coverage"] == "1.0"
+    assert cost["required_cost_trust_level"] == "CANARY"
+    assert cost["cost_trust_level"] == "PAPER_ONLY"
+    assert cost["valid_for_live_coverage"] == "False"
+    assert run["cost_trust_level"] == "PAPER_ONLY"
+
+
+def test_cooldown_skips_full_bar_before_reentry(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    proposal = _proposal(
+        "COOLDOWN_PAPER",
+        "TRX/USDT",
+        entry_rule={"operator": "gt", "field": "close", "value": 0},
+        exit_rule={"operator": "max_holding_bars", "value": 1},
+        max_holding_bars=1,
+        cooldown_bars=1,
+    )
+    _write_proposals(proposals_path, [proposal])
+    cfg = _cfg(tmp_path, proposals_path)
+    audit = SimpleNamespace(regime="NORMAL", quant_lab={})
+    series = _series("TRX/USDT")
+
+    for index in range(4):
+        last_ts = series.ts[-1] + index * 3_600_000
+        run_generic_paper_runtime(
+            run_dir=reports / "runs" / f"run-{index}",
+            market_data_1h={"TRX/USDT": _series("TRX/USDT", last_ts=last_ts)},
+            top_of_book={
+                "TRX/USDT": _quote(100.0 + index, NOW + timedelta(hours=index))
+            },
+            cfg=cfg,
+            audit=audit,
+            now=NOW + timedelta(hours=index),
+        )
+        state = list(
+            csv.DictReader((reports / "summaries/paper_strategy_state.csv").open())
+        )[0]
+        if index == 2:
+            assert state["state"] == "WAITING_SIGNAL"
+            assert state["open_paper_position"] == "False"
+
+    final_state = list(
+        csv.DictReader((reports / "summaries/paper_strategy_state.csv").open())
+    )[0]
+    assert final_state["state"] == "PAPER_OPEN"
+    assert final_state["open_paper_position"] == "True"
+
+
+def test_disabled_runtime_and_version_conflict_return_standard_rejections(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    original = _proposal("LOCKED_RULE_PAPER", "TRX/USDT")
+    _write_proposals(proposals_path, [original])
+    cfg = _cfg(tmp_path, proposals_path)
+    cfg.quant_lab.paper_runtime.enabled = False
+
+    disabled = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "disabled",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+    disabled_ack = list(
+        csv.DictReader((reports / "summaries/paper_strategy_proposal_ack.csv").open())
+    )[0]
+    assert disabled["trackers"] == 0
+    assert disabled_ack["accepted"] == "False"
+    assert disabled_ack["reject_reason"] == "config_disabled"
+
+    cfg.quant_lab.paper_runtime.enabled = True
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "accepted",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+    changed = _proposal(
+        "LOCKED_RULE_PAPER",
+        "TRX/USDT",
+        entry_rule={"operator": "gt", "field": "close", "value": 999999},
+    )
+    _write_proposals(proposals_path, [changed])
+    conflict = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "conflict",
+        market_data_1h={
+            "TRX/USDT": _series(
+                "TRX/USDT",
+                last_ts=_series("TRX/USDT").ts[-1] + 3_600_000,
+            )
+        },
+        top_of_book={"TRX/USDT": _quote(101.0, NOW + timedelta(hours=1))},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW + timedelta(hours=1),
+    )
+    conflict_ack = list(
+        csv.DictReader((reports / "summaries/paper_strategy_proposal_ack.csv").open())
+    )[-1]
+    assert conflict["rejected"] == 1
+    assert conflict_ack["reject_reason"] == "duplicate_version_conflict"
+
+
+def test_runtime_tracker_and_history_limits_bound_large_proposal_batch(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    proposals = [
+        _proposal(f"BOUNDED_PAPER_{index:03d}", "TRX/USDT") for index in range(120)
+    ]
+    _write_proposals(proposals_path, proposals)
+    cfg = _cfg(tmp_path, proposals_path)
+    cfg.quant_lab.paper_runtime.max_trackers = 100
+    cfg.quant_lab.paper_runtime.max_history_records = 100
+
+    result = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "bounded",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+    state = json.loads(Path(cfg.quant_lab.paper_runtime.state_path).read_text())
+    ack_rows = list(
+        csv.DictReader((reports / "summaries/paper_strategy_proposal_ack.csv").open())
+    )
+
+    assert result["trackers"] == 100
+    assert result["accepted"] == 100
+    assert result["rejected"] == 20
+    assert len(state["trackers"]) == 100
+    assert len(state["signals"]) == 100
+    assert {row["reject_reason"] for row in ack_rows if row["accepted"] == "False"} == {
+        "tracker_capacity_exceeded"
+    }
+
+
+def test_dsl_rejects_arbitrary_operator_and_never_evaluates_source_text():
+    with pytest.raises(ValidationError):
+        PaperRule.model_validate({"operator": "__import__", "value": "os"})
+    interpreter = PaperRuleInterpreter()
+    assert interpreter.evaluate(
+        PaperRule(operator="gt", field="close", value=1), {"close": 2}
+    )
+    with pytest.raises(ValidationError):
+        PaperRule.model_validate(
+            {
+                "operator": "consecutive",
+                "periods": 513,
+                "children": [{"operator": "gt", "field": "close", "value": 1}],
+            }
+        )
+
+
+def test_contract_hash_matches_quant_lab_canonical_vector():
+    payload = {
+        "contract_version": "quant_lab.paper_strategy.v1",
+        "strategy_id": "CONTRACT_TEST",
+        "strategy_version": "1.0.0",
+        "strategy_family": "contract",
+        "symbol": "TRX/USDT",
+        "timeframe": "1h",
+        "direction": "long",
+        "entry_rule": {"operator": "momentum_gt", "field": "momentum_24", "value": 0},
+        "exit_rule": {"operator": "max_holding_bars", "value": 48},
+        "max_holding_bars": 48,
+        "min_holding_bars": 1,
+        "cooldown_bars": 2,
+        "signal_confirmation_bars": 1,
+        "cost_quantile": "p75",
+        "minimum_expected_edge_bps": 10.0,
+        "paper_notional_usdt": 20.0,
+        "paper_only": True,
+        "live_order_effect": "none",
+        "max_live_notional_usdt": 0.0,
+        "created_at": "2026-07-10T00:00:00Z",
+        "expires_at": "2026-08-10T00:00:00Z",
+        "source_pack_sha256": "",
+        "source_dataset_versions": {"alpha_discovery_board": "v1"},
+        "required_market_fields": ["bid", "ask", "mid", "momentum_24"],
+        "required_cost_trust_level": "PAPER_ONLY",
+        "lifecycle_state": "PAPER_PROPOSAL_READY",
+        "lifecycle_reason": "ignored",
+        "blocked_reasons": ["ignored"],
+        "next_required_actions": ["ignored"],
+    }
+
+    assert paper_proposal_hash(payload) == (
+        "6d922297dfdd33019d720d5491e276382d49c710e0823997f78e44a21dd29acb"
+    )
+
+
+def test_bundle_contains_generic_paper_evidence(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    _write_proposals(proposals_path, [_proposal("BUNDLE_PAPER", "TRX/USDT")])
+    cfg = _cfg(tmp_path, proposals_path)
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "run-1",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+
+    bundle = export_v5_bundle(
+        reports_dir=reports,
+        out_dir=tmp_path / "bundles",
+        include_logs=False,
+        include_config=False,
+        refresh_cost_probe_preflight=False,
+    )
+    with tarfile.open(bundle, "r:gz") as archive:
+        names = set(archive.getnames())
+
+    assert "summaries/paper_strategy_registry.csv" in names
+    assert "summaries/paper_strategy_state.csv" in names
+    assert "summaries/paper_strategy_signals.csv" in names
+    assert "summaries/paper_strategy_quote_coverage.csv" in names
+    assert "summaries/paper_strategy_cost_evidence.csv" in names
+    assert "summaries/paper_strategy_errors.csv" in names
+    assert "summaries/paper_strategy_restart_recovery.csv" in names
+    assert "summaries/quant_lab_contract_status.json" in names

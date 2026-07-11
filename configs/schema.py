@@ -1875,6 +1875,57 @@ class LiveCostTrustGuardConfig(BaseModel):
         return value
 
 
+class PaperRuntimeConfig(BaseModel):
+    enabled: bool = True
+    live_order_effect: str = "none"
+    state_path: str = "state/paper_runtime/state.json"
+    max_trackers: int = Field(default=100, ge=1, le=500)
+    max_history_records: int = Field(default=5000, ge=100, le=100_000)
+    max_quote_age_seconds: float = Field(default=120.0, gt=0.0, le=3600.0)
+    default_fee_bps: float = Field(default=10.0, ge=0.0, le=1000.0)
+    default_slippage_bps: float = Field(default=2.0, ge=0.0, le=1000.0)
+    max_observation_symbols: int = Field(default=100, ge=1, le=500)
+    observation_timeout_seconds: float = Field(default=2.0, gt=0.0, le=10.0)
+
+    @field_validator("live_order_effect")
+    @classmethod
+    def _validate_live_order_effect(cls, value: str) -> str:
+        normalized = str(value or "none").strip().lower()
+        if normalized != "none":
+            raise ValueError(
+                "quant_lab.paper_runtime.live_order_effect must remain none"
+            )
+        return normalized
+
+
+class QuantLabCanaryConfig(BaseModel):
+    enabled: bool = False
+    strategy_whitelist: List[str] = Field(default_factory=list)
+    max_notional_usdt: float = Field(default=20.0, gt=0.0)
+    max_total_exposure_usdt: float = Field(default=20.0, gt=0.0)
+    max_open_positions: int = Field(default=1, ge=1)
+    never_block_exits: bool = True
+    require_permission_status: str = "ACTIVE_ALLOW"
+    require_cost_trust_level: str = "CANARY"
+    require_paper_promotion_ready: bool = True
+
+    @model_validator(mode="after")
+    def _validate_canary_safety(self) -> "QuantLabCanaryConfig":
+        if not self.never_block_exits:
+            raise ValueError("quant_lab.canary.never_block_exits must remain true")
+        if self.require_permission_status != "ACTIVE_ALLOW":
+            raise ValueError(
+                "quant_lab.canary.require_permission_status must be ACTIVE_ALLOW"
+            )
+        if self.require_cost_trust_level != "CANARY":
+            raise ValueError("quant_lab.canary.require_cost_trust_level must be CANARY")
+        if self.enabled and not self.strategy_whitelist:
+            raise ValueError(
+                "enabled quant_lab.canary requires an explicit strategy_whitelist"
+            )
+        return self
+
+
 class QuantLabConfig(BaseModel):
     enabled: bool = False
     mode: str = "shadow"
@@ -1909,6 +1960,8 @@ class QuantLabConfig(BaseModel):
         }
     )
     live_cost_trust_guard: LiveCostTrustGuardConfig = Field(default_factory=LiveCostTrustGuardConfig)
+    paper_runtime: PaperRuntimeConfig = Field(default_factory=PaperRuntimeConfig)
+    canary: QuantLabCanaryConfig = Field(default_factory=QuantLabCanaryConfig)
     quant_lab_shadow_live_canary_whitelist_enabled: bool = False
     quant_lab_shadow_live_canary_whitelist: List[str] = Field(default_factory=lambda: ["BTC_STRICT_PROBE"])
 
@@ -2063,6 +2116,8 @@ class QuantLabConfig(BaseModel):
                 "quant_lab.fail_policy=allow_local_fallback is not allowed in permission_only/enforce "
                 "unless quant_lab.allow_local_fallback_in_enforce=true"
             )
+        if self.canary.enabled and self.mode != "enforce":
+            raise ValueError("enabled quant_lab.canary requires quant_lab.mode=enforce")
         return self
 
 
