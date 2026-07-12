@@ -9,6 +9,15 @@ import pytest
 import scripts.trading_report as trading_report
 
 
+def test_legacy_numeric_order_fee_uses_side_to_restore_okx_fee_currency() -> None:
+    assert trading_report._signed_fee_usdt_from_order_fee(
+        "TURBO-USDT", "0.0011536", "-27.40713", side="buy"
+    ) == pytest.approx(-0.031616866768)
+    assert trading_report._signed_fee_usdt_from_order_fee(
+        "TURBO-USDT", "0.0011536", "-0.0316", side="sell"
+    ) == pytest.approx(-0.0316)
+
+
 def test_build_paths_uses_runtime_order_store(monkeypatch, tmp_path: Path) -> None:
     config_path = (tmp_path / "configs" / "live_prod.yaml").resolve()
     config_path.parent.mkdir(parents=True, exist_ok=True)

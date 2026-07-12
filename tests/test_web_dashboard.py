@@ -10445,7 +10445,23 @@ def test_api_account_converts_json_fee_maps_to_signed_usdt(monkeypatch, tmp_path
 
     assert payload["total_trades"] == 2
     assert payload["total_fees"] == pytest.approx(-50.0)
-    assert payload["realized_pnl"] == pytest.approx(-30.0)
+    assert payload["order_flow_net_usdt"] == pytest.approx(-30.0)
+    assert payload["realized_pnl"] == pytest.approx(-20.0)
+    assert payload["realized_pnl_source"] == "authoritative_equity_delta_flat"
+
+
+def test_legacy_numeric_order_fee_uses_side_to_restore_okx_fee_currency():
+    module = load_web_dashboard_module()
+
+    assert module._signed_fee_usdt_from_order_fee(
+        "PEPE-USDT", "0.000004453", "-4353.429", side="buy"
+    ) == pytest.approx(-0.019385819337)
+    assert module._signed_fee_usdt_from_order_fee(
+        "PEPE-USDT", "0.000004453", "-0.019", side="sell"
+    ) == pytest.approx(-0.019)
+    assert module._signed_fee_usdt_from_order_fee(
+        "PEPE-USDT", "0.000004453", "-4353.429"
+    ) == 0.0
 
 
 def test_api_account_prefers_live_okx_equsd_for_total_equity(monkeypatch, tmp_path):

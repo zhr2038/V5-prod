@@ -108,7 +108,12 @@ def _signed_fee_usdt_from_fee_fields(inst_id: str, px: Any, fee_amount: Any, fee
     return fee_val * px_val
 
 
-def _signed_fee_usdt_from_order_fee(inst_id: str, avg_px: Any, raw_fee: Any) -> float:
+def _signed_fee_usdt_from_order_fee(
+    inst_id: str,
+    avg_px: Any,
+    raw_fee: Any,
+    side: Any = None,
+) -> float:
     raw = str(raw_fee or "").strip()
     if not raw:
         return 0.0
@@ -118,7 +123,15 @@ def _signed_fee_usdt_from_order_fee(inst_id: str, avg_px: Any, raw_fee: Any) -> 
     except Exception:
         numeric_fee = None
     if numeric_fee is not None:
-        return _signed_fee_usdt_from_fee_fields(inst_id, avg_px, numeric_fee)
+        side_norm = str(side or '').strip().lower()
+        base_ccy, quote_ccy = _split_inst_id_base_quote(inst_id)
+        if side_norm == 'buy':
+            fee_ccy = base_ccy
+        elif side_norm == 'sell':
+            fee_ccy = quote_ccy
+        else:
+            return 0.0
+        return _signed_fee_usdt_from_fee_fields(inst_id, avg_px, numeric_fee, fee_ccy)
 
     try:
         fee_map = json.loads(raw)
@@ -316,7 +329,9 @@ class TradingReportGenerator:
                     "side": side,
                     "state": state,
                     "notional": float(notional_usdt or 0),
-                    "fee": _signed_fee_usdt_from_order_fee(str(inst_id or ""), avg_px, fee),
+                    "fee": _signed_fee_usdt_from_order_fee(
+                        str(inst_id or ""), avg_px, fee, side=side
+                    ),
                     "ts": datetime.fromtimestamp(float(ts_ms) / 1000, timezone.utc),
                 }
             )

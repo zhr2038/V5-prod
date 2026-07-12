@@ -2417,7 +2417,12 @@ def _signed_fee_usdt_from_fee_fields(inst_id: str, px: Any, fee_amount: Any, fee
     return fee_val * px_val
 
 
-def _signed_fee_usdt_from_order_fee(inst_id: str, avg_px: Any, raw_fee: Any) -> float:
+def _signed_fee_usdt_from_order_fee(
+    inst_id: str,
+    avg_px: Any,
+    raw_fee: Any,
+    side: Any = None,
+) -> float:
     raw = str(raw_fee or '').strip()
     if not raw:
         return 0.0
@@ -2427,7 +2432,18 @@ def _signed_fee_usdt_from_order_fee(inst_id: str, avg_px: Any, raw_fee: Any) -> 
     except Exception:
         numeric_fee = None
     if numeric_fee is not None:
-        return _signed_fee_usdt_from_fee_fields(inst_id, avg_px, numeric_fee)
+        # Legacy OKX rows stored only the amount: buys paid the fee in base
+        # currency and sells in quote currency. Without side the unit is
+        # ambiguous, so fail closed instead of reporting it as USDT.
+        side_norm = str(side or '').strip().lower()
+        base_ccy, quote_ccy = _split_inst_id_base_quote(inst_id)
+        if side_norm == 'buy':
+            fee_ccy = base_ccy
+        elif side_norm == 'sell':
+            fee_ccy = quote_ccy
+        else:
+            return 0.0
+        return _signed_fee_usdt_from_fee_fields(inst_id, avg_px, numeric_fee, fee_ccy)
 
     try:
         fee_map = json.loads(raw)
@@ -2452,7 +2468,7 @@ def _load_total_fees_from_orders(*, excluded_inst_ids: Optional[List[str]] = Non
     excluded = [str(x) for x in (excluded_inst_ids or [])]
     placeholders = ','.join(['?' for _ in excluded]) if excluded else ''
     sql = """
-        SELECT inst_id, avg_px, fee
+        SELECT inst_id, avg_px, fee, side
         FROM orders
         WHERE state='FILLED' AND notional_usdt < ?
     """
@@ -2471,8 +2487,10 @@ def _load_total_fees_from_orders(*, excluded_inst_ids: Optional[List[str]] = Non
         return 0.0
 
     total = 0.0
-    for inst_id, avg_px, fee in rows:
-        total += _signed_fee_usdt_from_order_fee(str(inst_id or ''), avg_px, fee)
+    for inst_id, avg_px, fee, side in rows:
+        total += _signed_fee_usdt_from_order_fee(
+            str(inst_id or ''), avg_px, fee, side=side
+        )
     return total
 
 
@@ -4751,9 +4769,9 @@ def api_account():
                 max_notional_usdt=1000.0,
                 orders_db=runtime_paths.orders_db,
             )
-            realized_pnl = float(total_sell) - float(total_buy) + float(total_fees)
+            order_flow_net = float(total_sell) - float(total_buy) + float(total_fees)
         else:
-            total_trades = total_buy = total_sell = total_fees = realized_pnl = 0
+            total_trades = total_buy = total_sell = total_fees = order_flow_net = 0
 
         positions_value = 0.0
         positions_rows = []
@@ -4800,6 +4818,12 @@ def api_account():
             drawdown_pct = (peak_equity - total_equity) / peak_equity if peak_equity > 0 else 0
 
         drawdown_pct = max(0.0, min(1.0, drawdown_pct))
+        if positions_count == 0:
+            realized_pnl: Optional[float] = float(equity_delta)
+            realized_pnl_source = 'authoritative_equity_delta_flat'
+        else:
+            realized_pnl = None
+            realized_pnl_source = 'not_observable_with_open_positions'
         if latest_update_epoch is None and runtime_paths.positions_db.exists():
             try:
                 latest_update_epoch = runtime_paths.positions_db.stat().st_mtime
@@ -4822,7 +4846,9 @@ def api_account():
             'total_buy': round(float(total_buy), 2),
             'total_sell': round(float(total_sell), 2),
             'total_fees': round(float(total_fees), 4),
-            'realized_pnl': round(float(realized_pnl), 2),
+            'order_flow_net_usdt': round(float(order_flow_net), 4),
+            'realized_pnl': round(realized_pnl, 4) if realized_pnl is not None else None,
+            'realized_pnl_source': realized_pnl_source,
             'last_update': _format_display_epoch(latest_update_epoch) if latest_update_epoch is not None else ''
         })
     except Exception as e:
@@ -4842,7 +4868,9 @@ def api_account():
             total_buy=0.0,
             total_sell=0.0,
             total_fees=0.0,
-            realized_pnl=0.0,
+            order_flow_net_usdt=0.0,
+            realized_pnl=None,
+            realized_pnl_source='unavailable',
             last_update='',
         )
 
@@ -4972,7 +5000,12 @@ def api_trades():
                             'price': round(price, 6),
                             'qty': round(qty, 8),
                             'amount': round(amount, 4),
-                            'fee': round(_signed_fee_usdt_from_order_fee(str(row[0]), row[5], row[3]), 6),
+                            'fee': round(
+                                _signed_fee_usdt_from_order_fee(
+                                    str(row[0]), row[5], row[3], side=row[1]
+                                ),
+                                6,
+                            ),
                             'state': str(row[4]),
                             'time': str(row[6])
                         })
