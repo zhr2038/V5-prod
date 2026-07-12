@@ -190,7 +190,16 @@ PAYLOAD_DIRS = [
     "raw/reports",
     "summaries",
 ]
-RUN_FILES = ("decision_audit.json", "trades.csv", "equity.jsonl", "summary.json", "candidate_snapshot.csv", "order_lifecycle.csv", "run_completion.json")
+RUN_FILES = (
+    "decision_audit.json",
+    "trades.csv",
+    "equity.jsonl",
+    "summary.json",
+    "candidate_snapshot.csv",
+    "order_lifecycle.csv",
+    "trade_opportunity_funnel.csv",
+    "run_completion.json",
+)
 STATE_FILES = [
     ("reports/kill_switch.json", "raw/state/kill_switch.json", True),
     ("reports/reconcile_status.json", "raw/state/reconcile_status.json", True),
@@ -217,6 +226,16 @@ CURRENT_REPORT_FILES = [
     ("reports/sol_paper_strategy_labels.jsonl", "raw/reports/sol_paper_strategy_labels.jsonl", False),
     ("reports/candidate_snapshot.csv", "raw/reports/candidate_snapshot.csv", False),
     ("reports/order_lifecycle.csv", "raw/reports/order_lifecycle.csv", False),
+    (
+        "reports/trade_opportunity_funnel.csv",
+        "raw/reports/trade_opportunity_funnel.csv",
+        False,
+    ),
+    (
+        "reports/trade_opportunity_funnel.csv",
+        "summaries/trade_opportunity_funnel.csv",
+        False,
+    ),
     ("reports/summaries/paper_strategy_runs.csv", "summaries/paper_strategy_runs.csv", False),
     ("reports/summaries/paper_strategy_proposal_ack.csv", "summaries/paper_strategy_proposal_ack.csv", False),
     ("reports/summaries/paper_strategy_daily.csv", "summaries/paper_strategy_daily.csv", False),

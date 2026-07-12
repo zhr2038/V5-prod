@@ -41,6 +41,18 @@ def test_v5_bundle_export_script_includes_fast_microstructure_shadow_summary() -
     assert '"summaries/fast_microstructure_strategy_shadow.csv"' in script
 
 
+def test_v5_bundle_export_script_includes_trade_opportunity_funnel() -> None:
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "scripts" / "generate_v5_bundle_remote.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"trade_opportunity_funnel.csv",' in script
+    assert '"reports/trade_opportunity_funnel.csv"' in script
+    assert '"raw/reports/trade_opportunity_funnel.csv"' in script
+    assert '"summaries/trade_opportunity_funnel.csv"' in script
+
+
 def test_v5_bundle_export_script_does_not_probe_legacy_report_api_paths_by_default() -> None:
     root = Path(__file__).resolve().parents[1]
     script = (root / "scripts" / "generate_v5_bundle_remote.sh").read_text(encoding="utf-8")
