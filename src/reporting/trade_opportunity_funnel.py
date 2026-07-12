@@ -81,10 +81,12 @@ def blocker_counts_from_decisions(
 ) -> dict[str, int]:
     counts: Counter[str] = Counter()
     for row in decisions or []:
-        if str(row.get("action") or "").lower() not in {"blocked", "skip", "filtered"}:
+        action = str(row.get("action") or row.get("router_action") or "").lower()
+        if action not in {"blocked", "skip", "filtered"}:
             continue
         reason = str(
             row.get("reason")
+            or row.get("blocked_reason")
             or row.get("block_reason")
             or row.get("reject_reason")
             or "unspecified"
@@ -229,7 +231,7 @@ def build_trade_opportunity_funnel(
             stage
         ]
         dropped = max(input_count - output_count, 0)
-        normalized_blockers = _positive_counts(blockers)
+        normalized_blockers = _blockers_for_stage_loss(blockers, dropped=dropped)
         output.append(
             {
                 "schema_version": TRADE_OPPORTUNITY_FUNNEL_SCHEMA_VERSION,
@@ -257,11 +259,22 @@ def _audit_blockers(audit: Any, stage: str) -> dict[str, int]:
     counts = dict(getattr(audit, "counts", {}) or {})
     rejects = dict(getattr(audit, "rejects", {}) or {})
     if stage == "risk_target":
-        tokens = ("risk_off", "target_zero", "dd_throttle")
+        tokens = (
+            "risk_off_suppressed",
+            "target_zero_after_",
+            "risk_block",
+            "risk_reject",
+        )
     elif stage == "signal_selection":
-        tokens = ("no_signal", "selected", "rank")
+        tokens = ("no_signal", "not_selected", "rank_filtered", "selection_block")
     elif stage == "candidate_scoring":
-        tokens = ("market_data", "no_closed_bar", "scored")
+        tokens = (
+            "market_data_missing",
+            "no_closed_bar",
+            "not_scored",
+            "scoring_error",
+            "provider_error",
+        )
     else:
         tokens = (
             "protect_entry",
@@ -374,6 +387,20 @@ def _positive_counts(values: Mapping[str, Any]) -> dict[str, int]:
         for key, value in values.items()
         if _int(value) > 0
     }
+
+
+def _blockers_for_stage_loss(
+    values: Mapping[str, Any], *, dropped: int
+) -> dict[str, int]:
+    """Report only reasons that explain an actual loss at this funnel stage."""
+
+    if dropped <= 0:
+        return {}
+    blockers = _positive_counts(values)
+    attributed = sum(blockers.values())
+    if attributed < dropped:
+        blockers["unattributed_stage_loss"] = dropped - attributed
+    return blockers
 
 
 def _primary_blocker(values: Mapping[str, int]) -> str:

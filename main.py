@@ -3598,7 +3598,14 @@ def main() -> None:
         record_order_stage,
     )
 
-    record_order_stage(audit, "local_order_generation", orders)
+    record_order_stage(
+        audit,
+        "local_order_generation",
+        orders,
+        blockers=blocker_counts_from_decisions(
+            list(getattr(audit, "target_execution_explain", []) or [])
+        ),
+    )
     if live_whitelist:
         _assert_live_symbol_subset(
             [str(getattr(order, "symbol", "") or "").strip() for order in (orders or []) if str(getattr(order, "symbol", "") or "").strip()],

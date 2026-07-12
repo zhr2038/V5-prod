@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from configs.schema import AppConfig
 from main import _write_trade_opportunity_funnel_best_effort
 from src.reporting.trade_opportunity_funnel import (
+    blocker_counts_from_decisions,
     build_trade_opportunity_funnel,
     record_order_stage,
     write_trade_opportunity_funnel,
@@ -136,6 +137,50 @@ def test_trade_funnel_dry_run_never_reports_real_submit_and_upserts_by_run(tmp_p
     assert by_stage["exchange_fill"]["output_count"] == 0
     assert len(aggregate) == 10
     assert json.loads(by_stage["order_arbitration"]["blocker_mix"]) == {}
+
+
+def test_trade_funnel_reports_real_stage_loss_instead_of_progress_counters() -> None:
+    audit = SimpleNamespace(
+        run_id="truthful-funnel",
+        counts={"universe": 4, "scored": 3, "selected": 1},
+        rejects={"dd_throttle": 1},
+        targets_post_risk={"ETH/USDT": 0.15},
+        target_execution_explain=[
+            {
+                "symbol": "ETH/USDT",
+                "router_action": "skip",
+                "blocked_reason": "protect_entry_rsi_confirm_too_weak",
+            }
+        ],
+        trade_funnel={"market_data_available": 4},
+    )
+    record_order_stage(
+        audit,
+        "local_order_generation",
+        [],
+        blockers=blocker_counts_from_decisions(audit.target_execution_explain),
+    )
+
+    rows = build_trade_opportunity_funnel(
+        audit=audit,
+        lifecycle_rows=[],
+        execution_mode="live",
+        ts_utc="2026-07-12T00:01:00Z",
+    )
+    by_stage = {row["stage"]: row for row in rows}
+
+    assert by_stage["candidate_scoring"]["primary_blocker"] == (
+        "unattributed_stage_loss"
+    )
+    assert "scored" not in by_stage["candidate_scoring"]["blocker_mix"]
+    assert by_stage["signal_selection"]["primary_blocker"] == (
+        "unattributed_stage_loss"
+    )
+    assert "selected" not in by_stage["signal_selection"]["blocker_mix"]
+    assert by_stage["risk_target"]["primary_blocker"] == ""
+    assert by_stage["local_order_generation"]["primary_blocker"] == (
+        "protect_entry_rsi_confirm_too_weak"
+    )
 
 
 def test_best_effort_writer_covers_safe_early_exit_without_live_effect(tmp_path) -> None:
