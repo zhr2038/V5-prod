@@ -92,6 +92,34 @@ class PaperRuleInterpreter:
             return left <= right
         raise ValueError(f"unsupported_operator:{operator}")
 
+    def match_reason(
+        self,
+        rule: PaperRule,
+        context: Mapping[str, Any],
+        *,
+        history: Sequence[Mapping[str, Any]] = (),
+    ) -> str:
+        """Return the closed-vocabulary branch that caused a true rule."""
+        if not self.evaluate(rule, context, history=history):
+            return ""
+        if rule.operator == "all":
+            reasons = [
+                self.match_reason(child, context, history=history)
+                for child in rule.children
+            ]
+            return "all:" + "+".join(reason for reason in reasons if reason)
+        if rule.operator == "any":
+            for child in rule.children:
+                reason = self.match_reason(child, context, history=history)
+                if reason:
+                    return reason
+            return "any"
+        if rule.operator == "not":
+            return f"not:{rule.children[0].operator}"
+        if rule.operator == "consecutive":
+            return f"consecutive:{rule.children[0].operator}"
+        return rule.operator
+
 
 def _right_value(rule: PaperRule, context: Mapping[str, Any]) -> float:
     if rule.reference_field:

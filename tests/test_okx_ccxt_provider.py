@@ -86,3 +86,33 @@ def test_fetch_top_of_book_keeps_valid_quotes_when_batch_or_symbol_fails(
     assert quotes["BTC/USDT"]["arrival_mid"] == pytest.approx(100.1)
     assert quotes["BTC/USDT"]["quote_age_ms"] == 1000
     assert quotes["SOL/USDT"]["quote_ts"] == "2023-11-14T22:13:20.500000Z"
+
+
+def test_history_ohlcv_excludes_unconfirmed_and_not_yet_closed_candles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _provider(monkeypatch)
+    start = 1_700_000_000_000
+    hour = 3_600_000
+    rows = [
+        [start, 100.0, 101.0, 99.0, 100.5, 10.0, 1],
+        [start + hour, 101.0, 102.0, 100.0, 101.5, 11.0, 0],
+        [start + 2 * hour, 102.0, 103.0, 101.0, 102.5, 12.0, None],
+        [start + 3 * hour, 103.0, 104.0, 102.0, 103.5, 13.0, None],
+        [start + 4 * hour, 104.0, 105.0, 103.0, 104.5, 14.0, 1],
+    ]
+    monkeypatch.setattr(
+        provider,
+        "_fetch_history_candles",
+        lambda *args, **kwargs: rows,
+    )
+
+    series = provider._fetch_symbol_ohlcv(
+        "BTC/USDT",
+        "1h",
+        limit=10,
+        end_ts_ms=start + 4 * hour,
+    )
+
+    assert series.ts == [start, start + 2 * hour, start + 3 * hour]
+    assert series.close == [100.5, 102.5, 103.5]

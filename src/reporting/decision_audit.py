@@ -136,6 +136,7 @@ class DecisionAudit:
     budget: Dict[str, Any] = field(default_factory=dict)
     budget_action: Dict[str, Any] = field(default_factory=dict)
     quant_lab: Dict[str, Any] = field(default_factory=dict)
+    trade_funnel: Dict[str, Any] = field(default_factory=dict)
 
     # Universe配置信息
     universe_config: Dict[str, Any] = field(default_factory=dict)
@@ -250,6 +251,7 @@ def load_decision_audit(run_dir: str) -> Optional[DecisionAudit]:
     audit.budget = data.get("budget", {})
     audit.budget_action = data.get("budget_action", {})
     audit.quant_lab = data.get("quant_lab", {}) or {}
+    audit.trade_funnel = data.get("trade_funnel", {}) or {}
     audit.universe_config = data.get("universe_config", {})
     audit.exit_signals = data.get("exit_signals", [])
     audit.notes = data.get("notes", [])

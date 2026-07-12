@@ -161,7 +161,7 @@ class OKXCCXTProvider(MarketDataProvider):
         *,
         after_ms: int,
         limit: int,
-    ) -> List[List[float]]:
+    ) -> List[List[Any]]:
         url = f"{self.base_url}/api/v5/market/history-candles"
         params = {
             "instId": str(inst_id),
@@ -231,21 +231,21 @@ class OKXCCXTProvider(MarketDataProvider):
             return []
 
         rows = obj.get("data") or []
-        out: List[List[float]] = []
+        out: List[List[Any]] = []
         for row in rows:
             if not isinstance(row, list) or len(row) < 6:
                 continue
             try:
-                out.append(
-                    [
-                        int(row[0]),
-                        float(row[1]),
-                        float(row[2]),
-                        float(row[3]),
-                        float(row[4]),
-                        float(row[5]),
-                    ]
-                )
+                candle: List[Any] = [
+                    int(row[0]),
+                    float(row[1]),
+                    float(row[2]),
+                    float(row[3]),
+                    float(row[4]),
+                    float(row[5]),
+                ]
+                candle.append(int(row[8]) if len(row) > 8 else None)
+                out.append(candle)
             except Exception:
                 continue
         return out
@@ -265,8 +265,14 @@ class OKXCCXTProvider(MarketDataProvider):
         cursor_ms = int(end_ts_ms) if end_ts_ms is not None else int(time.time() * 1000) + self._timeframe_ms(timeframe)
         inst_id = self._symbol_to_inst_id(symbol)
 
-        all_rows: List[List[float]] = []
+        all_rows: List[List[Any]] = []
         seen_ts = set()
+        timeframe_ms = self._timeframe_ms(timeframe)
+        closed_before_ms = (
+            int(end_ts_ms)
+            if end_ts_ms is not None
+            else int(time.time() * 1000)
+        )
 
         while len(all_rows) < requested:
             chunk = min(int(self.max_ohlcv_batch), requested - len(all_rows))
@@ -278,7 +284,10 @@ class OKXCCXTProvider(MarketDataProvider):
             for bar in page:
                 ts = int(bar[0])
                 oldest_ts = min(oldest_ts, ts)
-                if end_ts_ms is not None and ts >= int(end_ts_ms):
+                confirm = bar[6] if len(bar) > 6 else None
+                if confirm == 0:
+                    continue
+                if ts + timeframe_ms > closed_before_ms:
                     continue
                 if ts in seen_ts:
                     continue

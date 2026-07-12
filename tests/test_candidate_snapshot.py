@@ -4,6 +4,8 @@ import csv
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from src.core.models import Order
 from src.reporting.candidate_snapshot import (
     CANDIDATE_SNAPSHOT_FIELDS,
@@ -405,6 +407,52 @@ def test_blocked_candidate_uses_recent_quant_lab_cached_cost() -> None:
     assert btc["cost_bps"] == 19.0
     assert btc["selected_total_cost_bps"] == 18.0
     assert btc["cost_model_version"] == "cached_symbol_cost_v1"
+
+
+def test_cached_cost_cannot_replay_stale_edge_threshold_or_block_decision() -> None:
+    audit = SimpleNamespace(
+        top_scores=[{"symbol": "BTC/USDT", "score": 0.90, "rank": 1}],
+        targets_pre_risk={"BTC/USDT": 0.10},
+        targets_post_risk={"BTC/USDT": 0.10},
+        router_decisions=[],
+        target_execution_explain=[],
+        strategy_signals=[],
+        quant_lab={},
+    )
+
+    rows = build_candidate_snapshot_rows(
+        run_id="run_cached_decision_guard",
+        ts_utc="2026-05-15T00:00:00Z",
+        symbols=["BTC/USDT"],
+        audit=audit,
+        local_cost_bps=30.0,
+        cost_min_edge_multiplier=1.5,
+        score_proxy_floor=0.18,
+        score_per_bps=0.003,
+        quant_lab_cost_cache={
+            "BTC/USDT": {
+                "cost_source": "quant_lab_cached",
+                "roundtrip_all_in_cost_bps": 10.0,
+                "cost_model_version": "cached_symbol_cost_v1",
+                "cached_cost_estimate": True,
+                "expected_edge_bps": 1.0,
+                "expected_edge_source": "stale_request",
+                "required_edge_bps": 999.0,
+                "would_block_by_cost": True,
+                "filter_reason": "stale_block",
+                "cost_gate_verified": True,
+            }
+        },
+    )
+
+    btc = rows[0]
+    assert btc["cost_bps"] == 10.0
+    assert btc["expected_edge_bps"] == pytest.approx(240.0)
+    assert btc["expected_edge_source"] == "score_proxy"
+    assert btc["required_edge_bps"] == 45.0
+    assert btc["would_block_by_cost"] is False
+    assert btc["cost_gate_verified"] is False
+    assert btc["cost_reason"] == "cost_gate_passed"
 
 
 def test_blocked_btc_sol_bnb_candidates_use_cached_symbol_costs() -> None:

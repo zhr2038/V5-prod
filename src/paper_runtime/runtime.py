@@ -8,7 +8,7 @@ import os
 import statistics
 import subprocess
 import tempfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -27,6 +27,7 @@ from src.paper_runtime.contracts import (
 )
 from src.paper_runtime.dsl import PaperRuleInterpreter
 from src.paper_runtime.store import PaperRuntimeStore
+from src.paper_runtime.source import read_paper_strategy_proposals
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PAPER_RUNTIME_SCHEMA_VERSION = "v5.generic_paper_runtime.v1"
@@ -141,9 +142,31 @@ def run_generic_paper_runtime(
     try:
         state = store.load()
     except Exception as exc:
-        state = {"schema_version": "v5.paper_runtime_state.v1", "trackers": {}}
         errors.append(_error_row(current, "state_load_failed", exc))
+        contract_status = _contract_status(
+            cfg=cfg,
+            runtime_cfg=runtime_cfg,
+            now=current,
+            ack_rows=[],
+            trackers=[],
+            state_loaded=False,
+            state_persisted=False,
+            failure_stage="state_load_failed",
+        )
+        _write_failure_reports(
+            summaries_dir,
+            error_rows=errors,
+            contract_status=contract_status,
+            history_limit=runtime_cfg.max_history_records,
+        )
+        return _failure_result(
+            runtime_cfg=runtime_cfg,
+            store=store,
+            errors=errors,
+            failure_stage="state_load_failed",
+        )
     trackers: dict[str, dict[str, Any]] = state.setdefault("trackers", {})
+    loaded_tracker_count = len(trackers)
     for tracker in trackers.values():
         if tracker.get("state") in {
             PaperRuntimeState.PAPER_OPEN.value,
@@ -273,37 +296,50 @@ def run_generic_paper_runtime(
         store.save(state)
     except Exception as exc:
         errors.append(_error_row(current, "state_write_failed", exc))
+        contract_status = _contract_status(
+            cfg=cfg,
+            runtime_cfg=runtime_cfg,
+            now=current,
+            ack_rows=[],
+            trackers=list(trackers.values())[:loaded_tracker_count],
+            state_loaded=True,
+            state_persisted=False,
+            failure_stage="state_write_failed",
+        )
+        _write_failure_reports(
+            summaries_dir,
+            error_rows=errors,
+            contract_status=contract_status,
+            history_limit=max_history,
+        )
+        return _failure_result(
+            runtime_cfg=runtime_cfg,
+            store=store,
+            errors=errors,
+            failure_stage="state_write_failed",
+            tracker_count=loaded_tracker_count,
+        )
 
     registry_rows = [_registry_row(tracker) for tracker in trackers.values()]
     state_rows = [_state_row(tracker) for tracker in trackers.values()]
     daily_rows = _daily_rows(state["daily_buckets"])
     quote_coverage_rows = _quote_coverage_rows(state_signals)
     cost_evidence_rows = _cost_evidence_rows(state_runs, trackers.values())
-    contract_status = {
-        "schema_version": PAPER_RUNTIME_SCHEMA_VERSION,
-        "contract_version": PAPER_STRATEGY_CONTRACT_VERSION,
-        "paper_runtime_enabled": bool(runtime_cfg.enabled),
-        "paper_runtime_live_order_effect": runtime_cfg.live_order_effect,
-        "quant_lab_mode": cfg.quant_lab.mode,
-        "canary_enabled": bool(cfg.quant_lab.canary.enabled),
-        "accepted_proposal_count": sum(
-            _as_bool(row.get("accepted")) for row in ack_rows
-        ),
-        "rejected_proposal_count": sum(
-            not _as_bool(row.get("accepted")) for row in ack_rows
-        ),
-        "active_tracker_count": len(trackers),
-        "open_paper_position_count": sum(
-            bool(row.get("open_trade")) for row in trackers.values()
-        ),
-        "real_order_calls": 0,
-        "real_position_mutations": 0,
-        "generated_at": current.isoformat(),
-    }
+    exit_quality_rows = _exit_quality_rows(state_runs)
+    canonical_ack_rows = _canonical_ack_rows(trackers.values(), ack_rows, current)
+    contract_status = _contract_status(
+        cfg=cfg,
+        runtime_cfg=runtime_cfg,
+        now=current,
+        ack_rows=canonical_ack_rows,
+        trackers=trackers.values(),
+        state_loaded=True,
+        state_persisted=True,
+    )
     try:
         _write_runtime_reports(
             summaries_dir,
-            ack_rows=ack_rows,
+            ack_rows=canonical_ack_rows,
             registry_rows=registry_rows,
             state_rows=state_rows,
             signal_rows=state_signals,
@@ -311,6 +347,7 @@ def run_generic_paper_runtime(
             daily_rows=daily_rows,
             quote_coverage_rows=quote_coverage_rows,
             cost_evidence_rows=cost_evidence_rows,
+            exit_quality_rows=exit_quality_rows,
             error_rows=errors,
             recovery_rows=recovery_rows,
             contract_status=contract_status,
@@ -328,6 +365,8 @@ def run_generic_paper_runtime(
         "closed_trades": len(new_run_rows),
         "errors": len(errors),
         "state_path": str(store.path),
+        "fail_closed": False,
+        "state_persisted": True,
         "live_order_effect": "none",
     }
 
@@ -451,6 +490,11 @@ def _advance_tracker(
                 proposal.exit_rule, exit_context, history=history
             )
             if should_exit:
+                trade["pending_exit_reason"] = interpreter.match_reason(
+                    proposal.exit_rule,
+                    exit_context,
+                    history=history,
+                ) or "structured_exit_rule"
                 _set_state(tracker, PaperRuntimeState.PAPER_EXIT_PENDING)
                 state = PaperRuntimeState.PAPER_EXIT_PENDING
         if state == PaperRuntimeState.PAPER_EXIT_PENDING:
@@ -553,6 +597,8 @@ def _open_trade(
         "net_pnl_bps": 0.0,
         "max_favorable_excursion": 0.0,
         "max_adverse_excursion": 0.0,
+        "mfe_bps": 0.0,
+        "mae_bps": 0.0,
         "holding_bars": 0,
         "cost_source": "configured_conservative_paper",
         "required_cost_trust_level": proposal.required_cost_trust_level,
@@ -577,8 +623,10 @@ def _mark_to_market(
         != "OBSERVABLE"
     ):
         return
-    exit_side = float(
-        quote["bid"] if trade.get("direction") == "long" else quote["ask"]
+    exit_side = _virtual_exit_price(
+        direction=str(trade.get("direction") or "long"),
+        quote=quote,
+        slippage_bps=float(cfg.quant_lab.paper_runtime.default_slippage_bps),
     )
     entry = float(trade["virtual_entry_price"])
     gross = (
@@ -596,6 +644,8 @@ def _mark_to_market(
     trade["max_adverse_excursion"] = min(
         float(trade.get("max_adverse_excursion") or 0.0), gross - fees
     )
+    trade["mfe_bps"] = trade["max_favorable_excursion"]
+    trade["mae_bps"] = trade["max_adverse_excursion"]
 
 
 def _close_trade(
@@ -606,14 +656,12 @@ def _close_trade(
     cfg: AppConfig,
     now: datetime,
 ) -> dict[str, Any]:
-    side_price = float(quote["bid"] if proposal.direction == "long" else quote["ask"])
     slippage_bps = float(cfg.quant_lab.paper_runtime.default_slippage_bps)
-    multiplier = (
-        1.0 - slippage_bps / 10_000.0
-        if proposal.direction == "long"
-        else 1.0 + slippage_bps / 10_000.0
+    exit_price = _virtual_exit_price(
+        direction=proposal.direction,
+        quote=quote,
+        slippage_bps=slippage_bps,
     )
-    exit_price = side_price * multiplier
     entry_price = float(trade["virtual_entry_price"])
     gross = (
         (exit_price / entry_price - 1.0) * 10_000.0
@@ -625,6 +673,17 @@ def _close_trade(
         fee_bps + slippage_bps * 2.0 + float(trade.get("spread_bps") or 0.0)
     )
     net_pnl_bps = gross - fee_bps
+    mfe_bps = max(float(trade.get("mfe_bps") or 0.0), net_pnl_bps)
+    mae_bps = min(float(trade.get("mae_bps") or 0.0), net_pnl_bps)
+    profit_giveback_bps = max(0.0, mfe_bps - net_pnl_bps)
+    exit_efficiency = net_pnl_bps / mfe_bps if mfe_bps > 0 else None
+    exit_reason = str(
+        trade.get("pending_exit_reason") or "structured_exit_rule"
+    )
+    holding_period_seconds = _elapsed_seconds(
+        trade.get("entry_decision_ts"),
+        now,
+    )
     return {
         **trade,
         "ts_utc": now.isoformat(),
@@ -650,13 +709,56 @@ def _close_trade(
         "total_cost_bps": total_cost_bps,
         "gross_pnl_bps": gross,
         "net_pnl_bps": net_pnl_bps,
+        "mfe_bps": mfe_bps,
+        "mae_bps": mae_bps,
+        "profit_giveback_bps": profit_giveback_bps,
+        "exit_efficiency": exit_efficiency,
+        "exit_timing_bars": int(trade.get("holding_bars") or 0),
+        "holding_period_seconds": holding_period_seconds,
         "paper_pnl_bps": net_pnl_bps,
         "paper_pnl_usdt": proposal.paper_notional_usdt * net_pnl_bps / 10_000.0,
         "estimated_spread_bps": trade.get("spread_bps"),
-        "exit_reason": "structured_exit_rule",
+        "exit_reason": exit_reason,
+        "exit_timing_state": _exit_timing_state(exit_reason),
         "valid_for_promotion": True,
         "closed_at": now.isoformat(),
     }
+
+
+def _virtual_exit_price(
+    *,
+    direction: str,
+    quote: Mapping[str, Any],
+    slippage_bps: float,
+) -> float:
+    side_price = float(quote["bid"] if direction == "long" else quote["ask"])
+    multiplier = (
+        1.0 - slippage_bps / 10_000.0
+        if direction == "long"
+        else 1.0 + slippage_bps / 10_000.0
+    )
+    return side_price * multiplier
+
+
+def _elapsed_seconds(start: Any, end: datetime) -> float | None:
+    parsed = _datetime(start)
+    if parsed is None:
+        return None
+    return max((end - parsed).total_seconds(), 0.0)
+
+
+def _exit_timing_state(reason: str) -> str:
+    if "take_profit" in reason:
+        return "profit_target"
+    if "stop_loss" in reason:
+        return "hard_stop"
+    if "trailing_exit" in reason:
+        return "profit_giveback"
+    if "signal_invalid" in reason:
+        return "signal_invalidation"
+    if "max_holding_bars" in reason:
+        return "time_horizon"
+    return "structured_rule"
 
 
 def _market_context(
@@ -804,9 +906,7 @@ def _parse_proposal(
 
 
 def _proposal_rows(cfg: AppConfig, run_path: Path) -> list[dict[str, Any]]:
-    from src.reporting.sol_paper_strategy_tracker import _read_paper_strategy_proposals
-
-    return _read_paper_strategy_proposals(
+    return read_paper_strategy_proposals(
         run_path=run_path,
         reports_dir=_reports_dir(run_path),
         diagnostics=cfg.diagnostics,
@@ -1271,6 +1371,192 @@ def _cost_evidence_rows(
     return output
 
 
+def _exit_quality_rows(runs: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for row in runs:
+        grouped[str(row.get("proposal_id") or "")].append(row)
+    output: list[dict[str, Any]] = []
+    for proposal_id, rows in sorted(grouped.items()):
+        latest = rows[-1]
+        net_values = _numeric_values(rows, "net_pnl_bps")
+        mfe_values = _numeric_values(rows, "mfe_bps")
+        mae_values = _numeric_values(rows, "mae_bps")
+        giveback_values = _numeric_values(rows, "profit_giveback_bps")
+        efficiency_values = _numeric_values(rows, "exit_efficiency")
+        holding_values = _numeric_values(rows, "exit_timing_bars")
+        reason_mix = Counter(str(row.get("exit_reason") or "unknown") for row in rows)
+        timing_mix = Counter(
+            str(row.get("exit_timing_state") or "unknown") for row in rows
+        )
+        high_giveback_count = sum(
+            (_float(row.get("mfe_bps")) or 0.0) > 0
+            and (_float(row.get("profit_giveback_bps")) or 0.0)
+            >= (_float(row.get("mfe_bps")) or 0.0) * 0.5
+            for row in rows
+        )
+        output.append(
+            {
+                "schema_version": PAPER_RUNTIME_SCHEMA_VERSION,
+                "proposal_id": proposal_id,
+                "strategy_id": latest.get("strategy_id"),
+                "strategy_version": latest.get("strategy_version"),
+                "symbol": latest.get("symbol"),
+                "closed_trade_count": len(rows),
+                "avg_net_pnl_bps": _average(net_values),
+                "avg_mfe_bps": _average(mfe_values),
+                "avg_mae_bps": _average(mae_values),
+                "avg_profit_giveback_bps": _average(giveback_values),
+                "avg_exit_efficiency": _average(efficiency_values),
+                "avg_holding_bars": _average(holding_values),
+                "high_profit_giveback_count": high_giveback_count,
+                "exit_reason_mix": json.dumps(reason_mix, sort_keys=True),
+                "exit_timing_state_mix": json.dumps(timing_mix, sort_keys=True),
+                "diagnosis": (
+                    "high_profit_giveback"
+                    if high_giveback_count > len(rows) / 2
+                    else "observe_more_closed_paper_trades"
+                    if len(rows) < 20
+                    else "no_dominant_exit_defect"
+                ),
+                "valid_for_live_orders": False,
+                "live_order_effect": "none",
+            }
+        )
+    return output
+
+
+def _numeric_values(
+    rows: Iterable[Mapping[str, Any]],
+    field: str,
+) -> list[float]:
+    output: list[float] = []
+    for row in rows:
+        value = _float(row.get(field))
+        if value is not None and math.isfinite(value):
+            output.append(value)
+    return output
+
+
+def _average(values: Iterable[float]) -> float | None:
+    materialized = list(values)
+    return sum(materialized) / len(materialized) if materialized else None
+
+
+def _canonical_ack_rows(
+    trackers: Iterable[Mapping[str, Any]],
+    current_ack_rows: Iterable[Mapping[str, Any]],
+    now: datetime,
+) -> list[dict[str, Any]]:
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
+    for tracker in trackers:
+        try:
+            proposal = PaperStrategyProposal.model_validate(tracker.get("proposal"))
+        except (TypeError, ValidationError):
+            continue
+        row = _accepted_ack_row(proposal, tracker, now)
+        rows[(proposal.proposal_id, proposal.proposal_hash)] = row
+    for raw in current_ack_rows:
+        row = dict(raw)
+        if _as_bool(row.get("accepted")):
+            continue
+        key = (
+            str(row.get("proposal_id") or ""),
+            str(row.get("proposal_hash") or ""),
+        )
+        if key not in rows:
+            rows[key] = row
+    return list(rows.values())
+
+
+def _contract_status(
+    *,
+    cfg: AppConfig,
+    runtime_cfg: Any,
+    now: datetime,
+    ack_rows: Iterable[Mapping[str, Any]],
+    trackers: Iterable[Mapping[str, Any]],
+    state_loaded: bool,
+    state_persisted: bool,
+    failure_stage: str = "",
+) -> dict[str, Any]:
+    ack_list = list(ack_rows)
+    tracker_list = list(trackers)
+    return {
+        "schema_version": PAPER_RUNTIME_SCHEMA_VERSION,
+        "contract_version": PAPER_STRATEGY_CONTRACT_VERSION,
+        "paper_runtime_enabled": bool(runtime_cfg.enabled),
+        "paper_runtime_live_order_effect": runtime_cfg.live_order_effect,
+        "quant_lab_mode": cfg.quant_lab.mode,
+        "canary_enabled": bool(cfg.quant_lab.canary.enabled),
+        "accepted_proposal_count": sum(
+            _as_bool(row.get("accepted")) for row in ack_list
+        ),
+        "rejected_proposal_count": sum(
+            not _as_bool(row.get("accepted")) for row in ack_list
+        ),
+        "active_tracker_count": len(tracker_list),
+        "open_paper_position_count": sum(
+            bool(row.get("open_trade")) for row in tracker_list
+        ),
+        "state_loaded": state_loaded,
+        "state_persisted": state_persisted,
+        "fail_closed": not state_loaded or not state_persisted,
+        "failure_stage": failure_stage,
+        "real_order_calls": 0,
+        "real_position_mutations": 0,
+        "generated_at": now.isoformat(),
+    }
+
+
+def _write_failure_reports(
+    summaries: Path,
+    *,
+    error_rows: list[dict[str, Any]],
+    contract_status: dict[str, Any],
+    history_limit: int,
+) -> None:
+    try:
+        _write_csv_atomic(
+            summaries / "paper_strategy_errors.csv",
+            _merge_csv_rows(
+                summaries / "paper_strategy_errors.csv",
+                error_rows,
+                ("ts_utc", "proposal_id", "error_code"),
+            )[-history_limit:],
+        )
+        _write_json_atomic(
+            summaries / "quant_lab_contract_status.json",
+            contract_status,
+        )
+    except Exception:
+        return
+
+
+def _failure_result(
+    *,
+    runtime_cfg: Any,
+    store: PaperRuntimeStore,
+    errors: list[dict[str, Any]],
+    failure_stage: str,
+    tracker_count: int = 0,
+) -> dict[str, Any]:
+    return {
+        "enabled": bool(runtime_cfg.enabled),
+        "proposal_rows": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "trackers": tracker_count,
+        "signals": 0,
+        "closed_trades": 0,
+        "errors": len(errors),
+        "state_path": str(store.path),
+        "fail_closed": True,
+        "failure_stage": failure_stage,
+        "state_persisted": False,
+        "live_order_effect": "none",
+    }
+
+
 def _write_runtime_reports(
     summaries: Path,
     *,
@@ -1282,6 +1568,7 @@ def _write_runtime_reports(
     daily_rows: list[dict[str, Any]],
     quote_coverage_rows: list[dict[str, Any]],
     cost_evidence_rows: list[dict[str, Any]],
+    exit_quality_rows: list[dict[str, Any]],
     error_rows: list[dict[str, Any]],
     recovery_rows: list[dict[str, Any]],
     contract_status: dict[str, Any],
@@ -1289,11 +1576,7 @@ def _write_runtime_reports(
 ) -> None:
     _write_csv_atomic(
         summaries / "paper_strategy_proposal_ack.csv",
-        _merge_csv_rows(
-            summaries / "paper_strategy_proposal_ack.csv",
-            ack_rows,
-            ("proposal_id", "proposal_hash"),
-        ),
+        ack_rows,
         preferred_fields=ACK_FIELDS,
     )
     _write_csv_atomic(summaries / "paper_strategy_registry.csv", registry_rows)
@@ -1301,23 +1584,20 @@ def _write_runtime_reports(
     _write_csv_atomic(summaries / "paper_strategy_signals.csv", signal_rows)
     _write_csv_atomic(
         summaries / "paper_strategy_runs.csv",
-        _merge_csv_rows(
-            summaries / "paper_strategy_runs.csv", run_rows, ("paper_trade_id",)
-        ),
+        run_rows,
     )
     _write_csv_atomic(
         summaries / "paper_strategy_daily.csv",
-        _merge_csv_rows(
-            summaries / "paper_strategy_daily.csv",
-            daily_rows,
-            ("proposal_id", "paper_date"),
-        ),
+        daily_rows,
     )
     _write_csv_atomic(
         summaries / "paper_strategy_quote_coverage.csv", quote_coverage_rows
     )
     _write_csv_atomic(
         summaries / "paper_strategy_cost_evidence.csv", cost_evidence_rows
+    )
+    _write_csv_atomic(
+        summaries / "paper_strategy_exit_quality.csv", exit_quality_rows
     )
     _write_csv_atomic(
         summaries / "paper_strategy_errors.csv",

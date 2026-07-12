@@ -113,6 +113,67 @@ DEFAULT_SYMBOL_COST_TABLE_FILENAMES = (
     "latest_symbol_costs.json",
 )
 
+CACHED_COST_CONTEXT_FIELDS = frozenset(
+    {
+        "symbol",
+        "request_symbol",
+        "normalized_symbol",
+        "response_symbol",
+        "one_way_all_in_cost_bps",
+        "one_way_cost_bps",
+        "all_in_one_way_cost_bps",
+        "roundtrip_all_in_cost_bps",
+        "roundtrip_cost_bps",
+        "all_in_roundtrip_cost_bps",
+        "selected_entry_gate_cost_bps",
+        "effective_total_cost_bps",
+        "selected_total_cost_bps",
+        "total_cost_bps",
+        "cost_bps",
+        "fee_bps",
+        "spread_bps",
+        "slippage_bps",
+        "cost_quality",
+        "quality",
+        "cost_trusted_for_paper",
+        "trusted_for_paper",
+        "cost_trusted_for_live",
+        "trusted_for_live",
+        "cost_source",
+        "source",
+        "fallback_level",
+        "cost_model_version",
+        "cost_contract_version",
+        "cached_cost_estimate",
+        "from_cache",
+        "degraded_cost_model",
+        "cost_resolution_reason",
+        "resolution_reason",
+        "cost_bootstrap_state",
+        "bootstrap_state",
+        "cost_evidence_tier",
+        "evidence_tier",
+        "cost_trust_level",
+        "trust_level",
+        "cost_sample_origin_mix",
+        "sample_origin_mix",
+        "cost_bootstrap_trusted_for_paper",
+        "bootstrap_trusted_for_paper",
+        "cost_bootstrap_trusted_for_live",
+        "bootstrap_trusted_for_live",
+        "cost_bootstrap_next_action",
+        "next_action",
+        "success",
+        "error_type",
+        "error_message_short",
+        "warning",
+        "status_code",
+        "fallback_reason",
+        "reason",
+        "diagnosis",
+    }
+)
+
 
 def candidate_id_for(run_id: str, symbol: str, strategy_candidate: str) -> str:
     material = "|".join(
@@ -333,8 +394,12 @@ def build_candidate_snapshot_rows(
         alpha6 = strategy_signals.get("Alpha6Factor", {})
         mean_reversion = strategy_signals.get("MeanReversion", {})
         order = order_lookup.get(symbol)
-        cached_symbol_cost = _lookup_symbol_mapping(quant_lab_cost_cache, symbol)
-        table_symbol_cost = _lookup_symbol_mapping(symbol_cost_table, symbol)
+        cached_symbol_cost = _cached_cost_only_row(
+            _lookup_symbol_mapping(quant_lab_cost_cache, symbol)
+        )
+        table_symbol_cost = _cached_cost_only_row(
+            _lookup_symbol_mapping(symbol_cost_table, symbol)
+        )
         current_run_symbol_cost = _lookup_symbol_mapping(quant_lab_costs, symbol)
         candidate_cost_meta = _merge_mappings(
             _first_mapping(top.get("quant_lab"), top.get("cost_estimate"), top.get("cost")),
@@ -620,34 +685,23 @@ def build_candidate_snapshot_rows(
             _nested_get(qlab, ("cost_gate_verified",)),
             _nested_get(qlab, ("cost_gate_passed",)),
         )
-        if cost_gate_verified is None:
-            cost_gate_verified = False if used_local_cost else bool(qlab_has_cost and required_edge is not None)
-        would_block_by_cost = _first_bool(
-            _nested_get(qlab, ("would_block_by_cost",)),
-            _nested_get(qlab, ("would_filter_by_cost",)),
-            _nested_get(qlab, ("would_filter",)),
-            _nested_get(qlab, ("filtered",)),
-        )
+        if used_local_cost or _mapping_is_cached_cost(qlab):
+            cost_gate_verified = False
+        elif cost_gate_verified is None:
+            cost_gate_verified = bool(qlab_has_cost and required_edge is not None)
         computed_would_block_by_cost = bool(
             expected_edge is not None and required_edge is not None and float(expected_edge) < float(required_edge)
         )
-        if would_block_by_cost is None:
-            would_block_by_cost = computed_would_block_by_cost
-        else:
-            would_block_by_cost = bool(would_block_by_cost or computed_would_block_by_cost)
-        cost_reason = _first(
-            _nested_get(qlab, ("filter_reason",)),
-            _nested_get(qlab, ("reason",)),
-            _nested_get(qlab, ("diagnosis",)),
-            _nested_get(qlab, ("warning",)),
-            _nested_get(qlab, ("fallback_reason",)),
-        )
-        if not cost_reason:
-            cost_reason = (
-                cost_absence_reason
-                if used_local_cost
-                else "quant_lab_cost_estimate"
+        would_block_by_cost = computed_would_block_by_cost
+        cost_reason = (
+            cost_absence_reason
+            if used_local_cost
+            else (
+                "expected_edge_below_current_required_edge"
+                if computed_would_block_by_cost
+                else "cost_gate_passed"
             )
+        )
         if degraded_cost_model:
             cost_reason = "global_default_cost"
         cost_resolution_reason = _cost_resolution_reason(
@@ -1319,6 +1373,7 @@ def _cost_lookup_from_rows(
             continue
         normalized_row = dict(row)
         if force_cached:
+            normalized_row = _cached_cost_only_row(normalized_row)
             normalized_row.setdefault("cached_cost_estimate", True)
             if _missing_value(normalized_row.get("cost_source")) and _missing_value(normalized_row.get("source")):
                 normalized_row["cost_source"] = "quant_lab_cached"
@@ -1377,9 +1432,28 @@ def _merge_cost_context(preferred_cost: Mapping[str, Any], *items: Mapping[str, 
         merged = _merge_mappings(merged, preferred_cost)
     if preferred_cost and not _mapping_is_degraded_cost_model(preferred_cost):
         _drop_stale_degraded_cost_markers(merged, preferred_cost)
+    if preferred_cost and not _mapping_is_cached_cost(preferred_cost):
+        merged.pop("cached_cost_estimate", None)
+        merged.pop("from_cache", None)
     if preferred_cost and _mapping_is_degraded_cost_model(preferred_cost):
         merged["cost_resolution_reason"] = _global_default_resolution_reason(merged)
     return merged
+
+
+def _cached_cost_only_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        str(key): value
+        for key, value in row.items()
+        if str(key) in CACHED_COST_CONTEXT_FIELDS
+    }
+
+
+def _mapping_is_cached_cost(item: Mapping[str, Any]) -> bool:
+    return bool(
+        _first_bool(item.get("cached_cost_estimate"), item.get("from_cache"))
+        or str(item.get("cost_source") or "").strip().lower()
+        == "quant_lab_cached"
+    )
 
 
 def _drop_stale_degraded_cost_markers(merged: dict[str, Any], preferred_cost: Mapping[str, Any]) -> None:

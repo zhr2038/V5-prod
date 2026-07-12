@@ -273,6 +273,23 @@ def test_runtime_exit_restart_recovery_and_same_bar_idempotency(tmp_path):
     assert runs[0]["would_exit"] == "True"
     assert runs[0]["paper_pnl_bps"] == runs[0]["net_pnl_bps"]
     assert runs[0]["paper_tracker_id"] == f"paper:{proposal.proposal_id}"
+    assert runs[0]["exit_reason"] == "max_holding_bars"
+    assert runs[0]["exit_timing_state"] == "time_horizon"
+    assert float(runs[0]["mfe_bps"]) >= float(runs[0]["net_pnl_bps"])
+    assert float(runs[0]["mae_bps"]) <= float(runs[0]["net_pnl_bps"])
+    assert float(runs[0]["profit_giveback_bps"]) >= 0.0
+    assert runs[0]["exit_timing_bars"] == "1"
+    assert float(runs[0]["holding_period_seconds"]) == 3600.0
+    assert float(runs[0]["virtual_exit_price"]) < 101.9
+    exit_quality = list(
+        csv.DictReader(
+            (reports / "summaries/paper_strategy_exit_quality.csv").open()
+        )
+    )[0]
+    assert exit_quality["proposal_id"] == proposal.proposal_id
+    assert exit_quality["closed_trade_count"] == "1"
+    assert exit_quality["diagnosis"] == "observe_more_closed_paper_trades"
+    assert json.loads(exit_quality["exit_reason_mix"]) == {"max_holding_bars": 1}
     recovery = list(
         csv.DictReader(
             (reports / "summaries/paper_strategy_restart_recovery.csv").open()
@@ -980,6 +997,125 @@ def test_bundle_contains_generic_paper_evidence(tmp_path):
     assert "summaries/paper_strategy_signals.csv" in names
     assert "summaries/paper_strategy_quote_coverage.csv" in names
     assert "summaries/paper_strategy_cost_evidence.csv" in names
+    assert "summaries/paper_strategy_exit_quality.csv" in names
     assert "summaries/paper_strategy_errors.csv" in names
     assert "summaries/paper_strategy_restart_recovery.csv" in names
     assert "summaries/quant_lab_contract_status.json" in names
+    assert "summaries/trade_opportunity_funnel.csv" in names
+
+
+def test_corrupt_state_fails_closed_and_preserves_last_published_evidence(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    _write_proposals(proposals_path, [_proposal("STATE_LOAD_GUARD", "TRX/USDT")])
+    cfg = _cfg(tmp_path, proposals_path)
+    first = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "first",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+    summaries = reports / "summaries"
+    ack_before = (summaries / "paper_strategy_proposal_ack.csv").read_text()
+    signals_before = (summaries / "paper_strategy_signals.csv").read_text()
+    Path(cfg.quant_lab.paper_runtime.state_path).write_text("{broken", encoding="utf-8")
+
+    failed = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "corrupt",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={"TRX/USDT": _quote(101.0, NOW + timedelta(hours=1))},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW + timedelta(hours=1),
+    )
+
+    status = json.loads((summaries / "quant_lab_contract_status.json").read_text())
+    errors = list(csv.DictReader((summaries / "paper_strategy_errors.csv").open()))
+    assert first["fail_closed"] is False
+    assert failed["fail_closed"] is True
+    assert failed["failure_stage"] == "state_load_failed"
+    assert failed["signals"] == 0
+    assert failed["closed_trades"] == 0
+    assert (summaries / "paper_strategy_proposal_ack.csv").read_text() == ack_before
+    assert (summaries / "paper_strategy_signals.csv").read_text() == signals_before
+    assert status["state_loaded"] is False
+    assert status["state_persisted"] is False
+    assert status["real_order_calls"] == 0
+    assert errors[-1]["error_code"] == "state_load_failed"
+
+
+def test_state_save_failure_publishes_no_uncommitted_paper_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    from src.paper_runtime.store import PaperRuntimeStore
+
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    _write_proposals(proposals_path, [_proposal("STATE_SAVE_GUARD", "TRX/USDT")])
+    cfg = _cfg(tmp_path, proposals_path)
+
+    def fail_save(self, payload):
+        raise OSError("simulated durable state failure")
+
+    monkeypatch.setattr(PaperRuntimeStore, "save", fail_save)
+    failed = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "save-failed",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+
+    summaries = reports / "summaries"
+    status = json.loads((summaries / "quant_lab_contract_status.json").read_text())
+    errors = list(csv.DictReader((summaries / "paper_strategy_errors.csv").open()))
+    assert failed["fail_closed"] is True
+    assert failed["failure_stage"] == "state_write_failed"
+    assert failed["signals"] == 0
+    assert failed["closed_trades"] == 0
+    assert not (summaries / "paper_strategy_proposal_ack.csv").exists()
+    assert not (summaries / "paper_strategy_signals.csv").exists()
+    assert not (summaries / "paper_strategy_runs.csv").exists()
+    assert status["state_loaded"] is True
+    assert status["state_persisted"] is False
+    assert status["real_position_mutations"] == 0
+    assert errors[-1]["error_code"] == "state_write_failed"
+
+
+def test_generic_runtime_replaces_legacy_rows_in_canonical_contract_files(tmp_path):
+    reports = tmp_path / "reports"
+    summaries = reports / "summaries"
+    summaries.mkdir(parents=True)
+    (summaries / "paper_strategy_proposal_ack.csv").write_text(
+        "proposal_id,proposal_hash,accepted,proposal_source\n"
+        "legacy,wrong,False,legacy_tracker\n",
+        encoding="utf-8",
+    )
+    (summaries / "paper_strategy_runs.csv").write_text(
+        "paper_trade_id,strategy_id\nlegacy-trade,legacy\n",
+        encoding="utf-8",
+    )
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    proposal = _proposal("CANONICAL_OWNER", "TRX/USDT")
+    _write_proposals(proposals_path, [proposal])
+    cfg = _cfg(tmp_path, proposals_path)
+
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "canonical",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+
+    ack = list(csv.DictReader((summaries / "paper_strategy_proposal_ack.csv").open()))
+    runs = list(csv.DictReader((summaries / "paper_strategy_runs.csv").open()))
+    assert [(row["proposal_id"], row["proposal_hash"]) for row in ack] == [
+        (proposal.proposal_id, proposal.proposal_hash)
+    ]
+    assert runs == []

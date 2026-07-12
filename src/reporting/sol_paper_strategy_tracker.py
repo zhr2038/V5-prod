@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable, Mapping, Optional
 
 from configs.schema import AppConfig, DiagnosticsConfig
 from src.core.models import MarketSeries
+from src.paper_runtime.contracts import PAPER_STRATEGY_CONTRACT_VERSION
 from src.reporting.decision_audit import DecisionAudit
 from src.reporting.skipped_candidate_tracker import (
     HORIZON_PREFIX,
@@ -2140,66 +2141,25 @@ def _read_paper_strategy_proposals(
     diagnostics: DiagnosticsConfig,
     now_ms: int | None = None,
 ) -> list[dict[str, Any]]:
-    if not bool(getattr(diagnostics, "quant_lab_paper_strategy_proposals_enabled", True)):
-        return []
-    configured = (
-        getattr(diagnostics, "quant_lab_paper_strategy_proposals_paths", None)
-        or _default_proposal_paths()
+    from src.paper_runtime.source import read_paper_strategy_proposals
+
+    return read_paper_strategy_proposals(
+        run_path=run_path,
+        reports_dir=reports_dir,
+        diagnostics=diagnostics,
+        now_ms=now_ms,
     )
-    max_age_minutes = float(
-        getattr(diagnostics, "quant_lab_paper_strategy_proposals_max_age_minutes", 1440.0)
-        or 1440.0
-    )
-    if now_ms is None:
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    cutoff_ms = int(now_ms - max_age_minutes * 60_000)
-    archive_sources: list[_ProposalSource] = []
-    direct_sources: list[_ProposalSource] = []
-    seen_paths: set[Path] = set()
-    for raw_path in configured:
-        for path in _candidate_advisory_paths(str(raw_path), run_path=run_path, reports_dir=reports_dir):
-            if path in seen_paths:
-                continue
-            seen_paths.add(path)
-            if not path.is_file():
-                continue
-            try:
-                mtime_ms = int(path.stat().st_mtime * 1000)
-            except OSError:
-                continue
-            if mtime_ms < cutoff_ms:
-                continue
-            rows = _read_raw_csv_path(path, target_filename="paper_strategy_proposals.csv")
-            if not rows:
-                continue
-            if _is_archive_path(path):
-                archive_sources.append(_ProposalSource(path=path, rows=rows, is_archive=True, mtime_ms=mtime_ms))
-            else:
-                direct_sources.append(_ProposalSource(path=path, rows=rows, is_archive=False, mtime_ms=mtime_ms))
-    # A quant-lab expert/latest bundle is the authoritative current snapshot.  A
-    # bare CSV can be left behind by an older export request, so only use it as a
-    # fallback when no fresh bundle provided proposal rows.  Never union multiple
-    # generations: stale archives can otherwise resurrect old proposal IDs.
-    sources = archive_sources or direct_sources
-    if not sources:
-        return []
-    latest_mtime_ms = max(source.mtime_ms for source in sources)
-    rows: list[dict[str, Any]] = []
-    for source in sources:
-        if source.mtime_ms == latest_mtime_ms:
-            rows.extend(source.rows)
-    return _dedupe_rows(
-        rows,
-        [
-            "proposal_id",
-            "strategy_id",
-            "strategy_candidate",
-            "symbol",
-            "recommended_mode",
-            "suggested_horizon",
-            "entry_conditions",
-        ],
-    )
+
+
+def _legacy_owned_proposal_rows(
+    proposal_rows: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        dict(row)
+        for row in proposal_rows
+        if str(row.get("contract_version") or "").strip()
+        != PAPER_STRATEGY_CONTRACT_VERSION
+    ]
 
 
 def _is_archive_path(path: Path) -> bool:
@@ -5642,12 +5602,14 @@ def update_sol_paper_strategy_tracker(
         advisory_result.rows,
         advisory_result.source_health_rows,
     )
-    proposal_rows = _read_paper_strategy_proposals(
+    all_proposal_rows = _read_paper_strategy_proposals(
         run_path=run_path,
         reports_dir=reports_dir,
         diagnostics=diagnostics,
         now_ms=asof_ts_ms,
     )
+    proposal_rows = _legacy_owned_proposal_rows(all_proposal_rows)
+    generic_contract_proposal_rows = len(all_proposal_rows) - len(proposal_rows)
     expanded_advisory_rows = _expanded_universe_advisory_rows(
         advisory_rows,
         diagnostics=diagnostics,
@@ -5770,6 +5732,17 @@ def update_sol_paper_strategy_tracker(
     _write_csv(summaries_dir / "paper_strategy_runs.csv", run_rows, fields)
     _write_csv(summaries_dir / "paper_strategy_proposal_ack.csv", proposal_ack_rows, PAPER_PROPOSAL_ACK_FIELDS)
     _write_csv(summaries_dir / "paper_strategy_daily.csv", _daily_rows(records), PAPER_DAILY_FIELDS)
+    _write_csv(summaries_dir / "paper_strategy_runs_legacy.csv", run_rows, fields)
+    _write_csv(
+        summaries_dir / "paper_strategy_proposal_ack_legacy.csv",
+        proposal_ack_rows,
+        PAPER_PROPOSAL_ACK_FIELDS,
+    )
+    _write_csv(
+        summaries_dir / "paper_strategy_daily_legacy.csv",
+        _daily_rows(records),
+        PAPER_DAILY_FIELDS,
+    )
     _write_csv(summaries_dir / "paper_slippage_coverage.csv", _slippage_rows(records, diagnostics), PAPER_SLIPPAGE_FIELDS)
     bnb_records = _bnb_paper_records(records)
     _write_csv(
@@ -5870,6 +5843,9 @@ def update_sol_paper_strategy_tracker(
         "bnb_paper_strategy_rows": int(len(bnb_records)),
         "bottom_zone_probe_paper_rows": int(len(bottom_zone_records)),
         "proposal_rows": int(len(proposal_rows)),
+        "generic_contract_proposal_rows_delegated": int(
+            generic_contract_proposal_rows
+        ),
         "paper_strategy_proposal_ack_rows": int(len(proposal_ack_rows)),
         "eth_f3_alpha6_gate_rewrites": int(eth_f3_alpha6_gate_rewrites),
         "labels_path": str(labels_path),

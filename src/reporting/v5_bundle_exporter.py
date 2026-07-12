@@ -44,6 +44,9 @@ from src.reporting.order_lifecycle import (
     ORDER_LIFECYCLE_FIELDS,
     ORDER_LIFECYCLE_SCHEMA_VERSION,
 )
+from src.reporting.trade_opportunity_funnel import (
+    TRADE_OPPORTUNITY_FUNNEL_FIELDS,
+)
 from src.reporting.sol_paper_strategy_tracker import (
     ALPHA_FACTORY_ADVISORY_FIELDS,
     ALPHA_FACTORY_FAMILY_SUMMARY_FIELDS,
@@ -124,6 +127,14 @@ GENERIC_PAPER_REPORT_FIELDS = {
         "schema_version", "proposal_id", "strategy_id", "symbol",
         "required_cost_trust_level", "closed_trade_count", "cost_observed_count",
         "cost_source", "cost_trust_level", "valid_for_live_coverage",
+    ),
+    "paper_strategy_exit_quality.csv": (
+        "schema_version", "proposal_id", "strategy_id", "strategy_version",
+        "symbol", "closed_trade_count", "avg_net_pnl_bps", "avg_mfe_bps",
+        "avg_mae_bps", "avg_profit_giveback_bps", "avg_exit_efficiency",
+        "avg_holding_bars", "high_profit_giveback_count", "exit_reason_mix",
+        "exit_timing_state_mix", "diagnosis", "valid_for_live_orders",
+        "live_order_effect",
     ),
     "paper_strategy_errors.csv": (
         "schema_version", "ts_utc", "proposal_id", "error_code", "error_type",
@@ -1240,6 +1251,26 @@ def _copy_order_lifecycle_files(staging: Path, reports: Path) -> None:
         )
 
 
+def _copy_trade_opportunity_funnel_files(staging: Path, reports: Path) -> None:
+    aggregate = reports / "trade_opportunity_funnel.csv"
+    if aggregate.is_file():
+        _write_text(
+            staging / "raw/reports/trade_opportunity_funnel.csv",
+            _redact_text(aggregate.read_text(encoding="utf-8", errors="replace")),
+        )
+    runs_dir = reports / "runs"
+    if not runs_dir.is_dir():
+        return
+    for path in sorted(runs_dir.rglob("trade_opportunity_funnel.csv")):
+        _write_text(
+            staging
+            / "raw/recent_runs"
+            / path.parent.name
+            / "trade_opportunity_funnel.csv",
+            _redact_text(path.read_text(encoding="utf-8", errors="replace")),
+        )
+
+
 def _copy_run_completion_files(staging: Path, reports: Path) -> None:
     runs_dir = reports / "runs"
     if not runs_dir.exists():
@@ -1461,6 +1492,9 @@ def _copy_sol_paper_strategy_files(staging: Path, reports: Path) -> None:
         ("paper_strategy_runs.csv", PAPER_RUN_FIELDS),
         ("paper_strategy_proposal_ack.csv", PAPER_PROPOSAL_ACK_FIELDS),
         ("paper_strategy_daily.csv", PAPER_DAILY_FIELDS),
+        ("paper_strategy_runs_legacy.csv", PAPER_RUN_FIELDS),
+        ("paper_strategy_proposal_ack_legacy.csv", PAPER_PROPOSAL_ACK_FIELDS),
+        ("paper_strategy_daily_legacy.csv", PAPER_DAILY_FIELDS),
         ("bnb_paper_strategy_runs.csv", PAPER_RUN_FIELDS),
         ("bnb_paper_strategy_daily.csv", PAPER_DAILY_FIELDS),
         ("bottom_zone_probe_paper_runs.csv", BOTTOM_ZONE_PAPER_RUN_FIELDS),
@@ -3155,6 +3189,9 @@ def export_v5_bundle(
         _read_order_lifecycle_rows(reports),
         fill_metrics_rows,
     )
+    trade_opportunity_funnel_rows = _read_csv_dicts(
+        reports / "trade_opportunity_funnel.csv"
+    )
     fill_bill_reconciliation_rows = reconcile_runtime_cost_databases(reports)
     fill_bill_status_counts = _live_guard_value_mix(
         fill_bill_reconciliation_rows,
@@ -3205,12 +3242,18 @@ def export_v5_bundle(
         _write_csv(staging / "summaries/candidate_snapshot.csv", CANDIDATE_SNAPSHOT_FIELDS, candidate_rows)
         _write_csv(staging / "summaries/order_lifecycle.csv", ORDER_LIFECYCLE_FIELDS, order_lifecycle_rows)
         _write_csv(
+            staging / "summaries/trade_opportunity_funnel.csv",
+            TRADE_OPPORTUNITY_FUNNEL_FIELDS,
+            trade_opportunity_funnel_rows,
+        )
+        _write_csv(
             staging / "summaries/fill_bill_cost_reconciliation.csv",
             FILL_BILL_RECONCILIATION_FIELDS,
             fill_bill_reconciliation_rows,
         )
         _copy_candidate_snapshot_files(staging, reports, candidate_rows)
         _copy_order_lifecycle_files(staging, reports)
+        _copy_trade_opportunity_funnel_files(staging, reports)
         _copy_run_completion_files(staging, reports)
         cost_probe_artifacts = _copy_cost_probe_artifacts(
             staging,
@@ -3241,6 +3284,9 @@ def export_v5_bundle(
                 "candidate_snapshot_rows": len(candidate_rows),
                 "candidate_cost_source_coverage": candidate_cost_source_coverage,
                 "order_lifecycle_rows": len(order_lifecycle_rows),
+                "trade_opportunity_funnel_rows": len(
+                    trade_opportunity_funnel_rows
+                ),
                 "order_lifecycle_trade_metric_fill_count": trade_metric_fill_count,
                 "order_lifecycle_missing_high_issue": order_lifecycle_missing_for_trades,
                 "fill_bill_reconciliation_rows": len(fill_bill_reconciliation_rows),

@@ -2579,6 +2579,42 @@ def _write_candidate_snapshot_best_effort(
         return 0
 
 
+def _write_trade_opportunity_funnel_best_effort(
+    *,
+    cfg: AppConfig,
+    runtime_run_dir: Path,
+    runtime_reports_dir: Path,
+    audit: Any,
+    lifecycle_rows: Iterable[Mapping[str, Any]] = (),
+    log_obj: Any = None,
+) -> int:
+    try:
+        from src.reporting.trade_opportunity_funnel import (
+            write_trade_opportunity_funnel,
+        )
+
+        rows = write_trade_opportunity_funnel(
+            run_dir=runtime_run_dir,
+            reports_dir=runtime_reports_dir,
+            audit=audit,
+            lifecycle_rows=lifecycle_rows,
+            execution_mode=str(
+                getattr(getattr(cfg, "execution", None), "mode", "dry_run") or "dry_run"
+            ).lower(),
+        )
+        audit.add_note(f"trade_opportunity_funnel rows={len(rows)}")
+        audit.save(str(runtime_run_dir))
+        return len(rows)
+    except Exception as exc:
+        if log_obj is not None:
+            log_obj.warning(
+                "trade opportunity funnel export failed: %s",
+                exc,
+                exc_info=True,
+            )
+        return 0
+
+
 def _validate_live_contract(cfg: AppConfig) -> list[str]:
     whitelist = _live_symbol_whitelist(cfg)
     if not whitelist:
@@ -2991,9 +3027,34 @@ def main() -> None:
             no_signal_reason="market_data_coverage_insufficient",
             log_obj=log,
         )
+        audit.counts["universe"] = len(scored_symbols)
+        audit.trade_funnel = {
+            **dict(getattr(audit, "trade_funnel", {}) or {}),
+            "market_data_available": len(
+                [symbol for symbol in scored_symbols if symbol in md_1h]
+            ),
+            "local_order_generation": {
+                "total": 0,
+                "entry": 0,
+                "exit": 0,
+                "blockers": {"market_data_coverage_insufficient": 1},
+                "applied": True,
+            },
+        }
+        _write_trade_opportunity_funnel_best_effort(
+            cfg=cfg,
+            runtime_run_dir=runtime_run_dir,
+            runtime_reports_dir=runtime_reports_dir,
+            audit=audit,
+            log_obj=log,
+        )
         audit.save(str(runtime_run_dir))
         return
     scored_available = len([sym for sym in scored_symbols if sym in md_1h])
+    audit.trade_funnel = {
+        **dict(getattr(audit, "trade_funnel", {}) or {}),
+        "market_data_available": scored_available,
+    }
     if scored_available < len(scored_symbols):
         log.warning(
             "Market data partial coverage: %d/%d scored symbols available",
@@ -3062,6 +3123,24 @@ def main() -> None:
             regime,
             scored_symbols,
             order_store_path=trend_cache_order_store_path,
+        )
+        audit.counts["universe"] = len(scored_symbols)
+        audit.trade_funnel = {
+            **dict(getattr(audit, "trade_funnel", {}) or {}),
+            "local_order_generation": {
+                "total": 0,
+                "entry": 0,
+                "exit": 0,
+                "blockers": {"trend_update_only_no_order_routing": 1},
+                "applied": True,
+            },
+        }
+        _write_trade_opportunity_funnel_best_effort(
+            cfg=cfg,
+            runtime_run_dir=runtime_run_dir,
+            runtime_reports_dir=runtime_reports_dir,
+            audit=audit,
+            log_obj=log,
         )
         log.info("[TrendUpdate] Trend cache saved, exiting (V5_TREND_UPDATE_ONLY=1)")
         return
@@ -3218,6 +3297,24 @@ def main() -> None:
                         prices=dict(prices or {}),
                         equity_usdt=eq_now,
                         no_signal_reason="budget_limit_exceeded_no_order_routing",
+                        log_obj=log,
+                    )
+                    audit.counts["universe"] = len(scored_symbols)
+                    audit.trade_funnel = {
+                        **dict(getattr(audit, "trade_funnel", {}) or {}),
+                        "local_order_generation": {
+                            "total": 0,
+                            "entry": 0,
+                            "exit": 0,
+                            "blockers": {"budget_limit_exceeded": 1},
+                            "applied": True,
+                        },
+                    }
+                    _write_trade_opportunity_funnel_best_effort(
+                        cfg=cfg,
+                        runtime_run_dir=runtime_run_dir,
+                        runtime_reports_dir=runtime_reports_dir,
+                        audit=audit,
                         log_obj=log,
                     )
                     audit.save(str(runtime_run_dir))
@@ -3496,6 +3593,12 @@ def main() -> None:
         window_start_ts=window_start_ts,
         audit=audit,
     )
+    from src.reporting.trade_opportunity_funnel import (
+        blocker_counts_from_decisions,
+        record_order_stage,
+    )
+
+    record_order_stage(audit, "local_order_generation", orders)
     if live_whitelist:
         _assert_live_symbol_subset(
             [str(getattr(order, "symbol", "") or "").strip() for order in (orders or []) if str(getattr(order, "symbol", "") or "").strip()],
@@ -3507,6 +3610,7 @@ def main() -> None:
 
     # Order arbitration layer: unified priority + per-symbol state machine
     # to avoid cross-module conflicts (close vs rebalance/open in same run, cooldown churn, etc.).
+    arb_decisions = []
     try:
         from src.execution.order_arbitrator import arbitrate_orders
 
@@ -3543,6 +3647,12 @@ def main() -> None:
                 pass
     except Exception as e:
         log.warning(f"order arbitration skipped: {e}")
+    record_order_stage(
+        audit,
+        "order_arbitration",
+        orders,
+        blockers=blocker_counts_from_decisions(arb_decisions),
+    )
 
     try:
         audit.save(str(runtime_run_dir))
@@ -3615,6 +3725,8 @@ def main() -> None:
         except Exception as e:
             log.warning(f"live poll_open (pre) failed: {e}")
 
+    preflight_before_count = len(orders or [])
+    preflight_blockers: dict[str, int] = {}
     if is_live and live_preflight_result is not None:
         borrow_blocked = {
             str(sym)
@@ -3626,6 +3738,7 @@ def main() -> None:
             orders = [o for o in orders if str(getattr(o, "symbol", "")) not in borrow_blocked]
             after_n = len(orders)
             if before_n != after_n:
+                preflight_blockers["borrow_check_blocked"] = before_n - after_n
                 log.warning(
                     "live preflight filtered borrow-blocked symbols: blocked=%s removed=%d",
                     sorted(borrow_blocked),
@@ -3641,7 +3754,25 @@ def main() -> None:
             audit=audit,
             log=log,
         )
+        preflight_removed = max(preflight_before_count - len(orders or []), 0)
+        if preflight_removed > sum(preflight_blockers.values()):
+            reason = str(
+                getattr(live_preflight_result, "reason", "")
+                or getattr(live_preflight_result, "decision", "")
+                or "live_preflight_filtered"
+            )
+            preflight_blockers[reason] = (
+                preflight_removed - sum(preflight_blockers.values())
+            )
+    record_order_stage(
+        audit,
+        "live_preflight",
+        orders,
+        blockers=preflight_blockers,
+        applied=bool(is_live and live_preflight_result is not None),
+    )
 
+    quant_lab_guard_before_count = len(orders or [])
     if is_live and quant_lab_guard is not None:
         try:
             regime_state = getattr(out.regime, "state", None)
@@ -3657,6 +3788,24 @@ def main() -> None:
             log_obj=log,
             local_permission=str(getattr(live_preflight_result, "decision", "ALLOW") or "ALLOW"),
         )
+    quant_lab_removed = max(quant_lab_guard_before_count - len(orders or []), 0)
+    quant_lab_blockers: dict[str, int] = {}
+    if quant_lab_removed:
+        quant_lab_summary = dict(getattr(audit, "quant_lab", {}) or {})
+        reason = str(
+            quant_lab_summary.get("final_permission")
+            or quant_lab_summary.get("effective_permission")
+            or quant_lab_summary.get("permission")
+            or "quant_lab_guard_filtered"
+        )
+        quant_lab_blockers[reason] = quant_lab_removed
+    record_order_stage(
+        audit,
+        "quant_lab_guard",
+        orders,
+        blockers=quant_lab_blockers,
+        applied=bool(is_live and quant_lab_guard is not None),
+    )
 
     if live_whitelist:
         _assert_live_symbol_subset(
@@ -3668,6 +3817,7 @@ def main() -> None:
         )
 
     candidate_risk_level = None
+    lifecycle_rows = []
     try:
         candidate_risk_level = pipe._load_current_auto_risk_level()
     except Exception:
@@ -3944,6 +4094,15 @@ def main() -> None:
                 },
             },
         )
+
+    _write_trade_opportunity_funnel_best_effort(
+        cfg=cfg,
+        runtime_run_dir=runtime_run_dir,
+        runtime_reports_dir=runtime_reports_dir,
+        audit=audit,
+        lifecycle_rows=lifecycle_rows,
+        log_obj=log,
+    )
 
     # After execution/fill reconciliation, reread local positions and clear stale
     # active lifecycle state when a close left only exchange dust.
