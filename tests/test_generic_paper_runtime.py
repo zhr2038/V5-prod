@@ -393,6 +393,135 @@ def test_expired_source_does_not_replace_locked_ack_and_open_trade_can_exit(tmp_
     assert len(runs) == 1
 
 
+def test_superseded_tracker_cannot_open_new_position(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    proposal = _proposal("SUPERSEDED_NO_NEW_ENTRY", "TRX/USDT")
+    _write_proposals(proposals_path, [proposal])
+    cfg = _cfg(tmp_path, proposals_path)
+    series = _series("TRX/USDT")
+
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "current-no-quote",
+        market_data_1h={"TRX/USDT": series},
+        top_of_book={},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+    proposals_path.unlink()
+    result = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "superseded-with-quote",
+        market_data_1h={
+            "TRX/USDT": _series("TRX/USDT", last_ts=series.ts[-1] + 3_600_000)
+        },
+        top_of_book={"TRX/USDT": _quote(102.0, NOW + timedelta(hours=1))},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW + timedelta(hours=1),
+    )
+
+    state = json.loads(Path(cfg.quant_lab.paper_runtime.state_path).read_text())
+    tracker = state["trackers"][proposal.proposal_id]
+    assert result["closed_trades"] == 0
+    assert tracker["open_trade"] is None
+    assert tracker["supersession_status"] == "SUPERSEDED_CLOSED"
+    assert tracker["new_entry_allowed"] is False
+    assert tracker["exit_allowed"] is False
+
+
+def test_superseded_open_position_remains_exit_only(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    proposal = _proposal(
+        "SUPERSEDED_EXIT_ONLY",
+        "TRX/USDT",
+        entry_rule={"operator": "gt", "field": "close", "value": 0},
+        exit_rule={"operator": "max_holding_bars", "value": 1},
+        max_holding_bars=1,
+    )
+    _write_proposals(proposals_path, [proposal])
+    cfg = _cfg(tmp_path, proposals_path)
+    series = _series("TRX/USDT")
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "open",
+        market_data_1h={"TRX/USDT": series},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+    proposals_path.unlink()
+    result = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "exit-only",
+        market_data_1h={
+            "TRX/USDT": _series("TRX/USDT", last_ts=series.ts[-1] + 3_600_000)
+        },
+        top_of_book={"TRX/USDT": _quote(102.0, NOW + timedelta(hours=1))},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW + timedelta(hours=1),
+    )
+
+    runs = list(csv.DictReader((reports / "summaries/paper_strategy_runs.csv").open()))
+    history = list(
+        csv.DictReader((reports / "summaries/paper_strategy_registry_history.csv").open())
+    )
+    current = list(
+        csv.DictReader((reports / "summaries/paper_strategy_registry_current.csv").open())
+    )
+    assert result["closed_trades"] == 1
+    assert len(runs) == 1
+    assert current == []
+    assert history[0]["supersession_status"] == "SUPERSEDED_CLOSED"
+    assert history[0]["new_entry_allowed"] == "False"
+    assert history[0]["exit_allowed"] == "False"
+
+
+def test_ack_and_tracker_current_snapshots_exclude_history(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    first = _proposal("CURRENT_SNAPSHOT_FIRST", "TRX/USDT")
+    second = _proposal("CURRENT_SNAPSHOT_SECOND", "BCH/USDT")
+    _write_proposals(proposals_path, [first, second])
+    cfg = _cfg(tmp_path, proposals_path)
+    market = {"TRX/USDT": _series("TRX/USDT"), "BCH/USDT": _series("BCH/USDT")}
+    books = {"TRX/USDT": _quote(100.0), "BCH/USDT": _quote(200.0)}
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "both",
+        market_data_1h=market,
+        top_of_book=books,
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+    _write_proposals(proposals_path, [second])
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "second-only",
+        market_data_1h=market,
+        top_of_book=books,
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW + timedelta(hours=1),
+    )
+
+    ack_current = list(
+        csv.DictReader((reports / "summaries/paper_strategy_proposal_ack_current.csv").open())
+    )
+    ack_history = list(
+        csv.DictReader((reports / "summaries/paper_strategy_proposal_ack_history.csv").open())
+    )
+    tracker_current = list(
+        csv.DictReader((reports / "summaries/paper_strategy_trackers_current.csv").open())
+    )
+    assert {row["proposal_id"] for row in ack_current} == {second.proposal_id}
+    assert {row["proposal_id"] for row in ack_history} == {
+        first.proposal_id,
+        second.proposal_id,
+    }
+    assert {row["proposal_id"] for row in tracker_current} == {second.proposal_id}
+
+
 def test_missing_quote_records_not_observable_without_virtual_position(tmp_path):
     reports = tmp_path / "reports"
     proposals_path = tmp_path / "paper_strategy_proposals.csv"

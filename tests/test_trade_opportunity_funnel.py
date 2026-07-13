@@ -169,18 +169,45 @@ def test_trade_funnel_reports_real_stage_loss_instead_of_progress_counters() -> 
     )
     by_stage = {row["stage"]: row for row in rows}
 
-    assert by_stage["candidate_scoring"]["primary_blocker"] == (
-        "unattributed_stage_loss"
-    )
+    assert by_stage["candidate_scoring"]["primary_blocker"] == "other"
     assert "scored" not in by_stage["candidate_scoring"]["blocker_mix"]
-    assert by_stage["signal_selection"]["primary_blocker"] == (
-        "unattributed_stage_loss"
-    )
+    assert by_stage["signal_selection"]["primary_blocker"] == "other"
     assert "selected" not in by_stage["signal_selection"]["blocker_mix"]
     assert by_stage["risk_target"]["primary_blocker"] == ""
     assert by_stage["local_order_generation"]["primary_blocker"] == (
         "protect_entry_rsi_confirm_too_weak"
     )
+
+
+def test_selection_stage_uses_closed_vocabulary_reasons_without_unattributed_loss() -> None:
+    audit = SimpleNamespace(
+        run_id="selection-reasons",
+        counts={"universe": 5, "scored": 5, "selected": 2},
+        rejects={},
+        targets_post_risk={"BTC/USDT": 0.1, "ETH/USDT": 0.1},
+        trade_funnel={
+            "market_data_available": 5,
+            "selection_decisions": [
+                {"symbol": "SOL/USDT", "reason": "below_rank_cutoff"},
+                {"symbol": "BNB/USDT", "reason": "portfolio_limit"},
+                {"symbol": "ADA/USDT", "reason": "lower_score_same_symbol"},
+            ],
+        },
+    )
+    rows = build_trade_opportunity_funnel(
+        audit=audit,
+        lifecycle_rows=[],
+        execution_mode="dry_run",
+        ts_utc="2026-07-13T00:00:00Z",
+    )
+    selection = next(row for row in rows if row["stage"] == "signal_selection")
+    reasons = json.loads(selection["blocker_mix"])
+    assert reasons == {
+        "below_rank_cutoff": 1,
+        "lower_score_same_symbol": 1,
+        "portfolio_limit": 1,
+    }
+    assert "unattributed_stage_loss" not in reasons
 
 
 def test_best_effort_writer_covers_safe_early_exit_without_live_effect(tmp_path) -> None:

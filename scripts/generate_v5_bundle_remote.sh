@@ -238,9 +238,15 @@ CURRENT_REPORT_FILES = [
     ),
     ("reports/summaries/paper_strategy_runs.csv", "summaries/paper_strategy_runs.csv", False),
     ("reports/summaries/paper_strategy_proposal_ack.csv", "summaries/paper_strategy_proposal_ack.csv", False),
+    ("reports/summaries/paper_strategy_proposal_ack_current.csv", "summaries/paper_strategy_proposal_ack_current.csv", False),
+    ("reports/summaries/paper_strategy_proposal_ack_history.csv", "summaries/paper_strategy_proposal_ack_history.csv", False),
     ("reports/summaries/paper_strategy_daily.csv", "summaries/paper_strategy_daily.csv", False),
     ("reports/summaries/paper_strategy_registry.csv", "summaries/paper_strategy_registry.csv", False),
+    ("reports/summaries/paper_strategy_registry_current.csv", "summaries/paper_strategy_registry_current.csv", False),
+    ("reports/summaries/paper_strategy_registry_history.csv", "summaries/paper_strategy_registry_history.csv", False),
+    ("reports/summaries/paper_strategy_trackers_current.csv", "summaries/paper_strategy_trackers_current.csv", False),
     ("reports/summaries/paper_strategy_state.csv", "summaries/paper_strategy_state.csv", False),
+    ("reports/summaries/paper_strategy_state_history.csv", "summaries/paper_strategy_state_history.csv", False),
     ("reports/summaries/paper_strategy_signals.csv", "summaries/paper_strategy_signals.csv", False),
     ("reports/summaries/paper_strategy_quote_coverage.csv", "summaries/paper_strategy_quote_coverage.csv", False),
     ("reports/summaries/paper_strategy_cost_evidence.csv", "summaries/paper_strategy_cost_evidence.csv", False),
@@ -1904,6 +1910,8 @@ def copy_current_reports():
         else:
             copy_sanitized(src_rel, dest_rel, required=required)
     ensure_csv_header("summaries/paper_strategy_proposal_ack.csv", PAPER_PROPOSAL_ACK_FIELDS)
+    ensure_csv_header("summaries/paper_strategy_proposal_ack_current.csv", PAPER_PROPOSAL_ACK_FIELDS)
+    ensure_csv_header("summaries/paper_strategy_proposal_ack_history.csv", PAPER_PROPOSAL_ACK_FIELDS)
     for src_rel, dest_rel in (
         ("reports/strategy_opportunity_advisory.csv", "raw/reports/strategy_opportunity_advisory.csv"),
         ("reports/quant_lab/strategy_opportunity_advisory.csv", "raw/reports/quant_lab/strategy_opportunity_advisory.csv"),

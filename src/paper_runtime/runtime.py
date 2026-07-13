@@ -190,6 +190,7 @@ def run_generic_paper_runtime(
         errors.append(_error_row(current, "proposal_source_read_failed", exc))
     ack_rows: list[dict[str, Any]] = []
     accepted_proposals: dict[str, PaperStrategyProposal] = {}
+    current_proposal_ids: set[str] = set()
     seen_proposals: set[tuple[str, str]] = set()
     for raw in proposal_rows[: runtime_cfg.max_trackers * 2]:
         proposal_key = (
@@ -200,6 +201,9 @@ def run_generic_paper_runtime(
             continue
         seen_proposals.add(proposal_key)
         proposal, reject_reason = _parse_proposal(raw, current)
+        raw_proposal_id = str(raw.get("proposal_id") or "")
+        if raw_proposal_id:
+            current_proposal_ids.add(raw_proposal_id)
         if proposal is None:
             existing = trackers.get(proposal_key[0])
             if (
@@ -240,6 +244,24 @@ def run_generic_paper_runtime(
         trackers[proposal.proposal_id] = tracker
         accepted_proposals[proposal.proposal_id] = proposal
         ack_rows.append(_accepted_ack_row(proposal, tracker, current))
+
+    for proposal_id, tracker in trackers.items():
+        current_member = proposal_id in accepted_proposals
+        open_position = bool(tracker.get("open_trade"))
+        tracker["current_proposal_member"] = current_member
+        tracker["current_cohort_member"] = current_member
+        if current_member:
+            tracker["supersession_status"] = "CURRENT_ACTIVE"
+            tracker["new_entry_allowed"] = True
+            tracker["exit_allowed"] = True
+        elif open_position:
+            tracker["supersession_status"] = "SUPERSEDED_EXIT_ONLY"
+            tracker["new_entry_allowed"] = False
+            tracker["exit_allowed"] = True
+        else:
+            tracker["supersession_status"] = "SUPERSEDED_CLOSED"
+            tracker["new_entry_allowed"] = False
+            tracker["exit_allowed"] = False
 
     signal_rows: list[dict[str, Any]] = []
     new_run_rows: list[dict[str, Any]] = []
@@ -320,18 +342,29 @@ def run_generic_paper_runtime(
             tracker_count=loaded_tracker_count,
         )
 
-    registry_rows = [_registry_row(tracker) for tracker in trackers.values()]
-    state_rows = [_state_row(tracker) for tracker in trackers.values()]
+    registry_history_rows = [_registry_row(tracker) for tracker in trackers.values()]
+    registry_current_rows = [
+        row for row in registry_history_rows if _as_bool(row.get("current_proposal_member"))
+    ]
+    state_history_rows = [_state_row(tracker) for tracker in trackers.values()]
+    state_current_rows = [
+        row for row in state_history_rows if _as_bool(row.get("current_proposal_member"))
+    ]
     daily_rows = _daily_rows(state["daily_buckets"])
     quote_coverage_rows = _quote_coverage_rows(state_signals)
     cost_evidence_rows = _cost_evidence_rows(state_runs, trackers.values())
     exit_quality_rows = _exit_quality_rows(state_runs)
-    canonical_ack_rows = _canonical_ack_rows(trackers.values(), ack_rows, current)
+    canonical_ack_history_rows = _canonical_ack_rows(trackers.values(), ack_rows, current)
+    canonical_ack_current_rows = [
+        row
+        for row in ack_rows
+        if str(row.get("proposal_id") or "") in current_proposal_ids
+    ]
     contract_status = _contract_status(
         cfg=cfg,
         runtime_cfg=runtime_cfg,
         now=current,
-        ack_rows=canonical_ack_rows,
+        ack_rows=canonical_ack_current_rows,
         trackers=trackers.values(),
         state_loaded=True,
         state_persisted=True,
@@ -339,9 +372,12 @@ def run_generic_paper_runtime(
     try:
         _write_runtime_reports(
             summaries_dir,
-            ack_rows=canonical_ack_rows,
-            registry_rows=registry_rows,
-            state_rows=state_rows,
+            ack_rows=canonical_ack_current_rows,
+            ack_history_rows=canonical_ack_history_rows,
+            registry_rows=registry_current_rows,
+            registry_history_rows=registry_history_rows,
+            state_rows=state_current_rows,
+            state_history_rows=state_history_rows,
             signal_rows=state_signals,
             run_rows=state_runs,
             daily_rows=daily_rows,
@@ -441,6 +477,9 @@ def _advance_tracker(
         state = PaperRuntimeState.WAITING_SIGNAL
 
     if state == PaperRuntimeState.WAITING_SIGNAL and not consumed_cooldown_bar:
+        if not _as_bool(tracker.get("new_entry_allowed")):
+            tracker["updated_at"] = now.isoformat()
+            return
         triggered = interpreter.evaluate(proposal.entry_rule, context, history=history)
         confirmation = int(tracker.get("entry_confirmation_count") or 0)
         confirmation = confirmation + 1 if triggered else 0
@@ -473,6 +512,7 @@ def _advance_tracker(
         }
         and tracker.get("open_trade")
         and not opened_now
+        and _as_bool(tracker.get("exit_allowed", True))
     ):
         trade = tracker["open_trade"]
         _mark_to_market(trade, context, quote, cfg)
@@ -516,6 +556,9 @@ def _advance_tracker(
                     if proposal.cooldown_bars > 0
                     else PaperRuntimeState.WAITING_SIGNAL,
                 )
+                if not _as_bool(tracker.get("current_proposal_member")):
+                    tracker["supersession_status"] = "SUPERSEDED_CLOSED"
+                    tracker["exit_allowed"] = False
 
     tracker["context_history"] = [*history, _bounded_context(context)][-512:]
     tracker["updated_at"] = now.isoformat()
@@ -542,6 +585,11 @@ def _new_tracker(proposal: PaperStrategyProposal, now: datetime) -> dict[str, An
         "context_history": [],
         "open_trade": None,
         "closed_trades": [],
+        "current_proposal_member": True,
+        "current_cohort_member": True,
+        "supersession_status": "CURRENT_ACTIVE",
+        "new_entry_allowed": True,
+        "exit_allowed": True,
     }
 
 
@@ -1096,6 +1144,11 @@ def _registry_row(tracker: Mapping[str, Any]) -> dict[str, Any]:
         "live_order_effect": "none",
         "created_at": tracker.get("created_at"),
         "updated_at": tracker.get("updated_at"),
+        "current_proposal_member": tracker.get("current_proposal_member", False),
+        "current_cohort_member": tracker.get("current_cohort_member", False),
+        "supersession_status": tracker.get("supersession_status") or "HISTORY_ONLY",
+        "new_entry_allowed": tracker.get("new_entry_allowed", False),
+        "exit_allowed": tracker.get("exit_allowed", False),
     }
 
 
@@ -1114,6 +1167,11 @@ def _state_row(tracker: Mapping[str, Any]) -> dict[str, Any]:
         "cooldown_remaining_bars": tracker.get("cooldown_remaining_bars"),
         "last_processed_bar_ts": tracker.get("last_processed_bar_ts"),
         "updated_at": tracker.get("updated_at"),
+        "current_proposal_member": tracker.get("current_proposal_member", False),
+        "current_cohort_member": tracker.get("current_cohort_member", False),
+        "supersession_status": tracker.get("supersession_status") or "HISTORY_ONLY",
+        "new_entry_allowed": tracker.get("new_entry_allowed", False),
+        "exit_allowed": tracker.get("exit_allowed", False),
     }
 
 
@@ -1561,8 +1619,11 @@ def _write_runtime_reports(
     summaries: Path,
     *,
     ack_rows: list[dict[str, Any]],
+    ack_history_rows: list[dict[str, Any]],
     registry_rows: list[dict[str, Any]],
+    registry_history_rows: list[dict[str, Any]],
     state_rows: list[dict[str, Any]],
+    state_history_rows: list[dict[str, Any]],
     signal_rows: list[dict[str, Any]],
     run_rows: list[dict[str, Any]],
     daily_rows: list[dict[str, Any]],
@@ -1579,8 +1640,30 @@ def _write_runtime_reports(
         ack_rows,
         preferred_fields=ACK_FIELDS,
     )
+    _write_csv_atomic(
+        summaries / "paper_strategy_proposal_ack_current.csv",
+        ack_rows,
+        preferred_fields=ACK_FIELDS,
+    )
+    _write_csv_atomic(
+        summaries / "paper_strategy_proposal_ack_history.csv",
+        ack_history_rows,
+        preferred_fields=ACK_FIELDS,
+    )
     _write_csv_atomic(summaries / "paper_strategy_registry.csv", registry_rows)
+    _write_csv_atomic(
+        summaries / "paper_strategy_registry_current.csv", registry_rows
+    )
+    _write_csv_atomic(
+        summaries / "paper_strategy_registry_history.csv", registry_history_rows
+    )
+    _write_csv_atomic(
+        summaries / "paper_strategy_trackers_current.csv", registry_rows
+    )
     _write_csv_atomic(summaries / "paper_strategy_state.csv", state_rows)
+    _write_csv_atomic(
+        summaries / "paper_strategy_state_history.csv", state_history_rows
+    )
     _write_csv_atomic(summaries / "paper_strategy_signals.csv", signal_rows)
     _write_csv_atomic(
         summaries / "paper_strategy_runs.csv",

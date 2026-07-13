@@ -28,6 +28,41 @@ def _coalesce(value: Any, default: Any) -> Any:
     return default if value is None else value
 
 
+def _record_selection_decisions(
+    audit: Any,
+    *,
+    ranked_items: List[tuple[str, float]],
+    rank_cutoff: int,
+    minimum_score: float,
+    selected: List[str],
+    weight_symbols: set[str],
+) -> None:
+    if audit is None:
+        return
+    selected_set = set(selected)
+    decisions = []
+    for index, (symbol, score) in enumerate(ranked_items):
+        if symbol in selected_set:
+            continue
+        if index >= rank_cutoff:
+            reason = "below_rank_cutoff"
+        elif float(score) < minimum_score or symbol not in weight_symbols:
+            reason = "invalid_candidate"
+        else:
+            reason = "portfolio_limit"
+        decisions.append(
+            {
+                "symbol": symbol,
+                "reason": reason,
+                "rank": index + 1,
+                "score": float(score),
+            }
+        )
+    funnel = dict(getattr(audit, "trade_funnel", {}) or {})
+    funnel["selection_decisions"] = decisions
+    audit.trade_funnel = funnel
+
+
 def _coerce_state_epoch(value: Any) -> Optional[float]:
     if isinstance(value, (int, float)):
         return float(value)
@@ -474,7 +509,8 @@ class PortfolioEngine:
         except Exception:
             pass
 
-        selected = [s for s, score in items[:k] if score >= float(getattr(self.alpha_cfg, "min_score_threshold", 0.0))]
+        minimum_score = float(getattr(self.alpha_cfg, "min_score_threshold", 0.0))
+        selected = [s for s, score in items[:k] if score >= minimum_score]
         max_pos = self._get_dynamic_max_positions()
         entry_candidates = list(selected)
         if max_pos is not None and max_pos >= 0 and len(entry_candidates) > max_pos:
@@ -523,6 +559,14 @@ class PortfolioEngine:
         selected = valid_selected
         
         if not selected:
+            _record_selection_decisions(
+                audit,
+                ranked_items=items,
+                rank_cutoff=k,
+                minimum_score=minimum_score,
+                selected=[],
+                weight_symbols=set(weights_scores),
+            )
             return PortfolioSnapshot(
                 target_weights={},
                 selected=[],
@@ -658,6 +702,15 @@ class PortfolioEngine:
         # persist final target weights for next-cycle optimizer smoothing
         if bool(getattr(self.alpha_cfg, 'optimizer_enabled', False)):
             self._save_optimizer_state(capped)
+
+        _record_selection_decisions(
+            audit,
+            ranked_items=items,
+            rank_cutoff=k,
+            minimum_score=minimum_score,
+            selected=selected,
+            weight_symbols=set(weights_scores),
+        )
 
         return PortfolioSnapshot(
             target_weights=capped,

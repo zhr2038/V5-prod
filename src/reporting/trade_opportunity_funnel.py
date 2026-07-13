@@ -43,6 +43,19 @@ STAGES = (
     (100, "exchange_fill"),
 )
 
+SELECTION_REASON_VOCABULARY = frozenset(
+    {
+        "below_rank_cutoff",
+        "portfolio_limit",
+        "duplicate_symbol",
+        "correlation_limit",
+        "lower_score_same_symbol",
+        "invalid_candidate",
+        "no_budget",
+        "other",
+    }
+)
+
 
 def record_order_stage(
     audit: Any,
@@ -266,6 +279,22 @@ def _audit_blockers(audit: Any, stage: str) -> dict[str, int]:
             "risk_reject",
         )
     elif stage == "signal_selection":
+        decisions = (
+            dict(getattr(audit, "trade_funnel", {}) or {}).get(
+                "selection_decisions"
+            )
+            or []
+        )
+        decision_counts: Counter[str] = Counter()
+        for row in decisions:
+            if not isinstance(row, Mapping):
+                continue
+            reason = str(row.get("reason") or "other").strip().lower()
+            decision_counts[
+                reason if reason in SELECTION_REASON_VOCABULARY else "other"
+            ] += 1
+        if decision_counts:
+            return dict(decision_counts)
         tokens = ("no_signal", "not_selected", "rank_filtered", "selection_block")
     elif stage == "candidate_scoring":
         tokens = (
@@ -399,7 +428,7 @@ def _blockers_for_stage_loss(
     blockers = _positive_counts(values)
     attributed = sum(blockers.values())
     if attributed < dropped:
-        blockers["unattributed_stage_loss"] = dropped - attributed
+        blockers["other"] = blockers.get("other", 0) + dropped - attributed
     return blockers
 
 
