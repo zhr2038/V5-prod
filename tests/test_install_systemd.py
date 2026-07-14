@@ -142,6 +142,7 @@ def test_install_systemd_user_production_only_supports_shadow_root_and_required_
     assert "Unit=v5-trade-monitor.service" in trade_monitor_timer
     assert "/srv/shadow-runtime" in shadow_unit
     assert "--user enable --now v5-trade-monitor.timer" in systemctl_calls
+    assert "--user enable --now v5-quant-lab-selfcheck.timer" in systemctl_calls
     assert "--user enable --now v5-spread-rollup.timer" in systemctl_calls
     assert "--user restart v5-web-dashboard.service" in systemctl_calls
     assert "--user enable --now v5-shadow-tuned-xgboost.user.timer" not in systemctl_calls

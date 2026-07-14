@@ -61,6 +61,8 @@ PRODUCTION_USER_UNIT_MAPPINGS = (
     ("v5-prod.user.timer", "v5-prod.user.timer"),
     ("v5-event-driven.service", "v5-event-driven.service"),
     ("v5-event-driven.timer", "v5-event-driven.timer"),
+    ("v5-quant-lab-selfcheck.service", "v5-quant-lab-selfcheck.service"),
+    ("v5-quant-lab-selfcheck.timer", "v5-quant-lab-selfcheck.timer"),
     ("v5-web-dashboard.service", "v5-web-dashboard.service"),
     ("v5-trade-monitor.service", "v5-trade-monitor.service"),
     ("v5-trade-monitor.timer", "v5-trade-monitor.timer"),

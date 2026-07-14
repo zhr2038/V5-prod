@@ -110,6 +110,8 @@ if [[ "$USER_MODE" == "1" ]]; then
       --mapping v5-prod.user.timer=v5-prod.user.timer \
       --mapping v5-event-driven.service=v5-event-driven.service \
       --mapping v5-event-driven.timer=v5-event-driven.timer \
+      --mapping v5-quant-lab-selfcheck.service=v5-quant-lab-selfcheck.service \
+      --mapping v5-quant-lab-selfcheck.timer=v5-quant-lab-selfcheck.timer \
       --mapping v5-web-dashboard.service=v5-web-dashboard.service \
       --mapping v5-trade-monitor.service=v5-trade-monitor.service \
       --mapping v5-trade-monitor.timer=v5-trade-monitor.timer \
@@ -160,6 +162,7 @@ if [[ "$USER_MODE" == "1" ]]; then
       systemctl --user restart v5-web-dashboard.service
     fi
     systemctl --user enable --now v5-trade-monitor.timer
+    systemctl --user enable --now v5-quant-lab-selfcheck.timer
     systemctl --user enable --now v5-sentiment-collect.timer
     systemctl --user enable --now v5-auto-risk-eval.timer
     systemctl --user enable --now v5-reconcile.timer
@@ -173,7 +176,7 @@ if [[ "$USER_MODE" == "1" ]]; then
     if [[ "$ENABLE_EVENT_DRIVEN_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-event-driven.timer
     fi
-    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|sentiment-collect|auto-risk-eval|reconcile|ledger|cost-rollup-real|spread-rollup)" || true
+    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|quant-lab-selfcheck|sentiment-collect|auto-risk-eval|reconcile|ledger|cost-rollup-real|spread-rollup)" || true
   else
     systemctl --user enable --now v5-hourly.timer
     systemctl --user enable --now v5-daily.timer

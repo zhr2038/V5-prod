@@ -566,6 +566,8 @@ def test_validate_units_requires_active_dashboard_and_optional_live_timers(monke
     assert "is-active v5-web-dashboard.service" in inner
     assert "is-enabled v5-trade-monitor.timer" in inner
     assert "is-active v5-trade-monitor.timer" in inner
+    assert "is-enabled v5-quant-lab-selfcheck.timer" in inner
+    assert "is-active v5-quant-lab-selfcheck.timer" in inner
     assert "is-enabled v5-spread-rollup.timer" in inner
     assert "is-active v5-spread-rollup.timer" in inner
     assert 'is-enabled v5-shadow-tuned-xgboost.user.timer)" = disabled' in inner
@@ -596,6 +598,7 @@ def test_validate_units_skips_optional_live_timer_checks_when_not_enabled(monkey
     inner = captured["command"]
     assert "is-active v5-web-dashboard.service" in inner
     assert "is-active v5-trade-monitor.timer" in inner
+    assert "is-active v5-quant-lab-selfcheck.timer" in inner
     assert 'is-active v5-shadow-tuned-xgboost.user.timer)" != active' in inner
     assert "is-active v5-prod.user.timer" not in inner
     assert "is-active v5-event-driven.timer" not in inner
