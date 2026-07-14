@@ -283,6 +283,11 @@ def summarize_response(payload: Any) -> Dict[str, Any]:
         "normalized_symbol",
         "alpha_id",
         "contract_version",
+        "proposal_snapshot_id",
+        "proposal_snapshot_sha256",
+        "snapshot_generated_at",
+        "proposal_count",
+        "source_quant_lab_commit",
     )
     summary = {key: payload.get(key) for key in keys if key in payload}
     for nested_key in ("data", "result", "payload"):
@@ -516,6 +521,7 @@ class QuantLabClient:
                 "/v1/strategy-opportunity-advisory",
                 "/v1/strategy_opportunity_advisory",
                 "/v1/reports/strategy-opportunity-advisory",
+                "/v1/paper-strategy/proposals",
             )
         )
 

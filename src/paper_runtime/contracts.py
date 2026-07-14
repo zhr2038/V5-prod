@@ -335,6 +335,9 @@ class PaperStrategyAck(BaseModel):
     expires_at: datetime
     source_v5_commit: str = ""
     source_v5_bundle_sha256: str = ""
+    source_proposal_snapshot_id: str = ""
+    source_proposal_snapshot_sha256: str = ""
+    source_proposal_snapshot_generated_at: datetime | None = None
 
 
 def paper_proposal_hash(value: PaperStrategyProposal | dict[str, Any]) -> str:

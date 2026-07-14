@@ -1627,6 +1627,14 @@ class DiagnosticsConfig(BaseModel):
         ge=1.0,
         description="Maximum file mtime age for quant-lab paper strategy proposal sources before they are ignored",
     )
+    quant_lab_paper_strategy_proposals_api_enabled: bool = Field(
+        default=False,
+        description="Prefer the authenticated quant-lab Canonical Proposal Snapshot API",
+    )
+    quant_lab_paper_strategy_proposals_api_path: str = Field(
+        default="/v1/paper-strategy/proposals",
+        description="Single authenticated API endpoint for the Canonical Proposal Snapshot",
+    )
     enable_live_small_from_quant_lab: bool = Field(
         default=False,
         description="Explicit opt-in before V5 can consume quant-lab LIVE_SMALL_READY notional advice; default false",

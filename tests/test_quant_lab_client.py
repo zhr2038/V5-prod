@@ -116,12 +116,14 @@ def test_advisory_compact_and_legacy_requests_reuse_authorization_header(tmp_pat
         api_token="super-secret-token",
         http_client=http,
         request_log_path=tmp_path / "requests.jsonl",
+        http_cache_path=tmp_path / "http_cache.json",
     )
 
     client.get_json("/v1/strategy-opportunity-advisory/v5-compact")
     client.get_json("/v1/strategy-opportunity-advisory")
+    client.get_json("/v1/paper-strategy/proposals")
 
-    assert len(http.calls) == 2
+    assert len(http.calls) == 3
     assert {call["headers"].get("Authorization") for call in http.calls} == {
         "Bearer super-secret-token"
     }
@@ -355,6 +357,7 @@ def test_get_json_persists_etag_cache_across_clients(tmp_path: Path) -> None:
         "/v1/strategy-opportunity-advisory/v5-compact",
         "/v1/strategy_opportunity_advisory",
         "/v1/reports/strategy-opportunity-advisory",
+        "/v1/paper-strategy/proposals",
     ],
 )
 def test_strategy_advisory_endpoint_variants_are_persistent_cacheable(endpoint: str) -> None:

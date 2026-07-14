@@ -27,7 +27,10 @@ from src.paper_runtime.contracts import (
 )
 from src.paper_runtime.dsl import PaperRuleInterpreter
 from src.paper_runtime.store import PaperRuntimeStore
-from src.paper_runtime.source import read_paper_strategy_proposals
+from src.paper_runtime.source import (
+    ProposalSnapshot,
+    read_paper_strategy_snapshot,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PAPER_RUNTIME_SCHEMA_VERSION = "v5.generic_paper_runtime.v1"
@@ -54,7 +57,26 @@ ACK_FIELDS = (
     "expires_at",
     "source_v5_commit",
     "source_v5_bundle_sha256",
+    "source_proposal_snapshot_id",
+    "source_proposal_snapshot_sha256",
+    "source_proposal_snapshot_generated_at",
+    "processing_status",
+    "processing_reason",
     "schema_version",
+)
+
+PROPOSAL_PROCESSING_STATUSES = frozenset(
+    {
+        "ACCEPTED_TRACKER_ACTIVE",
+        "ACCEPTED_TRACKER_PENDING",
+        "REJECTED_CONTRACT",
+        "REJECTED_EXPIRED",
+        "REJECTED_CAPACITY",
+        "REJECTED_REQUIRED_MARKET_FIELDS",
+        "REJECTED_HASH_MISMATCH",
+        "PARSE_ERROR",
+        "NOT_PROCESSED_INTERNAL_ERROR",
+    }
 )
 
 
@@ -76,7 +98,7 @@ def paper_runtime_observation_symbols(
     except Exception:
         pass
     try:
-        for row in _proposal_rows(cfg, Path(run_dir)):
+        for row in _proposal_snapshot(cfg, Path(run_dir)).rows:
             symbol = str(row.get("symbol") or row.get("v5_symbol") or "")
             if symbol:
                 symbols.add(_slash_symbol(symbol))
@@ -183,8 +205,10 @@ def run_generic_paper_runtime(
                 }
             )
 
+    proposal_snapshot: ProposalSnapshot | None = None
     try:
-        proposal_rows = _proposal_rows(cfg, run_path)
+        proposal_snapshot = _proposal_snapshot(cfg, run_path)
+        proposal_rows = proposal_snapshot.rows
     except Exception as exc:
         proposal_rows = []
         errors.append(_error_row(current, "proposal_source_read_failed", exc))
@@ -192,7 +216,7 @@ def run_generic_paper_runtime(
     accepted_proposals: dict[str, PaperStrategyProposal] = {}
     current_proposal_ids: set[str] = set()
     seen_proposals: set[tuple[str, str]] = set()
-    for raw in proposal_rows[: runtime_cfg.max_trackers * 2]:
+    for raw in proposal_rows:
         proposal_key = (
             str(raw.get("proposal_id") or ""),
             str(raw.get("proposal_hash") or ""),
@@ -200,50 +224,30 @@ def run_generic_paper_runtime(
         if proposal_key in seen_proposals:
             continue
         seen_proposals.add(proposal_key)
-        proposal, reject_reason = _parse_proposal(raw, current)
         raw_proposal_id = str(raw.get("proposal_id") or "")
         if raw_proposal_id:
             current_proposal_ids.add(raw_proposal_id)
-        if proposal is None:
-            existing = trackers.get(proposal_key[0])
-            if (
-                reject_reason == "proposal_expired"
-                and existing is not None
-                and str(existing.get("proposal_hash") or "") == proposal_key[1]
-            ):
-                locked = PaperStrategyProposal.model_validate(existing.get("proposal"))
-                accepted_proposals[locked.proposal_id] = locked
-                ack_rows.append(_accepted_ack_row(locked, existing, current))
-                continue
-            ack_rows.append(_rejected_ack_row(raw, reject_reason, current))
-            continue
-        if not runtime_cfg.enabled:
-            ack_rows.append(_rejected_ack_row(raw, "config_disabled", current))
-            continue
-        existing = trackers.get(proposal.proposal_id)
-        conflict = _version_conflict(trackers.values(), proposal)
-        if conflict:
-            ack_rows.append(
-                _rejected_ack_row(raw, "duplicate_version_conflict", current)
+        try:
+            ack_row, proposal = _process_proposal_member(
+                raw=raw,
+                now=current,
+                runtime_cfg=runtime_cfg,
+                trackers=trackers,
             )
-            continue
-        if existing is None and len(trackers) >= runtime_cfg.max_trackers:
-            ack_rows.append(
-                _rejected_ack_row(raw, "tracker_capacity_exceeded", current)
+        except Exception as exc:
+            errors.append(
+                _error_row(
+                    current,
+                    "proposal_processing_failed",
+                    exc,
+                    proposal_id=raw_proposal_id,
+                )
             )
-            continue
-        tracker = existing or _new_tracker(proposal, current)
-        if (
-            existing is not None
-            and str(existing.get("proposal_hash")) != proposal.proposal_hash
-        ):
-            ack_rows.append(
-                _rejected_ack_row(raw, "duplicate_version_conflict", current)
-            )
-            continue
-        trackers[proposal.proposal_id] = tracker
-        accepted_proposals[proposal.proposal_id] = proposal
-        ack_rows.append(_accepted_ack_row(proposal, tracker, current))
+            ack_row = _rejected_ack_row(raw, "internal_error", current)
+            proposal = None
+        ack_rows.append(ack_row)
+        if proposal is not None:
+            accepted_proposals[proposal.proposal_id] = proposal
 
     for proposal_id, tracker in trackers.items():
         current_member = proposal_id in accepted_proposals
@@ -312,6 +316,8 @@ def run_generic_paper_runtime(
     state["daily_buckets"] = _bounded_daily_buckets(daily_buckets, max_history)
     state["signals"] = state_signals
     state["runs"] = state_runs
+    if proposal_snapshot is not None:
+        state["proposal_snapshot"] = proposal_snapshot.state_payload()
     state["updated_at"] = current.isoformat()
     state["schema_version"] = "v5.paper_runtime_state.v1"
     try:
@@ -327,6 +333,7 @@ def run_generic_paper_runtime(
             state_loaded=True,
             state_persisted=False,
             failure_stage="state_write_failed",
+            proposal_snapshot=proposal_snapshot,
         )
         _write_failure_reports(
             summaries_dir,
@@ -368,6 +375,7 @@ def run_generic_paper_runtime(
         trackers=trackers.values(),
         state_loaded=True,
         state_persisted=True,
+        proposal_snapshot=proposal_snapshot,
     )
     try:
         _write_runtime_reports(
@@ -564,13 +572,17 @@ def _advance_tracker(
     tracker["updated_at"] = now.isoformat()
 
 
-def _new_tracker(proposal: PaperStrategyProposal, now: datetime) -> dict[str, Any]:
+def _new_tracker(
+    proposal: PaperStrategyProposal,
+    now: datetime,
+    source_row: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     tracker_id = f"paper:{proposal.proposal_id}"
     state = PaperRuntimeState.PROPOSAL_RECEIVED
     state = assert_runtime_transition(state, PaperRuntimeState.VALIDATED)
     state = assert_runtime_transition(state, PaperRuntimeState.ACK_ACCEPTED)
     state = assert_runtime_transition(state, PaperRuntimeState.WAITING_SIGNAL)
-    return {
+    tracker = {
         "tracker_id": tracker_id,
         "proposal_id": proposal.proposal_id,
         "proposal_hash": proposal.proposal_hash,
@@ -591,6 +603,23 @@ def _new_tracker(proposal: PaperStrategyProposal, now: datetime) -> dict[str, An
         "new_entry_allowed": True,
         "exit_allowed": True,
     }
+    _bind_tracker_snapshot(tracker, source_row or {})
+    return tracker
+
+
+def _bind_tracker_snapshot(
+    tracker: dict[str, Any],
+    source_row: Mapping[str, Any],
+) -> None:
+    tracker["source_proposal_snapshot_id"] = str(
+        source_row.get("proposal_snapshot_id") or ""
+    )
+    tracker["source_proposal_snapshot_sha256"] = str(
+        source_row.get("proposal_snapshot_sha256") or ""
+    ).lower()
+    tracker["source_proposal_snapshot_generated_at"] = str(
+        source_row.get("snapshot_generated_at") or ""
+    )
 
 
 def _set_state(tracker: dict[str, Any], target: PaperRuntimeState) -> None:
@@ -945,6 +974,8 @@ def _parse_proposal(
             return None, "invalid_timeframe"
         if "missing_market_field" in text:
             return None, "missing_market_field"
+        if "proposal_hash does not match" in text:
+            return None, "proposal_hash_mismatch"
         return None, "invalid_schema"
     if proposal.expires_at <= now:
         return None, "proposal_expired"
@@ -953,13 +984,60 @@ def _parse_proposal(
     return proposal, ""
 
 
-def _proposal_rows(cfg: AppConfig, run_path: Path) -> list[dict[str, Any]]:
-    return read_paper_strategy_proposals(
+def _proposal_snapshot(cfg: AppConfig, run_path: Path) -> ProposalSnapshot:
+    return read_paper_strategy_snapshot(
         run_path=run_path,
         reports_dir=_reports_dir(run_path),
         diagnostics=cfg.diagnostics,
+        cfg=cfg,
         now_ms=int(datetime.now(UTC).timestamp() * 1000),
     )
+
+
+def _proposal_rows(cfg: AppConfig, run_path: Path) -> list[dict[str, Any]]:
+    return _proposal_snapshot(cfg, run_path).rows
+
+
+def _process_proposal_member(
+    *,
+    raw: Mapping[str, Any],
+    now: datetime,
+    runtime_cfg: Any,
+    trackers: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any], PaperStrategyProposal | None]:
+    proposal_key = (
+        str(raw.get("proposal_id") or ""),
+        str(raw.get("proposal_hash") or ""),
+    )
+    proposal, reject_reason = _parse_proposal(raw, now)
+    if proposal is None:
+        existing = trackers.get(proposal_key[0])
+        if (
+            reject_reason == "proposal_expired"
+            and existing is not None
+            and str(existing.get("proposal_hash") or "") == proposal_key[1]
+            and bool(existing.get("open_trade"))
+        ):
+            locked = PaperStrategyProposal.model_validate(existing.get("proposal"))
+            _bind_tracker_snapshot(existing, raw)
+            return _accepted_ack_row(locked, existing, now), locked
+        return _rejected_ack_row(raw, reject_reason, now), None
+    if not runtime_cfg.enabled:
+        return _rejected_ack_row(raw, "config_disabled", now), None
+    existing = trackers.get(proposal.proposal_id)
+    if _version_conflict(trackers.values(), proposal):
+        return _rejected_ack_row(raw, "duplicate_version_conflict", now), None
+    if existing is None and len(trackers) >= runtime_cfg.max_trackers:
+        return _rejected_ack_row(raw, "tracker_capacity_exceeded", now), None
+    tracker = existing or _new_tracker(proposal, now, raw)
+    if (
+        existing is not None
+        and str(existing.get("proposal_hash")) != proposal.proposal_hash
+    ):
+        return _rejected_ack_row(raw, "duplicate_version_conflict", now), None
+    _bind_tracker_snapshot(tracker, raw)
+    trackers[proposal.proposal_id] = tracker
+    return _accepted_ack_row(proposal, tracker, now), proposal
 
 
 def _accepted_ack_row(
@@ -979,6 +1057,15 @@ def _accepted_ack_row(
         accepted_at=_datetime(tracker.get("created_at")) or now,
         expires_at=proposal.expires_at,
         source_v5_commit=_source_v5_commit(),
+        source_proposal_snapshot_id=str(
+            tracker.get("source_proposal_snapshot_id") or ""
+        ),
+        source_proposal_snapshot_sha256=str(
+            tracker.get("source_proposal_snapshot_sha256") or ""
+        ),
+        source_proposal_snapshot_generated_at=(
+            tracker.get("source_proposal_snapshot_generated_at") or None
+        ),
     )
     return {
         **ack.model_dump(mode="json"),
@@ -989,6 +1076,8 @@ def _accepted_ack_row(
         "strategy_candidate": proposal.strategy_family,
         "suggested_horizon": f"{proposal.max_holding_bars}h",
         "proposal_source": "generic_contract_runtime",
+        "processing_status": _accepted_processing_status(tracker),
+        "processing_reason": "",
         "schema_version": PAPER_RUNTIME_SCHEMA_VERSION,
     }
 
@@ -1018,8 +1107,58 @@ def _rejected_ack_row(
         "expires_at": str(row.get("expires_at") or ""),
         "source_v5_commit": _source_v5_commit(),
         "source_v5_bundle_sha256": "",
+        "source_proposal_snapshot_id": str(
+            row.get("proposal_snapshot_id") or ""
+        ),
+        "source_proposal_snapshot_sha256": str(
+            row.get("proposal_snapshot_sha256") or ""
+        ).lower(),
+        "source_proposal_snapshot_generated_at": str(
+            row.get("snapshot_generated_at") or ""
+        ),
+        "processing_status": _rejected_processing_status(reason),
+        "processing_reason": reason or "invalid_schema",
         "schema_version": PAPER_RUNTIME_SCHEMA_VERSION,
     }
+
+
+def _accepted_processing_status(tracker: Mapping[str, Any]) -> str:
+    state = str(tracker.get("state") or "")
+    if state in {
+        PaperRuntimeState.WAITING_SIGNAL.value,
+        PaperRuntimeState.PAPER_OPEN.value,
+        PaperRuntimeState.PAPER_EXIT_PENDING.value,
+        PaperRuntimeState.PAPER_CLOSED.value,
+        PaperRuntimeState.COOLDOWN.value,
+    }:
+        return "ACCEPTED_TRACKER_ACTIVE"
+    return "ACCEPTED_TRACKER_PENDING"
+
+
+def _rejected_processing_status(reason: str) -> str:
+    normalized = str(reason or "").strip().lower()
+    if normalized == "proposal_expired":
+        return "REJECTED_EXPIRED"
+    if normalized == "tracker_capacity_exceeded":
+        return "REJECTED_CAPACITY"
+    if normalized == "missing_market_field":
+        return "REJECTED_REQUIRED_MARKET_FIELDS"
+    if normalized in {"duplicate_version_conflict", "proposal_hash_mismatch"}:
+        return "REJECTED_HASH_MISMATCH"
+    if normalized in {
+        "unsupported_contract_version",
+        "unsafe_live_effect",
+        "config_disabled",
+    }:
+        return "REJECTED_CONTRACT"
+    if normalized in {
+        "unsupported_operator",
+        "invalid_schema",
+        "invalid_symbol",
+        "invalid_timeframe",
+    }:
+        return "PARSE_ERROR"
+    return "NOT_PROCESSED_INTERNAL_ERROR"
 
 
 def _version_conflict(
@@ -1149,6 +1288,15 @@ def _registry_row(tracker: Mapping[str, Any]) -> dict[str, Any]:
         "supersession_status": tracker.get("supersession_status") or "HISTORY_ONLY",
         "new_entry_allowed": tracker.get("new_entry_allowed", False),
         "exit_allowed": tracker.get("exit_allowed", False),
+        "source_proposal_snapshot_id": tracker.get(
+            "source_proposal_snapshot_id", ""
+        ),
+        "source_proposal_snapshot_sha256": tracker.get(
+            "source_proposal_snapshot_sha256", ""
+        ),
+        "source_proposal_snapshot_generated_at": tracker.get(
+            "source_proposal_snapshot_generated_at", ""
+        ),
     }
 
 
@@ -1172,6 +1320,15 @@ def _state_row(tracker: Mapping[str, Any]) -> dict[str, Any]:
         "supersession_status": tracker.get("supersession_status") or "HISTORY_ONLY",
         "new_entry_allowed": tracker.get("new_entry_allowed", False),
         "exit_allowed": tracker.get("exit_allowed", False),
+        "source_proposal_snapshot_id": tracker.get(
+            "source_proposal_snapshot_id", ""
+        ),
+        "source_proposal_snapshot_sha256": tracker.get(
+            "source_proposal_snapshot_sha256", ""
+        ),
+        "source_proposal_snapshot_generated_at": tracker.get(
+            "source_proposal_snapshot_generated_at", ""
+        ),
     }
 
 
@@ -1536,6 +1693,7 @@ def _contract_status(
     state_loaded: bool,
     state_persisted: bool,
     failure_stage: str = "",
+    proposal_snapshot: ProposalSnapshot | None = None,
 ) -> dict[str, Any]:
     ack_list = list(ack_rows)
     tracker_list = list(trackers)
@@ -1565,6 +1723,45 @@ def _contract_status(
         for row in ack_list
         if _as_bool(row.get("accepted"))
     }
+    processing_status_counts = Counter(
+        str(row.get("processing_status") or "") for row in ack_list
+    )
+    processed_members = {
+        (
+            str(row.get("proposal_id") or ""),
+            str(row.get("proposal_hash") or "").lower(),
+        )
+        for row in ack_list
+    }
+    snapshot_members = (
+        set(zip(proposal_snapshot.proposal_ids, proposal_snapshot.proposal_hashes))
+        if proposal_snapshot is not None
+        else set()
+    )
+    processing_complete = bool(
+        proposal_snapshot is not None
+        and proposal_snapshot.identity_valid
+        and processed_members == snapshot_members
+        and all(status in PROPOSAL_PROCESSING_STATUSES for status in processing_status_counts)
+    )
+    snapshot_payload = (
+        proposal_snapshot.state_payload()
+        if proposal_snapshot is not None
+        else {
+            "proposal_snapshot_id": "",
+            "proposal_snapshot_sha256": "",
+            "proposal_snapshot_generated_at": "",
+            "fetched_at": "",
+            "proposal_count": 0,
+            "proposal_ids": [],
+            "proposal_hashes": [],
+            "source_quant_lab_commit": "",
+            "quant_lab_contract_version": "",
+            "source_kind": "",
+            "source_path": "",
+            "identity_valid": False,
+        }
+    )
     return {
         "schema_version": PAPER_RUNTIME_SCHEMA_VERSION,
         "contract_version": PAPER_STRATEGY_CONTRACT_VERSION,
@@ -1572,6 +1769,18 @@ def _contract_status(
         "paper_runtime_live_order_effect": runtime_cfg.live_order_effect,
         "quant_lab_mode": cfg.quant_lab.mode,
         "canary_enabled": bool(cfg.quant_lab.canary.enabled),
+        **snapshot_payload,
+        "proposal_snapshot_generated_at": snapshot_payload[
+            "proposal_snapshot_generated_at"
+        ],
+        "proposal_snapshot_fetched_at": snapshot_payload["fetched_at"],
+        "proposal_snapshot_proposal_count": snapshot_payload["proposal_count"],
+        "proposal_processing_status_counts": dict(processing_status_counts),
+        "proposal_processing_complete": processing_complete,
+        "unprocessed_proposal_count": max(
+            0,
+            int(snapshot_payload["proposal_count"]) - len(processed_members),
+        ),
         "accepted_proposal_count": sum(
             _as_bool(row.get("accepted")) for row in ack_list
         ),
@@ -1681,6 +1890,11 @@ def _write_runtime_reports(
     )
     _write_csv_atomic(
         summaries / "paper_strategy_proposal_ack_current.csv",
+        ack_rows,
+        preferred_fields=ACK_FIELDS,
+    )
+    _write_csv_atomic(
+        summaries / "paper_strategy_proposal_processing.csv",
         ack_rows,
         preferred_fields=ACK_FIELDS,
     )

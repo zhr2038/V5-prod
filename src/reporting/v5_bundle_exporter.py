@@ -107,6 +107,8 @@ GENERIC_PAPER_REPORT_FIELDS = {
         "live_order_effect", "created_at", "updated_at",
         "current_proposal_member", "current_cohort_member",
         "supersession_status", "new_entry_allowed", "exit_allowed",
+        "source_proposal_snapshot_id", "source_proposal_snapshot_sha256",
+        "source_proposal_snapshot_generated_at",
     ),
     "paper_strategy_registry_current.csv": (),
     "paper_strategy_registry_history.csv": (),
@@ -117,10 +119,18 @@ GENERIC_PAPER_REPORT_FIELDS = {
         "cooldown_remaining_bars", "last_processed_bar_ts", "updated_at",
         "current_proposal_member", "current_cohort_member",
         "supersession_status", "new_entry_allowed", "exit_allowed",
+        "source_proposal_snapshot_id", "source_proposal_snapshot_sha256",
+        "source_proposal_snapshot_generated_at",
     ),
     "paper_strategy_state_history.csv": (),
     "paper_strategy_proposal_ack_current.csv": (),
     "paper_strategy_proposal_ack_history.csv": (),
+    "paper_strategy_proposal_processing.csv": (
+        "proposal_id", "proposal_hash", "tracker_id", "accepted",
+        "processing_status", "processing_reason", "reject_reason",
+        "source_proposal_snapshot_id", "source_proposal_snapshot_sha256",
+        "source_proposal_snapshot_generated_at", "live_order_effect",
+    ),
     "paper_strategy_signals.csv": (
         "schema_version", "signal_id", "proposal_id", "tracker_id",
         "strategy_id", "strategy_version", "symbol", "signal_ts", "decision_ts",
@@ -3100,11 +3110,51 @@ def _manifest_metadata(root: Path, reports: Path, usage_rows: list[Dict[str, Any
             CONTRACT_VERSION,
         )
 
+    paper_contract_status = _read_json_obj(
+        reports / "summaries" / "quant_lab_contract_status.json"
+    )
+    if not isinstance(paper_contract_status, Mapping):
+        paper_contract_status = {}
+    proposal_contract_version = str(
+        paper_contract_status.get("quant_lab_contract_version") or ""
+    ).strip()
+
     git = _git_info(root)
     return {
         "schema_version": SCHEMA_VERSION,
         "contract_version": str(contract_version or CONTRACT_VERSION),
-        "quant_lab_contract_version": str(contract_version or CONTRACT_VERSION),
+        "quant_lab_contract_version": str(
+            proposal_contract_version or contract_version or CONTRACT_VERSION
+        ),
+        "proposal_quant_lab_contract_version": proposal_contract_version
+        or "not_observable",
+        "proposal_snapshot_id": str(
+            paper_contract_status.get("proposal_snapshot_id") or "not_observable"
+        ),
+        "proposal_snapshot_sha256": str(
+            paper_contract_status.get("proposal_snapshot_sha256")
+            or "not_observable"
+        ),
+        "proposal_snapshot_generated_at": str(
+            paper_contract_status.get("proposal_snapshot_generated_at")
+            or "not_observable"
+        ),
+        "fetched_at": str(
+            paper_contract_status.get("fetched_at") or "not_observable"
+        ),
+        "proposal_count": _to_int(
+            paper_contract_status.get("proposal_count")
+        ),
+        "proposal_processing_complete": bool(
+            paper_contract_status.get("proposal_processing_complete")
+        ),
+        "proposal_processing_status_counts": dict(
+            paper_contract_status.get("proposal_processing_status_counts") or {}
+        ),
+        "proposal_source_quant_lab_commit": str(
+            paper_contract_status.get("source_quant_lab_commit")
+            or "not_observable"
+        ),
         "telemetry_schema_version": SCHEMA_VERSION,
         "telemetry_contract_version": str(contract_version or CONTRACT_VERSION),
         "event_id_generation_version": EVENT_ID_GENERATION_VERSION,

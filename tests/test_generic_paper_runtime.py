@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import json
 import tarfile
 from datetime import UTC, datetime, timedelta
@@ -21,6 +22,7 @@ from src.paper_runtime.runtime import (
     run_generic_paper_runtime,
     supplement_paper_runtime_market_data,
 )
+from src.quant_lab_client.exceptions import QuantLabHTTPError
 from src.reporting.v5_bundle_exporter import export_v5_bundle
 
 
@@ -135,6 +137,43 @@ def _cfg(tmp_path: Path, proposals_path: Path) -> AppConfig:
     return cfg
 
 
+def _snapshot_payload(
+    proposals: list[PaperStrategyProposal],
+    *,
+    source_commit: str = "a" * 40,
+) -> dict:
+    rows = [proposal.model_dump(mode="json") for proposal in proposals]
+    members = sorted(
+        (row["proposal_id"], row["proposal_hash"].lower()) for row in rows
+    )
+    material = {
+        "proposal_ids": [proposal_id for proposal_id, _proposal_hash in members],
+        "proposal_hashes": [proposal_hash for _proposal_id, proposal_hash in members],
+        "proposal_count": len(members),
+        "source_quant_lab_commit": source_commit,
+    }
+    snapshot_sha = hashlib.sha256(
+        json.dumps(material, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    snapshot_id = f"proposal-snapshot:{snapshot_sha[:24]}"
+    generated_at = "2026-07-14T23:30:00+00:00"
+    for row in rows:
+        row.update(
+            {
+                "proposal_snapshot_id": snapshot_id,
+                "proposal_snapshot_sha256": snapshot_sha,
+                "snapshot_generated_at": generated_at,
+            }
+        )
+    return {
+        "proposal_snapshot_id": snapshot_id,
+        "proposal_snapshot_sha256": snapshot_sha,
+        "snapshot_generated_at": generated_at,
+        **material,
+        "proposals": rows,
+    }
+
+
 def _quote(price: float, now: datetime = NOW) -> dict:
     return {
         "bid": price - 0.1,
@@ -220,6 +259,224 @@ def test_first_three_generic_proposals_ack_and_open_without_live_side_effects(tm
     assert contract["real_position_mutations"] == 0
     assert cfg.quant_lab.mode == "shadow"
     assert cfg.quant_lab.canary.enabled is False
+
+
+def test_canonical_snapshot_api_identity_reaches_ack_tracker_status_and_bundle(
+    tmp_path,
+    monkeypatch,
+):
+    from src.quant_lab_client.client import QuantLabClient
+
+    reports = tmp_path / "reports"
+    proposals = [
+        _proposal("SNAPSHOT_TRX_PAPER", "TRX/USDT"),
+        _proposal("SNAPSHOT_BCH_PAPER", "BCH/USDT"),
+    ]
+    payload = _snapshot_payload(proposals)
+    cfg = _cfg(tmp_path, tmp_path / "unused.csv")
+    cfg.quant_lab.enabled = True
+    cfg.diagnostics.quant_lab_paper_strategy_proposals_api_enabled = True
+
+    class SnapshotClient:
+        api_token = "present"
+
+        def __init__(self):
+            self.calls = []
+
+        def get_json(self, endpoint):
+            self.calls.append(endpoint)
+            return SimpleNamespace(ok=True, data=payload)
+
+    client = SnapshotClient()
+    monkeypatch.setattr(
+        QuantLabClient,
+        "from_config",
+        classmethod(lambda cls, *args, **kwargs: client),
+    )
+
+    result = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "snapshot-api",
+        market_data_1h={
+            "TRX/USDT": _series("TRX/USDT"),
+            "BCH/USDT": _series("BCH/USDT"),
+        },
+        top_of_book={
+            "TRX/USDT": _quote(100.0),
+            "BCH/USDT": _quote(200.0),
+        },
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+
+    summaries = reports / "summaries"
+    ack = list(
+        csv.DictReader(
+            (summaries / "paper_strategy_proposal_processing.csv").open()
+        )
+    )
+    trackers = list(
+        csv.DictReader((summaries / "paper_strategy_trackers_current.csv").open())
+    )
+    status = json.loads((summaries / "quant_lab_contract_status.json").read_text())
+    assert client.calls == ["/v1/paper-strategy/proposals"]
+    assert result["proposal_rows"] == 2
+    assert {row["processing_status"] for row in ack} == {
+        "ACCEPTED_TRACKER_ACTIVE"
+    }
+    assert {row["source_proposal_snapshot_id"] for row in ack} == {
+        payload["proposal_snapshot_id"]
+    }
+    assert {row["source_proposal_snapshot_sha256"] for row in trackers} == {
+        payload["proposal_snapshot_sha256"]
+    }
+    assert status["proposal_snapshot_id"] == payload["proposal_snapshot_id"]
+    assert status["proposal_snapshot_sha256"] == payload["proposal_snapshot_sha256"]
+    assert status["proposal_count"] == 2
+    assert status["proposal_processing_complete"] is True
+    assert status["unprocessed_proposal_count"] == 0
+    assert status["real_order_calls"] == 0
+    assert status["real_position_mutations"] == 0
+
+    bundle = export_v5_bundle(
+        reports_dir=reports,
+        out_dir=tmp_path / "bundles",
+        include_logs=False,
+        include_config=False,
+        refresh_cost_probe_preflight=False,
+    )
+    with tarfile.open(bundle, "r:gz") as archive:
+        manifest = json.loads(archive.extractfile("manifest.json").read())
+        names = set(archive.getnames())
+    assert manifest["proposal_snapshot_id"] == payload["proposal_snapshot_id"]
+    assert manifest["proposal_snapshot_sha256"] == payload[
+        "proposal_snapshot_sha256"
+    ]
+    assert manifest["proposal_count"] == 2
+    assert manifest["proposal_processing_complete"] is True
+    assert "summaries/paper_strategy_proposal_processing.csv" in names
+
+
+def test_snapshot_capacity_rejection_covers_every_member(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    proposals = [
+        _proposal(f"CAPACITY_MEMBER_{index}", "TRX/USDT") for index in range(5)
+    ]
+    _write_proposals(proposals_path, proposals)
+    cfg = _cfg(tmp_path, proposals_path)
+    cfg.quant_lab.paper_runtime.max_trackers = 1
+
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "capacity",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+
+    rows = list(
+        csv.DictReader(
+            (
+                reports
+                / "summaries"
+                / "paper_strategy_proposal_processing.csv"
+            ).open()
+        )
+    )
+    assert len(rows) == 5
+    assert sum(
+        row["processing_status"] == "ACCEPTED_TRACKER_ACTIVE" for row in rows
+    ) == 1
+    assert sum(row["processing_status"] == "REJECTED_CAPACITY" for row in rows) == 4
+
+
+def test_snapshot_proposal_hash_mismatch_has_closed_processing_status(tmp_path):
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    raw = _proposal("HASH_MISMATCH_MEMBER", "TRX/USDT").model_dump(mode="json")
+    raw["proposal_hash"] = "0" * 64
+    for field in (
+        "entry_rule",
+        "exit_rule",
+        "source_dataset_versions",
+        "required_market_fields",
+        "blocked_reasons",
+        "next_required_actions",
+    ):
+        raw[field] = json.dumps(raw[field], sort_keys=True)
+    _write_raw_proposal_rows(proposals_path, [raw])
+    cfg = _cfg(tmp_path, proposals_path)
+
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "hash-mismatch",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT")},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+
+    row = list(
+        csv.DictReader(
+            (
+                reports
+                / "summaries"
+                / "paper_strategy_proposal_processing.csv"
+            ).open()
+        )
+    )[0]
+    assert row["processing_status"] == "REJECTED_HASH_MISMATCH"
+    assert row["processing_reason"] == "proposal_hash_mismatch"
+
+
+@pytest.mark.parametrize("missing_token", [True, False])
+def test_snapshot_auth_failure_is_single_endpoint_fail_fast(
+    tmp_path,
+    monkeypatch,
+    missing_token,
+):
+    from src.quant_lab_client.client import QuantLabClient
+
+    reports = tmp_path / "reports"
+    cfg = _cfg(tmp_path, tmp_path / "local-fallback-must-not-be-read.csv")
+    cfg.quant_lab.enabled = True
+    cfg.diagnostics.quant_lab_paper_strategy_proposals_api_enabled = True
+
+    class AuthFailureClient:
+        api_token = None if missing_token else "present"
+
+        def __init__(self):
+            self.calls = 0
+
+        def get_json(self, endpoint):
+            self.calls += 1
+            raise QuantLabHTTPError("quant-lab HTTP 401")
+
+    client = AuthFailureClient()
+    monkeypatch.setattr(
+        QuantLabClient,
+        "from_config",
+        classmethod(lambda cls, *args, **kwargs: client),
+    )
+    result = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "auth-failure",
+        market_data_1h={},
+        top_of_book={},
+        cfg=cfg,
+        audit=SimpleNamespace(regime="NORMAL", quant_lab={}),
+        now=NOW,
+    )
+
+    assert client.calls == (0 if missing_token else 1)
+    assert result["errors"] == 1
+    status = json.loads(
+        (reports / "summaries" / "quant_lab_contract_status.json").read_text()
+    )
+    assert status["proposal_snapshot_id"] == ""
+    assert status["real_order_calls"] == 0
+    assert status["real_position_mutations"] == 0
 
 
 def test_runtime_exit_restart_recovery_and_same_bar_idempotency(tmp_path):
@@ -782,7 +1039,7 @@ def test_proposal_source_failure_is_contained_without_live_effect(
     def fail_source(*args, **kwargs):
         raise TimeoutError("quant-lab proposal sync timed out")
 
-    monkeypatch.setattr(runtime, "_proposal_rows", fail_source)
+    monkeypatch.setattr(runtime, "_proposal_snapshot", fail_source)
     result = run_generic_paper_runtime(
         run_dir=reports / "runs" / "run-1",
         market_data_1h={"TRX/USDT": _series("TRX/USDT")},

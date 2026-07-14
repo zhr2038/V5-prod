@@ -2118,14 +2118,14 @@ def test_hype_wld_expanded_paper_ready_advisory_generates_paper_strategy_rows(tm
     expanded_by_strategy = {row["strategy_id"]: row for row in expanded_runs}
     assert expanded_by_strategy["HYPE_EXPANDED_UNIVERSE_PAPER_V1"]["paper_pnl_bps_4h"] == "42"
     assert expanded_by_strategy["WLD_EXPANDED_UNIVERSE_PAPER_V1"]["paper_pnl_bps_4h"] == "55"
-    assert all(row["live_order_effect"] == "read_only_no_live_order" for row in expanded_runs)
+    assert all(row["live_order_effect"] == "none" for row in expanded_runs)
 
     expanded_daily = _read_csv(reports_dir / "summaries" / "expanded_universe_paper_daily.csv")
     daily_by_strategy = {row["strategy_id"]: row for row in expanded_daily}
     assert daily_by_strategy["HYPE_EXPANDED_UNIVERSE_PAPER_V1"]["entry_count"] == "1"
     assert daily_by_strategy["HYPE_EXPANDED_UNIVERSE_PAPER_V1"]["avg_paper_pnl_bps_4h"] == "42.0"
     assert daily_by_strategy["WLD_EXPANDED_UNIVERSE_PAPER_V1"]["avg_paper_pnl_bps_4h"] == "55.0"
-    assert all(row["live_order_effect"] == "read_only_no_live_order" for row in expanded_daily)
+    assert all(row["live_order_effect"] == "none" for row in expanded_daily)
 
 
 def test_expanded_relative_strength_advisory_without_universe_type_is_tracked(tmp_path: Path) -> None:
@@ -2241,7 +2241,22 @@ def test_expanded_paper_no_entry_rows_have_standard_no_sample_reason(tmp_path: P
     assert by_symbol["HYPE/USDT"]["no_sample_reason"] == "cost_source_global_default"
     assert by_symbol["WLD/USDT"]["would_enter"] == "False"
     assert by_symbol["WLD/USDT"]["no_sample_reason"] == "missing_strategy_id"
-    assert all(row["live_order_effect"] == "read_only_no_live_order" for row in runs)
+    assert all(row["live_order_effect"] == "none" for row in runs)
+    assert by_symbol["HYPE/USDT"]["entry_count"] == "0"
+    assert by_symbol["HYPE/USDT"]["evaluated_at"]
+    assert by_symbol["HYPE/USDT"]["source_advisory_id"].startswith("derived:")
+
+    daily = _read_csv(
+        reports_dir / "summaries" / "expanded_universe_paper_daily.csv"
+    )
+    daily_by_symbol = {row["symbol"]: row for row in daily}
+    hype_daily = daily_by_symbol["HYPE/USDT"]
+    assert hype_daily["would_enter"] == "False"
+    assert hype_daily["entry_count"] == "0"
+    assert hype_daily["no_sample_reason"] == "cost_source_global_default"
+    assert hype_daily["evaluated_at"]
+    assert hype_daily["source_advisory_id"].startswith("derived:")
+    assert hype_daily["live_order_effect"] == "none"
 
 
 def test_expanded_paper_stale_display_only_outputs_no_entry_diagnostic(tmp_path: Path) -> None:

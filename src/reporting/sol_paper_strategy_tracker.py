@@ -70,6 +70,27 @@ EXPANDED_UNIVERSE_PAPER_LIVE_BLOCK_REASONS = [
     "expanded_universe_paper_only_no_live",
     "not_in_v5_live_universe",
 ]
+EXPANDED_NO_SAMPLE_REASONS = frozenset(
+    {
+        "symbol_not_normalized",
+        "missing_strategy_id",
+        "cost_source_global_default",
+        "negative_advisory",
+        "stale_advisory_display_only",
+        "advisory_not_paper_mode",
+        "no_advisory",
+        "needs_more_samples",
+        "shadow_only",
+        "research_only",
+        "regime_router_summary_only",
+        "late_chase_loss_shadow",
+        "maturity_not_paper_ready",
+        "expanded_universe_display_only",
+        "no_qualifying_entry",
+        "multiple_non_entry_reasons",
+        "upstream_non_entry_reason",
+    }
+)
 BOTTOM_ZONE_PAPER_LIVE_BLOCK_REASONS = [
     "bottom_zone_probe_paper_only_no_live",
     "bottom_zone_reversal_research_only",
@@ -453,6 +474,8 @@ STRATEGY_ADVISORY_SOURCE_HEALTH_FIELDS = [
 EXPANDED_UNIVERSE_ADVISORY_FIELDS = [
     "run_id",
     "ts_utc",
+    "evaluated_at",
+    "source_advisory_id",
     "source_path",
     "advisory_source",
     "advisory_fresh",
@@ -510,6 +533,8 @@ for _horizon in DEFAULT_HORIZONS:
 EXPANDED_UNIVERSE_PAPER_RUN_FIELDS = [
     "run_id",
     "ts_utc",
+    "evaluated_at",
+    "source_advisory_id",
     "paper_date",
     "universe_type",
     "symbol",
@@ -524,6 +549,7 @@ EXPANDED_UNIVERSE_PAPER_RUN_FIELDS = [
     "response_action",
     "negative_advisory",
     "would_enter",
+    "entry_count",
     "would_size_usdt",
     "max_paper_notional_usdt",
     "max_live_notional_usdt_ignored",
@@ -548,6 +574,10 @@ EXPANDED_UNIVERSE_PAPER_DAILY_FIELDS = [
     "strategy_id",
     "experiment_name",
     "symbol",
+    "evaluated_at",
+    "source_advisory_id",
+    "would_enter",
+    "no_sample_reason",
     "row_count",
     "entry_count",
     "shadow_count",
@@ -2756,6 +2786,17 @@ def _expanded_action_allows_entry(response_action: str) -> bool:
 
 
 def _expanded_no_sample_reason(row: Mapping[str, Any], fields: Mapping[str, Any]) -> str:
+    reason = _expanded_no_sample_reason_raw(row, fields)
+    return (
+        reason
+        if reason in EXPANDED_NO_SAMPLE_REASONS
+        else "upstream_non_entry_reason"
+    )
+
+
+def _expanded_no_sample_reason_raw(
+    row: Mapping[str, Any], fields: Mapping[str, Any]
+) -> str:
     action = str(fields.get("advisory_response_action") or "").strip()
     if _expanded_action_allows_entry(action) and _expanded_would_enter(row):
         return ""
@@ -2798,6 +2839,26 @@ def _expanded_no_sample_reason(row: Mapping[str, Any], fields: Mapping[str, Any]
     return "expanded_universe_display_only"
 
 
+def _expanded_source_advisory_id(row: Mapping[str, Any]) -> str:
+    explicit = str(
+        row.get("source_advisory_id") or row.get("advisory_id") or ""
+    ).strip()
+    if explicit:
+        return explicit
+    material = "|".join(
+        str(row.get(field) or "").strip()
+        for field in (
+            "source_path",
+            "strategy_id",
+            "strategy_candidate",
+            "symbol",
+            "generated_at",
+            "as_of_ts",
+        )
+    )
+    return f"derived:{hashlib.sha256(material.encode('utf-8')).hexdigest()[:24]}"
+
+
 def _expanded_universe_advisory_rows(
     advisory_rows: Iterable[Mapping[str, Any]],
     *,
@@ -2820,6 +2881,8 @@ def _expanded_universe_advisory_rows(
         item = {
             "run_id": run_id,
             "ts_utc": ts_utc,
+            "evaluated_at": ts_utc,
+            "source_advisory_id": _expanded_source_advisory_id(row),
             "source_path": row.get("source_path"),
             "advisory_source": fields["advisory_source"],
             "advisory_fresh": fields["advisory_fresh"],
@@ -2901,6 +2964,8 @@ def _expanded_universe_paper_rows(expanded_rows: Iterable[Mapping[str, Any]]) ->
         item = {
             "run_id": row.get("run_id"),
             "ts_utc": row.get("ts_utc"),
+            "evaluated_at": row.get("evaluated_at") or row.get("ts_utc"),
+            "source_advisory_id": row.get("source_advisory_id"),
             "paper_date": str(row.get("ts_utc") or "")[:10],
             "universe_type": "expanded_paper",
             "symbol": symbol,
@@ -2915,6 +2980,7 @@ def _expanded_universe_paper_rows(expanded_rows: Iterable[Mapping[str, Any]]) ->
             "response_action": response_action,
             "negative_advisory": row.get("negative_advisory"),
             "would_enter": would_enter,
+            "entry_count": int(bool(would_enter)),
             "would_size_usdt": max_paper if would_enter and max_paper is not None else 0.0,
             "max_paper_notional_usdt": max_paper,
             "max_live_notional_usdt_ignored": True,
@@ -2924,7 +2990,7 @@ def _expanded_universe_paper_rows(expanded_rows: Iterable[Mapping[str, Any]]) ->
             "advisory_fresh": row.get("advisory_fresh"),
             "advisory_contract_match": row.get("advisory_contract_match"),
             "live_block_reasons": row.get("live_block_reasons"),
-            "live_order_effect": "read_only_no_live_order",
+            "live_order_effect": "none",
         }
         for horizon in DEFAULT_HORIZONS:
             value = _expanded_horizon_value(row, horizon)
@@ -2960,6 +3026,13 @@ def _expanded_universe_paper_daily_rows(expanded_paper_rows: Iterable[Mapping[st
     out: list[dict[str, Any]] = []
     for (paper_date, strategy_id, symbol), rows in sorted(buckets.items()):
         entry_rows = [row for row in rows if _normalize_bool(row.get("would_enter"))]
+        no_sample_reasons = sorted(
+            {
+                str(row.get("no_sample_reason") or "")
+                for row in rows
+                if str(row.get("no_sample_reason") or "")
+            }
+        )
         horizon_avgs: dict[str, float] = {}
         observed_counts: dict[str, int] = {}
         win_rates: dict[str, float] = {}
@@ -2968,11 +3041,28 @@ def _expanded_universe_paper_daily_rows(expanded_paper_rows: Iterable[Mapping[st
             "strategy_id": strategy_id,
             "experiment_name": rows[0].get("experiment_name") if rows else "",
             "symbol": symbol,
+            "evaluated_at": max(
+                (str(row.get("evaluated_at") or row.get("ts_utc") or "") for row in rows),
+                default="",
+            ),
+            "source_advisory_id": str(
+                (rows[-1].get("source_advisory_id") if rows else "") or ""
+            ),
+            "would_enter": bool(entry_rows),
+            "no_sample_reason": (
+                ""
+                if entry_rows
+                else no_sample_reasons[0]
+                if len(no_sample_reasons) == 1
+                else "multiple_non_entry_reasons"
+                if no_sample_reasons
+                else "no_qualifying_entry"
+            ),
             "row_count": len(rows),
             "entry_count": len(entry_rows),
             "shadow_count": sum(1 for row in rows if str(row.get("response_action") or "") == "shadow_tracking"),
             "negative_count": sum(1 for row in rows if str(row.get("response_action") or "") == "negative_advisory"),
-            "live_order_effect": "read_only_no_live_order",
+            "live_order_effect": "none",
         }
         for horizon in DEFAULT_HORIZONS:
             values = [
