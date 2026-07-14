@@ -249,7 +249,18 @@ def run_generic_paper_runtime(
         if proposal is not None:
             accepted_proposals[proposal.proposal_id] = proposal
 
+    proposal_source_available = proposal_snapshot is not None
     for proposal_id, tracker in trackers.items():
+        if not proposal_source_available:
+            open_position = bool(tracker.get("open_trade"))
+            tracker["supersession_status"] = (
+                "SOURCE_UNAVAILABLE_EXIT_ONLY"
+                if open_position
+                else "SOURCE_UNAVAILABLE_HOLD"
+            )
+            tracker["new_entry_allowed"] = False
+            tracker["exit_allowed"] = open_position
+            continue
         current_member = proposal_id in accepted_proposals
         open_position = bool(tracker.get("open_trade"))
         tracker["current_proposal_member"] = current_member

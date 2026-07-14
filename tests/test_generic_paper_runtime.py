@@ -1057,6 +1057,84 @@ def test_proposal_source_failure_is_contained_without_live_effect(
     assert errors[0]["error_code"] == "proposal_source_read_failed"
 
 
+def test_proposal_source_failure_freezes_entries_but_preserves_open_exit(
+    tmp_path, monkeypatch
+):
+    from src.paper_runtime import runtime
+
+    reports = tmp_path / "reports"
+    proposals_path = tmp_path / "paper_strategy_proposals.csv"
+    held = _proposal(
+        "SOURCE_FAILURE_HOLD",
+        "TRX/USDT",
+        entry_rule={"operator": "gt", "field": "close", "value": 10_000},
+    )
+    exiting = _proposal(
+        "SOURCE_FAILURE_EXIT",
+        "BCH/USDT",
+        entry_rule={"operator": "gt", "field": "close", "value": 0},
+        exit_rule={"operator": "max_holding_bars", "value": 1},
+        max_holding_bars=1,
+    )
+    _write_proposals(proposals_path, [held, exiting])
+    cfg = _cfg(tmp_path, proposals_path)
+    audit = SimpleNamespace(regime="NORMAL", quant_lab={})
+    initial_series = {
+        "TRX/USDT": _series("TRX/USDT"),
+        "BCH/USDT": _series("BCH/USDT"),
+    }
+    initial_quotes = {
+        "TRX/USDT": _quote(100.0),
+        "BCH/USDT": _quote(100.0),
+    }
+
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "open",
+        market_data_1h=initial_series,
+        top_of_book=initial_quotes,
+        cfg=cfg,
+        audit=audit,
+        now=NOW,
+    )
+    opened_state = json.loads(Path(cfg.quant_lab.paper_runtime.state_path).read_text())
+    assert opened_state["trackers"][held.proposal_id]["open_trade"] is None
+    assert opened_state["trackers"][exiting.proposal_id]["open_trade"] is not None
+
+    def fail_source(*args, **kwargs):
+        raise TimeoutError("quant-lab proposal sync timed out")
+
+    monkeypatch.setattr(runtime, "_proposal_snapshot", fail_source)
+    later_ts = int((NOW + timedelta(hours=1)).timestamp() * 1000)
+    result = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "source-failed",
+        market_data_1h={
+            "TRX/USDT": _series("TRX/USDT", last_ts=later_ts),
+            "BCH/USDT": _series("BCH/USDT", last_ts=later_ts),
+        },
+        top_of_book={
+            "TRX/USDT": _quote(100.0, NOW + timedelta(hours=1)),
+            "BCH/USDT": _quote(100.0, NOW + timedelta(hours=1)),
+        },
+        cfg=cfg,
+        audit=audit,
+        now=NOW + timedelta(hours=1),
+    )
+
+    state = json.loads(Path(cfg.quant_lab.paper_runtime.state_path).read_text())
+    held_tracker = state["trackers"][held.proposal_id]
+    exiting_tracker = state["trackers"][exiting.proposal_id]
+    assert result["closed_trades"] == 1
+    assert result["live_order_effect"] == "none"
+    assert held_tracker["supersession_status"] == "SOURCE_UNAVAILABLE_HOLD"
+    assert held_tracker["new_entry_allowed"] is False
+    assert held_tracker["exit_allowed"] is False
+    assert held_tracker["open_trade"] is None
+    assert exiting_tracker["supersession_status"] == "SOURCE_UNAVAILABLE_EXIT_ONLY"
+    assert exiting_tracker["new_entry_allowed"] is False
+    assert exiting_tracker["exit_allowed"] is True
+    assert exiting_tracker["open_trade"] is None
+
+
 def test_pending_exit_retries_after_quote_recovers(tmp_path):
     reports = tmp_path / "reports"
     proposals_path = tmp_path / "paper_strategy_proposals.csv"
