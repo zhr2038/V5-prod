@@ -105,6 +105,16 @@ def test_live_prod_service_fails_when_pre_trade_auto_sync_fails() -> None:
     assert "ExecStartPre=/bin/bash" in service
 
 
+def test_quant_lab_callers_load_shared_api_environment_file() -> None:
+    for unit in (
+        "v5-prod.user.service",
+        "v5-event-driven.service",
+        "v5-quant-lab-selfcheck.service",
+    ):
+        text = (PROJECT_ROOT / "deploy" / "systemd" / unit).read_text(encoding="utf-8")
+        assert "EnvironmentFile=-/home/ubuntu/.quant-lab/api.env" in text, unit
+
+
 def test_live_prod_and_cost_probe_share_execution_maintenance_lock() -> None:
     service = (PROJECT_ROOT / "deploy" / "systemd" / "v5-prod.user.service").read_text(encoding="utf-8")
     live_runner = (PROJECT_ROOT / "scripts" / "run_hourly_live_window.sh").read_text(encoding="utf-8")

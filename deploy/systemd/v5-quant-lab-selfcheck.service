@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=/home/ubuntu/clawd/v5-prod
+EnvironmentFile=-/home/ubuntu/.quant-lab/api.env
 ExecStart=/home/ubuntu/clawd/v5-prod/.venv/bin/python scripts/quant_lab_selfcheck.py --config configs/config.yaml
 NoNewPrivileges=true
 PrivateTmp=true

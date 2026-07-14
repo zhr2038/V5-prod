@@ -1276,6 +1276,15 @@ def _read_strategy_opportunity_advisory_api(
         client = QuantLabClient.from_config(qcfg, run_id=run_id, phase="strategy_advisory_reader")
     except Exception:
         return AdvisoryApiReadResult(rows=[], meta={"api_fallback_attempted": True, "api_fallback_success": False})
+    if getattr(client, "api_token", "test_client") is None:
+        return AdvisoryApiReadResult(
+            rows=[],
+            meta={
+                "api_fallback_attempted": False,
+                "api_fallback_success": False,
+                "api_auth_status": "token_missing_fail_fast",
+            },
+        )
     rows: list[dict[str, Any]] = []
     meta: dict[str, Any] = {
         "api_fallback_attempted": True,
@@ -1294,7 +1303,10 @@ def _read_strategy_opportunity_advisory_api(
                     "fresh_only": "true",
                 },
             )
-        except Exception:
+        except Exception as exc:
+            if "HTTP 401" in str(exc) or "HTTP 403" in str(exc):
+                meta["api_auth_status"] = "authentication_rejected_fail_fast"
+                break
             continue
         if not bool(getattr(response, "ok", False)):
             continue
@@ -1320,8 +1332,10 @@ def _read_strategy_opportunity_advisory_api(
             normalized = _normalize_advisory_row(item, source_path=f"api:{endpoint}")
             if normalized.get("strategy_id") or normalized.get("strategy_candidate") or normalized.get("experiment_name"):
                 rows.append(normalized)
-        if rows:
-            break
+        # A successful compact response with zero rows is still authoritative.
+        # Legacy endpoints are transport compatibility fallbacks, not another
+        # source to query after a valid empty response.
+        break
     return AdvisoryApiReadResult(rows=rows, meta=meta)
 
 

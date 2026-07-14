@@ -520,6 +520,16 @@ def test_ack_and_tracker_current_snapshots_exclude_history(tmp_path):
         second.proposal_id,
     }
     assert {row["proposal_id"] for row in tracker_current} == {second.proposal_id}
+    contract = json.loads(
+        (reports / "summaries/quant_lab_contract_status.json").read_text()
+    )
+    assert contract["loaded_tracker_count"] == 2
+    assert contract["current_active_tracker_count"] == 1
+    assert contract["current_pending_tracker_count"] == 0
+    assert contract["superseded_closed_count"] == 0
+    assert contract["superseded_exit_only_count"] == 1
+    assert contract["active_tracker_count"] == 2
+    assert contract["active_tracker_count_deprecated"] is True
 
 
 def test_missing_quote_records_not_observable_without_virtual_position(tmp_path):

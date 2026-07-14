@@ -944,6 +944,11 @@ class QuantLabClient:
                     )
                     return response
                 last_error = QuantLabHTTPError(f"quant-lab HTTP {status_code}")
+                # Retrying deterministic client/auth failures only amplifies an
+                # incident and can make a single missing token look like a
+                # multi-endpoint outage. Keep retries for transient failures.
+                if 400 <= status_code < 500 and status_code not in {408, 429}:
+                    break
             except requests.Timeout as exc:
                 last_error = QuantLabTimeout(str(exc)[:300])
             except Exception as exc:

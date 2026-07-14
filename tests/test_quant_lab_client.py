@@ -9,7 +9,7 @@ import pytest
 
 import src.quant_lab_client.client as client_module
 from src.quant_lab_client.client import QuantLabClient
-from src.quant_lab_client.exceptions import QuantLabValidationError
+from src.quant_lab_client.exceptions import QuantLabHTTPError, QuantLabValidationError
 from src.quant_lab_client.models import GateDecision
 
 
@@ -107,6 +107,50 @@ def test_quant_lab_client_uses_get_and_redacts_token(tmp_path: Path) -> None:
     assert cost_params["requested_regime"] == "normal"
     assert cost_params["requested_quantile"] == "p75"
     assert cost_params["contract_version"] == "v5.quant_lab.telemetry.v2"
+
+
+def test_advisory_compact_and_legacy_requests_reuse_authorization_header(tmp_path: Path) -> None:
+    http = _HTTP()
+    client = QuantLabClient(
+        base_url="https://quant-lab.local",
+        api_token="super-secret-token",
+        http_client=http,
+        request_log_path=tmp_path / "requests.jsonl",
+    )
+
+    client.get_json("/v1/strategy-opportunity-advisory/v5-compact")
+    client.get_json("/v1/strategy-opportunity-advisory")
+
+    assert len(http.calls) == 2
+    assert {call["headers"].get("Authorization") for call in http.calls} == {
+        "Bearer super-secret-token"
+    }
+
+
+def test_authentication_failure_is_not_retried_across_same_endpoint(tmp_path: Path) -> None:
+    class UnauthorizedHTTP:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def get(self, url, params=None, headers=None, timeout=None):
+            self.calls += 1
+            return _Response({"detail": "missing bearer token"}, status_code=401)
+
+    http = UnauthorizedHTTP()
+    client = QuantLabClient(
+        base_url="https://quant-lab.local",
+        api_token="super-secret-token",
+        http_client=http,
+        max_retries=4,
+        cache_ttl_seconds=0,
+        http_cache_path=tmp_path / "auth-no-retry-cache.json",
+        request_log_path=tmp_path / "requests.jsonl",
+    )
+
+    with pytest.raises(QuantLabHTTPError, match="HTTP 401"):
+        client.get_json("/v1/test-auth-no-retry")
+
+    assert http.calls == 1
 
 
 def test_cost_request_normalizes_concatenated_usdt_symbol(tmp_path: Path) -> None:
@@ -694,6 +738,31 @@ def test_from_config_reads_token_from_api_env_path(monkeypatch, tmp_path: Path) 
     assert client.api_env_secure_permissions is True
     assert client.api_env_token_loaded is True
     assert "super-secret-token" not in (tmp_path / "requests.jsonl").read_text(encoding="utf-8")
+
+
+def test_from_config_reloads_token_from_api_env_after_restart(monkeypatch, tmp_path: Path) -> None:
+    from configs.schema import QuantLabConfig
+
+    monkeypatch.delenv("QUANT_LAB_API_TOKEN", raising=False)
+    env_path = tmp_path / "api.env"
+    env_path.write_text('QUANT_LAB_API_TOKEN="restart-token"\n', encoding="utf-8")
+    cfg = QuantLabConfig(
+        enabled=True,
+        mode="shadow",
+        base_url="http://qyun2.hrhome.top:8027",
+        api_env_path=str(env_path),
+        api_env_require_secure_permissions=False,
+        allow_insecure_http_with_token=True,
+        request_log_path=str(tmp_path / "requests.jsonl"),
+    )
+
+    first_http = _HTTP()
+    second_http = _HTTP()
+    QuantLabClient.from_config(cfg, http_client=first_http).get_health()
+    QuantLabClient.from_config(cfg, http_client=second_http).get_health()
+
+    assert first_http.calls[0]["headers"]["Authorization"] == "Bearer restart-token"
+    assert second_http.calls[0]["headers"]["Authorization"] == "Bearer restart-token"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not reliable on Windows")

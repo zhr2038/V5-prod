@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 
-TRADE_OPPORTUNITY_FUNNEL_SCHEMA_VERSION = "v5.trade_opportunity_funnel.v1"
+TRADE_OPPORTUNITY_FUNNEL_SCHEMA_VERSION = "v5.trade_opportunity_funnel.v2"
 TRADE_OPPORTUNITY_FUNNEL_FIELDS = (
     "schema_version",
     "run_id",

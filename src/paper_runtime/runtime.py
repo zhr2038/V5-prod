@@ -1539,6 +1539,32 @@ def _contract_status(
 ) -> dict[str, Any]:
     ack_list = list(ack_rows)
     tracker_list = list(trackers)
+    current_trackers = [
+        row for row in tracker_list if _as_bool(row.get("current_proposal_member"))
+    ]
+    superseded_exit_only = [
+        row
+        for row in tracker_list
+        if str(row.get("supersession_status") or "") == "SUPERSEDED_EXIT_ONLY"
+    ]
+    superseded_closed = [
+        row
+        for row in tracker_list
+        if str(row.get("supersession_status") or "") == "SUPERSEDED_CLOSED"
+    ]
+    current_tracker_ids = {
+        str(
+            row.get("proposal_id")
+            or (row.get("proposal") or {}).get("proposal_id")
+            or ""
+        )
+        for row in current_trackers
+    }
+    accepted_current_ids = {
+        str(row.get("proposal_id") or "")
+        for row in ack_list
+        if _as_bool(row.get("accepted"))
+    }
     return {
         "schema_version": PAPER_RUNTIME_SCHEMA_VERSION,
         "contract_version": PAPER_STRATEGY_CONTRACT_VERSION,
@@ -1552,7 +1578,20 @@ def _contract_status(
         "rejected_proposal_count": sum(
             not _as_bool(row.get("accepted")) for row in ack_list
         ),
+        "loaded_tracker_count": len(tracker_list),
+        "current_active_tracker_count": len(current_trackers),
+        "current_pending_tracker_count": len(
+            {
+                item
+                for item in accepted_current_ids
+                if item and item not in current_tracker_ids
+            }
+        ),
+        "superseded_exit_only_count": len(superseded_exit_only),
+        "superseded_closed_count": len(superseded_closed),
         "active_tracker_count": len(tracker_list),
+        "active_tracker_count_deprecated": True,
+        "active_tracker_count_semantics": "deprecated_alias_of_loaded_tracker_count",
         "open_paper_position_count": sum(
             bool(row.get("open_trade")) for row in tracker_list
         ),
