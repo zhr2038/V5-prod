@@ -29,12 +29,16 @@ class ProposalSnapshot:
     rows: list[dict[str, Any]]
     proposal_snapshot_id: str = ""
     proposal_snapshot_sha256: str = ""
+    proposal_content_snapshot_id: str = ""
+    proposal_content_snapshot_sha256: str = ""
     snapshot_generated_at: str = ""
     fetched_at: str = ""
     proposal_count: int = 0
     proposal_ids: tuple[str, ...] = ()
     proposal_hashes: tuple[str, ...] = ()
     source_quant_lab_commit: str = ""
+    proposal_compiler_version: str = ""
+    proposal_contract_version: str = ""
     quant_lab_contract_version: str = ""
     source_kind: str = ""
     source_path: str = ""
@@ -44,12 +48,16 @@ class ProposalSnapshot:
         return {
             "proposal_snapshot_id": self.proposal_snapshot_id,
             "proposal_snapshot_sha256": self.proposal_snapshot_sha256,
+            "proposal_content_snapshot_id": self.proposal_content_snapshot_id,
+            "proposal_content_snapshot_sha256": self.proposal_content_snapshot_sha256,
             "proposal_snapshot_generated_at": self.snapshot_generated_at,
             "fetched_at": self.fetched_at,
             "proposal_count": self.proposal_count,
             "proposal_ids": list(self.proposal_ids),
             "proposal_hashes": list(self.proposal_hashes),
             "source_quant_lab_commit": self.source_quant_lab_commit,
+            "proposal_compiler_version": self.proposal_compiler_version,
+            "proposal_contract_version": self.proposal_contract_version,
             "quant_lab_contract_version": self.quant_lab_contract_version,
             "source_kind": self.source_kind,
             "source_path": self.source_path,
@@ -142,6 +150,12 @@ def _snapshot_from_api_payload(
     rows = [dict(row) for row in raw_rows]
     snapshot_id = str(payload.get("proposal_snapshot_id") or "").strip()
     snapshot_sha = str(payload.get("proposal_snapshot_sha256") or "").strip().lower()
+    content_snapshot_id = str(
+        payload.get("proposal_content_snapshot_id") or ""
+    ).strip()
+    content_snapshot_sha = str(
+        payload.get("proposal_content_snapshot_sha256") or ""
+    ).strip().lower()
     generated_at = _utc_timestamp(payload.get("snapshot_generated_at"))
     source_commit = str(payload.get("source_quant_lab_commit") or "").strip()
     proposal_ids = _string_tuple(payload.get("proposal_ids"))
@@ -150,7 +164,12 @@ def _snapshot_from_api_payload(
         proposal_count = int(payload.get("proposal_count"))
     except (TypeError, ValueError) as exc:
         raise ProposalSnapshotError("proposal_snapshot_count_invalid") from exc
-    if not snapshot_id or not re.fullmatch(r"[0-9a-f]{64}", snapshot_sha):
+    if (
+        not snapshot_id
+        or not re.fullmatch(r"[0-9a-f]{64}", snapshot_sha)
+        or not content_snapshot_id
+        or not re.fullmatch(r"[0-9a-f]{64}", content_snapshot_sha)
+    ):
         raise ProposalSnapshotError("proposal_snapshot_identity_missing")
     if not generated_at:
         raise ProposalSnapshotError("proposal_snapshot_generated_at_invalid")
@@ -173,10 +192,38 @@ def _snapshot_from_api_payload(
         or proposal_hashes != observed_hashes
     ):
         raise ProposalSnapshotError("proposal_snapshot_membership_mismatch")
+    contract_versions = {
+        str(row.get("contract_version") or "").strip() for row in rows
+    } - {""}
+    quant_lab_contract_version = str(
+        payload.get("quant_lab_contract_version")
+        or payload.get("proposal_contract_version")
+        or payload.get("contract_version")
+        or (next(iter(contract_versions)) if len(contract_versions) == 1 else "")
+    ).strip()
+    if not quant_lab_contract_version or len(contract_versions) > 1:
+        raise ProposalSnapshotError("proposal_snapshot_contract_version_invalid")
+    content_material = {
+        "contract_version": quant_lab_contract_version,
+        "proposal_ids": sorted(proposal_ids),
+        "proposal_hashes": sorted(proposal_hashes),
+        "proposal_count": proposal_count,
+    }
+    expected_content_sha = hashlib.sha256(
+        json.dumps(
+            content_material, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
+    if (
+        content_snapshot_sha != expected_content_sha
+        or content_snapshot_id
+        != f"proposal-content-snapshot:{content_snapshot_sha[:24]}"
+    ):
+        raise ProposalSnapshotError("proposal_content_snapshot_hash_mismatch")
     material = {
+        **content_material,
         "proposal_ids": list(proposal_ids),
         "proposal_hashes": list(proposal_hashes),
-        "proposal_count": proposal_count,
         "source_quant_lab_commit": source_commit,
     }
     expected_sha = hashlib.sha256(
@@ -184,18 +231,16 @@ def _snapshot_from_api_payload(
     ).hexdigest()
     if snapshot_sha != expected_sha or snapshot_id != f"proposal-snapshot:{snapshot_sha[:24]}":
         raise ProposalSnapshotError("proposal_snapshot_hash_mismatch")
-    contract_versions = {
-        str(row.get("contract_version") or "").strip() for row in rows
-    } - {""}
-    quant_lab_contract_version = str(
-        payload.get("quant_lab_contract_version")
-        or payload.get("contract_version")
-        or (next(iter(contract_versions)) if len(contract_versions) == 1 else "")
-    ).strip()
     for row in rows:
         row_snapshot_id = str(row.get("proposal_snapshot_id") or snapshot_id).strip()
         row_snapshot_sha = str(
             row.get("proposal_snapshot_sha256") or snapshot_sha
+        ).strip().lower()
+        row_content_snapshot_id = str(
+            row.get("proposal_content_snapshot_id") or content_snapshot_id
+        ).strip()
+        row_content_snapshot_sha = str(
+            row.get("proposal_content_snapshot_sha256") or content_snapshot_sha
         ).strip().lower()
         row_generated_at = _utc_timestamp(
             row.get("snapshot_generated_at") or generated_at
@@ -203,6 +248,8 @@ def _snapshot_from_api_payload(
         if (
             row_snapshot_id != snapshot_id
             or row_snapshot_sha != snapshot_sha
+            or row_content_snapshot_id != content_snapshot_id
+            or row_content_snapshot_sha != content_snapshot_sha
             or row_generated_at != generated_at
         ):
             raise ProposalSnapshotError("proposal_snapshot_member_metadata_mismatch")
@@ -210,6 +257,8 @@ def _snapshot_from_api_payload(
             {
                 "proposal_snapshot_id": snapshot_id,
                 "proposal_snapshot_sha256": snapshot_sha,
+                "proposal_content_snapshot_id": content_snapshot_id,
+                "proposal_content_snapshot_sha256": content_snapshot_sha,
                 "snapshot_generated_at": generated_at,
                 "source_quant_lab_commit": source_commit,
                 "source_path": source_path,
@@ -219,12 +268,21 @@ def _snapshot_from_api_payload(
         rows=rows,
         proposal_snapshot_id=snapshot_id,
         proposal_snapshot_sha256=snapshot_sha,
+        proposal_content_snapshot_id=content_snapshot_id,
+        proposal_content_snapshot_sha256=content_snapshot_sha,
         snapshot_generated_at=generated_at,
         fetched_at=fetched_at,
         proposal_count=proposal_count,
         proposal_ids=proposal_ids,
         proposal_hashes=proposal_hashes,
         source_quant_lab_commit=source_commit,
+        proposal_compiler_version=str(
+            payload.get("proposal_compiler_version") or ""
+        ).strip(),
+        proposal_contract_version=str(
+            payload.get("proposal_contract_version")
+            or quant_lab_contract_version
+        ).strip(),
         quant_lab_contract_version=quant_lab_contract_version,
         source_kind="canonical_api",
         source_path=source_path,
@@ -242,11 +300,25 @@ def _snapshot_from_local_rows(
         str(row.get("proposal_snapshot_sha256") or "").strip().lower()
         for row in rows
     } - {""}
+    content_snapshot_ids = {
+        str(row.get("proposal_content_snapshot_id") or "").strip()
+        for row in rows
+    } - {""}
+    content_snapshot_shas = {
+        str(row.get("proposal_content_snapshot_sha256") or "").strip().lower()
+        for row in rows
+    } - {""}
     generated_values = {
         _utc_timestamp(row.get("snapshot_generated_at")) for row in rows
     } - {""}
     source_path = str(rows[0].get("source_path") or "") if rows else ""
-    if len(snapshot_ids) != 1 or len(snapshot_shas) != 1 or len(generated_values) != 1:
+    if (
+        len(snapshot_ids) != 1
+        or len(snapshot_shas) != 1
+        or len(content_snapshot_ids) != 1
+        or len(content_snapshot_shas) != 1
+        or len(generated_values) != 1
+    ):
         return ProposalSnapshot(
             rows=rows,
             fetched_at=fetched_at,
@@ -267,11 +339,21 @@ def _snapshot_from_local_rows(
     payload = {
         "proposal_snapshot_id": next(iter(snapshot_ids)),
         "proposal_snapshot_sha256": next(iter(snapshot_shas)),
+        "proposal_content_snapshot_id": next(iter(content_snapshot_ids)),
+        "proposal_content_snapshot_sha256": next(iter(content_snapshot_shas)),
         "snapshot_generated_at": next(iter(generated_values)),
         "proposal_count": len(rows),
         "proposal_ids": [proposal_id for proposal_id, _proposal_hash in members],
         "proposal_hashes": [proposal_hash for _proposal_id, proposal_hash in members],
         "source_quant_lab_commit": str(rows[0].get("source_quant_lab_commit") or ""),
+        "proposal_compiler_version": str(
+            rows[0].get("proposal_compiler_version") or ""
+        ),
+        "proposal_contract_version": str(
+            rows[0].get("proposal_contract_version")
+            or rows[0].get("contract_version")
+            or ""
+        ),
         "proposals": rows,
     }
     return _snapshot_from_api_payload(

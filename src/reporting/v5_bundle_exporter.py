@@ -109,6 +109,8 @@ GENERIC_PAPER_REPORT_FIELDS = {
         "supersession_status", "new_entry_allowed", "exit_allowed",
         "source_proposal_snapshot_id", "source_proposal_snapshot_sha256",
         "source_proposal_snapshot_generated_at",
+        "source_proposal_content_snapshot_id",
+        "source_proposal_content_snapshot_sha256",
     ),
     "paper_strategy_registry_current.csv": (),
     "paper_strategy_registry_history.csv": (),
@@ -121,6 +123,8 @@ GENERIC_PAPER_REPORT_FIELDS = {
         "supersession_status", "new_entry_allowed", "exit_allowed",
         "source_proposal_snapshot_id", "source_proposal_snapshot_sha256",
         "source_proposal_snapshot_generated_at",
+        "source_proposal_content_snapshot_id",
+        "source_proposal_content_snapshot_sha256",
     ),
     "paper_strategy_state_history.csv": (),
     "paper_strategy_proposal_ack_current.csv": (),
@@ -130,6 +134,8 @@ GENERIC_PAPER_REPORT_FIELDS = {
         "processing_status", "processing_reason", "reject_reason",
         "source_proposal_snapshot_id", "source_proposal_snapshot_sha256",
         "source_proposal_snapshot_generated_at", "live_order_effect",
+        "source_proposal_content_snapshot_id",
+        "source_proposal_content_snapshot_sha256",
     ),
     "paper_strategy_signals.csv": (
         "schema_version", "signal_id", "proposal_id", "tracker_id",
@@ -3135,6 +3141,14 @@ def _manifest_metadata(root: Path, reports: Path, usage_rows: list[Dict[str, Any
             paper_contract_status.get("proposal_snapshot_sha256")
             or "not_observable"
         ),
+        "proposal_content_snapshot_id": str(
+            paper_contract_status.get("proposal_content_snapshot_id")
+            or "not_observable"
+        ),
+        "proposal_content_snapshot_sha256": str(
+            paper_contract_status.get("proposal_content_snapshot_sha256")
+            or "not_observable"
+        ),
         "proposal_snapshot_generated_at": str(
             paper_contract_status.get("proposal_snapshot_generated_at")
             or "not_observable"
@@ -3153,6 +3167,15 @@ def _manifest_metadata(root: Path, reports: Path, usage_rows: list[Dict[str, Any
         ),
         "proposal_source_quant_lab_commit": str(
             paper_contract_status.get("source_quant_lab_commit")
+            or "not_observable"
+        ),
+        "proposal_compiler_version": str(
+            paper_contract_status.get("proposal_compiler_version")
+            or "not_observable"
+        ),
+        "proposal_contract_version": str(
+            paper_contract_status.get("proposal_contract_version")
+            or proposal_contract_version
             or "not_observable"
         ),
         "telemetry_schema_version": SCHEMA_VERSION,

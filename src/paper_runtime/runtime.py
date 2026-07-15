@@ -60,6 +60,8 @@ ACK_FIELDS = (
     "source_proposal_snapshot_id",
     "source_proposal_snapshot_sha256",
     "source_proposal_snapshot_generated_at",
+    "source_proposal_content_snapshot_id",
+    "source_proposal_content_snapshot_sha256",
     "processing_status",
     "processing_reason",
     "schema_version",
@@ -631,6 +633,12 @@ def _bind_tracker_snapshot(
     tracker["source_proposal_snapshot_generated_at"] = str(
         source_row.get("snapshot_generated_at") or ""
     )
+    tracker["source_proposal_content_snapshot_id"] = str(
+        source_row.get("proposal_content_snapshot_id") or ""
+    )
+    tracker["source_proposal_content_snapshot_sha256"] = str(
+        source_row.get("proposal_content_snapshot_sha256") or ""
+    ).lower()
 
 
 def _set_state(tracker: dict[str, Any], target: PaperRuntimeState) -> None:
@@ -1077,6 +1085,12 @@ def _accepted_ack_row(
         source_proposal_snapshot_generated_at=(
             tracker.get("source_proposal_snapshot_generated_at") or None
         ),
+        source_proposal_content_snapshot_id=str(
+            tracker.get("source_proposal_content_snapshot_id") or ""
+        ),
+        source_proposal_content_snapshot_sha256=str(
+            tracker.get("source_proposal_content_snapshot_sha256") or ""
+        ),
     )
     return {
         **ack.model_dump(mode="json"),
@@ -1127,6 +1141,12 @@ def _rejected_ack_row(
         "source_proposal_snapshot_generated_at": str(
             row.get("snapshot_generated_at") or ""
         ),
+        "source_proposal_content_snapshot_id": str(
+            row.get("proposal_content_snapshot_id") or ""
+        ),
+        "source_proposal_content_snapshot_sha256": str(
+            row.get("proposal_content_snapshot_sha256") or ""
+        ).lower(),
         "processing_status": _rejected_processing_status(reason),
         "processing_reason": reason or "invalid_schema",
         "schema_version": PAPER_RUNTIME_SCHEMA_VERSION,
@@ -1308,6 +1328,12 @@ def _registry_row(tracker: Mapping[str, Any]) -> dict[str, Any]:
         "source_proposal_snapshot_generated_at": tracker.get(
             "source_proposal_snapshot_generated_at", ""
         ),
+        "source_proposal_content_snapshot_id": tracker.get(
+            "source_proposal_content_snapshot_id", ""
+        ),
+        "source_proposal_content_snapshot_sha256": tracker.get(
+            "source_proposal_content_snapshot_sha256", ""
+        ),
     }
 
 
@@ -1339,6 +1365,12 @@ def _state_row(tracker: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "source_proposal_snapshot_generated_at": tracker.get(
             "source_proposal_snapshot_generated_at", ""
+        ),
+        "source_proposal_content_snapshot_id": tracker.get(
+            "source_proposal_content_snapshot_id", ""
+        ),
+        "source_proposal_content_snapshot_sha256": tracker.get(
+            "source_proposal_content_snapshot_sha256", ""
         ),
     }
 
@@ -1761,12 +1793,16 @@ def _contract_status(
         else {
             "proposal_snapshot_id": "",
             "proposal_snapshot_sha256": "",
+            "proposal_content_snapshot_id": "",
+            "proposal_content_snapshot_sha256": "",
             "proposal_snapshot_generated_at": "",
             "fetched_at": "",
             "proposal_count": 0,
             "proposal_ids": [],
             "proposal_hashes": [],
             "source_quant_lab_commit": "",
+            "proposal_compiler_version": "",
+            "proposal_contract_version": "",
             "quant_lab_contract_version": "",
             "source_kind": "",
             "source_path": "",

@@ -17899,6 +17899,11 @@ issues_path.write_text(json.dumps(issues_data, ensure_ascii=False, indent=2) + "
 
 commands_path = write_text("commands.log", "\n".join(commands) + "\n")
 inventory_before_manifest = file_inventory()
+paper_contract_status = load_json(
+    OUT / "summaries/quant_lab_contract_status.json"
+)
+if not isinstance(paper_contract_status, dict):
+    paper_contract_status = {}
 manifest = {
     "host": socket.gethostname(),
     "cwd": str(ROOT),
@@ -17921,6 +17926,28 @@ manifest = {
     "event_id_generation_version": provenance_meta.get("event_id_generation_version", QUANT_LAB_EVENT_ID_GENERATION_VERSION),
     "trade_export_schema_version": provenance_meta.get("trade_export_schema_version", TRADE_EXPORT_SCHEMA_VERSION),
     "summary_metrics_version": provenance_meta.get("summary_metrics_version", SUMMARY_METRICS_VERSION),
+    "proposal_snapshot_id": paper_contract_status.get(
+        "proposal_snapshot_id", "not_observable"
+    ),
+    "proposal_snapshot_sha256": paper_contract_status.get(
+        "proposal_snapshot_sha256", "not_observable"
+    ),
+    "proposal_content_snapshot_id": paper_contract_status.get(
+        "proposal_content_snapshot_id", "not_observable"
+    ),
+    "proposal_content_snapshot_sha256": paper_contract_status.get(
+        "proposal_content_snapshot_sha256", "not_observable"
+    ),
+    "proposal_snapshot_generated_at": paper_contract_status.get(
+        "proposal_snapshot_generated_at", "not_observable"
+    ),
+    "proposal_snapshot_fetched_at": paper_contract_status.get(
+        "proposal_snapshot_fetched_at", "not_observable"
+    ),
+    "proposal_count": int(paper_contract_status.get("proposal_count", 0) or 0),
+    "proposal_processing_complete": bool(
+        paper_contract_status.get("proposal_processing_complete", False)
+    ),
     "run_summary_invalid": bool(summary_meta.get("run_summary_invalid", False)),
     "summary_trade_count_mismatch_high_issue_count": int(
         summary_meta.get("summary_trade_count_mismatch_high_issue_count", 0) or 0

@@ -338,6 +338,8 @@ class PaperStrategyAck(BaseModel):
     source_proposal_snapshot_id: str = ""
     source_proposal_snapshot_sha256: str = ""
     source_proposal_snapshot_generated_at: datetime | None = None
+    source_proposal_content_snapshot_id: str = ""
+    source_proposal_content_snapshot_sha256: str = ""
 
 
 def paper_proposal_hash(value: PaperStrategyProposal | dict[str, Any]) -> str:

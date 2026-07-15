@@ -146,10 +146,26 @@ def _snapshot_payload(
     members = sorted(
         (row["proposal_id"], row["proposal_hash"].lower()) for row in rows
     )
+    content_material = {
+        "contract_version": PAPER_STRATEGY_CONTRACT_VERSION,
+        "proposal_ids": sorted(
+            proposal_id for proposal_id, _proposal_hash in members
+        ),
+        "proposal_hashes": sorted(
+            proposal_hash for _proposal_id, proposal_hash in members
+        ),
+        "proposal_count": len(members),
+    }
+    content_snapshot_sha = hashlib.sha256(
+        json.dumps(
+            content_material, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    content_snapshot_id = f"proposal-content-snapshot:{content_snapshot_sha[:24]}"
     material = {
+        **content_material,
         "proposal_ids": [proposal_id for proposal_id, _proposal_hash in members],
         "proposal_hashes": [proposal_hash for _proposal_id, proposal_hash in members],
-        "proposal_count": len(members),
         "source_quant_lab_commit": source_commit,
     }
     snapshot_sha = hashlib.sha256(
@@ -162,14 +178,20 @@ def _snapshot_payload(
             {
                 "proposal_snapshot_id": snapshot_id,
                 "proposal_snapshot_sha256": snapshot_sha,
+                "proposal_content_snapshot_id": content_snapshot_id,
+                "proposal_content_snapshot_sha256": content_snapshot_sha,
                 "snapshot_generated_at": generated_at,
             }
         )
     return {
         "proposal_snapshot_id": snapshot_id,
         "proposal_snapshot_sha256": snapshot_sha,
+        "proposal_content_snapshot_id": content_snapshot_id,
+        "proposal_content_snapshot_sha256": content_snapshot_sha,
         "snapshot_generated_at": generated_at,
         **material,
+        "proposal_contract_version": PAPER_STRATEGY_CONTRACT_VERSION,
+        "proposal_compiler_version": "test.compiler.v1",
         "proposals": rows,
     }
 
@@ -191,6 +213,20 @@ def _provider_quote(price: float, now: datetime = NOW) -> dict:
         "quote_ts": now.isoformat().replace("+00:00", "Z"),
         "source": "ccxt_ticker",
     }
+
+
+def test_content_snapshot_identity_ignores_producer_commit() -> None:
+    proposals = [_proposal("SNAPSHOT_STABLE", "TRX/USDT")]
+    first = _snapshot_payload(proposals, source_commit="a" * 40)
+    second = _snapshot_payload(proposals, source_commit="b" * 40)
+
+    assert first["proposal_content_snapshot_id"] == second[
+        "proposal_content_snapshot_id"
+    ]
+    assert first["proposal_content_snapshot_sha256"] == second[
+        "proposal_content_snapshot_sha256"
+    ]
+    assert first["proposal_snapshot_sha256"] != second["proposal_snapshot_sha256"]
 
 
 def test_first_three_generic_proposals_ack_and_open_without_live_side_effects(tmp_path):
@@ -330,8 +366,14 @@ def test_canonical_snapshot_api_identity_reaches_ack_tracker_status_and_bundle(
     assert {row["source_proposal_snapshot_sha256"] for row in trackers} == {
         payload["proposal_snapshot_sha256"]
     }
+    assert {row["source_proposal_content_snapshot_sha256"] for row in trackers} == {
+        payload["proposal_content_snapshot_sha256"]
+    }
     assert status["proposal_snapshot_id"] == payload["proposal_snapshot_id"]
     assert status["proposal_snapshot_sha256"] == payload["proposal_snapshot_sha256"]
+    assert status["proposal_content_snapshot_sha256"] == payload[
+        "proposal_content_snapshot_sha256"
+    ]
     assert status["proposal_count"] == 2
     assert status["proposal_processing_complete"] is True
     assert status["unprocessed_proposal_count"] == 0
@@ -351,6 +393,9 @@ def test_canonical_snapshot_api_identity_reaches_ack_tracker_status_and_bundle(
     assert manifest["proposal_snapshot_id"] == payload["proposal_snapshot_id"]
     assert manifest["proposal_snapshot_sha256"] == payload[
         "proposal_snapshot_sha256"
+    ]
+    assert manifest["proposal_content_snapshot_sha256"] == payload[
+        "proposal_content_snapshot_sha256"
     ]
     assert manifest["proposal_count"] == 2
     assert manifest["proposal_processing_complete"] is True

@@ -285,6 +285,8 @@ def summarize_response(payload: Any) -> Dict[str, Any]:
         "contract_version",
         "proposal_snapshot_id",
         "proposal_snapshot_sha256",
+        "proposal_content_snapshot_id",
+        "proposal_content_snapshot_sha256",
         "snapshot_generated_at",
         "proposal_count",
         "source_quant_lab_commit",
