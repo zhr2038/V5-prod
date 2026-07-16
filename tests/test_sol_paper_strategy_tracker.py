@@ -677,6 +677,8 @@ def test_sol_paper_strategy_tracker_writes_runs_daily_and_slippage(tmp_path: Pat
     assert f4["arrival_mid_coverage"] == "0.5"
     assert f4["spread_observation_coverage"] == "0.5"
     assert '"mixed_actual_proxy": 1' in f4["cost_source_mix"]
+    assert f4["coverage_status"] == "insufficient_slippage_observations"
+    assert f4["coverage_reason"] == "coverage_below_required"
     assert f4["readiness_status"] == "PAPER_READY"
     assert f4["live_small_ready"] == "False"
     assert "no_paper_days" in f4["live_block_reason"]
@@ -853,6 +855,12 @@ def test_sol_paper_strategy_tracker_writes_strategy_heartbeats_without_candidate
     coverage = _read_csv(tmp_path / "reports" / "summaries" / "paper_slippage_coverage.csv")
     assert {row["total_rows"] for row in coverage} == {"1"}
     assert {row["slippage_coverage"] for row in coverage} == {"0.0"}
+    assert {row["coverage_status"] for row in coverage} == {
+        "insufficient_slippage_observations"
+    }
+    assert {row["coverage_reason"] for row in coverage} == {
+        "coverage_below_required"
+    }
 
 
 def test_sol_paper_public_spread_does_not_become_live_without_arrival_coverage() -> None:

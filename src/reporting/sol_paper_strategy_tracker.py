@@ -380,6 +380,8 @@ PAPER_SLIPPAGE_FIELDS = [
     "spread_observation_coverage",
     "cost_source_mix",
     "required_slippage_coverage",
+    "coverage_status",
+    "coverage_reason",
     "latest_cost_source",
     "allowed_live_cost_sources",
     "live_small_ready",
@@ -5392,6 +5394,16 @@ def _readiness_for_rows(
     slippage_covered = [row for row in rows if _slippage_observed(row)]
     coverage = float(len(slippage_covered)) / float(len(rows)) if rows else 0.0
     coverage = round(coverage, 6)
+    coverage_status = (
+        "ok"
+        if rows and coverage >= float(required_coverage)
+        else "insufficient_slippage_observations"
+    )
+    coverage_reason = (
+        "coverage_met"
+        if coverage_status == "ok"
+        else "coverage_below_required" if rows else "no_paper_rows"
+    )
     arrival_mid_coverage = _coverage_ratio(
         rows,
         lambda row: (_normalize_float(row.get("arrival_mid")) or 0.0) > 0.0,
@@ -5454,6 +5466,8 @@ def _readiness_for_rows(
         "entry_day_count": entry_days,
         "slippage_coverage": coverage,
         "slippage_covered_rows": len(slippage_covered),
+        "coverage_status": coverage_status,
+        "coverage_reason": coverage_reason,
         "arrival_mid_coverage": arrival_mid_coverage,
         "spread_observation_coverage": spread_observation_coverage,
         "cost_source_mix": json.dumps(cost_mix, sort_keys=True),
@@ -5646,6 +5660,8 @@ def _slippage_rows(records: list[dict[str, Any]], diagnostics: DiagnosticsConfig
                 "spread_observation_coverage": readiness["spread_observation_coverage"],
                 "cost_source_mix": readiness["cost_source_mix"],
                 "required_slippage_coverage": required_coverage,
+                "coverage_status": readiness["coverage_status"],
+                "coverage_reason": readiness["coverage_reason"],
                 "latest_cost_source": latest.get("cost_source"),
                 "allowed_live_cost_sources": ",".join(sorted(allowed_cost_sources)),
                 "live_small_ready": readiness["live_small_ready"],
