@@ -749,6 +749,13 @@ def _bind_trade_cohort(
     trade: dict[str, Any],
     tracker: Mapping[str, Any],
 ) -> None:
+    # Older Paper state predates the explicit opened_at field. The decision
+    # timestamp is the runtime instant at which that virtual position opened;
+    # preserve it during state migration so every trade remains auditable.
+    if not str(trade.get("opened_at") or ""):
+        trade["opened_at"] = str(
+            trade.get("entry_decision_ts") or trade.get("entry_signal_ts") or ""
+        )
     tracker_snapshot_sha = str(
         tracker.get("source_proposal_content_snapshot_sha256") or ""
     ).lower()
