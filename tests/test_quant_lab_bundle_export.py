@@ -13,6 +13,7 @@ from src.reporting.v5_bundle_exporter import (
     _build_cost_probe_cost_disagreement_rows,
     _dedupe_fill_rows,
     _git_command,
+    _git_info,
     _issues,
     _normalized_symbol,
     export_v5_bundle,
@@ -1132,6 +1133,30 @@ def test_bundle_git_command_uses_timeout(monkeypatch, tmp_path: Path) -> None:
 
     assert _git_command(tmp_path, ["rev-parse", "--short", "HEAD"]) == "abc123"
     assert calls[0]["timeout"] == GIT_COMMAND_TIMEOUT_SEC
+
+
+def test_bundle_git_info_uses_full_commit(monkeypatch, tmp_path: Path) -> None:
+    commit = "a" * 40
+    observed: list[list[str]] = []
+
+    def fake_git_command(_root: Path, args: list[str]) -> str:
+        observed.append(args)
+        if args == ["rev-parse", "HEAD"]:
+            return commit
+        if args == ["branch", "--show-current"]:
+            return "main"
+        return ""
+
+    monkeypatch.setattr(
+        "src.reporting.v5_bundle_exporter._git_command",
+        fake_git_command,
+    )
+
+    info = _git_info(tmp_path)
+
+    assert info["git_commit"] == commit
+    assert ["rev-parse", "HEAD"] in observed
+    assert ["rev-parse", "--short", "HEAD"] not in observed
 
 
 def test_bundle_git_command_timeout_returns_empty(monkeypatch, tmp_path: Path) -> None:

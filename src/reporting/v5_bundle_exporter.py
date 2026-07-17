@@ -2954,7 +2954,7 @@ def _git_info(root: Path) -> Dict[str, Any]:
     status = _git_command(root, ["status", "--porcelain"])
     dirty = bool(status)
     return {
-        "git_commit": _git_command(root, ["rev-parse", "--short", "HEAD"]) or "not_observable",
+        "git_commit": _git_command(root, ["rev-parse", "HEAD"]) or "not_observable",
         "git_branch": _git_command(root, ["branch", "--show-current"]) or "not_observable",
         "git_dirty": dirty,
         "dirty_worktree": dirty,
