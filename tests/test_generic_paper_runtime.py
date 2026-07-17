@@ -461,16 +461,35 @@ def test_runtime_persists_formal_cohort_trade_identity_without_live_side_effects
         now=NOW,
     )
 
+    # Simulate an open position persisted by the pre-opened_at runtime. A
+    # restart must migrate the timestamp without opening another Paper trade.
+    state_path = Path(cfg.quant_lab.paper_runtime.state_path)
+    persisted = json.loads(state_path.read_text(encoding="utf-8"))
+    tracker = next(iter(persisted["trackers"].values()))
+    tracker["open_trade"].pop("opened_at")
+    state_path.write_text(json.dumps(persisted), encoding="utf-8")
+    migrated = run_generic_paper_runtime(
+        run_dir=reports / "runs" / "formal-open-restart",
+        market_data_1h={"TRX/USDT": first_series},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=audit,
+        now=NOW,
+    )
+
     state_rows = list(
         csv.DictReader((reports / "summaries/paper_strategy_state.csv").open())
     )
     assert state_rows[0]["paper_trade_id"]
     assert state_rows[0]["entry_signal_ts"]
     assert state_rows[0]["entry_decision_ts"] == NOW.isoformat()
+    assert state_rows[0]["opened_at"] == NOW.isoformat()
     assert state_rows[0]["proposal_content_snapshot_sha256"] == payload[
         "proposal_content_snapshot_sha256"
     ]
     assert state_rows[0]["cohort_scope"] == "FORMAL_COHORT_ENTRY"
+    assert migrated["closed_trades"] == 0
+    assert migrated["live_order_effect"] == "none"
 
     next_ts = first_series.ts[-1] + 3_600_000
     run_generic_paper_runtime(
