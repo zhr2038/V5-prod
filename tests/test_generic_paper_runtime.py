@@ -141,6 +141,7 @@ def _snapshot_payload(
     proposals: list[PaperStrategyProposal],
     *,
     source_commit: str = "a" * 40,
+    cohort_observation_start_at: str = "",
 ) -> dict:
     rows = [proposal.model_dump(mode="json") for proposal in proposals]
     members = sorted(
@@ -183,7 +184,7 @@ def _snapshot_payload(
                 "snapshot_generated_at": generated_at,
             }
         )
-    return {
+    payload = {
         "proposal_snapshot_id": snapshot_id,
         "proposal_snapshot_sha256": snapshot_sha,
         "proposal_content_snapshot_id": content_snapshot_id,
@@ -194,6 +195,20 @@ def _snapshot_payload(
         "proposal_compiler_version": "test.compiler.v1",
         "proposals": rows,
     }
+    if cohort_observation_start_at:
+        payload.update(
+            {
+                "cohort_id": "paper-cohort-test",
+                "cohort_version": 3,
+                "cohort_observation_start_at": cohort_observation_start_at,
+                "cohort_status": "OBSERVING",
+                "cohort_proposal_content_snapshot_sha256": content_snapshot_sha,
+                "cohort_last_evaluated_at": generated_at,
+                "last_evaluated_at": generated_at,
+                "last_consumed_by_v5_at": generated_at,
+            }
+        )
+    return payload
 
 
 def _quote(price: float, now: datetime = NOW) -> dict:
@@ -402,6 +417,89 @@ def test_canonical_snapshot_api_identity_reaches_ack_tracker_status_and_bundle(
     assert "summaries/paper_strategy_proposal_processing.csv" in names
 
 
+def test_runtime_persists_formal_cohort_trade_identity_without_live_side_effects(
+    tmp_path,
+    monkeypatch,
+):
+    from src.quant_lab_client.client import QuantLabClient
+
+    reports = tmp_path / "reports"
+    proposal = _proposal(
+        "FORMAL_COHORT_TRX_PAPER",
+        "TRX/USDT",
+        entry_rule={"operator": "gt", "field": "close", "value": 0},
+        exit_rule={"operator": "max_holding_bars", "value": 1},
+        max_holding_bars=1,
+    )
+    payload = _snapshot_payload(
+        [proposal],
+        cohort_observation_start_at=(NOW - timedelta(minutes=1)).isoformat(),
+    )
+    cfg = _cfg(tmp_path, tmp_path / "unused.csv")
+    cfg.quant_lab.enabled = True
+    cfg.diagnostics.quant_lab_paper_strategy_proposals_api_enabled = True
+
+    class SnapshotClient:
+        api_token = "present"
+
+        def get_json(self, _endpoint):
+            return SimpleNamespace(ok=True, data=payload)
+
+    monkeypatch.setattr(
+        QuantLabClient,
+        "from_config",
+        classmethod(lambda cls, *args, **kwargs: SnapshotClient()),
+    )
+    audit = SimpleNamespace(regime="NORMAL", quant_lab={})
+    first_series = _series("TRX/USDT")
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "formal-open",
+        market_data_1h={"TRX/USDT": first_series},
+        top_of_book={"TRX/USDT": _quote(100.0)},
+        cfg=cfg,
+        audit=audit,
+        now=NOW,
+    )
+
+    state_rows = list(
+        csv.DictReader((reports / "summaries/paper_strategy_state.csv").open())
+    )
+    assert state_rows[0]["paper_trade_id"]
+    assert state_rows[0]["entry_signal_ts"]
+    assert state_rows[0]["entry_decision_ts"] == NOW.isoformat()
+    assert state_rows[0]["proposal_content_snapshot_sha256"] == payload[
+        "proposal_content_snapshot_sha256"
+    ]
+    assert state_rows[0]["cohort_scope"] == "FORMAL_COHORT_ENTRY"
+
+    next_ts = first_series.ts[-1] + 3_600_000
+    run_generic_paper_runtime(
+        run_dir=reports / "runs" / "formal-close",
+        market_data_1h={"TRX/USDT": _series("TRX/USDT", last_ts=next_ts)},
+        top_of_book={
+            "TRX/USDT": _quote(102.0, NOW + timedelta(hours=1))
+        },
+        cfg=cfg,
+        audit=audit,
+        now=NOW + timedelta(hours=1),
+    )
+
+    runs = list(csv.DictReader((reports / "summaries/paper_strategy_runs.csv").open()))
+    assert len(runs) == 1
+    assert runs[0]["cohort_id"] == "paper-cohort-test"
+    assert runs[0]["cohort_version"] == "3"
+    assert runs[0]["cohort_scope"] == "FORMAL_COHORT_ENTRY"
+    assert runs[0]["valid_for_promotion"] == "True"
+    assert runs[0]["opened_at"] == NOW.isoformat()
+    assert runs[0]["closed_at"] == (NOW + timedelta(hours=1)).isoformat()
+    status = json.loads(
+        (reports / "summaries/quant_lab_contract_status.json").read_text()
+    )
+    assert status["real_order_calls"] == 0
+    assert status["real_position_mutations"] == 0
+    assert status["paper_runtime_live_order_effect"] == "none"
+
+
 def test_snapshot_capacity_rejection_covers_every_member(tmp_path):
     reports = tmp_path / "reports"
     proposals_path = tmp_path / "paper_strategy_proposals.csv"
@@ -570,7 +668,8 @@ def test_runtime_exit_restart_recovery_and_same_bar_idempotency(tmp_path):
     assert closed["closed_trades"] == 1
     runs = list(csv.DictReader((reports / "summaries/paper_strategy_runs.csv").open()))
     assert len([row for row in runs if row.get("paper_trade_id")]) == 1
-    assert runs[0]["valid_for_promotion"] == "True"
+    assert runs[0]["valid_for_promotion"] == "False"
+    assert runs[0]["cohort_scope"] == "HISTORY_ONLY"
     assert runs[0]["would_enter"] == "True"
     assert runs[0]["would_exit"] == "True"
     assert runs[0]["paper_pnl_bps"] == runs[0]["net_pnl_bps"]

@@ -40,6 +40,14 @@ class ProposalSnapshot:
     proposal_compiler_version: str = ""
     proposal_contract_version: str = ""
     quant_lab_contract_version: str = ""
+    last_evaluated_at: str = ""
+    last_consumed_by_v5_at: str = ""
+    cohort_id: str = ""
+    cohort_version: int = 0
+    cohort_observation_start_at: str = ""
+    cohort_status: str = ""
+    cohort_proposal_content_snapshot_sha256: str = ""
+    cohort_last_evaluated_at: str = ""
     source_kind: str = ""
     source_path: str = ""
     identity_valid: bool = False
@@ -59,6 +67,16 @@ class ProposalSnapshot:
             "proposal_compiler_version": self.proposal_compiler_version,
             "proposal_contract_version": self.proposal_contract_version,
             "quant_lab_contract_version": self.quant_lab_contract_version,
+            "last_evaluated_at": self.last_evaluated_at,
+            "last_consumed_by_v5_at": self.last_consumed_by_v5_at,
+            "cohort_id": self.cohort_id,
+            "cohort_version": self.cohort_version,
+            "cohort_observation_start_at": self.cohort_observation_start_at,
+            "cohort_status": self.cohort_status,
+            "cohort_proposal_content_snapshot_sha256": (
+                self.cohort_proposal_content_snapshot_sha256
+            ),
+            "cohort_last_evaluated_at": self.cohort_last_evaluated_at,
             "source_kind": self.source_kind,
             "source_path": self.source_path,
             "identity_valid": self.identity_valid,
@@ -203,6 +221,31 @@ def _snapshot_from_api_payload(
     ).strip()
     if not quant_lab_contract_version or len(contract_versions) > 1:
         raise ProposalSnapshotError("proposal_snapshot_contract_version_invalid")
+    cohort_id = str(payload.get("cohort_id") or "").strip()
+    try:
+        cohort_version = int(payload.get("cohort_version") or 0)
+    except (TypeError, ValueError):
+        cohort_version = 0
+    cohort_observation_start_at = _utc_timestamp(
+        payload.get("cohort_observation_start_at")
+    )
+    cohort_status = str(payload.get("cohort_status") or "").strip().upper()
+    cohort_content_sha = str(
+        payload.get("cohort_proposal_content_snapshot_sha256") or ""
+    ).strip().lower()
+    cohort_last_evaluated_at = _utc_timestamp(
+        payload.get("cohort_last_evaluated_at")
+    )
+    last_evaluated_at = _utc_timestamp(payload.get("last_evaluated_at"))
+    last_consumed_by_v5_at = _utc_timestamp(
+        payload.get("last_consumed_by_v5_at")
+    )
+    if cohort_id and (
+        cohort_version <= 0
+        or not cohort_status
+        or not re.fullmatch(r"[0-9a-f]{64}", cohort_content_sha)
+    ):
+        raise ProposalSnapshotError("proposal_cohort_identity_invalid")
     content_material = {
         "contract_version": quant_lab_contract_version,
         "proposal_ids": sorted(proposal_ids),
@@ -262,6 +305,14 @@ def _snapshot_from_api_payload(
                 "snapshot_generated_at": generated_at,
                 "source_quant_lab_commit": source_commit,
                 "source_path": source_path,
+                "last_evaluated_at": last_evaluated_at,
+                "last_consumed_by_v5_at": last_consumed_by_v5_at,
+                "cohort_id": cohort_id,
+                "cohort_version": cohort_version,
+                "cohort_observation_start_at": cohort_observation_start_at,
+                "cohort_status": cohort_status,
+                "cohort_proposal_content_snapshot_sha256": cohort_content_sha,
+                "cohort_last_evaluated_at": cohort_last_evaluated_at,
             }
         )
     return ProposalSnapshot(
@@ -284,6 +335,14 @@ def _snapshot_from_api_payload(
             or quant_lab_contract_version
         ).strip(),
         quant_lab_contract_version=quant_lab_contract_version,
+        last_evaluated_at=last_evaluated_at,
+        last_consumed_by_v5_at=last_consumed_by_v5_at,
+        cohort_id=cohort_id,
+        cohort_version=cohort_version,
+        cohort_observation_start_at=cohort_observation_start_at,
+        cohort_status=cohort_status,
+        cohort_proposal_content_snapshot_sha256=cohort_content_sha,
+        cohort_last_evaluated_at=cohort_last_evaluated_at,
         source_kind="canonical_api",
         source_path=source_path,
         identity_valid=True,
@@ -354,6 +413,26 @@ def _snapshot_from_local_rows(
             or rows[0].get("contract_version")
             or ""
         ),
+        "last_evaluated_at": str(rows[0].get("last_evaluated_at") or "")
+        if rows
+        else "",
+        "last_consumed_by_v5_at": str(
+            rows[0].get("last_consumed_by_v5_at") or ""
+        )
+        if rows
+        else "",
+        "cohort_id": str(rows[0].get("cohort_id") or "") if rows else "",
+        "cohort_version": int(rows[0].get("cohort_version") or 0) if rows else 0,
+        "cohort_observation_start_at": str(
+            rows[0].get("cohort_observation_start_at") or ""
+        ) if rows else "",
+        "cohort_status": str(rows[0].get("cohort_status") or "") if rows else "",
+        "cohort_proposal_content_snapshot_sha256": str(
+            rows[0].get("cohort_proposal_content_snapshot_sha256") or ""
+        ) if rows else "",
+        "cohort_last_evaluated_at": str(
+            rows[0].get("cohort_last_evaluated_at") or ""
+        ) if rows else "",
         "proposals": rows,
     }
     return _snapshot_from_api_payload(

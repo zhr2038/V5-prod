@@ -34,6 +34,16 @@ from src.paper_runtime.source import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PAPER_RUNTIME_SCHEMA_VERSION = "v5.generic_paper_runtime.v1"
+PAPER_COHORT_SCOPES = frozenset(
+    {
+        "FORMAL_COHORT_ENTRY",
+        "PRE_COHORT_ENTRY",
+        "PREVIOUS_COHORT_ENTRY",
+        "SNAPSHOT_MISMATCH",
+        "HISTORY_ONLY",
+        "ENTRY_TIME_NOT_OBSERVABLE",
+    }
+)
 
 ACK_FIELDS = (
     "proposal_id",
@@ -313,6 +323,11 @@ def run_generic_paper_runtime(
     combined_signals = [*(state.get("signals") or []), *signal_rows]
     state_signals = _dedupe_rows(combined_signals, "signal_id")[-max_history:]
     state_runs = [*(state.get("runs") or []), *new_run_rows][-max_history:]
+    for run_row in state_runs:
+        tracker = trackers.get(str(run_row.get("proposal_id") or ""))
+        if tracker is not None:
+            _bind_trade_cohort(run_row, tracker)
+    _apply_evidence_independence_weights(state_runs, trackers.values())
     daily_buckets = state.get("daily_buckets")
     rebuild_daily_buckets = not isinstance(daily_buckets, dict) or len(
         state_signals
@@ -518,7 +533,7 @@ def _advance_tracker(
             )
         )
         if confirmed and observability == "OBSERVABLE":
-            trade = _open_trade(proposal, context, quote, cfg, now)
+            trade = _open_trade(proposal, tracker, context, quote, cfg, now)
             tracker["open_trade"] = trade
             tracker["entry_confirmation_count"] = 0
             _set_state(tracker, PaperRuntimeState.PAPER_OPEN)
@@ -639,6 +654,23 @@ def _bind_tracker_snapshot(
     tracker["source_proposal_content_snapshot_sha256"] = str(
         source_row.get("proposal_content_snapshot_sha256") or ""
     ).lower()
+    tracker["cohort_id"] = str(source_row.get("cohort_id") or "")
+    tracker["cohort_version"] = int(source_row.get("cohort_version") or 0)
+    tracker["cohort_observation_start_at"] = str(
+        source_row.get("cohort_observation_start_at") or ""
+    )
+    tracker["cohort_status"] = str(source_row.get("cohort_status") or "").upper()
+    tracker["cohort_proposal_content_snapshot_sha256"] = str(
+        source_row.get("cohort_proposal_content_snapshot_sha256") or ""
+    ).lower()
+    tracker["cohort_last_evaluated_at"] = str(
+        source_row.get("cohort_last_evaluated_at") or ""
+    )
+    if isinstance(tracker.get("open_trade"), dict):
+        _bind_trade_cohort(tracker["open_trade"], tracker)
+    for trade in tracker.get("closed_trades") or []:
+        if isinstance(trade, dict):
+            _bind_trade_cohort(trade, tracker)
 
 
 def _set_state(tracker: dict[str, Any], target: PaperRuntimeState) -> None:
@@ -648,6 +680,7 @@ def _set_state(tracker: dict[str, Any], target: PaperRuntimeState) -> None:
 
 def _open_trade(
     proposal: PaperStrategyProposal,
+    tracker: Mapping[str, Any],
     context: Mapping[str, Any],
     quote: Mapping[str, Any],
     cfg: AppConfig,
@@ -665,7 +698,7 @@ def _open_trade(
     trade_id = hashlib.sha256(
         f"{proposal.proposal_hash}|{context.get('bar_ts')}".encode("utf-8")
     ).hexdigest()[:32]
-    return {
+    trade = {
         "schema_version": PAPER_RUNTIME_SCHEMA_VERSION,
         "paper_trade_id": trade_id,
         "proposal_id": proposal.proposal_id,
@@ -675,6 +708,8 @@ def _open_trade(
         "direction": proposal.direction,
         "entry_signal_ts": context.get("bar_ts"),
         "entry_decision_ts": now.isoformat(),
+        "opened_at": now.isoformat(),
+        "closed_at": "",
         "entry_arrival_mid": entry_mid,
         "entry_bid": quote.get("bid"),
         "entry_ask": quote.get("ask"),
@@ -706,6 +741,128 @@ def _open_trade(
         "real_cost_canary_ready": context.get("real_cost_canary_ready"),
         "real_funds_sufficient": context.get("real_funds_sufficient"),
     }
+    _bind_trade_cohort(trade, tracker)
+    return trade
+
+
+def _bind_trade_cohort(
+    trade: dict[str, Any],
+    tracker: Mapping[str, Any],
+) -> None:
+    tracker_snapshot_sha = str(
+        tracker.get("source_proposal_content_snapshot_sha256") or ""
+    ).lower()
+    if not str(trade.get("proposal_content_snapshot_sha256") or ""):
+        trade["proposal_content_snapshot_sha256"] = tracker_snapshot_sha
+    current_cohort_id = str(tracker.get("cohort_id") or "")
+    current_cohort_version = int(tracker.get("cohort_version") or 0)
+    if not str(trade.get("cohort_id") or ""):
+        trade["cohort_id"] = current_cohort_id
+        trade["cohort_version"] = current_cohort_version
+    if not str(trade.get("cohort_observation_start_at") or ""):
+        trade["cohort_observation_start_at"] = str(
+            tracker.get("cohort_observation_start_at") or ""
+        )
+    if not str(trade.get("canonical_opportunity_id") or ""):
+        trade["canonical_opportunity_id"] = _canonical_opportunity_id(trade)
+    trade.setdefault("evidence_independence_weight", 1.0)
+    trade["cohort_scope"] = _cohort_scope(
+        trade,
+        current_cohort_id=current_cohort_id,
+        current_cohort_version=current_cohort_version,
+        current_observation_start_at=str(
+            tracker.get("cohort_observation_start_at") or ""
+        ),
+        current_status=str(tracker.get("cohort_status") or ""),
+        current_content_snapshot_sha=str(
+            tracker.get("cohort_proposal_content_snapshot_sha256") or ""
+        ).lower(),
+    )
+    if "valid_for_promotion" in trade:
+        trade["valid_for_promotion"] = bool(
+            _as_bool(trade.get("valid_for_promotion"))
+            and trade["cohort_scope"] == "FORMAL_COHORT_ENTRY"
+        )
+
+
+def _cohort_scope(
+    trade: Mapping[str, Any],
+    *,
+    current_cohort_id: str,
+    current_cohort_version: int,
+    current_observation_start_at: str,
+    current_status: str,
+    current_content_snapshot_sha: str,
+) -> str:
+    entry_at = _datetime(
+        trade.get("entry_decision_ts")
+        or trade.get("entry_signal_ts")
+        or trade.get("opened_at")
+    )
+    if entry_at is None:
+        return "ENTRY_TIME_NOT_OBSERVABLE"
+    trade_cohort_id = str(trade.get("cohort_id") or "")
+    trade_cohort_version = int(trade.get("cohort_version") or 0)
+    if trade_cohort_id and current_cohort_id and (
+        trade_cohort_id != current_cohort_id
+        or trade_cohort_version != current_cohort_version
+    ):
+        return "PREVIOUS_COHORT_ENTRY"
+    if str(current_status or "").upper() not in {"OBSERVING", "REVIEW_READY"}:
+        return "HISTORY_ONLY"
+    observation_start = _datetime(current_observation_start_at)
+    if not current_cohort_id or current_cohort_version <= 0 or observation_start is None:
+        return "HISTORY_ONLY"
+    trade_snapshot_sha = str(
+        trade.get("proposal_content_snapshot_sha256") or ""
+    ).lower()
+    if (
+        not trade_snapshot_sha
+        or not current_content_snapshot_sha
+        or trade_snapshot_sha != current_content_snapshot_sha
+    ):
+        return "SNAPSHOT_MISMATCH"
+    return (
+        "FORMAL_COHORT_ENTRY"
+        if entry_at >= observation_start
+        else "PRE_COHORT_ENTRY"
+    )
+
+
+def _canonical_opportunity_id(trade: Mapping[str, Any]) -> str:
+    entry_at = str(
+        trade.get("entry_signal_ts")
+        or trade.get("entry_decision_ts")
+        or trade.get("opened_at")
+        or ""
+    )
+    symbol = str(trade.get("symbol") or "").upper().replace("-", "/")
+    if not entry_at:
+        return str(trade.get("paper_trade_id") or "")
+    material = f"{symbol or 'UNKNOWN'}|{entry_at}"
+    return f"paper-event:{hashlib.sha256(material.encode()).hexdigest()[:24]}"
+
+
+def _apply_evidence_independence_weights(
+    runs: Iterable[dict[str, Any]],
+    trackers: Iterable[Mapping[str, Any]],
+) -> None:
+    trades = list(runs)
+    trades.extend(
+        tracker["open_trade"]
+        for tracker in trackers
+        if isinstance(tracker.get("open_trade"), dict)
+    )
+    variants: dict[str, set[str]] = defaultdict(set)
+    for trade in trades:
+        event_id = str(trade.get("canonical_opportunity_id") or "")
+        proposal_id = str(trade.get("proposal_id") or "")
+        if event_id and proposal_id:
+            variants[event_id].add(proposal_id)
+    for trade in trades:
+        event_id = str(trade.get("canonical_opportunity_id") or "")
+        count = len(variants.get(event_id, set()))
+        trade["evidence_independence_weight"] = 1.0 / count if count else 0.0
 
 
 def _mark_to_market(
@@ -1334,6 +1491,15 @@ def _registry_row(tracker: Mapping[str, Any]) -> dict[str, Any]:
         "source_proposal_content_snapshot_sha256": tracker.get(
             "source_proposal_content_snapshot_sha256", ""
         ),
+        "cohort_id": tracker.get("cohort_id", ""),
+        "cohort_version": tracker.get("cohort_version", 0),
+        "cohort_observation_start_at": tracker.get(
+            "cohort_observation_start_at", ""
+        ),
+        "cohort_status": tracker.get("cohort_status", ""),
+        "cohort_proposal_content_snapshot_sha256": tracker.get(
+            "cohort_proposal_content_snapshot_sha256", ""
+        ),
     }
 
 
@@ -1349,6 +1515,34 @@ def _state_row(tracker: Mapping[str, Any]) -> dict[str, Any]:
         "state": tracker.get("state"),
         "paper_trade_id": open_trade.get("paper_trade_id"),
         "open_paper_position": bool(open_trade),
+        "proposal_content_snapshot_sha256": open_trade.get(
+            "proposal_content_snapshot_sha256", ""
+        ),
+        "cohort_id": open_trade.get("cohort_id", tracker.get("cohort_id", "")),
+        "cohort_version": open_trade.get(
+            "cohort_version", tracker.get("cohort_version", 0)
+        ),
+        "cohort_observation_start_at": open_trade.get(
+            "cohort_observation_start_at",
+            tracker.get("cohort_observation_start_at", ""),
+        ),
+        "entry_signal_ts": open_trade.get("entry_signal_ts", ""),
+        "entry_decision_ts": open_trade.get("entry_decision_ts", ""),
+        "opened_at": open_trade.get("opened_at", ""),
+        "closed_at": open_trade.get("closed_at", ""),
+        "cohort_scope": open_trade.get("cohort_scope", "HISTORY_ONLY"),
+        "canonical_opportunity_id": open_trade.get(
+            "canonical_opportunity_id", ""
+        ),
+        "evidence_independence_weight": open_trade.get(
+            "evidence_independence_weight", 0.0
+        ),
+        "entry_arrival_mid": open_trade.get("entry_arrival_mid"),
+        "entry_bid": open_trade.get("entry_bid"),
+        "entry_ask": open_trade.get("entry_ask"),
+        "cost_source": open_trade.get("cost_source", ""),
+        "cost_trust_level": open_trade.get("cost_trust_level", ""),
+        "market_regime": open_trade.get("market_regime", ""),
         "cooldown_remaining_bars": tracker.get("cooldown_remaining_bars"),
         "last_processed_bar_ts": tracker.get("last_processed_bar_ts"),
         "updated_at": tracker.get("updated_at"),
@@ -1804,6 +1998,14 @@ def _contract_status(
             "proposal_compiler_version": "",
             "proposal_contract_version": "",
             "quant_lab_contract_version": "",
+            "last_evaluated_at": "",
+            "last_consumed_by_v5_at": "",
+            "cohort_id": "",
+            "cohort_version": 0,
+            "cohort_observation_start_at": "",
+            "cohort_status": "",
+            "cohort_proposal_content_snapshot_sha256": "",
+            "cohort_last_evaluated_at": "",
             "source_kind": "",
             "source_path": "",
             "identity_valid": False,
