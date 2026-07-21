@@ -8,6 +8,7 @@ interface TopCommandBarProps {
   health?: HealthData | null;
   updateTime?: string;
   loading?: boolean;
+  refreshFailed?: boolean;
   onRefresh?: () => void;
   onSymbolSearch?: (symbol: string) => void;
 }
@@ -40,6 +41,7 @@ export function TopCommandBar({
   health,
   updateTime,
   loading = false,
+  refreshFailed = false,
   onRefresh,
   onSymbolSearch,
 }: TopCommandBarProps) {
@@ -65,7 +67,13 @@ export function TopCommandBar({
       </div>
 
       <div className="top-command-meta">
-        <span>更新时间 {updateTime || '--'}</span>
+        <span className={refreshFailed ? 'top-command-warning' : undefined}>
+          {refreshFailed
+            ? updateTime
+              ? `刷新失败 · 显示 ${updateTime} 的上次成功数据`
+              : '主数据加载失败'
+            : `更新时间 ${updateTime || '--'}`}
+        </span>
         <span>自动刷新 30s</span>
         <motion.span
           className="live-dot"

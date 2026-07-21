@@ -1772,6 +1772,11 @@ body {
   white-space: nowrap;
 }
 
+.top-command-warning {
+  color: #ff9b6f;
+  font-weight: 700;
+}
+
 .live-dot {
   width: 8px;
   height: 8px;

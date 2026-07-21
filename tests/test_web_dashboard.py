@@ -23,6 +23,9 @@ STATUS_RIBBON_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" 
 APP_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "App.tsx"
 API_TS_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "api.ts"
 POSITIONS_PANEL_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "PositionsPanel.tsx"
+TOP_COMMAND_BAR_TSX_PATH = (
+    REPO_ROOT / "web" / "dashboard" / "src" / "components" / "TopCommandBar.tsx"
+)
 DASHBOARD_CSS_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "index.css"
 
 
@@ -68,6 +71,37 @@ def test_main_trading_grid_marks_stale_quant_lab_costs():
     assert "ql-cost-status-pill" in source
     assert '.ql-cost-panel[data-status="stale"]' in css
     assert '.ql-cost-panel[data-status="pending"]' in css
+
+
+def test_react_dashboard_keeps_quant_lab_focus_and_fail_closed_state_truthful():
+    source = APP_TSX_PATH.read_text(encoding="utf-8")
+
+    assert "dashboardFocusForQuantLab(dashboard?: DashboardData | null, preferredSymbol?: string)" in source
+    assert "const requestId = ++quantLabRequestIdRef.current;" in source
+    assert "if (requestId !== quantLabRequestIdRef.current) return;" in source
+    assert "permission: 'ABORT'" in source
+    assert "reasons: ['dashboard_fetch_failed']" in source
+    assert "void loadQuantLab(dashboardFocusForQuantLab(dashboard, symbol));" in source
+    assert "setPrimaryRefreshFailed(true);" in source
+
+
+def test_react_dashboard_labels_bounded_rows_ranges_and_cost_times_truthfully():
+    grid = MAIN_TRADING_GRID_TSX_PATH.read_text(encoding="utf-8")
+    positions = POSITIONS_PANEL_TSX_PATH.read_text(encoding="utf-8")
+    command_bar = TOP_COMMAND_BAR_TSX_PATH.read_text(encoding="utf-8")
+    css = DASHBOARD_CSS_PATH.read_text(encoding="utf-8")
+
+    assert "显示最近 ${Math.min(sortedTrades.length, 48)} / 共 ${sortedTrades.length} 条" in grid
+    assert "模型选定成本" in grid
+    assert "单程全包" in grid
+    assert "往返全包" in grid
+    assert "localShortTime(refreshedAt)" in grid
+    assert "区间高" in positions
+    assert "区间低" in positions
+    assert "区间成交量" in positions
+    assert "24h 高" not in positions
+    assert "刷新失败 · 显示 ${updateTime} 的上次成功数据" in command_bar
+    assert ".top-command-warning" in css
 
 
 def test_status_ribbon_formats_market_volatility_as_percent_points():

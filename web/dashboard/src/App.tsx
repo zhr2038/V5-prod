@@ -211,7 +211,29 @@ function positionFocusFromDashboard(dashboard?: DashboardData | null) {
   return { symbol: bestSymbol, notional_usdt: Math.max(0, bestNotional) };
 }
 
-function dashboardFocusForQuantLab(dashboard?: DashboardData | null) {
+function dashboardFocusForQuantLab(dashboard?: DashboardData | null, preferredSymbol?: string) {
+  const normalizedPreferred = quantLabSymbol(preferredSymbol);
+  if (normalizedPreferred) {
+    const positions = Array.isArray(dashboard?.positions) ? dashboard.positions : [];
+    const matchedPosition = positions.find(
+      (position) => quantLabSymbol(position?.symbol) === normalizedPreferred
+    );
+    if (matchedPosition) {
+      return {
+        symbol: normalizedPreferred,
+        notional_usdt: Math.max(0, Number(matchedPosition.value || 0) || 0),
+      };
+    }
+
+    const matchingTrade = summarizeTradeOrders(dashboard?.trades)
+      .sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a))
+      .find((trade) => quantLabSymbol(trade.symbol) === normalizedPreferred);
+    return {
+      symbol: normalizedPreferred,
+      notional_usdt: Math.max(0, Number(matchingTrade?.value || 0) || 0),
+    };
+  }
+
   const positionFocus = positionFocusFromDashboard(dashboard);
   if (positionFocus) return positionFocus;
   const latestTrade = summarizeTradeOrders(dashboard?.trades).sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a))[0];
@@ -233,8 +255,10 @@ function App() {
   const [apiTelemetrySeries, setApiTelemetrySeries] = useState<ApiTelemetrySeriesData | null>(null);
   const [updateTime, setUpdateTime] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
+  const [primaryRefreshFailed, setPrimaryRefreshFailed] = useState(false);
   const [showDeferredPanels, setShowDeferredPanels] = useState(false);
   const manualFocusRef = useRef(false);
+  const quantLabRequestIdRef = useRef(0);
   const [focusSymbol, setFocusSymbol] = useState('BNB-USDT');
 
   const syncPositionFocus = useCallback((nextDashboard: DashboardData) => {
@@ -247,12 +271,8 @@ function App() {
     });
   }, []);
 
-  const handleSymbolSearch = useCallback((symbol: string) => {
-    manualFocusRef.current = true;
-    setFocusSymbol(symbol);
-  }, []);
-
   const loadQuantLab = useCallback(async (focus?: { symbol?: string; notional_usdt?: number } | null) => {
+    const requestId = ++quantLabRequestIdRef.current;
     const symbol = quantLabSymbol(focus?.symbol);
     const notional = Number(focus?.notional_usdt || 0) || 0;
     const [status, permission, cost] = await Promise.all([
@@ -267,13 +287,27 @@ function App() {
           })
         : Promise.resolve(null),
     ]);
+    if (requestId !== quantLabRequestIdRef.current) return;
+
+    const nextStatus = status || ({
+      available: false,
+      status: 'degraded',
+      mode: 'shadow',
+      reason: 'dashboard_fetch_failed',
+    } as QuantLabStatusData);
+    const nextPermission = permission || ({
+      available: false,
+      status: 'degraded',
+      permission: 'ABORT',
+      decision: 'ABORT',
+      permission_status: 'UNAVAILABLE',
+      enforceable: false,
+      reasons: ['dashboard_fetch_failed'],
+      live_block_reasons: ['dashboard_fetch_failed'],
+    } as QuantLabPermissionData);
     startTransition(() => {
-      if (status) {
-        setQuantLabStatus(status);
-      }
-      if (permission) {
-        setQuantLabPermission(permission);
-      }
+      setQuantLabStatus(nextStatus);
+      setQuantLabPermission(nextPermission);
       if (symbol) {
         const nextCost =
           cost ||
@@ -289,6 +323,12 @@ function App() {
       }
     });
   }, []);
+
+  const handleSymbolSearch = useCallback((symbol: string) => {
+    manualFocusRef.current = true;
+    setFocusSymbol(symbol);
+    void loadQuantLab(dashboardFocusForQuantLab(dashboard, symbol));
+  }, [dashboard, loadQuantLab]);
 
   const loadApiTelemetrySeries = useCallback(async () => {
     const telemetrySeries = await api.apiTelemetrySeries(24, 5);
@@ -319,12 +359,19 @@ function App() {
       });
       syncPositionFocus(nextDashboardBase);
       setMarketState(d.marketState || null);
-      void loadQuantLab(dashboardFocusForQuantLab(nextDashboardBase));
+      const positionFocus = positionFocusFromDashboard(nextDashboardBase);
+      const nextFocusSymbol = manualFocusRef.current
+        ? focusSymbol
+        : quantLabSymbol(positionFocus?.symbol) || focusSymbol;
+      void loadQuantLab(dashboardFocusForQuantLab(nextDashboardBase, nextFocusSymbol));
+      setUpdateTime(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
+      setPrimaryRefreshFailed(false);
+    } else {
+      setPrimaryRefreshFailed(true);
     }
-    if (r) setRiskGuard(r);
-    setUpdateTime(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
+    setRiskGuard(r || null);
     setLoading(false);
-  }, [loadQuantLab, syncPositionFocus]);
+  }, [focusSymbol, loadQuantLab, syncPositionFocus]);
 
   const loadSecondary = useCallback(async () => {
     void loadApiTelemetrySeries();
@@ -336,15 +383,13 @@ function App() {
     startTransition(() => {
       if (deferred) {
         setDashboard((prev) => {
-          const nextDashboard = mergeDeferredDashboard(prev, deferred);
-          void loadQuantLab(dashboardFocusForQuantLab(nextDashboard));
-          return nextDashboard;
+          return mergeDeferredDashboard(prev, deferred);
         });
       }
       if (dec) setDecisionAudit(dec);
       if (h) setHealth(h);
     });
-  }, [loadApiTelemetrySeries, loadQuantLab]);
+  }, [loadApiTelemetrySeries]);
 
   useEffect(() => {
     clearLegacyUiCache();
@@ -392,10 +437,6 @@ function App() {
     loadApiTelemetrySeries();
   }, 30000);
 
-  useInterval(() => {
-    loadQuantLab(dashboardFocusForQuantLab(dashboard));
-  }, 30000);
-
   const displayMarketState = marketState || dashboard?.marketState || null;
 
   return (
@@ -408,10 +449,10 @@ function App() {
           health={health}
           updateTime={updateTime}
           loading={loading}
+          refreshFailed={primaryRefreshFailed}
           onRefresh={() => {
             void loadPrimary();
             void loadSecondary();
-            void loadQuantLab(dashboardFocusForQuantLab(dashboard));
             void loadApiTelemetrySeries();
           }}
           onSymbolSearch={handleSymbolSearch}

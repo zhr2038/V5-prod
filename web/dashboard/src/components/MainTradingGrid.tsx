@@ -72,6 +72,17 @@ function shortTime(value?: string) {
   return text ? text.slice(5, 16).replace('T', ' ') : '--';
 }
 
+function localShortTime(value?: string) {
+  const text = String(value || '').trim();
+  if (!text) return '--';
+  const normalized = text.includes('T') ? text : text.replace(' ', 'T');
+  const parsed = Date.parse(normalized);
+  if (!Number.isFinite(parsed)) return shortTime(text);
+  const date = new Date(parsed);
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function fullTime(value?: string) {
   const text = String(value || '').trim();
   if (!text) return '--';
@@ -323,7 +334,11 @@ function HoldingsFocusPanel({ positions, trades, account }: { positions: Positio
             <div className="trade-details-head">
               <div>
                 <span id="trade-details-title">最近成交明细</span>
-                <small>{sortedTrades.length ? `${sortedTrades.length} 条` : '暂无成交'}</small>
+                <small>
+                  {sortedTrades.length
+                    ? `显示最近 ${Math.min(sortedTrades.length, 48)} / 共 ${sortedTrades.length} 条`
+                    : '暂无成交'}
+                </small>
               </div>
               <button type="button" onClick={() => setTradeDetailsOpen(false)}>关闭</button>
             </div>
@@ -382,6 +397,8 @@ function QuantLabCostPanel({ cost }: { cost?: QuantLabCostEstimateData | null })
     cost?.cost_bps,
     data.cost_bps
   );
+  const oneWayAllIn = firstNumber(cost?.one_way_all_in_cost_bps, data.one_way_all_in_cost_bps);
+  const roundtripAllIn = firstNumber(cost?.roundtrip_all_in_cost_bps, data.roundtrip_all_in_cost_bps);
   const source = firstText(cost?.cost_source, cost?.source, data.cost_source, data.source, cost?.available === false ? 'unavailable' : '');
   const freshness = firstText(cost?.cost_freshness_status, data.cost_freshness_status, cost?.cost_quality, data.cost_quality, cost?.available === false ? 'unavailable' : '');
   const trustLevel = firstText(cost?.cost_trust_level, data.cost_trust_level);
@@ -424,14 +441,16 @@ function QuantLabCostPanel({ cost }: { cost?: QuantLabCostEstimateData | null })
         <div><span>手续费</span><strong>{fmtNum(firstNumber(cost?.fee_bps, data.fee_bps), 2)} bps</strong></div>
         <div><span>滑点</span><strong>{fmtNum(firstNumber(cost?.slippage_bps, data.slippage_bps), 2)} bps</strong></div>
         <div><span>价差</span><strong>{fmtNum(firstNumber(cost?.spread_bps, data.spread_bps), 2)} bps</strong></div>
-        <div><span>总成本</span><strong>{fmtNum(selectedCost, 2)} bps</strong></div>
+        <div><span>模型选定成本</span><strong>{fmtNum(selectedCost, 2)} bps</strong></div>
       </div>
       <div className="ql-cost-footer">
         <span>Fallback Level <strong>{firstText(cost?.fallback_level, data.fallback_level, 'NONE')}</strong></span>
         <span>数据来源 <strong>{source || '--'}</strong></span>
         <span>样本数 <strong>{fmtNum(firstNumber(cost?.sample_count, data.sample_count), 0)}</strong></span>
-        <span>样本时间 <strong>{stale ? fullTime(sampleTimestamp) : shortTime(sampleTimestamp)}</strong></span>
-        {refreshedAt ? <span>接口拉取 <strong>{shortTime(refreshedAt)}</strong></span> : null}
+        <span>样本时间 <strong>{stale ? fullTime(sampleTimestamp) : localShortTime(sampleTimestamp)}</strong></span>
+        {refreshedAt ? <span>接口拉取 <strong>{localShortTime(refreshedAt)}</strong></span> : null}
+        {oneWayAllIn !== null ? <span>单程全包 <strong>{fmtNum(oneWayAllIn, 2)} bps</strong></span> : null}
+        {roundtripAllIn !== null ? <span>往返全包 <strong>{fmtNum(roundtripAllIn, 2)} bps</strong></span> : null}
         <span>信任 <strong>{trustLevel || '--'}</strong></span>
         {uniqueStaleReasons.length ? (
           <span className="ql-cost-reasons">原因 <strong>{uniqueStaleReasons.slice(0, 4).map(reasonLabel).join(' / ')}</strong></span>

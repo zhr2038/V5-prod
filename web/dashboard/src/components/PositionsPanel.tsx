@@ -793,7 +793,7 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
               </em>
             </div>
             <div className="chart-live-meta">
-              <span>24H 成交量 <strong>{formatCompactVolume(Number(chartSummary?.volume || 0))}</strong></span>
+              <span>区间成交量 <strong>{formatCompactVolume(Number(chartSummary?.volume || 0))}</strong></span>
               <span>振幅 <strong>{fmtPct(sessionRangePct, 2)}</strong></span>
               <span>/api/position_kline · 10s 更新</span>
             </div>
@@ -858,15 +858,15 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
                 <div className="text-lg font-mono">{fmtUsd(displayCurrentPrice || undefined)}</div>
               </div>
               <div className="liquid-glass-thin metric-pill tone-amber px-4 py-3">
-                <div className="text-xs text-[var(--text-dim)]">24h 高</div>
+                <div className="text-xs text-[var(--text-dim)]">区间高</div>
                 <div className="text-lg font-mono">{fmtUsd(chartSummary?.high)}</div>
               </div>
               <div className="liquid-glass-thin metric-pill tone-coral px-4 py-3">
-                <div className="text-xs text-[var(--text-dim)]">24h 低</div>
+                <div className="text-xs text-[var(--text-dim)]">区间低</div>
                 <div className="text-lg font-mono">{fmtUsd(chartSummary?.low)}</div>
               </div>
               <div className="material-surface material-clear clear-control metric-pill tone-plum col-span-2 xl:col-span-1 px-4 py-3">
-                <div className="text-xs text-[var(--text-dim)]">24h 量</div>
+                <div className="text-xs text-[var(--text-dim)]">区间成交量</div>
                 <div className="text-lg font-mono">{formatCompactVolume(Number(chartSummary?.volume || 0))}</div>
                 <div className="text-[11px] text-[var(--text-dim)] mt-1">真实行情聚焦</div>
               </div>
