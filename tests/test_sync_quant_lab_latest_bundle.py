@@ -91,3 +91,43 @@ def test_sync_latest_bundle_refuses_empty_proposal_pack(monkeypatch, tmp_path: P
             output_name="quant_lab_latest_bundle.zip",
             timeout=1.0,
         )
+
+
+def test_sync_latest_bundle_explicitly_skips_nas_only_pack(monkeypatch, tmp_path: Path) -> None:
+    status = {
+        "storage_location": "nas_only",
+        "cloud_zip_present": False,
+        "available_download_url": "http://192.168.1.15:8788/download/private-pack",
+        "available_pack_name": "quant_lab_expert_pack_2026-07-21.zip",
+        "export_date": "2026-07-21",
+        "state": "accepted_on_nas",
+    }
+    requested_urls: list[str] = []
+
+    def fake_urlopen(req, timeout):
+        requested_urls.append(req.full_url)
+        return _FakeResponse(json.dumps(status).encode("utf-8"))
+
+    monkeypatch.setattr(syncer.urllib.request, "urlopen", fake_urlopen)
+
+    result = syncer.sync_latest_bundle(
+        status_url="http://qyun2.hrhome.top:8027/web-v2/expert-pack/status",
+        output_dir=tmp_path,
+        output_name="quant_lab_latest_bundle.zip",
+        timeout=1.0,
+    )
+
+    assert result == {
+        "status": "skipped",
+        "reason": "nas_only_pack_bytes_are_not_proxied_by_qyun2",
+        "status_url": "http://qyun2.hrhome.top:8027/web-v2/expert-pack/status",
+        "storage_location": "nas_only",
+        "cloud_zip_present": False,
+        "local_bundle_unchanged": True,
+        "pack_name": "quant_lab_expert_pack_2026-07-21.zip",
+        "export_date": "2026-07-21",
+        "state": "accepted_on_nas",
+        "live_order_effect": "none",
+    }
+    assert requested_urls == ["http://qyun2.hrhome.top:8027/web-v2/expert-pack/status"]
+    assert not (tmp_path / "quant_lab_latest_bundle.zip").exists()

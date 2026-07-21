@@ -1,5 +1,5 @@
 [Unit]
-Description=Sync latest quant-lab expert pack for V5 paper-only proposal readers
+Description=Sync cloud quant-lab pack when available; observe NAS-only packs without proxying
 After=network-online.target
 Wants=network-online.target
 

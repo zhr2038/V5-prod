@@ -1,5 +1,5 @@
 [Unit]
-Description=Sync latest quant-lab expert pack every 10 minutes
+Description=Observe quant-lab expert-pack availability every 10 minutes
 
 [Timer]
 OnBootSec=3min

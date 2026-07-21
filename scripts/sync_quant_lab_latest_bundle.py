@@ -85,6 +85,21 @@ def sync_latest_bundle(
     allow_missing_proposals: bool = False,
 ) -> dict[str, Any]:
     status = _load_status(status_url, timeout=timeout)
+    if str(status.get("storage_location") or "").strip().lower() == "nas_only":
+        return {
+            "status": "skipped",
+            "reason": "nas_only_pack_bytes_are_not_proxied_by_qyun2",
+            "status_url": status_url,
+            "storage_location": "nas_only",
+            "cloud_zip_present": bool(status.get("cloud_zip_present")),
+            "local_bundle_unchanged": True,
+            "pack_name": status.get("available_pack_name")
+            or status.get("latest_pack_name")
+            or "",
+            "export_date": status.get("export_date") or "",
+            "state": status.get("state") or "",
+            "live_order_effect": "none",
+        }
     url = _download_url(status, status_url)
     payload = _read_url(url, timeout=timeout)
     target = output_dir / output_name
