@@ -492,6 +492,8 @@ function TimersPanel({ timers }: { timers?: { timers: TimerData[] } | null }) {
 
 function ExecutionPathPanel({ decisionAudit }: { decisionAudit?: DecisionAuditData | null }) {
   const exec = decisionAudit?.execution_summary || {};
+  const executionScope = decisionAudit?.execution_scope || {};
+  const recentFills = decisionAudit?.recent_fill_summary || {};
   const rejectedSummary = asRecord(decisionAudit?.rejected_summary);
   const orders = decisionAudit?.orders || decisionAudit?.run_orders || [];
   const selected = firstNumber(decisionAudit?.counts?.selected) || 0;
@@ -507,6 +509,8 @@ function ExecutionPathPanel({ decisionAudit }: { decisionAudit?: DecisionAuditDa
   const filled = firstNumber(exec.filled) || 0;
   const partialFilled = firstNumber(exec.partially_filled, exec.open_or_partial) || 0;
   const rejectedCount = firstNumber(exec.rejected) || 0;
+  const recentFillCount24h = firstNumber(recentFills.count_24h) || 0;
+  const scopeRunId = firstText(executionScope.run_id, decisionAudit?.run_id);
   const previousFilled = usePreviousValue(filled);
   const previousRejected = usePreviousValue(rejectedCount);
   const flowTone = rejectedCount > Number(previousRejected || 0)
@@ -523,7 +527,13 @@ function ExecutionPathPanel({ decisionAudit }: { decisionAudit?: DecisionAuditDa
 
   return (
     <section className="design-panel compact-ops-panel execution-path-panel">
-      <div className="design-panel-heading"><span>执行路径 (今日)</span><Route className="h-4 w-4" /></div>
+      <div className="design-panel-heading">
+        <span>执行路径 (最近运行)</span>
+        <span className="flex items-center gap-2">
+          <small>{scopeRunId ? `运行 ${scopeRunId}` : '等待运行数据'}</small>
+          <Route className="h-4 w-4" />
+        </span>
+      </div>
       <div
         className={`execution-chain ${flowPulse.className}`}
         data-pulse={flowPulse.active ? 'true' : 'false'}
@@ -538,10 +548,13 @@ function ExecutionPathPanel({ decisionAudit }: { decisionAudit?: DecisionAuditDa
         <div><span>交易所提交</span><strong>{fmtNum(submitted, 0)}</strong></div>
       </div>
       <div className="execution-status-row">
-        <span className="ok">成交 {fmtNum(filled, 0)}</span>
-        <span className="info">部分成交 {fmtNum(partialFilled, 0)}</span>
-        <span className="warn">压单 {fmtNum(rejectedTotal, 0)}</span>
-        <span className="danger">拒单 {fmtNum(rejectedCount, 0)}</span>
+        <span className="ok">本轮成交 {fmtNum(filled, 0)}</span>
+        <span className="info">本轮部分成交 {fmtNum(partialFilled, 0)}</span>
+        <span className="warn">本轮压单 {fmtNum(rejectedTotal, 0)}</span>
+        <span className="danger">本轮拒单 {fmtNum(rejectedCount, 0)}</span>
+      </div>
+      <div className="api-note">
+        近 24 小时实际成交 {fmtNum(recentFillCount24h, 0)} 笔；路径数字仅统计上方最近一次运行。
       </div>
     </section>
   );

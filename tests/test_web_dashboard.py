@@ -53,6 +53,10 @@ def test_execution_path_panel_uses_strategy_and_route_counts_not_selected_only()
 
     assert "function countStrategySignals" in source
     assert "function countActionableSignals" in source
+    assert "执行路径 (最近运行)" in source
+    assert "执行路径 (今日)" not in source
+    assert "本轮成交 {fmtNum(filled, 0)}" in source
+    assert "近 24 小时实际成交 {fmtNum(recentFillCount24h, 0)} 笔" in source
     assert "<span>信号生成</span><strong>{fmtNum(strategySignalCount, 0)}</strong>" in source
     assert "<span>风控检查</span><strong>{fmtNum(routeChecked, 0)}</strong>" in source
     assert "firstNumber(rejectedSummary.total, blockedRoutes.length)" in source

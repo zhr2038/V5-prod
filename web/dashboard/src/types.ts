@@ -254,6 +254,7 @@ export interface StrategySignal {
 
 export interface DecisionAuditData {
   run_id?: string;
+  timestamp?: MetricValue;
   strategy_signals?: StrategySignal[];
   counts?: {
     selected?: number;
@@ -264,6 +265,17 @@ export interface DecisionAuditData {
   strategy_signal_source?: string;
   ml_signal_overview?: UnknownRecord;
   execution_summary?: MetricRecord;
+  execution_scope?: {
+    type?: string;
+    run_id?: string;
+    note?: string;
+  };
+  recent_fill_summary?: {
+    count_60m?: number;
+    count_24h?: number;
+    latest_fill?: UnknownRecord | null;
+  };
+  latest_ordered_run_summary?: UnknownRecord | null;
   rejected_summary?: MetricRecord;
   orders?: UnknownRecord[];
   run_orders?: UnknownRecord[];
