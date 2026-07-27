@@ -9952,6 +9952,94 @@ def test_api_positions_exports_fifo_entry_time_from_remaining_lots(monkeypatch, 
     assert row["remaining_qty_from_fills"] == 0.2135
 
 
+def test_position_lot_metadata_ignores_sub_precision_fifo_dust(tmp_path):
+    module = load_web_dashboard_module()
+
+    old_buy_ts = 1_720_000_000_000
+    old_sell_ts = 1_720_003_600_000
+    current_buy_ts = 1_785_132_064_957
+    fills_db = tmp_path / "fills.sqlite"
+    con = sqlite3.connect(str(fills_db))
+    cur = con.cursor()
+    cur.execute(
+        """
+        CREATE TABLE fills (
+          inst_id TEXT,
+          side TEXT,
+          fill_px REAL,
+          fill_sz REAL,
+          fill_notional REAL,
+          fee REAL,
+          fee_ccy TEXT,
+          ts_ms INTEGER,
+          created_ts_ms INTEGER,
+          trade_id TEXT
+        )
+        """
+    )
+    cur.executemany(
+        """
+        INSERT INTO fills (
+          inst_id, side, fill_px, fill_sz, fill_notional, fee, fee_ccy, ts_ms, created_ts_ms, trade_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                "ETH-USDT",
+                "buy",
+                2200.0,
+                0.009099,
+                20.0178,
+                -0.000009099,
+                "ETH",
+                old_buy_ts,
+                old_buy_ts,
+                "old-buy",
+            ),
+            (
+                "ETH-USDT",
+                "sell",
+                2210.0,
+                0.009089,
+                20.08669,
+                0.0,
+                "USDT",
+                old_sell_ts,
+                old_sell_ts,
+                "old-sell",
+            ),
+            (
+                "ETH-USDT",
+                "buy",
+                1965.08,
+                0.008091,
+                15.89946228,
+                -0.000008091,
+                "ETH",
+                current_buy_ts,
+                current_buy_ts,
+                "current-buy",
+            ),
+        ],
+    )
+    con.commit()
+    con.close()
+
+    metadata = module._load_position_lot_metadata_from_fills(
+        "ETH/USDT",
+        current_qty=0.00808291,
+        fills_db=fills_db,
+    )
+
+    assert metadata is not None
+    assert metadata["entry_ts_ms"] == current_buy_ts
+    assert metadata["latest_entry_ts_ms"] == current_buy_ts
+    assert metadata["entry_source"] == "fills_fifo"
+    assert metadata["lot_count"] == 1
+    assert metadata["remaining_qty_from_fills"] == pytest.approx(0.008082909)
+    assert metadata["avg_px"] == pytest.approx(15.89946228 / 0.008082909)
+
+
 def test_api_positions_falls_back_to_latest_buy_fill_entry_time(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
 

@@ -2067,6 +2067,11 @@ def _load_position_lot_metadata_from_fills(
                 queue[0][0] = head_qty - trim_qty
                 trim_qty = 0.0
 
+    # Account snapshots are rounded more coarsely than raw fills. Do not let a
+    # sub-precision FIFO remainder become the displayed position entry lot.
+    display_dust_qty = max(1e-12, min(1e-8, float(current_qty) * 1e-5))
+    queue = [lot for lot in queue if lot[0] > display_dust_qty]
+
     remaining_qty = sum(qty for qty, _cost, _ts in queue)
     if remaining_qty <= 1e-12:
         return None
