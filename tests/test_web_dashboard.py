@@ -4170,7 +4170,7 @@ def test_api_decision_audit_recent_fill_summary_uses_newer_order_event_when_fill
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["recent_fill_summary"]["count_60m"] == 1
-    assert payload["recent_fill_summary"]["count_24h"] == 2
+    assert payload["recent_fill_summary"]["count_24h"] == 1
     assert payload["recent_fill_summary"]["latest_fill"]["created_ts"] == 1_710_088_200_000
     assert payload["recent_fill_summary"]["latest_fill"]["run_id"] == "20260313_16"
     assert payload["recent_fill_summary"]["latest_fill"]["ord_id"] == "ord-1"

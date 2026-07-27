@@ -8665,17 +8665,17 @@ def api_decision_audit():
                     if cl_key:
                         order_meta_by_cl_ord_id[cl_key] = order_meta
 
-                    order_age_ms = max(0, now_ms - order_event_ts)
-                    if order_age_ms <= 60 * 60 * 1000:
-                        recent_fill_summary['count_60m'] += 1
-                    if order_age_ms <= 24 * 60 * 60 * 1000:
-                        recent_fill_summary['count_24h'] += 1
-
                     fill_event_ts = max(
                         fill_ts_by_ord_id.get(ord_key, 0),
                         fill_ts_by_cl_ord_id.get(cl_key, 0),
                     )
                     latest_event_ts = max(order_event_ts, fill_event_ts)
+                    latest_event_age_ms = max(0, now_ms - latest_event_ts)
+                    if latest_event_age_ms <= 60 * 60 * 1000:
+                        recent_fill_summary['count_60m'] += 1
+                    if latest_event_age_ms <= 24 * 60 * 60 * 1000:
+                        recent_fill_summary['count_24h'] += 1
+
                     if latest_event_ts >= latest_fill_ts:
                         latest_fill_ts = latest_event_ts
                         recent_fill_summary['latest_fill'] = {
@@ -8696,7 +8696,9 @@ def api_decision_audit():
                         order_event_ts_by_ord_id.get(ord_key, 0),
                         order_event_ts_by_cl_ord_id.get(cl_key, 0),
                     )
-                    if matched_order_ts and matched_order_ts == fill_ts:
+                    # An order row and its fill-store row describe the same
+                    # execution even when their persisted timestamps differ.
+                    if matched_order_ts:
                         continue
 
                     fill_age_ms = max(0, now_ms - fill_ts)
