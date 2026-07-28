@@ -71,7 +71,8 @@ def test_live_followup_bundle_export_grants_dashboard_read_access() -> None:
     assert "scripts/install_live_followup_bundle.sh" in service
     assert "Environment=V5_DASHBOARD_BUNDLE_USER=ubuntu" in service
     assert "install -m 0640 -o root -g v5readonly" in installer
-    assert 'setfacl -m "u:${DASHBOARD_USER}:rx" "${EXPORT_DIR}"' in installer
+    assert 'setfacl -m "u:${DASHBOARD_USER}:rwx" "${EXPORT_DIR}"' in installer
+    assert 'setfacl -d -m "u:${DASHBOARD_USER}:rwX" "${EXPORT_DIR}"' in installer
     assert 'setfacl -m "u:${DASHBOARD_USER}:r" "${target_path}"' in installer
 
 

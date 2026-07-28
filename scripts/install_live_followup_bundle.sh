@@ -22,8 +22,10 @@ apply_dashboard_acl() {
     return
   fi
 
-  setfacl -m "u:${DASHBOARD_USER}:rx" "${EXPORT_DIR}"
-  setfacl -d -m "u:${DASHBOARD_USER}:rX" "${EXPORT_DIR}"
+  # The dashboard and the legacy ubuntu-owned exporter publish through a
+  # same-directory temporary file followed by an atomic rename.
+  setfacl -m "u:${DASHBOARD_USER}:rwx" "${EXPORT_DIR}"
+  setfacl -d -m "u:${DASHBOARD_USER}:rwX" "${EXPORT_DIR}"
   setfacl -m "u:${DASHBOARD_USER}:r" "${target_path}"
 }
 
