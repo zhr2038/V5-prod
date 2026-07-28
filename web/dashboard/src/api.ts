@@ -176,11 +176,16 @@ function normalizeTradeEntry(trade: ApiTradePayload, index: number): Trade {
   const symbol = normalizeTradeSymbol(trade.symbol);
   const timestamp = String(trade.timestamp || trade.time || '').trim();
   const side = String(trade.side || 'buy');
-  const value = Number(trade.value ?? trade.amount ?? 0) || 0;
   const fee = Math.abs(Number(trade.fee ?? 0) || 0);
   const price = Number(trade.price ?? 0) || 0;
   const qty = Number(trade.qty ?? 0) || 0;
-  const derivedQty = qty > 0 ? qty : (price > 0 && value > 0 ? value / price : 0);
+  const providedValue = Number(trade.value ?? trade.amount ?? 0) || 0;
+  const derivedQty =
+    qty > 0 ? qty : (price > 0 && providedValue > 0 ? providedValue / price : 0);
+  const value =
+    providedValue > 0
+      ? providedValue
+      : (price > 0 && derivedQty > 0 ? price * derivedQty : 0);
   const sourceId = String(
     trade.id ||
     trade.trade_id ||
