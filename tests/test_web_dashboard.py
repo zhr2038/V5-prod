@@ -10143,6 +10143,130 @@ def test_api_positions_latest_buy_fallback_ignores_closed_roundtrip(tmp_path):
     assert module._load_position_entry_time_fallback_from_fills("SOL", fills_db=fills_db) is None
 
 
+def test_latest_buy_fill_fallback_uses_exchange_time_not_ingestion_time(tmp_path):
+    module = load_web_dashboard_module()
+
+    fills_db = tmp_path / "fills.sqlite"
+    con = sqlite3.connect(str(fills_db))
+    cur = con.cursor()
+    cur.execute("CREATE TABLE fills (inst_id TEXT, side TEXT, ts_ms INTEGER, created_ts_ms INTEGER)")
+    delayed_ingest_ts = 1_785_253_218_404
+    cur.executemany(
+        "INSERT INTO fills VALUES (?, ?, ?, ?)",
+        [
+            ("BTC-USDT", "buy", 1_785_252_000_000, delayed_ingest_ts),
+            ("BTC-USDT", "sell", 1_785_252_001_000, delayed_ingest_ts),
+        ],
+    )
+    con.commit()
+    con.close()
+
+    assert module._load_position_entry_time_fallback_from_fills("BTC", fills_db=fills_db) is None
+
+
+def test_api_positions_prefers_new_filled_order_while_fills_ingestion_lags(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "execution": {
+                "order_store_path": "reports/shadow_runtime/orders.sqlite",
+                "reconcile_status_path": "reports/shadow_runtime/reconcile_status.json",
+            }
+        },
+    )
+    monkeypatch.setattr(module, "_load_position_lot_metadata_from_fills", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module.requests, "get", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("network down")))
+
+    positions_db = runtime_dir / "positions.sqlite"
+    con = sqlite3.connect(str(positions_db))
+    cur = con.cursor()
+    cur.execute("CREATE TABLE positions (symbol TEXT, qty REAL, avg_px REAL, last_mark_px REAL)")
+    cur.execute("INSERT INTO positions VALUES ('BTC/USDT', 0.00024655, 64017.0, 64040.9)")
+    con.commit()
+    con.close()
+
+    stale_ingest_ts = 1_782_043_218_404
+    fills_db = runtime_dir / "fills.sqlite"
+    con = sqlite3.connect(str(fills_db))
+    cur = con.cursor()
+    cur.execute(
+        """
+        CREATE TABLE fills (
+          inst_id TEXT,
+          side TEXT,
+          fill_px REAL,
+          fill_sz REAL,
+          fill_notional REAL,
+          fee REAL,
+          fee_ccy TEXT,
+          ts_ms INTEGER,
+          created_ts_ms INTEGER,
+          trade_id TEXT
+        )
+        """
+    )
+    cur.executemany(
+        "INSERT INTO fills VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            ("BTC-USDT", "buy", 64469.2, 0.00007747, 4.99, 0.0, "BTC", 1_782_039_715_687, stale_ingest_ts, "old-buy"),
+            ("BTC-USDT", "sell", 64469.1, 0.00007739, 4.99, 0.0, "USDT", 1_782_039_716_099, stale_ingest_ts, "old-sell"),
+        ],
+    )
+    con.commit()
+    con.close()
+
+    current_fill_ts = 1_785_258_084_280
+    orders_db = runtime_dir / "orders.sqlite"
+    con = sqlite3.connect(str(orders_db))
+    cur = con.cursor()
+    cur.execute(
+        """
+        CREATE TABLE orders (
+          inst_id TEXT,
+          side TEXT,
+          state TEXT,
+          created_ts INTEGER,
+          updated_ts INTEGER,
+          last_query_json TEXT,
+          ack_json TEXT
+        )
+        """
+    )
+    cur.execute(
+        "INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            "BTC-USDT",
+            "buy",
+            "FILLED",
+            current_fill_ts - 62,
+            current_fill_ts + 189,
+            json.dumps({"data": [{"fillTime": str(current_fill_ts)}]}),
+            json.dumps({"data": [{"ts": str(current_fill_ts - 1)}]}),
+        ),
+    )
+    con.commit()
+    con.close()
+
+    with module.app.app_context():
+        payload = module.api_positions().get_json()
+
+    row = payload["positions"][0]
+    assert row["entryTimeMs"] == current_fill_ts
+    assert row["latestEntryTimeMs"] == current_fill_ts
+    assert row["entry_source"] == "orders_latest_buy_fallback"
+    assert row["entryTime"] == module._format_dashboard_ts_ms(current_fill_ts)
+
+
 def test_api_positions_fallback_prefers_positions_file_mtime_over_run_dir_mtime(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
 

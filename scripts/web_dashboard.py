@@ -1973,6 +1973,14 @@ def _normalize_fill_ts_ms(raw_value: Any) -> int:
     return value
 
 
+def _fill_event_ts_ms(ts_ms: Any, created_ts_ms: Any) -> int:
+    """Prefer the exchange event time; ingestion time is only a last-resort fallback."""
+    event_ts_ms = _normalize_fill_ts_ms(ts_ms)
+    if event_ts_ms > 0:
+        return event_ts_ms
+    return _normalize_fill_ts_ms(created_ts_ms)
+
+
 def _load_position_lot_metadata_from_fills(
     symbol: str,
     current_qty: float,
@@ -2025,7 +2033,7 @@ def _load_position_lot_metadata_from_fills(
             notional = px * qty
         fee_val = float(fee or 0.0)
         fee_ccy_norm = str(fee_ccy or '').upper()
-        event_ts_ms = max(_normalize_fill_ts_ms(ts_ms), _normalize_fill_ts_ms(created_ts_ms))
+        event_ts_ms = _fill_event_ts_ms(ts_ms, created_ts_ms)
 
         if side == 'buy':
             net_base_qty = qty + (fee_val if fee_ccy_norm == base_symbol else 0.0)
@@ -2134,7 +2142,7 @@ def _load_position_entry_time_fallback_from_fills(
     latest_buy_ts_ms = 0
     latest_sell_ts_ms = 0
     for raw_side, ts_ms, created_ts_ms in rows:
-        event_ts_ms = max(_normalize_fill_ts_ms(ts_ms), _normalize_fill_ts_ms(created_ts_ms))
+        event_ts_ms = _fill_event_ts_ms(ts_ms, created_ts_ms)
         if event_ts_ms <= 0:
             continue
         side = str(raw_side or '').lower()
@@ -2145,7 +2153,7 @@ def _load_position_entry_time_fallback_from_fills(
         if latest_buy_ts_ms > 0 and latest_sell_ts_ms > 0:
             break
 
-    if latest_buy_ts_ms <= 0 or latest_buy_ts_ms < latest_sell_ts_ms:
+    if latest_buy_ts_ms <= 0 or latest_buy_ts_ms <= latest_sell_ts_ms:
         return None
 
     now_ms = int(time.time() * 1000)
@@ -2155,6 +2163,88 @@ def _load_position_entry_time_fallback_from_fills(
         'latest_entry_ts': _format_dashboard_ts_ms(latest_buy_ts_ms),
         'latest_entry_ts_ms': latest_buy_ts_ms,
         'entry_source': 'fills_latest_buy_fallback',
+        'position_age_seconds': max(0, int((now_ms - latest_buy_ts_ms) / 1000)),
+    }
+
+
+def _load_position_entry_time_fallback_from_orders(
+    symbol: str,
+    orders_db: Optional[Path] = None,
+) -> Optional[Dict[str, Any]]:
+    """Return the newest still-open FILLED buy time while fills ingestion catches up."""
+    base_symbol = str(symbol or '').split('/')[0].split('-')[0].upper()
+    inst_id = _to_inst_id(base_symbol)
+    if orders_db is None:
+        orders_db = REPORTS_DIR / 'orders.sqlite'
+    if not orders_db.exists() or not inst_id:
+        return None
+
+    try:
+        conn = sqlite3.connect(str(orders_db))
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT side, created_ts, updated_ts, last_query_json, ack_json
+            FROM orders
+            WHERE inst_id = ? AND UPPER(state) = 'FILLED'
+            ORDER BY COALESCE(NULLIF(updated_ts, 0), created_ts) DESC
+            LIMIT 200
+            """,
+            (inst_id,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+    except Exception:
+        return None
+
+    def order_event_ts_ms(
+        created_ts: Any,
+        updated_ts: Any,
+        last_query_json: Any,
+        ack_json: Any,
+    ) -> int:
+        for raw_payload, keys in (
+            (last_query_json, ('fillTime', 'uTime', 'cTime')),
+            (ack_json, ('ts',)),
+        ):
+            try:
+                payload = json.loads(str(raw_payload or ''))
+                data = payload.get('data') if isinstance(payload, dict) else None
+                first = data[0] if isinstance(data, list) and data else {}
+                if not isinstance(first, dict):
+                    continue
+                for key in keys:
+                    value = _normalize_fill_ts_ms(first.get(key))
+                    if value > 0:
+                        return value
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+        return _fill_event_ts_ms(created_ts, updated_ts)
+
+    latest_buy_ts_ms = 0
+    latest_sell_ts_ms = 0
+    for raw_side, created_ts, updated_ts, last_query_json, ack_json in rows:
+        event_ts_ms = order_event_ts_ms(created_ts, updated_ts, last_query_json, ack_json)
+        if event_ts_ms <= 0:
+            continue
+        side = str(raw_side or '').lower()
+        if side == 'buy' and latest_buy_ts_ms <= 0:
+            latest_buy_ts_ms = event_ts_ms
+        elif side == 'sell' and latest_sell_ts_ms <= 0:
+            latest_sell_ts_ms = event_ts_ms
+        if latest_buy_ts_ms > 0 and latest_sell_ts_ms > 0:
+            break
+
+    if latest_buy_ts_ms <= 0 or latest_buy_ts_ms <= latest_sell_ts_ms:
+        return None
+
+    now_ms = int(time.time() * 1000)
+    return {
+        'entry_ts': _format_dashboard_ts_ms(latest_buy_ts_ms),
+        'entry_ts_ms': latest_buy_ts_ms,
+        'latest_entry_ts': _format_dashboard_ts_ms(latest_buy_ts_ms),
+        'latest_entry_ts_ms': latest_buy_ts_ms,
+        'entry_source': 'orders_latest_buy_fallback',
         'position_age_seconds': max(0, int((now_ms - latest_buy_ts_ms) / 1000)),
     }
 
@@ -5335,9 +5425,20 @@ def api_positions():
                     if value not in (None, ''):
                         p[key] = value
             if not p.get('entry_ts') and not p.get('entry_ts_ms'):
-                fallback_metadata = _load_position_entry_time_fallback_from_fills(
-                    symbol,
-                    fills_db=runtime_paths.fills_db,
+                fallback_candidates = [
+                    _load_position_entry_time_fallback_from_orders(
+                        symbol,
+                        orders_db=runtime_paths.orders_db,
+                    ),
+                    _load_position_entry_time_fallback_from_fills(
+                        symbol,
+                        fills_db=runtime_paths.fills_db,
+                    ),
+                ]
+                fallback_metadata = max(
+                    (item for item in fallback_candidates if item),
+                    key=lambda item: int(item.get('entry_ts_ms') or 0),
+                    default=None,
                 )
                 if fallback_metadata:
                     for key in (
