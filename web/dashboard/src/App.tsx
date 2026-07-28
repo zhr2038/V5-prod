@@ -183,7 +183,8 @@ function mergeDeferredDashboard(prev: DashboardData | null, deferred: Partial<Da
 function quantLabSymbol(symbol?: string) {
   const text = String(symbol || '').trim().toUpperCase();
   if (!text) return '';
-  return text.replace('/', '-').replace('_', '-');
+  const normalized = text.replace('/', '-').replace('_', '-');
+  return normalized.includes('-') ? normalized : `${normalized}-USDT`;
 }
 
 function tradeTimeValue(trade: Trade) {

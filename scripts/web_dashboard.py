@@ -9092,9 +9092,10 @@ def api_quant_lab_live_permission_detail():
 @_cache_json_response(12.0)
 def api_quant_lab_cost_estimate():
     try:
-        symbol = str(request.args.get('symbol') or '').strip().upper()
-        if not symbol:
+        requested_symbol = str(request.args.get('symbol') or '').strip().upper()
+        if not requested_symbol:
             return jsonify(_quant_lab_proxy_degraded('symbol_required', path='/v1/costs/estimate'))
+        symbol = _normalize_dashboard_symbol(requested_symbol).replace('/', '-')
         regime = str(request.args.get('regime') or 'normal').strip() or 'normal'
         quantile = str(request.args.get('quantile') or 'p75').strip() or 'p75'
         try:

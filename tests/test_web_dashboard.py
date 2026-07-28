@@ -596,6 +596,51 @@ def test_quant_lab_cost_estimate_route_is_local_proxy(monkeypatch):
     assert captured["params"]["notional_usdt"] == 15.82
 
 
+def test_quant_lab_cost_estimate_route_normalizes_base_symbol(monkeypatch):
+    module = load_web_dashboard_module()
+    module._QUANT_LAB_PROXY_CACHE.clear()
+    captured = {}
+
+    class Response:
+        status_code = 200
+        text = '{"symbol":"BTC-USDT"}'
+
+        def json(self):
+            return {
+                "symbol": "BTC-USDT",
+                "regime": "normal",
+                "total_cost_bps": 1.25,
+                "cost_source": "actual_fills",
+            }
+
+    def fake_get(url, *, params=None, headers=None, timeout=None):
+        captured["params"] = params
+        return Response()
+
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "quant_lab": {
+                "enabled": True,
+                "mode": "shadow",
+                "base_url": "http://qyun2.hrhome.top:8027",
+                "timeout_seconds": 2.0,
+            }
+        },
+    )
+    monkeypatch.setattr(module.requests, "get", fake_get)
+
+    with module.app.test_client() as client:
+        response = client.get(
+            "/api/quant_lab/cost_estimate?symbol=BTC&regime=normal&notional_usdt=15.7&quantile=p75"
+        )
+
+    assert response.status_code == 200
+    assert captured["params"]["symbol"] == "BTC-USDT"
+    assert captured["params"]["normalized_symbol"] == "BTC-USDT"
+
+
 def test_quant_lab_cost_estimate_route_marks_stale_payload(monkeypatch):
     module = load_web_dashboard_module()
     module._QUANT_LAB_PROXY_CACHE.clear()
