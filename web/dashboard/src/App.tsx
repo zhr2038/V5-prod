@@ -194,6 +194,15 @@ function tradeTimeValue(trade: Trade) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function tradeNotionalUsdt(trade?: Trade | null) {
+  if (!trade) return 0;
+  const providedValue = Math.max(0, Number(trade.value || 0) || 0);
+  if (providedValue > 0) return providedValue;
+  const price = Math.max(0, Number(trade.price || 0) || 0);
+  const qty = Math.max(0, Number(trade.qty || 0) || 0);
+  return price * qty;
+}
+
 function positionFocusFromDashboard(dashboard?: DashboardData | null) {
   const positions = Array.isArray(dashboard?.positions) ? dashboard.positions : [];
   let bestSymbol = '';
@@ -213,6 +222,8 @@ function positionFocusFromDashboard(dashboard?: DashboardData | null) {
 
 function dashboardFocusForQuantLab(dashboard?: DashboardData | null, preferredSymbol?: string) {
   const normalizedPreferred = quantLabSymbol(preferredSymbol);
+  const recentTrades = summarizeTradeOrders(dashboard?.trades)
+    .sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a));
   if (normalizedPreferred) {
     const positions = Array.isArray(dashboard?.positions) ? dashboard.positions : [];
     const matchedPosition = positions.find(
@@ -225,20 +236,24 @@ function dashboardFocusForQuantLab(dashboard?: DashboardData | null, preferredSy
       };
     }
 
-    const matchingTrade = summarizeTradeOrders(dashboard?.trades)
-      .sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a))
+    const matchingTrade = recentTrades
       .find((trade) => quantLabSymbol(trade.symbol) === normalizedPreferred);
+    const matchingNotional = tradeNotionalUsdt(matchingTrade);
+    const fallbackNotional =
+      matchingNotional > 0
+        ? matchingNotional
+        : tradeNotionalUsdt(recentTrades.find((trade) => tradeNotionalUsdt(trade) > 0));
     return {
       symbol: normalizedPreferred,
-      notional_usdt: Math.max(0, Number(matchingTrade?.value || 0) || 0),
+      notional_usdt: fallbackNotional,
     };
   }
 
   const positionFocus = positionFocusFromDashboard(dashboard);
   if (positionFocus) return positionFocus;
-  const latestTrade = summarizeTradeOrders(dashboard?.trades).sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a))[0];
+  const latestTrade = recentTrades[0];
   if (latestTrade?.symbol) {
-    return { symbol: latestTrade.symbol, notional_usdt: Number(latestTrade.value || 0) || 0 };
+    return { symbol: latestTrade.symbol, notional_usdt: tradeNotionalUsdt(latestTrade) };
   }
   return null;
 }
