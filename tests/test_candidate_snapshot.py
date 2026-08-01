@@ -241,6 +241,11 @@ def test_candidate_snapshot_uses_quant_lab_cost_estimates_for_blocked_candidate(
         target_execution_explain=[],
         strategy_signals=[],
         quant_lab={
+            "raw_permission_decision": "ABORT",
+            "raw_permission_status": "ACTIVE_ABORT",
+            "remote_permission_as_of_ts": "2026-05-14T23:59:00Z",
+            "live_block_reasons": ["no_strategy_live_small_ready"],
+            "allowed_live_modes": [],
             "cost_estimates": [
                 {
                     "symbol": "BTC/USDT",
@@ -299,7 +304,12 @@ def test_candidate_snapshot_uses_quant_lab_cost_estimates_for_blocked_candidate(
     assert btc["cost_bootstrap_trusted_for_paper"] is True
     assert btc["cost_bootstrap_trusted_for_live"] is False
     assert btc["cost_bootstrap_next_action"] == "collect strategy live samples before trusted live review"
-    assert btc["allowed_live_modes"] == ["shadow", "paper"]
+    assert btc["quant_lab_permission"] == "ABORT"
+    assert btc["quant_lab_permission_status"] == "ACTIVE_ABORT"
+    assert btc["quant_lab_live_block_reasons"] == ["no_strategy_live_small_ready"]
+    assert btc["risk_permission_as_of_ts"] == "2026-05-14T23:59:00Z"
+    assert btc["risk_permission_source"] == "v5_quant_lab_guard"
+    assert btc["allowed_live_modes"] == []
 
 
 def test_candidate_snapshot_records_all_in_cost_fields_and_entry_gate_floor() -> None:

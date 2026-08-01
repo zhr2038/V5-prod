@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 
-CANDIDATE_SNAPSHOT_SCHEMA_VERSION = "v5.candidate_snapshot.v3"
+CANDIDATE_SNAPSHOT_SCHEMA_VERSION = "v5.candidate_snapshot.v4"
 
 SPECIFIC_STRATEGY_CANDIDATES = {
     "btc_leadership_probe_strict",
@@ -44,6 +44,11 @@ CANDIDATE_SNAPSHOT_FIELDS = (
     "price_observability_reason",
     "regime_state",
     "risk_level",
+    "quant_lab_permission",
+    "quant_lab_permission_status",
+    "quant_lab_live_block_reasons",
+    "risk_permission_as_of_ts",
+    "risk_permission_source",
     "current_position",
     "current_weight",
     "target_weight_raw",
@@ -361,7 +366,9 @@ def build_candidate_snapshot_rows(
     explain_rows = _symbol_map(getattr(audit, "target_execution_explain", []) or [])
     router_decisions = _router_decisions_by_symbol(getattr(audit, "router_decisions", []) or [])
     strategy_lookup = _strategy_signal_lookup(getattr(audit, "strategy_signals", []) or [])
-    quant_lab_costs = _quant_lab_cost_lookup(getattr(audit, "quant_lab", {}) or {})
+    quant_lab_summary = getattr(audit, "quant_lab", {}) or {}
+    quant_lab_costs = _quant_lab_cost_lookup(quant_lab_summary)
+    permission_context = _quant_lab_permission_context(quant_lab_summary)
     symbol_cost_table = dict(symbol_cost_table or {})
     quant_lab_cost_cache = dict(quant_lab_cost_cache or {})
     top_of_book = dict(top_of_book or {})
@@ -744,6 +751,7 @@ def build_candidate_snapshot_rows(
             _nested_get(qlab, ("next_action",)),
         )
         allowed_live_modes = _first(
+            permission_context.get("allowed_live_modes"),
             _nested_get(qlab, ("allowed_live_modes",)),
             _nested_get(qlab, ("live_allowed_modes",)),
         )
@@ -797,6 +805,11 @@ def build_candidate_snapshot_rows(
             **price_observability,
             "regime_state": _string_or_none(regime_state),
             "risk_level": _string_or_none(risk_level),
+            "quant_lab_permission": permission_context.get("permission"),
+            "quant_lab_permission_status": permission_context.get("permission_status"),
+            "quant_lab_live_block_reasons": permission_context.get("live_block_reasons"),
+            "risk_permission_as_of_ts": permission_context.get("as_of_ts"),
+            "risk_permission_source": permission_context.get("source"),
             "current_position": current_position,
             "current_weight": current_weight,
             "target_weight_raw": target_raw,
@@ -2067,6 +2080,55 @@ def _nested_get(obj: Any, path: Sequence[str]) -> Any:
         if cur is None:
             return None
     return cur
+
+
+def _quant_lab_permission_context(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    permission = _first(
+        value.get("raw_permission_decision"),
+        value.get("quant_lab_permission"),
+        value.get("permission"),
+    )
+    permission_status = _first(
+        value.get("raw_permission_status"),
+        value.get("remote_permission_status"),
+        value.get("permission_status"),
+    )
+    as_of_ts = _first(
+        value.get("remote_permission_as_of_ts"),
+        value.get("risk_permission_as_of_ts"),
+        value.get("permission_as_of_ts"),
+        value.get("response_ts"),
+    )
+    live_block_reasons = _first(
+        value.get("live_block_reasons"),
+        value.get("quant_lab_live_block_reasons"),
+        value.get("reasons"),
+    )
+    allowed_live_modes = _first(
+        value.get("allowed_live_modes"),
+        value.get("permission_allowed_live_modes"),
+    )
+    if not any(
+        item not in (None, "", [], {})
+        for item in (
+            permission,
+            permission_status,
+            as_of_ts,
+            live_block_reasons,
+            allowed_live_modes,
+        )
+    ):
+        return {}
+    return {
+        "permission": permission,
+        "permission_status": permission_status,
+        "live_block_reasons": live_block_reasons,
+        "allowed_live_modes": allowed_live_modes,
+        "as_of_ts": as_of_ts,
+        "source": "v5_quant_lab_guard",
+    }
 
 
 def _find_nested(obj: Any, key: str) -> Any:

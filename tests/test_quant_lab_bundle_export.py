@@ -937,7 +937,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert fill_bill_reconciliation == []
         assert mismatch_rows[0]["high_issue"] == "true"
         assert manifest["run_summary_invalid"] is True
-        assert manifest["candidate_snapshot_schema_version"] == "v5.candidate_snapshot.v3"
+        assert manifest["candidate_snapshot_schema_version"] == "v5.candidate_snapshot.v4"
         assert manifest["candidate_snapshot_rows"] == 1
         assert manifest["candidate_cost_source_coverage"] == 1.0
         assert manifest["order_lifecycle_schema_version"] == "v5.order_lifecycle.v1"
