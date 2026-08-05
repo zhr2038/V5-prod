@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -582,6 +583,24 @@ class ExecutionConfig(BaseModel):
     kill_switch_path: str = Field(default="reports/kill_switch.json")
     reconcile_status_path: str = Field(default="reports/reconcile_status.json")
     reconcile_failure_state_path: str = Field(default="reports/reconcile_failure_state.json")
+    position_profit_only_exit_guard_enabled: bool = Field(
+        default=False,
+        description="Bind a net-profitable-only automatic sell guard to one existing position",
+    )
+    position_profit_only_exit_guard_symbol: str = Field(
+        default="",
+        description="Position symbol protected by the one-position profit-only exit guard",
+    )
+    position_profit_only_exit_guard_entry_ts: str = Field(
+        default="",
+        description="Exact PositionStore entry_ts anchor; a later position is not protected",
+    )
+    position_profit_only_exit_guard_min_net_bps: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=10000.0,
+        description="Automatic sells require estimated net bps strictly above this threshold",
+    )
 
     # Reconcile behavior (G1)
     reconcile_abs_usdt_tol: float = Field(default=50.0, ge=0, description="USDT drift tolerance used by live preflight reconcile.")
@@ -1300,6 +1319,39 @@ class ExecutionConfig(BaseModel):
         if not out:
             raise ValueError("protect_recovery_allowed_symbols cannot be empty")
         return out
+
+    @field_validator("position_profit_only_exit_guard_symbol")
+    @classmethod
+    def _normalize_position_profit_only_exit_guard_symbol(cls, v: str) -> str:
+        symbol = str(v or "").strip().upper().replace("_", "/").replace("-", "/")
+        if symbol and symbol.count("/") != 1:
+            raise ValueError("execution.position_profit_only_exit_guard_symbol must use BASE/QUOTE format")
+        return symbol
+
+    @model_validator(mode="after")
+    def _validate_position_profit_only_exit_guard(self):
+        if not self.position_profit_only_exit_guard_enabled:
+            return self
+        if not self.position_profit_only_exit_guard_symbol:
+            raise ValueError(
+                "execution.position_profit_only_exit_guard_symbol is required when the guard is enabled"
+            )
+        raw_ts = str(self.position_profit_only_exit_guard_entry_ts or "").strip()
+        if not raw_ts:
+            raise ValueError(
+                "execution.position_profit_only_exit_guard_entry_ts is required when the guard is enabled"
+            )
+        try:
+            parsed_ts = datetime.fromisoformat(raw_ts[:-1] + "+00:00" if raw_ts.endswith("Z") else raw_ts)
+        except ValueError as exc:
+            raise ValueError(
+                "execution.position_profit_only_exit_guard_entry_ts must be an ISO-8601 timestamp"
+            ) from exc
+        if parsed_ts.tzinfo is None:
+            raise ValueError(
+                "execution.position_profit_only_exit_guard_entry_ts must include a timezone"
+            )
+        return self
 
 
     @model_validator(mode="before")

@@ -928,6 +928,185 @@ class LiveExecutionEngine:
         raise SafetyReject(f"rank_exit_missing_router_validation: {o.symbol} reason={reason}")
 
     @staticmethod
+    def _position_profit_only_exit_bypass_reason(reason: str) -> str:
+        """Return the explicit operator/safety reason allowed to bypass the one-position lock."""
+
+        norm = str(reason or "").strip().lower()
+        if not norm:
+            return ""
+        exact = {
+            "emergency_close",
+            "emergency_flatten",
+            "kill_switch",
+            "manual_close",
+            "manual_kill",
+            "manual_kill_switch",
+            "manual_sell",
+            "operator_close",
+            "operator_sell",
+            "position_reconcile_force_close",
+            "reconcile_fail",
+            "reconcile_failure",
+        }
+        if norm in exact:
+            return norm
+        for prefix in (
+            "emergency_",
+            "kill_switch_",
+            "manual_",
+            "operator_",
+            "position_reconcile_",
+        ):
+            if norm.startswith(prefix):
+                return norm
+        return ""
+
+    def _check_position_profit_only_exit_guard(
+        self,
+        o: Order,
+        *,
+        inst_id: str,
+        tob: Optional[Dict[str, Any]],
+    ) -> None:
+        """Fail closed for automatic sells of the configured existing position until net-profitable."""
+
+        if not bool(getattr(self.cfg, "position_profit_only_exit_guard_enabled", False)):
+            return
+        if str(getattr(o, "side", "") or "").strip().lower() != "sell":
+            return
+
+        configured_symbol = str(
+            getattr(self.cfg, "position_profit_only_exit_guard_symbol", "") or ""
+        ).strip()
+        configured_inst_id = symbol_to_inst_id(configured_symbol)
+        anchor_ts = str(
+            getattr(self.cfg, "position_profit_only_exit_guard_entry_ts", "") or ""
+        ).strip()
+        if not configured_inst_id or not anchor_ts:
+            raise SafetyReject(
+                "position_profit_only_exit_guard_invalid_config: symbol and entry_ts are required"
+            )
+        if inst_id != configured_inst_id:
+            return
+
+        meta = dict(getattr(o, "meta", None) or {})
+        reason = str(meta.get("reason") or meta.get("exit_reason") or "").strip()
+        bypass_reason = self._position_profit_only_exit_bypass_reason(reason)
+        if bypass_reason:
+            meta.update(
+                {
+                    "position_profit_only_exit_guard_checked": True,
+                    "position_profit_only_exit_guard_applied": False,
+                    "position_profit_only_exit_guard_decision": "bypass_operator_or_safety_exit",
+                    "position_profit_only_exit_guard_bypass_reason": bypass_reason,
+                    "position_profit_only_exit_guard_symbol": configured_symbol,
+                    "position_profit_only_exit_guard_anchor_entry_ts": anchor_ts,
+                }
+            )
+            o.meta = meta
+            return
+
+        position = self.position_store.get(o.symbol)
+        if position is None or float(getattr(position, "qty", 0.0) or 0.0) <= 0.0:
+            meta.update(
+                {
+                    "position_profit_only_exit_guard_checked": True,
+                    "position_profit_only_exit_guard_applied": True,
+                    "position_profit_only_exit_guard_decision": "block_position_unavailable",
+                    "position_profit_only_exit_guard_symbol": configured_symbol,
+                    "position_profit_only_exit_guard_anchor_entry_ts": anchor_ts,
+                }
+            )
+            o.meta = meta
+            raise SafetyReject(
+                f"position_profit_only_exit_guard_position_unavailable: {o.symbol}"
+            )
+
+        position_entry_ts = str(getattr(position, "entry_ts", "") or "").strip()
+        anchor_dt = _parse_iso_utc(anchor_ts)
+        position_entry_dt = _parse_iso_utc(position_entry_ts)
+        if anchor_dt is None or position_entry_dt is None:
+            meta.update(
+                {
+                    "position_profit_only_exit_guard_checked": True,
+                    "position_profit_only_exit_guard_applied": True,
+                    "position_profit_only_exit_guard_decision": "block_invalid_entry_anchor",
+                    "position_profit_only_exit_guard_symbol": configured_symbol,
+                    "position_profit_only_exit_guard_anchor_entry_ts": anchor_ts,
+                    "position_profit_only_exit_guard_position_entry_ts": position_entry_ts,
+                }
+            )
+            o.meta = meta
+            raise SafetyReject(
+                f"position_profit_only_exit_guard_invalid_entry_anchor: {o.symbol}"
+            )
+
+        if position_entry_dt != anchor_dt:
+            meta.update(
+                {
+                    "position_profit_only_exit_guard_checked": True,
+                    "position_profit_only_exit_guard_applied": False,
+                    "position_profit_only_exit_guard_decision": "anchor_mismatch_future_position",
+                    "position_profit_only_exit_guard_symbol": configured_symbol,
+                    "position_profit_only_exit_guard_anchor_entry_ts": anchor_ts,
+                    "position_profit_only_exit_guard_position_entry_ts": position_entry_ts,
+                }
+            )
+            o.meta = meta
+            return
+
+        entry_px = _safe_float(getattr(position, "avg_px", None))
+        bid_px = _safe_float((tob or {}).get("bid"))
+        min_net_bps = float(
+            getattr(self.cfg, "position_profit_only_exit_guard_min_net_bps", 0.0) or 0.0
+        )
+        fee_bps = float(getattr(self.cfg, "fee_bps", 0.0) or 0.0)
+        slippage_bps = float(getattr(self.cfg, "slippage_bps", 0.0) or 0.0)
+        estimated_roundtrip_cost_bps = 2.0 * (fee_bps + slippage_bps)
+        if entry_px is None or entry_px <= 0.0:
+            decision = "block_entry_price_unavailable"
+            estimated_gross_bps = None
+            estimated_net_bps = None
+        elif bid_px is None or bid_px <= 0.0:
+            decision = "block_submit_bid_unavailable"
+            estimated_gross_bps = None
+            estimated_net_bps = None
+        else:
+            estimated_gross_bps = (float(bid_px) / float(entry_px) - 1.0) * 10000.0
+            estimated_net_bps = float(estimated_gross_bps - estimated_roundtrip_cost_bps)
+            decision = (
+                "allow_strictly_net_profitable"
+                if estimated_net_bps > min_net_bps
+                else "block_not_strictly_net_profitable"
+            )
+
+        context = {
+            "position_profit_only_exit_guard_checked": True,
+            "position_profit_only_exit_guard_applied": True,
+            "position_profit_only_exit_guard_decision": decision,
+            "position_profit_only_exit_guard_symbol": configured_symbol,
+            "position_profit_only_exit_guard_anchor_entry_ts": anchor_ts,
+            "position_profit_only_exit_guard_position_entry_ts": position_entry_ts,
+            "position_profit_only_exit_guard_entry_px": entry_px,
+            "position_profit_only_exit_guard_submit_bid_px": bid_px,
+            "position_profit_only_exit_guard_fee_bps": fee_bps,
+            "position_profit_only_exit_guard_slippage_bps": slippage_bps,
+            "position_profit_only_exit_guard_estimated_roundtrip_cost_bps": estimated_roundtrip_cost_bps,
+            "position_profit_only_exit_guard_estimated_gross_bps": estimated_gross_bps,
+            "position_profit_only_exit_guard_estimated_net_bps": estimated_net_bps,
+            "position_profit_only_exit_guard_min_net_bps": min_net_bps,
+        }
+        meta.update(context)
+        o.meta = meta
+        if decision != "allow_strictly_net_profitable":
+            net_text = "unavailable" if estimated_net_bps is None else f"{estimated_net_bps:.4f}"
+            raise SafetyReject(
+                "position_profit_only_exit_guard_block: "
+                f"{o.symbol} decision={decision} estimated_net_bps={net_text} "
+                f"must_be_strictly_above={min_net_bps:.4f}"
+            )
+
+    @staticmethod
     def _exit_priority_for_reason(reason: str) -> str:
         norm = str(reason or "").strip()
         if not norm:
@@ -1964,6 +2143,7 @@ class LiveExecutionEngine:
             self._check_rank_exit_router_validation(o)
             # Best-effort top-of-book at submit time for entry guard + slippage attribution.
             tob = _public_mid_at_submit(inst_id=inst_id, timeout_sec=2.0)
+            self._check_position_profit_only_exit_guard(o, inst_id=inst_id, tob=tob)
             self._check_open_long_entry_guard(o, inst_id=inst_id, tob=tob)
 
             budget_snapshot = self._snapshot_in_run_budgets()
@@ -2006,6 +2186,9 @@ class LiveExecutionEngine:
             elif error_text.startswith("rank_exit_missing_router_validation"):
                 reject_code = "rank_exit_missing_router_validation"
                 reject_event = "RANK_EXIT_GUARD_BLOCK"
+            elif error_text.startswith("position_profit_only_exit_guard"):
+                reject_code = "POSITION_PROFIT_ONLY_EXIT_GUARD"
+                reject_event = "POSITION_PROFIT_ONLY_EXIT_BLOCK"
             self.order_store.upsert_new(
                 cl_ord_id=clid,
                 run_id=self.run_id,

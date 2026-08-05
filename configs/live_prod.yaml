@@ -423,6 +423,13 @@ execution:
   order_store_path: reports/orders.sqlite
   kill_switch_path: reports/kill_switch.json
   reconcile_status_path: reports/reconcile_status.json
+  # One-position operator lock: this exact BNB position may auto-sell only after
+  # estimated round-trip fees/slippage. A later BNB position has a different
+  # entry_ts and is therefore not affected. Manual emergency/kill/reconcile exits remain available.
+  position_profit_only_exit_guard_enabled: true
+  position_profit_only_exit_guard_symbol: BNB/USDT
+  position_profit_only_exit_guard_entry_ts: "2026-08-05T02:01:09.754896Z"
+  position_profit_only_exit_guard_min_net_bps: 0.0
   reconcile_abs_usdt_tol: 1.0
   okx_exp_time_ms: 1500
   live_arm_env: V5_LIVE_ARM

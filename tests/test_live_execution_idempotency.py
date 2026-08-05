@@ -84,6 +84,50 @@ class FakeOKX:
         return SimpleNamespace(data={"code": "0", "data": rows})
 
 
+def _build_position_profit_only_guard_engine(
+    td: str,
+    *,
+    anchor_entry_ts: str,
+    position_entry_ts: str | None = None,
+) -> tuple[FakeOKX, OrderStore, LiveExecutionEngine]:
+    okx = FakeOKX()
+    okx.balance_by_ccy["BNB"] = {"eq": "1", "availBal": "1", "cashBal": "1", "liab": "0"}
+    store = OrderStore(path=f"{td}/orders.sqlite")
+    positions = PositionStore(path=f"{td}/pos.sqlite")
+    effective_entry_ts = position_entry_ts or anchor_entry_ts
+    positions.upsert_position(
+        Position(
+            symbol="BNB/USDT",
+            qty=0.02,
+            avg_px=600.0,
+            entry_ts=effective_entry_ts,
+            highest_px=605.0,
+            last_update_ts=effective_entry_ts,
+            last_mark_px=600.0,
+            unrealized_pnl_pct=0.0,
+            tags_json="{}",
+        )
+    )
+    cfg = ExecutionConfig(
+        reconcile_status_path=f"{td}/reconcile_status.json",
+        kill_switch_path=f"{td}/kill_switch.json",
+        fee_bps=10.0,
+        slippage_bps=5.0,
+        position_profit_only_exit_guard_enabled=True,
+        position_profit_only_exit_guard_symbol="BNB/USDT",
+        position_profit_only_exit_guard_entry_ts=anchor_entry_ts,
+        position_profit_only_exit_guard_min_net_bps=0.0,
+    )
+    engine = LiveExecutionEngine(
+        cfg,
+        okx=okx,
+        order_store=store,
+        position_store=positions,
+        run_id="profit-lock-test",
+    )
+    return okx, store, engine
+
+
 @pytest.mark.parametrize(
     ("symbol", "expected"),
     [
@@ -1167,6 +1211,130 @@ def test_live_execution_allows_emergency_swing_exit_before_min_hold() -> None:
 
         assert result.state in {"OPEN", "FILLED"}
         assert okx.place_calls == 1
+
+
+def test_position_profit_only_exit_guard_config_requires_position_anchor() -> None:
+    with pytest.raises(ValueError, match="position_profit_only_exit_guard_symbol is required"):
+        ExecutionConfig(position_profit_only_exit_guard_enabled=True)
+
+
+def test_position_profit_only_exit_guard_blocks_automatic_loss_exit_at_submit_bid() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        entry_ts = "2026-08-05T02:01:09.754896Z"
+        okx, store, eng = _build_position_profit_only_guard_engine(
+            td,
+            anchor_entry_ts=entry_ts,
+        )
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "src.execution.live_execution_engine._public_mid_at_submit",
+                lambda **kwargs: {"bid": 599.0, "ask": 600.0, "mid": 599.5, "ts_ms": 1},
+            )
+            result = eng.place(
+                Order(
+                    symbol="BNB/USDT",
+                    side="sell",
+                    intent="CLOSE_LONG",
+                    notional_usdt=12.0,
+                    signal_price=610.0,
+                    meta={"decision_hash": "profit-lock-block-loss", "reason": "fixed_stop_loss"},
+                )
+            )
+
+        row = store.get(result.cl_ord_id)
+        req = json.loads(row.req_json)
+        guard_meta = req["_v5_order_meta"]
+        assert result.state == "REJECTED"
+        assert okx.place_calls == 0
+        assert row.last_error_code == "POSITION_PROFIT_ONLY_EXIT_GUARD"
+        assert guard_meta["position_profit_only_exit_guard_decision"] == "block_not_strictly_net_profitable"
+        assert guard_meta["position_profit_only_exit_guard_submit_bid_px"] == 599.0
+        assert guard_meta["position_profit_only_exit_guard_estimated_roundtrip_cost_bps"] == 30.0
+        assert guard_meta["position_profit_only_exit_guard_estimated_net_bps"] == pytest.approx(-46.6667, abs=0.001)
+
+
+def test_position_profit_only_exit_guard_allows_only_strict_net_profit() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        entry_ts = "2026-08-05T02:01:09.754896Z"
+        okx, store, eng = _build_position_profit_only_guard_engine(
+            td,
+            anchor_entry_ts=entry_ts,
+        )
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "src.execution.live_execution_engine._public_mid_at_submit",
+                lambda **kwargs: {"bid": 602.0, "ask": 602.2, "mid": 602.1, "ts_ms": 1},
+            )
+            result = eng.place(
+                Order(
+                    symbol="BNB/USDT",
+                    side="sell",
+                    intent="CLOSE_LONG",
+                    notional_usdt=12.0,
+                    signal_price=610.0,
+                    meta={"decision_hash": "profit-lock-allow-profit", "reason": "fixed_stop_loss"},
+                )
+            )
+
+        row = store.get(result.cl_ord_id)
+        req = json.loads(row.req_json)
+        guard_meta = req["_v5_order_meta"]
+        assert result.state in {"OPEN", "FILLED"}
+        assert okx.place_calls == 1
+        assert guard_meta["position_profit_only_exit_guard_decision"] == "allow_strictly_net_profitable"
+        assert guard_meta["position_profit_only_exit_guard_estimated_net_bps"] == pytest.approx(3.3333, abs=0.001)
+
+
+@pytest.mark.parametrize(
+    ("anchor_entry_ts", "position_entry_ts", "reason", "expected_decision"),
+    [
+        (
+            "2026-08-05T02:01:09.754896Z",
+            "2026-08-06T02:01:09.754896Z",
+            "fixed_stop_loss",
+            "anchor_mismatch_future_position",
+        ),
+        (
+            "2026-08-05T02:01:09.754896Z",
+            "2026-08-05T02:01:09.754896Z",
+            "manual_close",
+            "bypass_operator_or_safety_exit",
+        ),
+    ],
+)
+def test_position_profit_only_exit_guard_does_not_lock_future_or_manual_exit(
+    anchor_entry_ts: str,
+    position_entry_ts: str,
+    reason: str,
+    expected_decision: str,
+) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx, store, eng = _build_position_profit_only_guard_engine(
+            td,
+            anchor_entry_ts=anchor_entry_ts,
+            position_entry_ts=position_entry_ts,
+        )
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "src.execution.live_execution_engine._public_mid_at_submit",
+                lambda **kwargs: {"bid": 590.0, "ask": 590.2, "mid": 590.1, "ts_ms": 1},
+            )
+            result = eng.place(
+                Order(
+                    symbol="BNB/USDT",
+                    side="sell",
+                    intent="CLOSE_LONG",
+                    notional_usdt=12.0,
+                    signal_price=590.0,
+                    meta={"decision_hash": f"profit-lock-{expected_decision}", "reason": reason},
+                )
+            )
+
+        row = store.get(result.cl_ord_id)
+        req = json.loads(row.req_json)
+        assert result.state in {"OPEN", "FILLED"}
+        assert okx.place_calls == 1
+        assert req["_v5_order_meta"]["position_profit_only_exit_guard_decision"] == expected_decision
 
 
 def test_live_execution_allows_atr_swing_exit_after_min_hold() -> None:
