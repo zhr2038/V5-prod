@@ -428,7 +428,7 @@ execution:
   # entry_ts and is therefore not affected. Manual emergency/kill/reconcile exits remain available.
   position_profit_only_exit_guard_enabled: true
   position_profit_only_exit_guard_symbol: BNB/USDT
-  position_profit_only_exit_guard_entry_ts: "2026-08-05T02:01:09.754896Z"
+  position_profit_only_exit_guard_entry_ts: "2026-08-08T17:01:54.695976Z"
   position_profit_only_exit_guard_min_net_bps: 0.0
   reconcile_abs_usdt_tol: 1.0
   okx_exp_time_ms: 1500
