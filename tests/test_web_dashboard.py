@@ -108,6 +108,15 @@ def test_react_dashboard_labels_bounded_rows_ranges_and_cost_times_truthfully():
     assert ".top-command-warning" in css
 
 
+def test_react_kline_volume_bars_follow_candle_direction():
+    positions = POSITIONS_PANEL_TSX_PATH.read_text(encoding="utf-8")
+
+    assert 'id="volumeFillUp"' in positions
+    assert 'id="volumeFillDown"' in positions
+    assert "candle.close >= candle.open ? 'url(#volumeFillUp)' : 'url(#volumeFillDown)'" in positions
+    assert "Vol <tspan fill={hoverUp ? 'var(--kline-candle-up)' : 'var(--kline-candle-down)'}>" in positions
+
+
 def test_status_ribbon_formats_market_volatility_as_percent_points():
     source = STATUS_RIBBON_TSX_PATH.read_text(encoding="utf-8")
 

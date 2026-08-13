@@ -233,9 +233,13 @@ function CandlestickSvg({
       aria-label="Interactive candlestick chart"
     >
       <defs>
-        <linearGradient id="volumeFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="rgba(126, 236, 205, 0.62)" />
-          <stop offset="100%" stopColor="rgba(126, 236, 205, 0.12)" />
+        <linearGradient id="volumeFillUp" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--kline-candle-up)" stopOpacity={0.72} />
+          <stop offset="100%" stopColor="var(--kline-candle-up)" stopOpacity={0.16} />
+        </linearGradient>
+        <linearGradient id="volumeFillDown" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--kline-candle-down)" stopOpacity={0.72} />
+          <stop offset="100%" stopColor="var(--kline-candle-down)" stopOpacity={0.16} />
         </linearGradient>
       </defs>
       {hoveredCandle ? (
@@ -279,7 +283,7 @@ function CandlestickSvg({
             y={volTop}
             width={bodyWidth}
             height={Math.max(1, volumeBaseY - volTop)}
-            fill="url(#volumeFill)"
+            fill={candle.close >= candle.open ? 'url(#volumeFillUp)' : 'url(#volumeFillDown)'}
             opacity={0.88}
             rx={1.2}
           />
@@ -579,7 +583,7 @@ function CandlestickSvg({
               <tspan dx="10">C </tspan><tspan fill="var(--kline-tooltip-text)">{formatAxisPrice(hoveredCandle.close)}</tspan>
             </text>
             <text x={hoverTooltipX + 12} y={hoverTooltipY + 74} fill="var(--kline-axis-muted)" fontSize="10">
-              Vol <tspan fill="var(--kline-tooltip-text)">{formatCompactVolume(Number(hoveredCandle.volume || 0))}</tspan>
+              Vol <tspan fill={hoverUp ? 'var(--kline-candle-up)' : 'var(--kline-candle-down)'}>{formatCompactVolume(Number(hoveredCandle.volume || 0))}</tspan>
               <tspan dx="10">Chg </tspan>
               <tspan fill={hoverUp ? 'var(--kline-candle-up)' : 'var(--kline-candle-down)'}>
                 {fmtPct(hoverChangePct, 2)}
