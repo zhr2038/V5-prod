@@ -10869,6 +10869,93 @@ def test_api_trades_converts_live_base_fee_to_signed_usdt(monkeypatch, tmp_path)
     assert payload["trades"][0]["fee"] == pytest.approx(-5.0)
 
 
+def test_api_trades_uses_synced_fills_when_okx_recent_window_is_empty(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setenv("V5_DASHBOARD_ALLOW_LIVE_OKX", "1")
+    monkeypatch.setenv("EXCHANGE_API_KEY", "k")
+    monkeypatch.setenv("EXCHANGE_API_SECRET", "s")
+    monkeypatch.setenv("EXCHANGE_PASSPHRASE", "p")
+
+    event_ts_ms = int(
+        datetime(2026, 8, 11, 13, 56, 9, tzinfo=timezone.utc).timestamp() * 1000
+    )
+    created_ts_ms = event_ts_ms + 4 * 60 * 1000
+    conn = sqlite3.connect(str(tmp_path / "fills.sqlite"))
+    conn.execute(
+        """
+        CREATE TABLE fills (
+          inst_id TEXT,
+          trade_id TEXT,
+          ts_ms INTEGER,
+          ord_id TEXT,
+          cl_ord_id TEXT,
+          side TEXT,
+          exec_type TEXT,
+          fill_px REAL,
+          fill_sz REAL,
+          fill_notional REAL,
+          fee REAL,
+          fee_ccy TEXT,
+          source TEXT,
+          raw_json TEXT,
+          created_ts_ms INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO fills (
+          inst_id, trade_id, ts_ms, ord_id, cl_ord_id, side, exec_type,
+          fill_px, fill_sz, fill_notional, fee, fee_ccy, source, raw_json,
+          created_ts_ms
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "BNB-USDT",
+            "49126501",
+            event_ts_ms,
+            "3823667437472567296",
+            "",
+            "sell",
+            "trade",
+            611.2,
+            0.02085,
+            None,
+            -0.01274352,
+            "USDT",
+            "fills_pre_route",
+            "{}",
+            created_ts_ms,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(
+        module.requests,
+        "get",
+        lambda *args, **kwargs: _DummyResponse({"code": "0", "data": []}),
+    )
+
+    with module.app.app_context():
+        payload = module.api_trades().get_json()
+
+    assert payload["source"] == "fills_sqlite"
+    assert payload["warnings"] == ["okx_recent_fills_empty"]
+    assert len(payload["trades"]) == 1
+    trade = payload["trades"][0]
+    assert trade["id"] == "49126501"
+    assert trade["trade_id"] == "49126501"
+    assert trade["order_id"] == "3823667437472567296"
+    assert trade["time"] == "2026-08-11 21:56:09"
+    assert trade["qty"] == pytest.approx(0.02085)
+    assert trade["amount"] == pytest.approx(12.7435)
+    assert trade["fee"] == pytest.approx(-0.012744)
+    assert trade["fill_source"] == "fills_pre_route"
+
+
 def test_api_trades_dedupes_live_fill_trade_ids_without_collapsing_roundtrip(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)

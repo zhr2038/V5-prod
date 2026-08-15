@@ -401,6 +401,92 @@ def _aggregate_dashboard_trades_for_display(trades: List[Dict[str, Any]]) -> Lis
     return summaries
 
 
+def _load_dashboard_trades_from_fills_db(
+    fills_db: Path,
+    *,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """Load exchange-event fill truth from the local synchronized fills store."""
+    if not fills_db.exists():
+        return []
+
+    db_uri = f"{fills_db.resolve().as_uri()}?mode=ro"
+    conn = sqlite3.connect(db_uri, uri=True)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                inst_id, trade_id, ord_id, cl_ord_id, side,
+                fill_px, fill_sz, fill_notional, fee, fee_ccy,
+                source, ts_ms, created_ts_ms
+            FROM fills
+            ORDER BY COALESCE(NULLIF(ts_ms, 0), created_ts_ms) DESC,
+                     created_ts_ms DESC,
+                     trade_id DESC
+            LIMIT ?
+            """,
+            (max(1, min(int(limit), 500)),),
+        )
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
+
+    trades: List[Dict[str, Any]] = []
+    for row in rows:
+        try:
+            inst = str(row[0] or '').strip()
+            if (not inst) or (inst in EXCLUDED_SYMBOLS):
+                continue
+            trade_id = str(row[1] or '').strip()
+            order_id = str(row[2] or '').strip()
+            client_order_id = str(row[3] or '').strip()
+            side = str(row[4] or '').strip()
+            price = float(row[5] or 0.0)
+            qty = float(row[6] or 0.0)
+            amount = float(row[7] or 0.0)
+            if amount <= 0 and price > 0 and qty > 0:
+                amount = price * qty
+            event_ts_ms = int(float(row[11] or row[12] or 0))
+            if event_ts_ms <= 0:
+                continue
+            event_time = datetime.fromtimestamp(
+                event_ts_ms / 1000.0,
+                tz=timezone.utc,
+            ).astimezone(CHINA_TZ)
+            fee = _signed_fee_usdt_from_fee_fields(
+                inst,
+                price,
+                row[8],
+                row[9],
+            )
+            trades.append({
+                'id': trade_id or "|".join([
+                    inst,
+                    side,
+                    str(event_ts_ms),
+                    str(round(price, 6)),
+                    str(round(qty, 8)),
+                    order_id,
+                ]),
+                'trade_id': trade_id,
+                'order_id': order_id,
+                'client_order_id': client_order_id,
+                'symbol': inst,
+                'side': side,
+                'price': round(price, 6),
+                'qty': round(qty, 8),
+                'amount': round(amount, 4),
+                'fee': round(fee, 6),
+                'state': 'FILLED',
+                'time': event_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'fill_source': str(row[10] or '').strip(),
+            })
+        except (TypeError, ValueError, OverflowError, OSError):
+            continue
+    return trades
+
+
 def _json_internal_error_response(
     exc: BaseException,
     *,
@@ -4973,10 +5059,12 @@ def api_account():
 @app.route('/api/trades')
 @_cache_json_response(10.0)
 def api_trades():
-    """交易历史API（优先OKX实时成交，回退DB，再回退runs/*/trades.csv）"""
+    """交易历史API（OKX近期成交 -> 本地fills -> 订单库 -> runs CSV）。"""
     try:
         runtime_paths = _resolve_dashboard_runtime_paths(load_config())
         trades = []
+        trade_source = 'none'
+        warnings: List[str] = []
 
         # 0) 优先OKX实时成交
         try:
@@ -5041,10 +5129,27 @@ def api_trades():
                             })
                         except Exception:
                             continue
-        except Exception:
-            pass
+                    if trades:
+                        trade_source = 'okx_live_recent_fills'
+                    else:
+                        warnings.append('okx_recent_fills_empty')
+                else:
+                    warnings.append(f"okx_recent_fills_error:{str(data.get('code') or 'unknown')}")
+            else:
+                warnings.append('okx_recent_fills_disabled_or_credentials_missing')
+        except Exception as exc:
+            warnings.append(f'okx_recent_fills_unavailable:{type(exc).__name__}')
 
-        # 1) 回退订单库
+        # 1) OKX近期窗口为空时，优先使用已同步的真实fill事件。
+        if not trades:
+            try:
+                trades = _load_dashboard_trades_from_fills_db(runtime_paths.fills_db, limit=100)
+                if trades:
+                    trade_source = 'fills_sqlite'
+            except Exception as exc:
+                warnings.append(f'fills_sqlite_unavailable:{type(exc).__name__}')
+
+        # 2) 回退订单库
         if not trades:
             conn = None
             if runtime_paths.orders_db.exists():
@@ -5107,8 +5212,10 @@ def api_trades():
                     except (TypeError, ValueError):
                         continue
                 conn.close()
+                if trades:
+                    trade_source = 'orders_sqlite'
 
-        # 2) 回退 runs/*/trades.csv
+        # 3) 回退 runs/*/trades.csv
         if not trades:
             runs_dir = runtime_paths.runs_dir
             if runs_dir.exists():
@@ -5159,8 +5266,14 @@ def api_trades():
                         continue
                     if len(trades) >= 100:
                         break
+                if trades:
+                    trade_source = 'run_trades_csv'
 
-        return jsonify({'trades': _dedupe_dashboard_trades(trades)[:100]})
+        return jsonify({
+            'trades': _dedupe_dashboard_trades(trades)[:100],
+            'source': trade_source,
+            'warnings': warnings,
+        })
     except Exception as e:
         return _json_internal_error_response(e, trades=[])
 
