@@ -3490,16 +3490,20 @@ def main() -> None:
     try:
         from src.reporting.skipped_candidate_tracker import update_skipped_candidate_tracker
 
-        tracker_result = {"enabled": False, "new_records": 0, "total_records": 0}
-        if _should_update_skipped_candidate_tracker(cfg, out.regime.state, held):
-            tracker_result = update_skipped_candidate_tracker(
-                run_dir=str(runtime_run_dir),
-                audit=audit,
-                market_data_1h=md_1h,
-                cfg=cfg,
-                current_level=pipe._load_current_auto_risk_level(),
-                cache_dir=PROJECT_ROOT / "data" / "cache",
-            )
+        collect_new_candidates = _should_update_skipped_candidate_tracker(
+            cfg,
+            out.regime.state,
+            held,
+        )
+        tracker_result = update_skipped_candidate_tracker(
+            run_dir=str(runtime_run_dir),
+            audit=audit,
+            market_data_1h=md_1h,
+            cfg=cfg,
+            current_level=pipe._load_current_auto_risk_level(),
+            cache_dir=PROJECT_ROOT / "data" / "cache",
+            collect_new_candidates=collect_new_candidates,
+        )
         if tracker_result.get("enabled"):
             log.info(
                 "SKIPPED_CANDIDATE_TRACKER new_records=%s total_records=%s",

@@ -101,6 +101,76 @@ def test_protect_entry_trend_only_skip_is_written(tmp_path: Path) -> None:
     assert rows[0]["label_status"] == "pending"
 
 
+def test_existing_pending_labels_refresh_without_collecting_new_candidates(tmp_path: Path) -> None:
+    initial_run_dir = tmp_path / "reports" / "runs" / "20260819_23"
+    refresh_run_dir = tmp_path / "reports" / "runs" / "20260821_00"
+    initial_run_dir.mkdir(parents=True, exist_ok=True)
+    refresh_run_dir.mkdir(parents=True, exist_ok=True)
+    cfg = AppConfig(symbols=["ETH/USDT"])
+    cfg.diagnostics.skipped_candidate_horizons_hours = [24]
+
+    entry_ts_ms = int(datetime.fromisoformat("2026-08-19T23:00:00+00:00").timestamp() * 1000)
+    initial_audit = DecisionAudit(run_id="20260819_23")
+    initial_audit.now_ts = entry_ts_ms // 1000
+    initial_audit.regime = "Trending"
+    initial_audit.router_decisions = [
+        {
+            "symbol": "ETH/USDT",
+            "action": "skip",
+            "reason": "protect_entry_trend_only",
+            "final_score": 1.0,
+            "latest_px": 100.0,
+            "current_level": "PROTECT",
+        }
+    ]
+    update_skipped_candidate_tracker(
+        run_dir=initial_run_dir,
+        audit=initial_audit,
+        market_data_1h={"ETH/USDT": _series("ETH/USDT", [entry_ts_ms], [100.0])},
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=tmp_path / "data" / "cache",
+    )
+
+    refresh_ts_ms = entry_ts_ms + 25 * 3600 * 1000
+    refresh_audit = DecisionAudit(run_id="20260821_00")
+    refresh_audit.now_ts = refresh_ts_ms // 1000
+    refresh_audit.regime = "RiskOff"
+    refresh_audit.router_decisions = [
+        {
+            "symbol": "ETH/USDT",
+            "action": "skip",
+            "reason": "all_scores_below_threshold",
+            "latest_px": 105.0,
+        }
+    ]
+    result = update_skipped_candidate_tracker(
+        run_dir=refresh_run_dir,
+        audit=refresh_audit,
+        market_data_1h={
+            "ETH/USDT": _series(
+                "ETH/USDT",
+                [entry_ts_ms, entry_ts_ms + 24 * 3600 * 1000, refresh_ts_ms],
+                [100.0, 104.0, 105.0],
+            )
+        },
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=tmp_path / "data" / "cache",
+        collect_new_candidates=False,
+    )
+
+    assert result["collect_new_candidates"] is False
+    assert result["new_records"] == 0
+    assert result["total_records"] == 1
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(rows) == 1
+    assert rows[0]["run_id"] == "20260819_23"
+    assert rows[0]["label_24h_status"] == "complete"
+    assert rows[0]["label_status"] == "complete"
+
+
 def test_btc_leadership_probe_alpha6_score_too_low_skip_is_written(tmp_path: Path) -> None:
     run_dir = tmp_path / "reports" / "runs" / "20260421_05"
     run_dir.mkdir(parents=True, exist_ok=True)

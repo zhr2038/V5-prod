@@ -1117,6 +1117,7 @@ def update_skipped_candidate_tracker(
     current_level: Optional[str],
     cache_dir: str | Path | None = None,
     ohlcv_provider: Any = None,
+    collect_new_candidates: bool = True,
 ) -> dict[str, Any]:
     diagnostics = _diagnostics_cfg(cfg)
     if not bool(getattr(diagnostics, "skipped_candidate_label_enabled", True)):
@@ -1129,11 +1130,15 @@ def update_skipped_candidate_tracker(
     cache_root = Path(cache_dir) if cache_dir is not None else (PROJECT_ROOT / "data" / "cache")
 
     records_by_key = _load_existing_records(labels_path)
-    new_records = _collect_skipped_candidates(
-        audit=audit,
-        cfg=cfg,
-        market_data_1h=market_data_1h,
-        current_level=current_level,
+    new_records = (
+        _collect_skipped_candidates(
+            audit=audit,
+            cfg=cfg,
+            market_data_1h=market_data_1h,
+            current_level=current_level,
+        )
+        if collect_new_candidates
+        else []
     )
     inserted = 0
     for record in new_records:
@@ -1347,6 +1352,7 @@ def update_skipped_candidate_tracker(
 
     return {
         "enabled": True,
+        "collect_new_candidates": bool(collect_new_candidates),
         "new_records": int(inserted),
         "total_records": int(len(records)),
         "high_score_blocked_records": int(len(high_score_records)),
