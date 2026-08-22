@@ -1977,6 +1977,23 @@ def fixture_high_score_blocked_root(root):
                 "label_status": "complete",
                 },
                 {
+                    "ts_utc": iso(window_end + 60),
+                    "run_id": run_id,
+                    "symbol": "ETH/USDT",
+                    "intended_side": "buy",
+                    "skip_reason": "protect_entry_trend_only",
+                    "high_score_blocked_target": True,
+                    "high_score_block_category": "trend_only",
+                    "final_score": 1.0,
+                    "target_w": 0.15,
+                    "entry_px": 125.0,
+                    "rt_cost_bps": 30.0,
+                    "current_level": "PROTECT",
+                    "regime": "Trending",
+                    "label_4h_status": "pending",
+                    "label_status": "pending",
+                },
+                {
                     "ts_utc": iso(window_end),
                     "run_id": run_id,
                     "symbol": "ETH/USDT",
@@ -3522,11 +3539,19 @@ def fixture_market_impulse_selection_shadow_root(root):
             "active": True,
             "trend_buy_count": 3,
             "btc_trend_score": 0.90,
+            "selection_mode": "composite",
+            "execution_mode": "live_probe_enabled",
+            "feature_enabled": True,
+            "configured_live_enabled": True,
+            "forward_test_live_ready": True,
+            "live_enabled": True,
+            "live_disabled_reason": None,
             "selected_live": "BTC/USDT",
             "selected_by_priority": "BTC/USDT",
             "selected_by_trend_score": "ETH/USDT",
             "selected_by_alpha6_confirmed": "SOL/USDT",
             "selected_by_expected_net_shadow": "ETH/USDT",
+            "selected_by_composite": "ETH/USDT",
             "candidates": [
                 {"symbol": "BTC/USDT", "trend_score": 0.90, "priority_rank": 0},
                 {"symbol": "ETH/USDT", "trend_score": 1.00, "priority_rank": 1, "expected_net_bps": 25.0},
@@ -4994,6 +5019,7 @@ def main():
             complete = next(item for item in outcome_rows if item["skip_reason"] == "protect_entry_trend_only")
             pending = next(item for item in outcome_rows if item["skip_reason"] == "protect_entry_no_alpha6_confirmation")
             assert complete["symbol"] == "ETH/USDT", outcome_rows
+            assert float(complete["entry_px"]) == 100.0, outcome_rows
             assert complete["label_4h_net_bps"] == "70.0", outcome_rows
             assert complete["label_status"] == "complete", outcome_rows
             assert pending["label_status"] == "pending", outcome_rows
@@ -5957,6 +5983,13 @@ def main():
             assert row["selected_by_trend_score"] == "ETH/USDT", row
             assert row["selected_by_alpha6_confirmed"] == "SOL/USDT", row
             assert row["selected_by_expected_net_shadow"] == "ETH/USDT", row
+            assert row["selected_by_composite"] == "ETH/USDT", row
+            assert row["execution_mode"] == "live_probe_enabled", row
+            assert row["feature_enabled"] == "true", row
+            assert row["configured_live_enabled"] == "true", row
+            assert row["forward_test_live_ready"] == "true", row
+            assert row["live_enabled"] == "true", row
+            assert row["live_disabled_reason"] == "not_observable", row
             assert "ETH/USDT" in row["candidates_json"], row
             assert window["market_impulse_selection_shadow_rows"] == 1, window
         finally:

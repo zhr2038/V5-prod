@@ -3104,11 +3104,21 @@ class V5Pipeline:
         candidates: List[Dict[str, Any]],
         selection_mode: str,
     ) -> Dict[str, Any]:
+        feature_enabled = bool(getattr(self.cfg.execution, "market_impulse_probe_enabled", True))
+        configured_live_enabled = bool(getattr(self.cfg.execution, "market_impulse_probe_live_enabled", False))
+        forward_test_live_ready = self._market_impulse_probe_forward_test_live_ready()
+        live_enabled = self._market_impulse_probe_effective_live_enabled()
         return {
             "active": bool(active),
             "trend_buy_count": int(trend_buy_count or 0),
             "btc_trend_score": btc_trend_score,
             "selection_mode": selection_mode,
+            "execution_mode": "live_probe_enabled" if live_enabled else "shadow_only",
+            "feature_enabled": feature_enabled,
+            "configured_live_enabled": configured_live_enabled,
+            "forward_test_live_ready": forward_test_live_ready,
+            "live_enabled": live_enabled,
+            "live_disabled_reason": self._market_impulse_probe_live_disabled_reason(),
             "selected_live": None,
             "selected_by_priority": self._market_impulse_probe_select_symbol(candidates, "priority"),
             "selected_by_trend_score": self._market_impulse_probe_select_symbol(candidates, "trend_score"),
@@ -3151,11 +3161,7 @@ class V5Pipeline:
                 "live_enabled": bool(live_enabled),
                 "configured_live_enabled": bool(configured_live_enabled),
                 "forward_test_live_ready": bool(forward_test_live_ready),
-                "live_disabled_reason": (
-                    "market_impulse_probe_forward_test_not_ready"
-                    if configured_live_enabled and not forward_test_live_ready
-                    else None
-                ),
+                "live_disabled_reason": self._market_impulse_probe_live_disabled_reason(),
             }
             if shadow_enabled:
                 payload["shadow_selection"] = self._market_impulse_probe_shadow_selection(
@@ -3235,11 +3241,7 @@ class V5Pipeline:
             "live_enabled": bool(live_enabled),
             "configured_live_enabled": bool(configured_live_enabled),
             "forward_test_live_ready": bool(forward_test_live_ready),
-            "live_disabled_reason": (
-                "market_impulse_probe_forward_test_not_ready"
-                if configured_live_enabled and not forward_test_live_ready
-                else None
-            ),
+            "live_disabled_reason": self._market_impulse_probe_live_disabled_reason(),
         }
         if shadow_enabled:
             payload["shadow_selection"] = self._market_impulse_probe_shadow_selection(
@@ -3256,9 +3258,20 @@ class V5Pipeline:
             getattr(self.cfg.execution, "market_impulse_probe_forward_test_live_ready", False)
         )
 
+    def _market_impulse_probe_live_disabled_reason(self) -> Optional[str]:
+        if not bool(getattr(self.cfg.execution, "market_impulse_probe_enabled", True)):
+            return "market_impulse_probe_feature_disabled"
+        if not bool(getattr(self.cfg.execution, "market_impulse_probe_live_enabled", False)):
+            return "market_impulse_probe_live_disabled_by_config"
+        if not self._market_impulse_probe_forward_test_live_ready():
+            return "market_impulse_probe_forward_test_not_ready"
+        return None
+
     def _market_impulse_probe_effective_live_enabled(self) -> bool:
-        return bool(getattr(self.cfg.execution, "market_impulse_probe_live_enabled", False)) and (
-            self._market_impulse_probe_forward_test_live_ready()
+        return (
+            bool(getattr(self.cfg.execution, "market_impulse_probe_enabled", True))
+            and bool(getattr(self.cfg.execution, "market_impulse_probe_live_enabled", False))
+            and self._market_impulse_probe_forward_test_live_ready()
         )
 
     def _market_impulse_probe_quality_filter_decision(

@@ -132,6 +132,20 @@ def test_existing_pending_labels_refresh_without_collecting_new_candidates(tmp_p
         cache_dir=tmp_path / "data" / "cache",
     )
 
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    first_record = json.loads(labels_path.read_text(encoding="utf-8").splitlines()[0])
+    duplicate = dict(first_record)
+    duplicate["ts_utc"] = "2026-08-20T07:00:00Z"
+    duplicate["entry_ts_ms"] = int(
+        datetime.fromisoformat("2026-08-20T07:00:00+00:00").timestamp() * 1000
+    )
+    duplicate["entry_px"] = 125.0
+    duplicate["label_status"] = "not_observable"
+    duplicate["label_24h_status"] = "not_observable"
+    duplicate["label_24h_reason"] = "missing_future_px"
+    with labels_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(duplicate) + "\n")
+
     refresh_ts_ms = entry_ts_ms + 25 * 3600 * 1000
     refresh_audit = DecisionAudit(run_id="20260821_00")
     refresh_audit.now_ts = refresh_ts_ms // 1000
@@ -163,10 +177,10 @@ def test_existing_pending_labels_refresh_without_collecting_new_candidates(tmp_p
     assert result["collect_new_candidates"] is False
     assert result["new_records"] == 0
     assert result["total_records"] == 1
-    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
     rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(rows) == 1
     assert rows[0]["run_id"] == "20260819_23"
+    assert rows[0]["entry_px"] == 100.0
     assert rows[0]["label_24h_status"] == "complete"
     assert rows[0]["label_status"] == "complete"
 

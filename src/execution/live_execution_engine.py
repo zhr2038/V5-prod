@@ -1469,20 +1469,36 @@ class LiveExecutionEngine:
             tags = _safe_json_obj(getattr(position, "tags_json", "{}"))
             self._set_meta_if_missing(meta, "entry_px", getattr(position, "avg_px", None))
 
-        swing_entry_ts = (
-            meta.get("swing_entry_ts")
-            or tags.get("swing_entry_ts")
-            or tags.get("entry_ts")
-            or (getattr(position, "entry_ts", None) if position is not None else None)
-        )
-        self._set_meta_if_missing(meta, "swing_entry_ts", swing_entry_ts)
-
-        swing_hold_position = bool(
+        explicit_swing_entry_ts = meta.get("swing_entry_ts") or tags.get("swing_entry_ts")
+        meta_swing_flag = (
             _to_bool(meta.get("swing_hold_position"))
-            or _to_bool(tags.get("swing_hold_position"))
-            or swing_entry_ts is not None
+            if meta.get("swing_hold_position") not in (None, "")
+            else None
         )
+        tag_swing_flag = (
+            _to_bool(tags.get("swing_hold_position"))
+            if tags.get("swing_hold_position") not in (None, "")
+            else None
+        )
+        if meta_swing_flag is not None:
+            swing_hold_position = bool(meta_swing_flag)
+        elif tag_swing_flag is not None:
+            swing_hold_position = bool(tag_swing_flag)
+        else:
+            # Legacy swing positions may only carry swing_entry_ts.  A normal
+            # position entry_ts is not sufficient evidence that the entry was
+            # admitted by the swing router.
+            swing_hold_position = explicit_swing_entry_ts is not None
         self._set_meta_if_missing(meta, "swing_hold_position", swing_hold_position)
+
+        swing_entry_ts = None
+        if swing_hold_position:
+            swing_entry_ts = (
+                explicit_swing_entry_ts
+                or tags.get("entry_ts")
+                or (getattr(position, "entry_ts", None) if position is not None else None)
+            )
+            self._set_meta_if_missing(meta, "swing_entry_ts", swing_entry_ts)
 
         min_hold_hours = _safe_float(
             meta.get("swing_min_hold_hours")
@@ -1490,15 +1506,22 @@ class LiveExecutionEngine:
             or tags.get("swing_min_hold_hours")
             or getattr(self.cfg, "swing_min_hold_hours", None)
         )
-        self._set_meta_if_missing(meta, "swing_min_hold_hours", min_hold_hours)
+        if swing_hold_position:
+            self._set_meta_if_missing(meta, "swing_min_hold_hours", min_hold_hours)
 
         hold_hours = _safe_float(meta.get("hold_hours") or meta.get("held_hours"))
         if hold_hours is None:
-            entry_dt = _parse_iso_utc(swing_entry_ts)
+            attribution_entry_ts = (
+                swing_entry_ts
+                or meta.get("entry_ts")
+                or tags.get("entry_ts")
+                or (getattr(position, "entry_ts", None) if position is not None else None)
+            )
+            entry_dt = _parse_iso_utc(attribution_entry_ts)
             if entry_dt is not None:
                 hold_hours = max(0.0, (datetime.now(timezone.utc) - entry_dt).total_seconds() / 3600.0)
         self._set_meta_if_missing(meta, "hold_hours", hold_hours)
-        if hold_hours is not None and min_hold_hours is not None:
+        if swing_hold_position and hold_hours is not None and min_hold_hours is not None:
             self._set_meta_if_missing(meta, "exited_before_min_hold", float(hold_hours) < float(min_hold_hours))
 
         max_unrealized_bps = _safe_float(

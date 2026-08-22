@@ -4190,11 +4190,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "active": str(bool(market_shadow.get("active"))).lower(),
                 "trend_buy_count": first_observed(market_shadow.get("trend_buy_count")),
                 "btc_trend_score": first_observed(market_shadow.get("btc_trend_score")),
+                "selection_mode": first_observed(market_shadow.get("selection_mode")),
+                "execution_mode": first_observed(market_shadow.get("execution_mode")),
+                "feature_enabled": bool_text(market_shadow.get("feature_enabled")),
+                "configured_live_enabled": bool_text(market_shadow.get("configured_live_enabled")),
+                "forward_test_live_ready": bool_text(market_shadow.get("forward_test_live_ready")),
+                "live_enabled": bool_text(market_shadow.get("live_enabled")),
+                "live_disabled_reason": first_observed(market_shadow.get("live_disabled_reason")),
                 "selected_live": first_observed(market_shadow.get("selected_live")),
                 "selected_by_priority": first_observed(market_shadow.get("selected_by_priority")),
                 "selected_by_trend_score": first_observed(market_shadow.get("selected_by_trend_score")),
                 "selected_by_alpha6_confirmed": first_observed(market_shadow.get("selected_by_alpha6_confirmed")),
                 "selected_by_expected_net_shadow": first_observed(market_shadow.get("selected_by_expected_net_shadow")),
+                "selected_by_composite": first_observed(market_shadow.get("selected_by_composite")),
+                "live_missed_eth_by_trend_score": bool_text(market_shadow.get("live_missed_eth_by_trend_score")),
                 "candidates_json": safe_json(market_shadow.get("candidates") or []),
             })
         for item in audit.get("target_execution_explain") or []:
@@ -6381,16 +6390,23 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         category = flatten_value(row.get("high_score_block_category"))
         return bool(category and category != not_obs and as_float(row.get("final_score")) is not None)
 
-    high_score_outcome_by_key = {}
+    def high_score_outcome_identity_key(row):
+        return (
+            flatten_value(first_value(row, ("run_id",), not_obs)) or not_obs,
+            flatten_value(first_value(row, ("symbol", "instId"), not_obs)) or not_obs,
+            high_score_reason_text(row) or not_obs,
+        )
+
+    high_score_outcome_by_identity = {}
     for row in list(label_rows) + list(outcome_rows):
         if not is_high_score_blocked_outcome_source(row):
             continue
-        key = btc_label_row_key(row)
+        key = high_score_outcome_identity_key(row)
         if not key or any(part == not_obs for part in key):
             continue
-        existing = high_score_outcome_by_key.get(key)
+        existing = high_score_outcome_by_identity.get(key)
         if existing is None or status_rank(row) > status_rank(existing):
-            high_score_outcome_by_key[key] = row
+            high_score_outcome_by_identity[key] = row
 
     def high_score_outcome_field_value(row, field):
         value = first_value(row, (field,), not_obs)
@@ -6399,7 +6415,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         return first_observed(value)
 
     high_score_blocked_outcome_rows = []
-    for row in high_score_outcome_by_key.values():
+    for row in high_score_outcome_by_identity.values():
         high_score_blocked_outcome_rows.append({
             field: high_score_outcome_field_value(row, field)
             for field in high_score_outcome_fields
@@ -6577,8 +6593,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if not candles:
             return None, "missing_market_data"
         target_ms = int(when_dt.timestamp() * 1000.0)
+        latest_allowed_ms = target_ms + 2 * 3600 * 1000
         for ts_ms, close in candles:
             if ts_ms >= target_ms:
+                if ts_ms > latest_allowed_ms:
+                    return None, "missing_entry_px"
                 return close, ""
         return None, "missing_future_px"
 
@@ -6718,6 +6737,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         ts_utc = first_observed(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs))
         audit = audit_by_run.get(run_id, {}) if run_id != not_obs else {}
 
+        existing_price = price_from_dict(row, ("entry_px", "latest_px", "current_px", "price", "px"))
+        if existing_price is not None:
+            return existing_price, "", "label_row"
+
         target_item = symbol_map_get(target_explain_by_symbol(audit), symbol)
         price = price_from_dict(target_item, ("latest_px", "current_px", "price", "px"))
         if price is not None:
@@ -6732,17 +6755,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if price is not None:
             return price, "", "decision_audit_market_data"
 
-        event_price = price_from_dict(symbol_map_get(event_candidate_price_by_symbol, symbol), ("latest_px", "current_px", "price", "px"))
-        if event_price is not None:
-            return event_price, "", "event_candidates"
-
         cache_price, cache_reason = cache_price_at_or_after(symbol, parse_dt_utc(ts_utc))
         if cache_price is not None:
             return cache_price, "", "data_cache_1h"
-
-        existing_price = price_from_dict(row, ("entry_px", "latest_px", "current_px", "price", "px"))
-        if existing_price is not None:
-            return existing_price, "", "label_row"
 
         return None, "missing_entry_px", cache_reason or "missing_entry_px"
 
@@ -6997,31 +7012,35 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             out["label_not_observable_reason"] = not_obs
         return out
 
+    for identity_key, source_row in list(high_score_outcome_by_identity.items()):
+        refreshed = build_high_score_blocked_outcome_row(source_row)
+        if status_rank(refreshed) >= status_rank(source_row):
+            high_score_outcome_by_identity[identity_key] = refreshed
+
     for row in high_score_blocked_rows:
         if not is_high_score_labelable_reason(high_score_reason_text(row)):
             continue
-        key = btc_label_key(
-            row.get("run_id"),
-            row.get("ts_utc"),
-            row.get("symbol"),
-            high_score_reason_text(row),
-        )
+        key = high_score_outcome_identity_key(row)
         if not key or any(part == not_obs for part in key):
             continue
         reason = high_score_reason_text(row)
-        synthesized = build_high_score_blocked_outcome_row(row)
+        existing = high_score_outcome_by_identity.get(key)
+        source_row = dict(existing) if existing is not None else dict(row)
+        for field, value in row.items():
+            if source_row.get(field) in (None, "", not_obs) and value not in (None, "", not_obs):
+                source_row[field] = value
+        synthesized = build_high_score_blocked_outcome_row(source_row)
         if (
             reason != "same_symbol_reentry_cooldown"
             and as_float(synthesized.get("entry_px")) is None
             and synthesized.get("label_status") == "not_observable"
         ):
             continue
-        existing = high_score_outcome_by_key.get(key)
-        if existing is None or status_rank(synthesized) > status_rank(existing):
-            high_score_outcome_by_key[key] = synthesized
+        if existing is None or status_rank(synthesized) >= status_rank(existing):
+            high_score_outcome_by_identity[key] = synthesized
 
     high_score_blocked_outcome_rows = []
-    for row in high_score_outcome_by_key.values():
+    for row in high_score_outcome_by_identity.values():
         high_score_blocked_outcome_rows.append({
             field: high_score_outcome_field_value(row, field)
             for field in high_score_outcome_fields
@@ -7958,10 +7977,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         loose_key = (key[0], key[2], key[3])
         label = label_index.get(key) or label_loose_index.get(loose_key)
         outcome = (
-            outcome_index.get(key)
-            or high_score_outcome_by_key.get(key)
+            high_score_outcome_loose_index.get(loose_key)
+            or outcome_index.get(key)
             or outcome_loose_index.get(loose_key)
-            or high_score_outcome_loose_index.get(loose_key)
         )
         src = outcome or label or {}
         label_status = flatten_value(first_value(src, ("label_status", "label_24h_status"), not_obs))
@@ -13458,7 +13476,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     write_csv(
         "summaries/market_impulse_selection_shadow.csv",
         market_impulse_selection_shadow_rows,
-        ["ts_utc", "run_id", "active", "trend_buy_count", "btc_trend_score", "selected_live", "selected_by_priority", "selected_by_trend_score", "selected_by_alpha6_confirmed", "selected_by_expected_net_shadow", "candidates_json"],
+        ["ts_utc", "run_id", "active", "trend_buy_count", "btc_trend_score", "selection_mode", "execution_mode", "feature_enabled", "configured_live_enabled", "forward_test_live_ready", "live_enabled", "live_disabled_reason", "selected_live", "selected_by_priority", "selected_by_trend_score", "selected_by_alpha6_confirmed", "selected_by_expected_net_shadow", "selected_by_composite", "live_missed_eth_by_trend_score", "candidates_json"],
     )
 
     entry_quality_dir = OUT / "raw" / "reports" / "entry_quality"

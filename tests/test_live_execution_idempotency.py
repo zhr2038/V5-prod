@@ -1406,7 +1406,12 @@ def test_live_execution_does_not_block_non_swing_atr_exit_before_min_hold() -> N
                 last_update_ts=entry_ts,
                 last_mark_px=600.0,
                 unrealized_pnl_pct=0.0,
-                tags_json="{}",
+                tags_json=json.dumps(
+                    {
+                        "swing_hold_position": False,
+                        "entry_ts": entry_ts,
+                    }
+                ),
             )
         )
         cfg = ExecutionConfig(
@@ -1430,6 +1435,13 @@ def test_live_execution_does_not_block_non_swing_atr_exit_before_min_hold() -> N
 
         assert result.state in {"OPEN", "FILLED"}
         assert okx.place_calls == 1
+        row = store.get(result.cl_ord_id)
+        request = json.loads(row.req_json)
+        order_meta = request["_v5_order_meta"]
+        assert order_meta["swing_hold_position"] is False
+        assert "swing_entry_ts" not in order_meta
+        assert "swing_min_hold_hours" not in order_meta
+        assert "exited_before_min_hold" not in order_meta
 
 
 def test_position_tags_preserve_nested_swing_router_metadata() -> None:

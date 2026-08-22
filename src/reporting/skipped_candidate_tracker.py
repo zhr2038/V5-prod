@@ -355,6 +355,17 @@ def _signal_factor(signal: Optional[Mapping[str, Any]], name: str) -> Optional[f
 
 
 def _record_key(record: Mapping[str, Any]) -> str:
+    run_id = str(record.get("run_id") or "").strip()
+    symbol = str(record.get("symbol") or "").strip()
+    skip_reason = str(record.get("skip_reason") or "").strip()
+    intended_side = str(record.get("intended_side") or "").strip()
+    if run_id and symbol and skip_reason:
+        # A production run emits one decision per symbol/reason.  Timestamp is
+        # evidence attached to that decision, not part of its identity.  Using
+        # it in the key allowed the same blocked candidate to survive twice
+        # when the audit timestamp and the latest market-bar timestamp differed.
+        return "|".join([run_id, symbol, skip_reason, intended_side])
+
     ts_utc = str(record.get("ts_utc") or "").strip()
     if not ts_utc:
         entry_ts_ms = _record_entry_ts_ms(record)
@@ -362,18 +373,18 @@ def _record_key(record: Mapping[str, Any]) -> str:
     if ts_utc:
         return "|".join(
             [
-                str(record.get("run_id") or ""),
+                run_id,
                 ts_utc,
-                str(record.get("symbol") or ""),
-                str(record.get("skip_reason") or ""),
+                symbol,
+                skip_reason,
             ]
         )
     return "|".join(
         [
-            str(record.get("run_id") or ""),
-            str(record.get("symbol") or ""),
-            str(record.get("skip_reason") or ""),
-            str(record.get("intended_side") or ""),
+            run_id,
+            symbol,
+            skip_reason,
+            intended_side,
             str(_record_entry_ts_ms(record) or ""),
         ]
     )
