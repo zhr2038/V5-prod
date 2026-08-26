@@ -257,6 +257,9 @@ def test_collect_rss_sentiment_reuses_unchanged_prediction(monkeypatch, tmp_path
     assert latest["deepseek_status"] == "reused"
     assert latest["analysis_reused"] is True
     assert latest["deepseek_usage"]["total_tokens"] == 0
+    assert latest["analysis_deepseek_usage"]["total_tokens"] == 400
+    assert latest["analysis_deepseek_request_id"] == "request-1"
+    assert latest["analysis_input_chars"] > 0
     assert latest["analysis_generated_at"] == "2026-08-26T04:00:00Z"
 
 

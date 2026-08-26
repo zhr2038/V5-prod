@@ -417,6 +417,9 @@ def collect_rss_sentiment(*, env_path: str = ".env", project_root: Path | None =
                     "rss_input_fingerprint": fingerprint,
                     "rss_new_article_count": new_article_count,
                     "rss_input_chars": 0,
+                    "analysis_input_chars": previous.get("analysis_input_chars")
+                    or previous.get("rss_input_chars")
+                    or 0,
                     "deepseek_status": "reused",
                     "deepseek_usage": {
                         "prompt_tokens": 0,
@@ -424,6 +427,13 @@ def collect_rss_sentiment(*, env_path: str = ".env", project_root: Path | None =
                         "total_tokens": 0,
                     },
                     "deepseek_request_id": None,
+                    "analysis_deepseek_usage": previous.get("analysis_deepseek_usage")
+                    or previous.get("deepseek_usage")
+                    or {},
+                    "analysis_deepseek_request_id": previous.get(
+                        "analysis_deepseek_request_id"
+                    )
+                    or previous.get("deepseek_request_id"),
                     "analysis_reused": True,
                     "reuse_reason": reuse_reason,
                     "previous_analysis_age_minutes": round(analysis_age_minutes or 0.0, 1),
@@ -489,10 +499,13 @@ def collect_rss_sentiment(*, env_path: str = ".env", project_root: Path | None =
             'rss_input_fingerprint': fingerprint,
             'rss_new_article_count': new_article_count,
             'rss_input_chars': len(combined_text),
+            'analysis_input_chars': len(combined_text),
             'deepseek_status': 'ok',
             'deepseek_model': result.get('model') or getattr(factor, 'model', 'deepseek-chat'),
             'deepseek_usage': result.get('usage') or {},
             'deepseek_request_id': result.get('request_id'),
+            'analysis_deepseek_usage': result.get('usage') or {},
+            'analysis_deepseek_request_id': result.get('request_id'),
             'analysis_reused': False,
             'reuse_reason': None,
             'analysis_generated_at': _utc_now_iso(),
