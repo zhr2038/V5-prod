@@ -333,6 +333,32 @@ def test_alpha6_sentiment_factor_prefers_filename_timestamp_over_mtime(tmp_path)
     assert strategy._load_sentiment_factor("BTC/USDT") == pytest.approx(0.35)
 
 
+def test_alpha6_sentiment_factor_uses_valid_rss_prediction_without_online_call(tmp_path):
+    strategy = Alpha6FactorStrategy()
+    cache_dir = tmp_path / "data" / "sentiment_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    strategy.sentiment_cache_dir = cache_dir
+    (cache_dir / "rss_BTC-USDT_20260826_04.json").write_text(
+        '{"f6_sentiment":0.42,"deepseek_status":"reused"}',
+        encoding="utf-8",
+    )
+
+    assert strategy._load_sentiment_factor("BTC/USDT") == pytest.approx(0.42)
+
+
+def test_alpha6_sentiment_factor_rejects_failed_rss_prediction(tmp_path):
+    strategy = Alpha6FactorStrategy()
+    cache_dir = tmp_path / "data" / "sentiment_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    strategy.sentiment_cache_dir = cache_dir
+    (cache_dir / "rss_BTC-USDT_20260826_04.json").write_text(
+        '{"f6_sentiment":0.8,"deepseek_status":"error"}',
+        encoding="utf-8",
+    )
+
+    assert strategy._load_sentiment_factor("BTC/USDT") == 0.0
+
+
 def test_alpha_engine_latest_model_artifact_mtime_ignores_newer_config_file(tmp_path):
     base_path = tmp_path / "models" / "ml_factor_model"
     base_path.parent.mkdir(parents=True, exist_ok=True)

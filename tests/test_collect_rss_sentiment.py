@@ -170,3 +170,126 @@ def test_parse_rss_feed_fails_closed_when_safe_parser_missing(monkeypatch):
     monkeypatch.setattr(rss_mod, "SAFE_XML_ET", None)
 
     assert rss_mod.parse_rss_feed("https://example.com/rss", max_items=5) == []
+
+
+def test_prepare_analysis_input_deduplicates_and_bounds_payload():
+    articles = [
+        {
+            "title": "ETF inflows continue",
+            "summary": "x" * 1000,
+            "link": "https://example.com/a",
+            "source_name": "CoinDesk",
+            "source_weight": 1.0,
+        },
+        {
+            "title": "ETF inflows continue duplicate",
+            "summary": "duplicate",
+            "link": "https://example.com/a",
+            "source_name": "Cointelegraph",
+            "source_weight": 1.0,
+        },
+    ]
+
+    texts, article_ids, fingerprint = rss_mod._prepare_analysis_input(articles)
+
+    assert len(texts) == 1
+    assert len(article_ids) == 1
+    assert len("\n\n".join(texts)) <= rss_mod.MAX_ANALYSIS_CHARS
+    assert len(fingerprint) == 64
+
+
+def test_collect_rss_sentiment_reuses_unchanged_prediction(monkeypatch, tmp_path):
+    current_now = [datetime(2026, 8, 26, 4, 0, tzinfo=timezone.utc)]
+    calls = []
+    monkeypatch.setattr(rss_mod, "_utc_now", lambda: current_now[0])
+    monkeypatch.setattr(rss_mod, "SAFE_XML_ET", object())
+    monkeypatch.setattr(
+        rss_mod,
+        "parse_rss_feed",
+        lambda url, max_items=5: [
+            {
+                "title": "ETF inflows continue",
+                "summary": "Market remains constructive",
+                "link": "https://example.com/article-1",
+                "published": "",
+                "source": "example.com",
+            }
+        ],
+    )
+
+    class _FakeFactor:
+        model = "deepseek-chat"
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def analyze_sentiment(self, texts, symbol="MARKET"):
+            calls.append((texts, symbol))
+            return {
+                "ok": True,
+                "direction": "up",
+                "horizon_hours": 4,
+                "up_probability": 0.6,
+                "down_probability": 0.2,
+                "flat_probability": 0.2,
+                "expected_move_bps": 25,
+                "sentiment_score": 0.3,
+                "fear_greed_index": 62,
+                "summary": "资金流偏多",
+                "market_stage": "risk_on",
+                "confidence": 0.7,
+                "usage": {"total_tokens": 400},
+                "request_id": "request-1",
+            }
+
+    monkeypatch.setattr(rss_mod, "DeepSeekSentimentFactor", _FakeFactor)
+
+    assert rss_mod.collect_rss_sentiment(project_root=tmp_path) is True
+    current_now[0] = datetime(2026, 8, 26, 5, 0, tzinfo=timezone.utc)
+    assert rss_mod.collect_rss_sentiment(project_root=tmp_path) is True
+
+    assert len(calls) == 1
+    latest = json.loads(
+        (tmp_path / "data" / "sentiment_cache" / "rss_MARKET_20260826_05.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert latest["deepseek_status"] == "reused"
+    assert latest["analysis_reused"] is True
+    assert latest["deepseek_usage"]["total_tokens"] == 0
+    assert latest["analysis_generated_at"] == "2026-08-26T04:00:00Z"
+
+
+def test_collect_rss_sentiment_does_not_publish_failed_prediction(monkeypatch, tmp_path):
+    monkeypatch.setattr(rss_mod, "SAFE_XML_ET", object())
+    monkeypatch.setattr(
+        rss_mod,
+        "parse_rss_feed",
+        lambda url, max_items=5: [
+            {
+                "title": "Market update",
+                "summary": "No confirmed catalyst",
+                "link": url,
+                "published": "",
+                "source": "example.com",
+            }
+        ],
+    )
+
+    class _FailedFactor:
+        model = "deepseek-chat"
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def analyze_sentiment(self, _texts, symbol="MARKET"):
+            return {
+                "ok": False,
+                "error_code": "http_402",
+                "error": "Insufficient Balance",
+            }
+
+    monkeypatch.setattr(rss_mod, "DeepSeekSentimentFactor", _FailedFactor)
+
+    assert rss_mod.collect_rss_sentiment(project_root=tmp_path) is False
+    assert not list((tmp_path / "data" / "sentiment_cache").glob("rss_MARKET_*.json"))

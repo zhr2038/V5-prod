@@ -6,7 +6,9 @@ V5 RSS情报收集器 + DeepSeek情绪分析
 """
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import sys
 from datetime import datetime, timezone
@@ -50,6 +52,30 @@ RSS_SOURCES = [
     },
 ]
 
+MAX_ANALYSIS_ARTICLES = 8
+MAX_ANALYSIS_CHARS = 3600
+MAX_ARTICLE_SUMMARY_CHARS = 280
+DEFAULT_MIN_REFRESH_MINUTES = 120
+DEFAULT_UNCHANGED_RECHECK_MINUTES = 360
+HIGH_IMPACT_TERMS = (
+    "etf",
+    "sec",
+    "fed",
+    "rate cut",
+    "rate hike",
+    "cpi",
+    "inflation",
+    "regulation",
+    "ban",
+    "hack",
+    "exploit",
+    "liquidation",
+    "bankruptcy",
+    "stablecoin",
+    "tariff",
+    "war",
+)
+
 
 def get_cache_dir(project_root: Path | None = None) -> Path:
     return (project_root or PROJECT_ROOT).resolve() / "data" / "sentiment_cache"
@@ -61,6 +87,159 @@ def _utc_now() -> datetime:
 
 def _utc_now_iso() -> str:
     return _utc_now().isoformat().replace("+00:00", "Z")
+
+
+def _article_identity(article: dict) -> str:
+    link = str(article.get("link") or "").strip().lower().split("#", 1)[0]
+    title = re.sub(r"\s+", " ", str(article.get("title") or "")).strip().lower()
+    raw = link or title
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
+
+
+def _article_impact_score(article: dict) -> tuple[float, str]:
+    text = f"{article.get('title', '')} {article.get('summary', '')}".lower()
+    impact = sum(1 for term in HIGH_IMPACT_TERMS if term in text)
+    return float(article.get("source_weight", 1.0)) + impact * 0.5, str(
+        article.get("published") or ""
+    )
+
+
+def _prepare_analysis_input(articles: list[dict]) -> tuple[list[str], list[str], str]:
+    """Deduplicate and bound the exact text sent to the model."""
+    unique: dict[str, dict] = {}
+    for article in articles:
+        identity = _article_identity(article)
+        if identity not in unique:
+            unique[identity] = article
+
+    ranked = sorted(unique.items(), key=lambda item: _article_impact_score(item[1]), reverse=True)
+    texts: list[str] = []
+    article_ids: list[str] = []
+    used_chars = 0
+    for identity, article in ranked[:MAX_ANALYSIS_ARTICLES]:
+        title = str(article.get("title") or "").strip()
+        if not title:
+            continue
+        summary = str(article.get("summary") or "").strip()[:MAX_ARTICLE_SUMMARY_CHARS]
+        source = str(article.get("source_name") or article.get("source") or "RSS").strip()
+        text = f"{len(texts) + 1}|{source}|{title}"
+        if summary:
+            text += f"|{summary}"
+        remaining = MAX_ANALYSIS_CHARS - used_chars
+        if remaining <= 80:
+            break
+        if len(text) > remaining:
+            text = text[:remaining]
+        texts.append(text)
+        article_ids.append(identity)
+        used_chars += len(text) + 1
+
+    fingerprint = hashlib.sha256("\n".join(article_ids).encode("utf-8")).hexdigest()
+    return texts, article_ids, fingerprint
+
+
+def _parse_utc(value: object) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _latest_valid_market_cache(cache_dir: Path) -> dict | None:
+    for path in sorted(cache_dir.glob("rss_MARKET_*.json"), reverse=True):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        status = str(payload.get("deepseek_status") or "legacy_ok")
+        source = str(payload.get("f6_sentiment_source") or "")
+        summary = str(payload.get("f6_sentiment_summary") or "")
+        confidence = float(payload.get("f6_sentiment_confidence") or 0.0)
+        if (
+            status in {"ok", "reused", "legacy_ok"}
+            and source == "rss_deepseek"
+            and "无数据" not in summary
+            and confidence > 0.0
+        ):
+            return payload
+    return None
+
+
+def _has_high_impact_new_article(articles: list[dict], new_ids: set[str]) -> bool:
+    for article in articles:
+        if _article_identity(article) not in new_ids:
+            continue
+        text = f"{article.get('title', '')} {article.get('summary', '')}".lower()
+        if any(term in text for term in HIGH_IMPACT_TERMS):
+            return True
+    return False
+
+
+def _reuse_decision(
+    previous: dict | None,
+    *,
+    article_ids: list[str],
+    fingerprint: str,
+    articles: list[dict],
+    now: datetime,
+) -> tuple[bool, str, int, float | None]:
+    if not previous:
+        return False, "no_previous_prediction", len(article_ids), None
+    generated_at = _parse_utc(
+        previous.get("analysis_generated_at") or previous.get("collected_at")
+    )
+    if generated_at is None:
+        return False, "previous_prediction_time_unknown", len(article_ids), None
+
+    age_minutes = max(0.0, (now - generated_at).total_seconds() / 60.0)
+    previous_ids = {str(item) for item in previous.get("rss_article_ids") or []}
+    new_ids = set(article_ids) - previous_ids
+    new_count = len(new_ids)
+    min_refresh = max(
+        30,
+        int(os.getenv("DEEPSEEK_RSS_MIN_REFRESH_MINUTES", str(DEFAULT_MIN_REFRESH_MINUTES))),
+    )
+    max_reuse = max(
+        min_refresh,
+        int(
+            os.getenv(
+                "DEEPSEEK_RSS_UNCHANGED_RECHECK_MINUTES",
+                str(DEFAULT_UNCHANGED_RECHECK_MINUTES),
+            )
+        ),
+    )
+
+    if age_minutes < max_reuse and fingerprint == previous.get("rss_input_fingerprint"):
+        return True, "unchanged_articles", new_count, age_minutes
+    if (
+        age_minutes < min_refresh
+        and new_count < 2
+        and not _has_high_impact_new_article(articles, new_ids)
+    ):
+        return True, "insufficient_new_market_information", new_count, age_minutes
+    return False, "refresh_required", new_count, age_minutes
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    temp_path.replace(path)
+
+
+def _write_cache_bundle(cache_dir: Path, timestamp: str, payload: dict) -> Path:
+    cache_file = cache_dir / f"rss_MARKET_{timestamp}.json"
+    _write_json_atomic(cache_file, payload)
+    for symbol in ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']:
+        _write_json_atomic(cache_dir / f"rss_{symbol}_{timestamp}.json", payload)
+    return cache_file
 
 
 class MLStripper(HTMLParser):
@@ -205,73 +384,123 @@ def collect_rss_sentiment(*, env_path: str = ".env", project_root: Path | None =
     
     print(f"[RSS] 总共获取 {len(all_articles)} 篇文章，开始情绪分析...")
     
-    # 合并文本进行情绪分析
-    # 按来源权重排序，优先分析高权重来源
-    all_articles.sort(key=lambda x: x.get('source_weight', 1), reverse=True)
-    
-    # 准备分析文本（限制token数量）
-    texts = []
-    total_length = 0
-    max_length = 8000  # 限制总长度，控制API成本
-    
-    for article in all_articles[:10]:  # 最多分析10篇
-        text = f"[{article['source_name']}] {article['title']}"
-        if article.get('summary'):
-            text += f": {article['summary']}"
-        
-        if total_length + len(text) > max_length:
-            break
-        
-        texts.append(text)
-        total_length += len(text)
-    
-    # 使用DeepSeek分析情绪
+    texts, article_ids, fingerprint = _prepare_analysis_input(all_articles)
+    if not texts:
+        print("[RSS] 去重后没有可分析的文章")
+        return False
+
+    now = _utc_now()
+
+    # 使用DeepSeek分析预测；构造实例也会加载生产 runtime env。
     try:
         factor = DeepSeekSentimentFactor(
             cache_dir=str(cache_dir),
             env_path=resolved_env_path,
             project_root=root,
         )
+        previous = _latest_valid_market_cache(cache_dir)
+        should_reuse, reuse_reason, new_article_count, analysis_age_minutes = _reuse_decision(
+            previous,
+            article_ids=article_ids,
+            fingerprint=fingerprint,
+            articles=all_articles,
+            now=now,
+        )
+        if should_reuse and previous is not None:
+            cache_data = dict(previous)
+            cache_data.update(
+                {
+                    "rss_articles_count": len(all_articles),
+                    "rss_sources": sorted({a['source_name'] for a in all_articles}),
+                    "analyzed_texts": len(texts),
+                    "rss_article_ids": article_ids,
+                    "rss_input_fingerprint": fingerprint,
+                    "rss_new_article_count": new_article_count,
+                    "rss_input_chars": 0,
+                    "deepseek_status": "reused",
+                    "deepseek_usage": {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                    },
+                    "deepseek_request_id": None,
+                    "analysis_reused": True,
+                    "reuse_reason": reuse_reason,
+                    "previous_analysis_age_minutes": round(analysis_age_minutes or 0.0, 1),
+                    "collected_at": _utc_now_iso(),
+                }
+            )
+            cache_file = _write_cache_bundle(cache_dir, timestamp, cache_data)
+            print(
+                "[RSS] 复用最近预测: "
+                f"reason={reuse_reason}, new_articles={new_article_count}, "
+                f"analysis_age_minutes={analysis_age_minutes:.1f}"
+            )
+            print(f"[RSS] 预测缓存已保存到 {cache_file}")
+            return True
+
         combined_text = "\n\n".join(texts)
-        
-        print(f"[RSS] 发送 {len(texts)} 篇文章到DeepSeek分析...")
+
+        print(
+            f"[RSS] 发送 {len(texts)} 篇去重新闻到DeepSeek预测... "
+            f"input_chars={len(combined_text)}, new_articles={new_article_count}"
+        )
         result = factor.analyze_sentiment([combined_text], symbol="MARKET")
-        
+        if not result.get("ok", True):
+            print(
+                "[RSS] DeepSeek预测不可用: "
+                f"code={result.get('error_code')}, error={result.get('error')}"
+            )
+            return False
+
         sentiment_score = result.get('sentiment_score', 0)
         fear_greed = result.get('fear_greed_index', 50)
         summary = result.get('summary', '')
         stage = result.get('market_stage', 'neutral')
-        
-        print(f"[RSS] 分析完成: 情绪={sentiment_score:.2f}, 阶段={stage}")
+
+        print(
+            f"[RSS] 预测完成: 方向={result.get('direction', 'flat')}, "
+            f"情绪={sentiment_score:.2f}, 阶段={stage}, "
+            f"usage={json.dumps(result.get('usage') or {}, ensure_ascii=False)}"
+        )
         print(f"[RSS] 摘要: {summary[:100]}...")
-        
-        # 保存结果（兼容f6_sentiment格式）
+
+        # 保存结果（兼容既有 f6_sentiment 字段，并增加短周期预测审计字段）
         cache_data = {
             'f6_sentiment': sentiment_score,
             'f6_sentiment_magnitude': abs(sentiment_score),
             'f6_fear_greed_index': fear_greed,
-            'f6_sentiment_summary': f"[RSS情报] {summary}",
+            'f6_sentiment_summary': f"[RSS预测4h] {summary}",
             'f6_sentiment_confidence': result.get('confidence', 0.7),
             'f6_sentiment_source': 'rss_deepseek',
             'f6_market_stage': stage,
+            'f6_forecast_direction': result.get('direction', 'flat'),
+            'f6_forecast_horizon_hours': result.get('horizon_hours', 4),
+            'f6_up_probability': result.get('up_probability', 0.0),
+            'f6_down_probability': result.get('down_probability', 0.0),
+            'f6_flat_probability': result.get('flat_probability', 1.0),
+            'f6_expected_move_bps': result.get('expected_move_bps', 0.0),
+            'f6_forecast_catalysts': result.get('catalysts', []),
+            'f6_forecast_risk_flags': result.get('risk_flags', []),
             'rss_articles_count': len(all_articles),
-            'rss_sources': list(set(a['source_name'] for a in all_articles)),
+            'rss_sources': sorted({a['source_name'] for a in all_articles}),
             'analyzed_texts': len(texts),
-            'collected_at': _utc_now_iso()
+            'rss_article_ids': article_ids,
+            'rss_input_fingerprint': fingerprint,
+            'rss_new_article_count': new_article_count,
+            'rss_input_chars': len(combined_text),
+            'deepseek_status': 'ok',
+            'deepseek_model': result.get('model') or getattr(factor, 'model', 'deepseek-chat'),
+            'deepseek_usage': result.get('usage') or {},
+            'deepseek_request_id': result.get('request_id'),
+            'analysis_reused': False,
+            'reuse_reason': None,
+            'analysis_generated_at': _utc_now_iso(),
+            'collected_at': _utc_now_iso(),
         }
-        
-        # 保存为通用市场情绪文件
-        cache_file = cache_dir / f"rss_MARKET_{timestamp}.json"
-        with open(cache_file, 'w') as f:
-            json.dump(cache_data, f, indent=2)
-        
-        # 同时保存为各币种文件（复用）
-        for symbol in ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']:
-            symbol_file = cache_dir / f"rss_{symbol}_{timestamp}.json"
-            with open(symbol_file, 'w') as f:
-                json.dump(cache_data, f, indent=2)
-        
-        print(f"[RSS] 情绪数据已保存到 {cache_file}")
+
+        cache_file = _write_cache_bundle(cache_dir, timestamp, cache_data)
+        print(f"[RSS] 预测缓存已保存到 {cache_file}")
         return True
 
     except Exception as e:

@@ -938,32 +938,31 @@ class Alpha6FactorStrategy(BaseStrategy):
             if funding_file is not None:
                 data = json.loads(funding_file.read_text())
             
-            # 2. 尝试 deepseek AI分析
+            # 2. 尝试定时任务生成的真实 RSS + DeepSeek 市场预测
+            if data is None:
+                rss_file = self._latest_sentiment_cache_file(f"rss_{s}_*.json")
+                if rss_file is not None:
+                    candidate = json.loads(rss_file.read_text())
+                    status = str(candidate.get('deepseek_status') or 'legacy_ok').lower()
+                    if status not in {'error', 'unavailable'}:
+                        data = candidate
+
+            # 3. 兼容历史 deepseek 缓存
             if data is None:
                 deepseek_file = self._latest_sentiment_cache_file(f"deepseek_{s}_*.json")
                 if deepseek_file is not None:
-                    data = json.loads(deepseek_file.read_text())
+                    candidate = json.loads(deepseek_file.read_text())
+                    if str(candidate.get('deepseek_status') or 'legacy_ok').lower() not in {
+                        'error',
+                        'unavailable',
+                    }:
+                        data = candidate
             
-            # 3. 尝试其他格式
+            # 4. 尝试其他格式
             if data is None:
                 other_file = self._latest_sentiment_cache_file(f"{s}_*.json")
                 if other_file is not None:
                     data = json.loads(other_file.read_text())
-            
-            # 4. 若该币种没有缓存，尝试用DeepSeek生成一次
-            if data is None:
-                try:
-                    from src.factors.deepseek_sentiment_factor import (
-                        DeepSeekSentimentFactor,
-                    )
-                    factor = DeepSeekSentimentFactor(cache_dir=str(self.sentiment_cache_dir))
-                    factor.calculate(s)
-                    # 重新尝试读取
-                    funding_file = self._latest_sentiment_cache_file(f"funding_{s}_*.json")
-                    if funding_file is not None:
-                        data = json.loads(funding_file.read_text())
-                except Exception:
-                    pass
             
             if data is None:
                 return 0.0

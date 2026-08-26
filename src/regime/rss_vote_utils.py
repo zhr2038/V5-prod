@@ -19,7 +19,10 @@ def rss_vote_state(sentiment: float) -> str:
 
 def rss_vote_confidence(sentiment: float, source_confidence: float = 0.7) -> float:
     sentiment = float(sentiment or 0.0)
-    source_confidence = clamp(float(source_confidence or 0.7), 0.3, 1.0)
+    source_confidence = float(source_confidence if source_confidence is not None else 0.7)
+    if source_confidence <= 0.0:
+        return 0.0
+    source_confidence = clamp(source_confidence, 0.3, 1.0)
     magnitude = clamp(abs(sentiment) / 0.6, 0.0, 1.0)
     if abs(sentiment) < 0.15:
         magnitude *= 0.4
@@ -68,9 +71,20 @@ def short_rss_summary(summary: str, sentiment: float, state: str) -> str:
 
 def build_rss_vote(payload: Dict[str, Any], weight: float) -> Dict[str, Any]:
     sentiment = float(payload.get("f6_sentiment", 0.0) or 0.0)
-    source_confidence = float(payload.get("f6_sentiment_confidence", 0.7) or 0.7)
-    state = rss_vote_state(sentiment)
+    status = str(payload.get("deepseek_status") or "legacy_ok").lower()
     summary = str(payload.get("f6_sentiment_summary", "") or "").strip()
+    source = str(payload.get("f6_sentiment_source") or "")
+    data_valid = (
+        status not in {"error", "unavailable"}
+        and source != "unavailable"
+        and "无数据" not in summary
+    )
+    source_confidence = (
+        float(payload.get("f6_sentiment_confidence", 0.7) or 0.7)
+        if data_valid
+        else 0.0
+    )
+    state = rss_vote_state(sentiment)
     return {
         "state": state,
         "confidence": rss_vote_confidence(sentiment, source_confidence),
@@ -78,6 +92,7 @@ def build_rss_vote(payload: Dict[str, Any], weight: float) -> Dict[str, Any]:
         "sentiment": sentiment,
         "summary": summary,
         "summary_short": short_rss_summary(summary, sentiment, state),
-        "source_confidence": clamp(source_confidence, 0.3, 1.0),
+        "source_confidence": clamp(source_confidence, 0.3, 1.0) if data_valid else 0.0,
+        "data_valid": data_valid,
         "raw_state": state,
     }
