@@ -89,6 +89,21 @@ def test_react_dashboard_keeps_quant_lab_focus_and_fail_closed_state_truthful():
     assert "setPrimaryRefreshFailed(true);" in source
 
 
+def test_react_dashboard_bounds_fetches_and_renders_primary_before_auxiliary_calls():
+    api_source = API_TS_PATH.read_text(encoding="utf-8")
+    app_source = APP_TSX_PATH.read_text(encoding="utf-8")
+
+    assert "const DASHBOARD_FETCH_TIMEOUT_MS = 12_000;" in api_source
+    assert "const controller = new AbortController();" in api_source
+    assert "signal: controller.signal," in api_source
+    assert "globalThis.clearTimeout(timeoutId);" in api_source
+
+    primary_fetch = app_source.index("const d = await api.dashboard();")
+    primary_rendered = app_source.index("setLoading(false);", primary_fetch)
+    auxiliary_fetch = app_source.index("const [r, liveTrades] = await Promise.all([", primary_fetch)
+    assert primary_fetch < primary_rendered < auxiliary_fetch
+
+
 def test_react_dashboard_labels_bounded_rows_ranges_and_cost_times_truthfully():
     grid = MAIN_TRADING_GRID_TSX_PATH.read_text(encoding="utf-8")
     positions = POSITIONS_PANEL_TSX_PATH.read_text(encoding="utf-8")

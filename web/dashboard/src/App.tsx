@@ -358,16 +358,11 @@ function App() {
   const loadPrimary = useCallback(async () => {
     if (document.hidden) return;
     setLoading(true);
-    const [d, r, liveTrades] = await Promise.all([
-      api.dashboard(),
-      api.riskGuard(),
-      api.trades(),
-    ]);
+    const d = await api.dashboard();
     if (d) {
-      const authoritativeTrades = Array.isArray(liveTrades?.trades) ? liveTrades.trades : d.trades;
       const nextDashboardBase = {
         ...d,
-        trades: summarizeTradeOrders(authoritativeTrades),
+        trades: summarizeTradeOrders(d.trades),
       } as DashboardData;
       setDashboard((prev) => {
         const merged = prev ? { ...prev, ...nextDashboardBase } : nextDashboardBase;
@@ -385,8 +380,23 @@ function App() {
     } else {
       setPrimaryRefreshFailed(true);
     }
-    setRiskGuard(r || null);
     setLoading(false);
+
+    // Auxiliary calls must not keep the whole dashboard in its UNKNOWN loading state.
+    const [r, liveTrades] = await Promise.all([
+      api.riskGuard(),
+      api.trades(),
+    ]);
+    setRiskGuard(r || null);
+    if (d) {
+      const authoritativeTrades = Array.isArray(liveTrades?.trades) ? liveTrades.trades : d.trades;
+      if (Array.isArray(authoritativeTrades)) {
+        setDashboard((prev) => prev ? {
+          ...prev,
+          trades: summarizeTradeOrders(authoritativeTrades),
+        } : prev);
+      }
+    }
   }, [focusSymbol, loadQuantLab, syncPositionFocus]);
 
   const loadSecondary = useCallback(async () => {

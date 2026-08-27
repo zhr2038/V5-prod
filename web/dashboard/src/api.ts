@@ -17,6 +17,7 @@ import type {
 } from './types';
 
 const API_BASE = '';
+const DASHBOARD_FETCH_TIMEOUT_MS = 12_000;
 
 type ApiTradePayload = Partial<Trade> & {
   time?: string;
@@ -56,17 +57,22 @@ export interface QuantLabCostEstimateParams {
   quantile?: string;
 }
 
-async function fetchJson<T>(url: string): Promise<T | null> {
+async function fetchJson<T>(url: string, timeoutMs = DASHBOARD_FETCH_TIMEOUT_MS): Promise<T | null> {
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${API_BASE}${url}${url.includes('?') ? '&' : '?'}_=${Date.now()}`, {
       cache: 'no-store',
       headers: { Accept: 'application/json' },
+      signal: controller.signal,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return (await res.json()) as T;
   } catch (err) {
     console.error('fetch failed', url, err);
     return null;
+  } finally {
+    globalThis.clearTimeout(timeoutId);
   }
 }
 
