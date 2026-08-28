@@ -401,6 +401,7 @@ function QuantLabCostPanel({ cost }: { cost?: QuantLabCostEstimateData | null })
   const roundtripAllIn = firstNumber(cost?.roundtrip_all_in_cost_bps, data.roundtrip_all_in_cost_bps);
   const source = firstText(cost?.cost_source, cost?.source, data.cost_source, data.source, cost?.available === false ? 'unavailable' : '');
   const freshness = firstText(cost?.cost_freshness_status, data.cost_freshness_status, cost?.cost_quality, data.cost_quality, cost?.available === false ? 'unavailable' : '');
+  const unavailableReason = firstText(cost?.reason, data.reason);
   const trustLevel = firstText(cost?.cost_trust_level, data.cost_trust_level);
   const staleReasons = [
     ...textList(cost?.cost_stale_reasons || data.cost_stale_reasons),
@@ -410,6 +411,7 @@ function QuantLabCostPanel({ cost }: { cost?: QuantLabCostEstimateData | null })
   const costAge = ageLabel(firstNumber(cost?.cost_age_seconds, data.cost_age_seconds));
   const pending = !cost;
   const unavailable = cost?.available === false;
+  const missingNotional = unavailable && unavailableReason === 'notional_required';
   const stale =
     !pending &&
     (unavailable ||
@@ -417,13 +419,15 @@ function QuantLabCostPanel({ cost }: { cost?: QuantLabCostEstimateData | null })
     boolLike(cost?.cost_stale ?? data.cost_stale));
   const statusText = pending
     ? '等待接口'
-    : unavailable
-    ? '接口不可用'
-    : stale
-      ? costAge
-        ? `数据过期 ${costAge}`
-        : '数据过期'
-      : freshness || 'fresh';
+    : missingNotional
+      ? '缺少估算金额'
+      : unavailable
+        ? '接口不可用'
+        : stale
+          ? costAge
+            ? `数据过期 ${costAge}`
+            : '数据过期'
+          : freshness || 'fresh';
   const proxy = asRecord(cost?.proxy || data.proxy);
   const sampleTimestamp = firstText(cost?.last_sample_at, data.last_sample_at, cost?.as_of_ts, data.as_of_ts);
   const refreshedAt = firstText(cost?.refreshed_at, data.refreshed_at, cost?.generated_at, data.generated_at, proxy.sampled_at);

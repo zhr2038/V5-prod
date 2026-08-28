@@ -79,6 +79,7 @@ def test_main_trading_grid_marks_stale_quant_lab_costs():
 
 def test_react_dashboard_keeps_quant_lab_focus_and_fail_closed_state_truthful():
     source = APP_TSX_PATH.read_text(encoding="utf-8")
+    grid = MAIN_TRADING_GRID_TSX_PATH.read_text(encoding="utf-8")
 
     assert "dashboardFocusForQuantLab(dashboard?: DashboardData | null, preferredSymbol?: string)" in source
     assert "const requestId = ++quantLabRequestIdRef.current;" in source
@@ -86,6 +87,10 @@ def test_react_dashboard_keeps_quant_lab_focus_and_fail_closed_state_truthful():
     assert "permission: 'ABORT'" in source
     assert "reasons: ['dashboard_fetch_failed']" in source
     assert "void loadQuantLab(dashboardFocusForQuantLab(dashboard, symbol));" in source
+    assert "if (notional <= 0) continue;" in source
+    assert "if (positionNotional > 0)" in source
+    assert "missingNotional" in grid
+    assert "'缺少估算金额'" in grid
     assert "setPrimaryRefreshFailed(true);" in source
 
 
@@ -101,7 +106,9 @@ def test_react_dashboard_bounds_fetches_and_renders_primary_before_auxiliary_cal
     primary_fetch = app_source.index("const d = await api.dashboard();")
     primary_rendered = app_source.index("setLoading(false);", primary_fetch)
     auxiliary_fetch = app_source.index("const [r, liveTrades] = await Promise.all([", primary_fetch)
-    assert primary_fetch < primary_rendered < auxiliary_fetch
+    authoritative_trades = app_source.index("const authoritativeTrades =", auxiliary_fetch)
+    quant_lab_fetch = app_source.index("void loadQuantLab(dashboardFocusForQuantLab(authoritativeDashboard, nextFocusSymbol));", authoritative_trades)
+    assert primary_fetch < primary_rendered < auxiliary_fetch < authoritative_trades < quant_lab_fetch
 
 
 def test_react_dashboard_labels_bounded_rows_ranges_and_cost_times_truthfully():

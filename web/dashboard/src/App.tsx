@@ -212,6 +212,7 @@ function positionFocusFromDashboard(dashboard?: DashboardData | null) {
     const symbol = String(position?.symbol || '').trim();
     if (!symbol) continue;
     const notional = Math.max(0, Number(position.value || 0) || 0);
+    if (notional <= 0) continue;
     if (notional > bestNotional) {
       bestSymbol = symbol;
       bestNotional = notional;
@@ -231,10 +232,13 @@ function dashboardFocusForQuantLab(dashboard?: DashboardData | null, preferredSy
       (position) => quantLabSymbol(position?.symbol) === normalizedPreferred
     );
     if (matchedPosition) {
-      return {
-        symbol: normalizedPreferred,
-        notional_usdt: Math.max(0, Number(matchedPosition.value || 0) || 0),
-      };
+      const positionNotional = Math.max(0, Number(matchedPosition.value || 0) || 0);
+      if (positionNotional > 0) {
+        return {
+          symbol: normalizedPreferred,
+          notional_usdt: positionNotional,
+        };
+      }
     }
 
     const matchingTrade = recentTrades
@@ -370,11 +374,6 @@ function App() {
       });
       syncPositionFocus(nextDashboardBase);
       setMarketState(d.marketState || null);
-      const positionFocus = positionFocusFromDashboard(nextDashboardBase);
-      const nextFocusSymbol = manualFocusRef.current
-        ? focusSymbol
-        : quantLabSymbol(positionFocus?.symbol) || focusSymbol;
-      void loadQuantLab(dashboardFocusForQuantLab(nextDashboardBase, nextFocusSymbol));
       setUpdateTime(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
       setPrimaryRefreshFailed(false);
     } else {
@@ -389,13 +388,28 @@ function App() {
     ]);
     setRiskGuard(r || null);
     if (d) {
-      const authoritativeTrades = Array.isArray(liveTrades?.trades) ? liveTrades.trades : d.trades;
-      if (Array.isArray(authoritativeTrades)) {
-        setDashboard((prev) => prev ? {
-          ...prev,
-          trades: summarizeTradeOrders(authoritativeTrades),
-        } : prev);
-      }
+      const authoritativeTrades = Array.isArray(liveTrades?.trades)
+        ? liveTrades.trades
+        : Array.isArray(d.trades)
+          ? d.trades
+          : [];
+      const normalizedTrades = summarizeTradeOrders(authoritativeTrades);
+      const authoritativeDashboard = {
+        ...d,
+        trades: normalizedTrades,
+      } as DashboardData;
+      setDashboard((prev) => prev ? {
+        ...prev,
+        trades: normalizedTrades,
+      } : authoritativeDashboard);
+
+      // The primary dashboard intentionally omits trades. Wait for the authoritative
+      // trade endpoint before deriving a fallback notional for the cost estimate.
+      const positionFocus = positionFocusFromDashboard(authoritativeDashboard);
+      const nextFocusSymbol = manualFocusRef.current
+        ? focusSymbol
+        : quantLabSymbol(positionFocus?.symbol) || focusSymbol;
+      void loadQuantLab(dashboardFocusForQuantLab(authoritativeDashboard, nextFocusSymbol));
     }
   }, [focusSymbol, loadQuantLab, syncPositionFocus]);
 
