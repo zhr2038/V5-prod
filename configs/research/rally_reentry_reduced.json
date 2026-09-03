@@ -1,0 +1,52 @@
+{
+  "schema_version": "v5.reduced_factor_candidate.v1",
+  "mode": "offline_research",
+  "disabled_factors": [
+    "f4_volume_expansion"
+  ],
+  "ranking": "remaining_recorded_factors",
+  "absolute_direction_policy": {
+    "name": "direction_rank_simple",
+    "purpose": "Simplification ablation: positive price direction plus cost-aware momentum; Alpha6 relative score only ranks eligible symbols. Remove independent Alpha6 score/side, f4, f5, breadth and two-round vetoes for this offline variant.",
+    "require_close_above_ema20": true,
+    "require_positive_ema20_slope_4h": true,
+    "minimum_4h_momentum_bps": 80.0,
+    "momentum_cost_multiplier": 1.5,
+    "confirmation_rounds": 1,
+    "ranking": "recorded_alpha6_relative_score_descending_then_symbol"
+  },
+  "execution": {
+    "initial_cash_usdt": 106.86074454295628,
+    "maximum_positions": 1,
+    "target_weight": 0.08,
+    "maximum_gross_weight": 0.15,
+    "minimum_order_notional_usdt": 10.0,
+    "minimum_executable_buffer": 1.05,
+    "maximum_volume_participation": 0.05,
+    "maximum_spread_bps": 35.0,
+    "maximum_recorded_quote_age_ms": 30000,
+    "roundtrip_cost_scenarios_bps": [
+      30.0,
+      60.0,
+      120.0
+    ],
+    "gate_cost": "max(recorded selected entry gate cost, scenario roundtrip cost)",
+    "fill_cost": "scenario roundtrip cost split equally between entry and exit; actual realized execution costs are not known for hypothetical orders",
+    "execution_delay": "Entry at the next completed 1H close after the decision window. Existing stop/target orders are modeled intrabar; time exits use the observed hour close.",
+    "stop_loss_net_bps": -120.0,
+    "take_profit_net_bps": null,
+    "maximum_holding_hours": 72,
+    "same_symbol_cooldown_hours": 8,
+    "two_losses_cooldown_hours": 48,
+    "maximum_daily_realized_loss_usdt": 1.0,
+    "maximum_trial_drawdown_pct": 0.03,
+    "intrabar_stop_rule": "Test the stop before take-profit using hourly high/low; same-bar ambiguity is resolved against the strategy; gaps fill at the worse available opening price.",
+    "history_gap_rule": "Missing observations cannot confirm consecutive signals; no entry without complete causal bars and a current recorded quote.",
+    "maximum_signal_premium_pct": 0.006,
+    "daily_turnover_ratio": 0.6,
+    "exit_mode": "ema20_trend"
+  },
+  "live_promotion_allowed": false,
+  "requires_prospective_validation": true,
+  "source_protocol_sha256": "9114a96a8bc37e9f45ed6c9e0a543a7e5e91f175c30688b92e109d547cb3cd85"
+}

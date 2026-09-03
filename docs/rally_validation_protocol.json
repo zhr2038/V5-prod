@@ -1,0 +1,109 @@
+{
+  "schema_version": "v5.offline_rally_validation.v2",
+  "frozen_at_utc": "2026-09-03T14:23:52.834438+00:00",
+  "evaluation_start_utc": "2026-07-05T13:00:00Z",
+  "evaluation_end_utc": "2026-09-03T13:00:00Z",
+  "chronological_split_utc": "2026-08-14T13:00:00Z",
+  "split_warning": "The latest eight days were already inspected during diagnosis. This is a fixed chronological comparison, not a blind holdout or a prospective live test.",
+  "policies": [
+    {
+      "name": "current_confirmation",
+      "purpose": "Replay the recorded normal PROTECT target eligibility and BTC leadership confirmation under the same small-position execution model as the alternatives.",
+      "normal_alpha6_min_score": 0.4,
+      "normal_f4_min": 0.0,
+      "normal_f5_min": 0.3,
+      "normal_confirmation_rounds": 2,
+      "single_round_strong_alpha6": 0.55,
+      "single_round_strong_f5": 0.45,
+      "btc_probe_alpha6_min_score": 0.3,
+      "btc_probe_f4_min": -0.1,
+      "btc_probe_f5_min": 0.3
+    },
+    {
+      "name": "uncentered_alpha_control",
+      "purpose": "Diagnostic control: use positive tanh of the uncentered Alpha6 factor score for direction, rank eligible symbols by relative score, preserve f4/f5 and two-round confirmation.",
+      "absolute_alpha6_min_score": 0.4,
+      "f4_min": 0.0,
+      "f5_min": 0.3,
+      "confirmation_rounds": 2
+    },
+    {
+      "name": "direction_then_rank",
+      "purpose": "Require absolute positive price direction and market breadth; use the recorded Alpha6 relative score only to rank eligible symbols.",
+      "require_close_above_ema20": true,
+      "require_ema20_above_ema60": true,
+      "require_positive_24h_return": true,
+      "minimum_4h_momentum_bps": 80.0,
+      "momentum_cost_multiplier": 1.5,
+      "maximum_ema20_premium_pct": 0.012,
+      "minimum_positive_whitelist_4h_count": 3,
+      "require_positive_btc_4h_return": true,
+      "f4_min": 0.0,
+      "f5_min": 0.3,
+      "confirmation_rounds": 2,
+      "ranking": "recorded_alpha6_relative_score_descending_then_symbol"
+    },
+    {
+      "name": "direction_rank_simple",
+      "purpose": "Simplification ablation: positive price direction plus cost-aware momentum; Alpha6 relative score only ranks eligible symbols. Remove independent Alpha6 score/side, f4, f5, breadth and two-round vetoes for this offline variant.",
+      "require_close_above_ema20": true,
+      "require_positive_ema20_slope_4h": true,
+      "minimum_4h_momentum_bps": 80.0,
+      "momentum_cost_multiplier": 1.5,
+      "confirmation_rounds": 1,
+      "ranking": "recorded_alpha6_relative_score_descending_then_symbol"
+    }
+  ],
+  "shared_execution": {
+    "initial_cash_usdt": 106.86074454295628,
+    "maximum_positions": 1,
+    "target_weight": 0.08,
+    "maximum_gross_weight": 0.1,
+    "minimum_order_notional_usdt": 10.0,
+    "minimum_executable_buffer": 1.05,
+    "maximum_volume_participation": 0.05,
+    "maximum_spread_bps": 35.0,
+    "maximum_recorded_quote_age_ms": 30000,
+    "roundtrip_cost_scenarios_bps": [
+      30.0,
+      60.0,
+      120.0
+    ],
+    "gate_cost": "max(recorded selected entry gate cost, scenario roundtrip cost)",
+    "fill_cost": "scenario roundtrip cost split equally between entry and exit; actual realized execution costs are not known for hypothetical orders",
+    "execution_delay": "Entry at the next completed 1H close after the decision window. Existing stop/target orders are modeled intrabar; time exits use the observed hour close.",
+    "stop_loss_net_bps": -120.0,
+    "take_profit_net_bps": 80.0,
+    "maximum_holding_hours": 8,
+    "same_symbol_cooldown_hours": 8,
+    "two_losses_cooldown_hours": 48,
+    "maximum_daily_realized_loss_usdt": 1.0,
+    "maximum_trial_drawdown_pct": 0.03,
+    "intrabar_stop_rule": "Test the stop before take-profit using hourly high/low; same-bar ambiguity is resolved against the strategy; gaps fill at the worse available opening price.",
+    "history_gap_rule": "Missing observations cannot confirm consecutive signals; no entry without complete causal bars and a current recorded quote.",
+    "maximum_signal_premium_pct": 0.006,
+    "daily_turnover_ratio": 0.6
+  },
+  "recovery_audit": {
+    "run_original_evaluator_only_against_temporary_local_state": true,
+    "reset_historical_equity_peak": false,
+    "candidate_design": "Keep PROTECT active while evaluating a separately bounded research trial. No automatic promotion from historical replay results."
+  },
+  "admission": {
+    "positive_validation_net_pnl_at_30_and_60_bps": true,
+    "minimum_validation_closed_trades": 20,
+    "minimum_validation_calendar_days_with_trades": 10,
+    "positive_validation_mean_trade_with_lower_95pct_day_block_bootstrap_bound_above_zero": true,
+    "maximum_trial_drawdown_pct": 0.03,
+    "no_single_trade_more_than_half_total_positive_validation_pnl": true,
+    "require_prospective_paper_evidence_before_live": true
+  },
+  "safety": {
+    "offline_only": true,
+    "production_changes": false,
+    "live_order_effect": "none",
+    "live_promotion_allowed": false
+  },
+  "amended_at_utc": "2026-09-03T14:28:49.096640+00:00",
+  "amendment_reason": "User explicitly requested fewer redundant restrictions and more active participation before any replay performance results were computed."
+}

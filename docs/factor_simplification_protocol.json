@@ -1,0 +1,184 @@
+{
+  "schema_version": "v5.offline_factor_simplification.v1",
+  "frozen_at_utc": "2026-09-03T15:02:11.063873+00:00",
+  "evaluation_start_utc": "2026-07-05T13:00:00Z",
+  "evaluation_end_utc": "2026-09-03T13:00:00Z",
+  "chronological_split_utc": "2026-08-14T13:00:00Z",
+  "split_warning": "The latest eight days were already inspected during diagnosis. This is a fixed chronological comparison, not a blind holdout or a prospective live test.",
+  "policies": [
+    {
+      "name": "direction_rank_simple",
+      "purpose": "Simplification ablation: positive price direction plus cost-aware momentum; Alpha6 relative score only ranks eligible symbols. Remove independent Alpha6 score/side, f4, f5, breadth and two-round vetoes for this offline variant.",
+      "require_close_above_ema20": true,
+      "require_positive_ema20_slope_4h": true,
+      "minimum_4h_momentum_bps": 80.0,
+      "momentum_cost_multiplier": 1.5,
+      "confirmation_rounds": 1,
+      "ranking": "recorded_alpha6_relative_score_descending_then_symbol"
+    }
+  ],
+  "shared_execution": {
+    "initial_cash_usdt": 106.86074454295628,
+    "maximum_positions": 1,
+    "target_weight": 0.08,
+    "maximum_gross_weight": 0.15,
+    "minimum_order_notional_usdt": 10.0,
+    "minimum_executable_buffer": 1.05,
+    "maximum_volume_participation": 0.05,
+    "maximum_spread_bps": 35.0,
+    "maximum_recorded_quote_age_ms": 30000,
+    "roundtrip_cost_scenarios_bps": [
+      30.0,
+      60.0,
+      120.0
+    ],
+    "gate_cost": "max(recorded selected entry gate cost, scenario roundtrip cost)",
+    "fill_cost": "scenario roundtrip cost split equally between entry and exit; actual realized execution costs are not known for hypothetical orders",
+    "execution_delay": "Entry at the next completed 1H close after the decision window. Existing stop/target orders are modeled intrabar; time exits use the observed hour close.",
+    "stop_loss_net_bps": -120.0,
+    "take_profit_net_bps": 80.0,
+    "maximum_holding_hours": 8,
+    "same_symbol_cooldown_hours": 8,
+    "two_losses_cooldown_hours": 48,
+    "maximum_daily_realized_loss_usdt": 1.0,
+    "maximum_trial_drawdown_pct": 0.03,
+    "intrabar_stop_rule": "Test the stop before take-profit using hourly high/low; same-bar ambiguity is resolved against the strategy; gaps fill at the worse available opening price.",
+    "history_gap_rule": "Missing observations cannot confirm consecutive signals; no entry without complete causal bars and a current recorded quote.",
+    "maximum_signal_premium_pct": 0.006,
+    "daily_turnover_ratio": 0.6
+  },
+  "recovery_audit": {
+    "run_original_evaluator_only_against_temporary_local_state": true,
+    "reset_historical_equity_peak": false,
+    "candidate_design": "Keep PROTECT active while evaluating a separately bounded research trial. No automatic promotion from historical replay results."
+  },
+  "admission": {
+    "positive_validation_net_pnl_at_30_and_60_bps": true,
+    "minimum_validation_closed_trades": 20,
+    "minimum_validation_calendar_days_with_trades": 10,
+    "positive_validation_mean_trade_with_lower_95pct_day_block_bootstrap_bound_above_zero": true,
+    "maximum_trial_drawdown_pct": 0.03,
+    "no_single_trade_more_than_half_total_positive_validation_pnl": true,
+    "require_prospective_paper_evidence_before_live": true
+  },
+  "safety": {
+    "offline_only": true,
+    "production_changes": false,
+    "live_order_effect": "none",
+    "live_promotion_allowed": false
+  },
+  "phase1_protocol_sha256": "11f9f1f626590eec23f21b11f7ac4cd859c042be2a663c9764fc5a5554fb8c15",
+  "experiment_reason": "Single-factor removal showed identical executed outcomes for F1/F2/F5/F6, while F4 removal improved the primary cells. Test their combined removal once, against the F4-removed candidate, before accepting a smaller factor set. This post-ablation comparison is exploratory.",
+  "execution_scenarios": [
+    {
+      "name": "ema20_trend_72h",
+      "overrides": {
+        "exit_mode": "ema20_trend",
+        "take_profit_net_bps": null,
+        "maximum_holding_hours": 72
+      }
+    }
+  ],
+  "user_request": "Remove factors without after-cost contribution.",
+  "factor_keys": [
+    "f1_mom_5d",
+    "f2_mom_20d",
+    "f3_vol_adj_ret",
+    "f4_volume_expansion",
+    "f5_rsi_trend_confirm",
+    "f6_sentiment"
+  ],
+  "factor_variants": [
+    {
+      "name": "all_recorded_factors",
+      "drop": []
+    },
+    {
+      "name": "drop_f1",
+      "drop": [
+        "f1_mom_5d"
+      ]
+    },
+    {
+      "name": "drop_f2",
+      "drop": [
+        "f2_mom_20d"
+      ]
+    },
+    {
+      "name": "drop_f3",
+      "drop": [
+        "f3_vol_adj_ret"
+      ]
+    },
+    {
+      "name": "drop_f4",
+      "drop": [
+        "f4_volume_expansion"
+      ]
+    },
+    {
+      "name": "drop_f5",
+      "drop": [
+        "f5_rsi_trend_confirm"
+      ]
+    },
+    {
+      "name": "drop_f6",
+      "drop": [
+        "f6_sentiment"
+      ]
+    },
+    {
+      "name": "price_momentum_only",
+      "drop": [
+        "f1_mom_5d",
+        "f2_mom_20d",
+        "f3_vol_adj_ret",
+        "f4_volume_expansion",
+        "f5_rsi_trend_confirm",
+        "f6_sentiment"
+      ],
+      "ranking": "causal_4h_momentum"
+    },
+    {
+      "name": "f3_only",
+      "drop": [
+        "f1_mom_5d",
+        "f2_mom_20d",
+        "f4_volume_expansion",
+        "f5_rsi_trend_confirm",
+        "f6_sentiment"
+      ],
+      "baseline": "drop_f4",
+      "accept_if": "No primary-cell net PnL is worse than the F4-removed candidate, and all primary-cell drawdowns remain at most 3 percent. Otherwise retain the F4-only removal."
+    }
+  ],
+  "removal_rule": {
+    "candidate_scope": "exploratory_candidate_only",
+    "zero_effect_can_remove_from_relative_ranker": true,
+    "otherwise_require_positive_pnl_difference_in_all_primary_cells": true,
+    "primary_cells": [
+      "full60:30",
+      "full60:60",
+      "validation20:30",
+      "validation20:60"
+    ],
+    "minimum_total_improvement_usdt": 0.05,
+    "maximum_drawdown_pct": 3.0,
+    "combined_removal_must_be_retested": true,
+    "no_automatic_live_promotion": true
+  },
+  "compact_candidate": {
+    "name": "f3_only",
+    "drop": [
+      "f1_mom_5d",
+      "f2_mom_20d",
+      "f4_volume_expansion",
+      "f5_rsi_trend_confirm",
+      "f6_sentiment"
+    ],
+    "baseline": "drop_f4",
+    "accept_if": "No primary-cell net PnL is worse than the F4-removed candidate, and all primary-cell drawdowns remain at most 3 percent. Otherwise retain the F4-only removal."
+  }
+}
