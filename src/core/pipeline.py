@@ -704,7 +704,7 @@ class V5Pipeline:
         if not isinstance(signal, dict):
             return None
         for source in (signal, signal.get("metadata") or {}):
-            for key in ("expected_net_return_bps", "expected_gross_return_bps", "expected_net_bps", "expected_edge_bps", "edge_bps"):
+            for key in ("expected_net_return_bps", "expected_gross_return_bps", "expected_net_bps", "expected_edge_bps", "expected_net_edge_bps", "edge_bps"):
                 if key in source:
                     return _float_or_none(source[key])
         return None
@@ -813,7 +813,7 @@ class V5Pipeline:
                     meta.update({key: source[key] for key in contract_keys if key in source})
                     meta["expected_edge_source"] = "strategy_net_requires_cost_binding"
                     return meta
-                for key in ("expected_edge_bps", "edge_bps"):
+                for key in ("expected_edge_bps", "expected_net_edge_bps", "edge_bps"):
                     if key in source:
                         meta["expected_edge_bps"] = source[key]
                         meta["expected_edge_source"] = "legacy_unbound"
