@@ -5625,6 +5625,27 @@ def api_positions():
         return _json_internal_error_response(e, positions=[])
 
 
+@app.route('/api/market_chart', methods=['GET'])
+def api_market_chart():
+    """Public exchange chart snapshots; never load the account or trading engine."""
+    from src.reporting.dashboard_market_chart import MarketChartError, get_market_chart, validate_selection
+
+    try:
+        symbol, timeframe = validate_selection(request.args.get('symbol', 'BTC-USDT'),
+                                               request.args.get('timeframe', '1h'))
+    except ValueError:
+        return jsonify({'error': 'unsupported_market_selection', 'read_only': True}), 400
+    try:
+        response = jsonify(get_market_chart(symbol, timeframe))
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+    except MarketChartError as exc:
+        app.logger.warning('Public market chart unavailable: %s %s %s', symbol, timeframe, exc)
+        return jsonify({'error': str(exc), 'symbol': symbol, 'timeframe': timeframe, 'read_only': True}), 502
+    except Exception as exc:
+        return _json_internal_error_response(exc, read_only=True, symbol=symbol, timeframe=timeframe)
+
+
 @app.route('/api/position_kline')
 @_cache_json_response(15.0)
 def api_position_kline():
