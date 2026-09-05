@@ -25,8 +25,13 @@ class ParticipationStore:
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS decisions "
                 "(sequence INTEGER PRIMARY KEY, observed_ts REAL NOT NULL, "
-                "bar_ts INTEGER NOT NULL UNIQUE, event TEXT NOT NULL)"
+                "bar_ts INTEGER NOT NULL, event_kind TEXT NOT NULL, "
+                "event_key TEXT NOT NULL UNIQUE, event TEXT NOT NULL)"
             )
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(decisions)")}
+            if "event_key" not in columns:
+                raise ValueError("quote execution requires a new explicit cohort/state path; legacy ledger retained")
+            connection.execute("CREATE INDEX IF NOT EXISTS decisions_observed ON decisions(observed_ts)")
             yield connection
             connection.commit()
         except BaseException:
@@ -49,14 +54,24 @@ class ParticipationStore:
 
     @staticmethod
     def save(connection, *, identity: str, state: dict, event: dict):
+        kind = event.get("observation_kind", "hourly")
+        if kind not in ("hourly", "quote"):
+            raise ValueError("unknown participation observation kind")
+        key = f"hourly:{event['bar_ts']}" if kind == "hourly" else f"quote:{event['observed_ts']}"
         encoded_state = json.dumps(state, allow_nan=False, sort_keys=True, separators=(",", ":"))
         encoded_event = json.dumps(event, allow_nan=False, sort_keys=True, separators=(",", ":"))
         connection.execute(
-            "INSERT INTO decisions(observed_ts,bar_ts,event) VALUES(?,?,?)",
-            (event["observed_ts"], event["bar_ts"], encoded_event),
+            "INSERT INTO decisions(observed_ts,bar_ts,event_kind,event_key,event) VALUES(?,?,?,?,?)",
+            (event["observed_ts"], event["bar_ts"], kind, key, encoded_event),
         )
         connection.execute(
             "INSERT INTO portfolio(id,identity,state) VALUES(1,?,?) "
             "ON CONFLICT(id) DO UPDATE SET identity=excluded.identity,state=excluded.state",
             (identity, encoded_state),
         )
+
+    @staticmethod
+    def latest(connection, *, hourly=False):
+        where = " WHERE event_kind='hourly'" if hourly else ""
+        row = connection.execute("SELECT event FROM decisions" + where + " ORDER BY sequence DESC LIMIT 1").fetchone()
+        return json.loads(row[0]) if row else None

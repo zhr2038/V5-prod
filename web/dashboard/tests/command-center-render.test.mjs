@@ -188,3 +188,35 @@ test('a fresh HTTP receipt cannot make an old account snapshot current', () => {
   assert.match(section(html, 'positions'), /上次快照未见有效持仓/);
   assert.doesNotMatch(html, /当前空仓|当前没有有效持仓/);
 });
+
+test('paper quote execution shows pending intent, cancellation and measured fill latency', () => {
+  const props = fixture();
+  Object.assign(props.command.participation, {
+    quote_execution_enabled: true,
+    quote_worker: { status: 'observed', observed_at: STAMP, interval_seconds: 2 },
+    signal_observed_at: STAMP,
+    pending: { action: 'entry_intent', symbol: 'BNB/USDT', decision_ts: NOW / 1000 },
+    events: [
+      { observed_ts: STAMP, execution: { action: 'cancel', symbol: 'BNB/USDT', reason: 'entry_price_premium' } },
+      { observed_ts: STAMP, execution: { action: 'fill', side: 'buy', symbol: 'SOL/USDT', latency_seconds: 1.8 } },
+    ],
+  });
+  const html = section(render(props), 'participation');
+  assert.match(html, /持续报价检查运行中/);
+  assert.match(html, /检查间隔 2 秒/);
+  assert.match(html, /BNB\/USDT 买入意向/);
+  assert.match(html, /意向已取消/);
+  assert.match(html, /模拟买入成交/);
+  assert.match(html, /信号至成交 1\.80 秒/);
+});
+
+test('a stopped quote worker cannot retain a running label after its heartbeat expires', () => {
+  const props = fixture();
+  Object.assign(props.command.participation, {
+    quote_execution_enabled: true,
+    quote_worker: { status: 'observed', observed_at: new Date(NOW - 60000).toISOString(), interval_seconds: 2 },
+  });
+  const html = section(render(props), 'participation');
+  assert.match(html, /报价检查状态待确认/);
+  assert.doesNotMatch(html, /持续报价检查运行中/);
+});

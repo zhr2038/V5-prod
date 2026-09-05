@@ -2199,7 +2199,12 @@ class ParticipationRuntimeConfig(BaseModel):
     mode: str = "forward_paper"
     policy_path: str = "configs/research/participation_policy_v1.json"
     state_path: str = "reports/participation/forward.sqlite"
+    latest_path: str = "reports/participation/latest.json"
     max_signal_age_seconds: float = Field(default=900.0, gt=0, le=3600)
+    quote_execution_enabled: bool = False
+    quote_execution_interval_seconds: float = Field(default=2.0, ge=1, le=5)
+
+    model_config = {"extra": "forbid"}
 
     @field_validator("mode")
     @classmethod

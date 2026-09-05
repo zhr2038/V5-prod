@@ -1,0 +1,19 @@
+[Unit]
+Description=V5 forward-paper execution on subsequent public OKX quotes
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/clawd/v5-prod
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/ubuntu/clawd/v5-prod/.venv/bin/python -B scripts/run_participation_quotes.py --config configs/live_prod.yaml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

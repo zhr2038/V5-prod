@@ -30,6 +30,16 @@ export interface CommandCandidate {
   rsi_confirm?: number | null;
 }
 
+export interface ParticipationAction {
+  action?: string;
+  reason?: string;
+  symbol?: string;
+  side?: string;
+  decision_ts?: number;
+  latency_seconds?: number;
+  candidate_reasons?: Record<string, string>;
+}
+
 export interface ParticipationSummary {
   enabled: boolean | null;
   mode: string;
@@ -44,8 +54,14 @@ export interface ParticipationSummary {
   equity_usdt: number | null;
   valuation_status?: string | null;
   curve: { observed_ts: number | string; equity_usdt: number | null; net_realized_pnl_usdt: number | null; valuation_status?: string }[];
-  latest_decision?: { action?: string; reason?: string; symbol?: string; candidate_reasons?: Record<string, string> } | null;
-  latest_execution?: { action?: string; reason?: string; side?: string; symbol?: string } | null;
+  latest_decision?: ParticipationAction | null;
+  latest_execution?: ParticipationAction | null;
+  signal_decision?: ParticipationAction | null;
+  signal_observed_at?: string | null;
+  pending?: ParticipationAction | null;
+  quote_execution_enabled?: boolean;
+  quote_worker?: { status: string; observed_at?: string | null; interval_seconds?: number; websocket_connected?: boolean; last_error?: string | null; last_check_status?: string };
+  events?: { observed_ts: string; decision?: ParticipationAction | null; execution?: ParticipationAction | null }[];
 }
 
 export interface CommandCenterData {

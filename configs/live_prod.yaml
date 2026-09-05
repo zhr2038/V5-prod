@@ -847,5 +847,8 @@ participation:
   enabled: true
   mode: forward_paper
   policy_path: configs/research/participation_policy_v1.json
-  state_path: reports/participation/forward.sqlite
+  state_path: reports/participation/forward-quotes-20260905.sqlite
+  latest_path: reports/participation/forward-quotes-20260905.latest.json
   max_signal_age_seconds: 900
+  quote_execution_enabled: true
+  quote_execution_interval_seconds: 2

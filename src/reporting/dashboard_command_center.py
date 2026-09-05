@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.execution.fill_store import derive_runtime_named_json_path
+from src.reporting.participation_runtime import runtime_identity
 
 SCHEMA = "v5.command_center.v1"
 MAX_JSON_BYTES = 4 * 1024 * 1024
@@ -308,12 +309,26 @@ def _participation(paths, config, workspace, now, warnings):
         if policy_status != "observed" or policy.get("mode") != "research_shadow" or policy.get("live_promotion_allowed") is not False:
             raise ValueError("participation_policy_unavailable_or_invalid")
         policy_hash = hashlib.sha256(json.dumps(policy, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
-        source_hashes = {name: hashlib.sha256(_safe(workspace / relative, workspace).read_bytes()).hexdigest()
-                         for name, relative in (("policy", "src/strategy/participation_policy.py"),
-                                                ("runtime", "src/reporting/participation_runtime.py"),
-                                                ("store", "src/reporting/participation_store.py"))}
-        identity = hashlib.sha256(json.dumps({"policy": policy_hash, "code": source_hashes}, sort_keys=True).encode()).hexdigest()
-        latest, latest_status = _json(root / "latest.json", root)
+        identity, _ = runtime_identity(policy, settings, workspace)
+        raw_latest = Path(settings.get("latest_path") or root / "latest.json")
+        latest_path = _safe(raw_latest if raw_latest.is_absolute() else workspace / raw_latest, root)
+        raw_path = Path(settings.get("state_path") or "")
+        state_path = _safe(raw_path if raw_path.is_absolute() else workspace / raw_path, root)
+        if state_path.suffix != ".sqlite":
+            raise ValueError("participation_state_path_invalid")
+        quote_enabled = settings.get("quote_execution_enabled") is True
+        output["quote_execution_enabled"] = quote_enabled
+        if quote_enabled:
+            worker, worker_status = _json(state_path.with_suffix(".worker.json"), root)
+            worker = worker or {}
+            stamp = _epoch(worker.get("observed_ts"))
+            status = "observed" if (worker_status == "observed" and worker.get("status") == "observed"
+                      and worker.get("identity") == identity and stamp is not None and 0 <= now - stamp <= 30) else "unavailable"
+            output["quote_worker"] = {"status": status, "observed_at": _iso(stamp),
+                                      "interval_seconds": worker.get("interval_seconds"),
+                                      "websocket_connected": worker.get("websocket_connected"),
+                                      "last_check_status": worker.get("last_check_status"), "last_error": worker.get("last_error")}
+        latest, latest_status = _json(latest_path, root)
         output["status"] = latest_status
         if latest is None:
             return output
@@ -332,14 +347,15 @@ def _participation(paths, config, workspace, now, warnings):
                        "equity_usdt": _valued_equity(state, now),
                        "valuation_status": valuation, "last_valuation_at": _iso(state.get("last_valuation_quote_ts")),
                        "latest_decision": latest.get("decision"), "latest_execution": latest.get("execution"),
-                       "position": state.get("position"), "halted": state.get("halted")})
+                       "position": state.get("position"), "pending": state.get("pending"), "halted": state.get("halted"),
+                       "signal_decision": latest.get("signal_decision", latest.get("decision")),
+                       "signal_observed_at": _iso(latest.get("signal_observed_ts", latest.get("observed_ts")))})
+        if quote_enabled and output["quote_worker"]["status"] != "observed" and state.get("position"):
+            output["equity_usdt"] = None
+            output["valuation_status"] = "quote_worker_unavailable"
         if output["status"] in ("future", "unavailable"):
             _clear_participation_values(output)
             return output
-        raw_path = Path(settings.get("state_path") or "")
-        state_path = _safe(raw_path if raw_path.is_absolute() else workspace / raw_path, root)
-        if state_path.suffix != ".sqlite":
-            raise ValueError("participation_state_path_invalid")
         with closing(sqlite3.connect(state_path.as_uri() + "?mode=ro", uri=True, timeout=1)) as con:
             portfolio = con.execute("SELECT identity FROM portfolio WHERE id=1").fetchone()
             if not portfolio or portfolio[0] != identity:
@@ -347,8 +363,17 @@ def _participation(paths, config, workspace, now, warnings):
                 _clear_participation_values(output)
                 return output
             # Keep the curve on the latest report's committed observation boundary.
-            rows = con.execute("SELECT observed_ts,event FROM decisions WHERE observed_ts<=? ORDER BY bar_ts DESC LIMIT 168",
-                               (_epoch(latest.get("observed_ts")),)).fetchall()
+            boundary = _epoch(latest.get("observed_ts"))
+            # One valuation per hour keeps the chart bounded when quote events
+            # arrive within the same signal hour. Preserve the latest event too.
+            rows = con.execute("SELECT observed_ts,event FROM decisions WHERE sequence IN ("
+                               "SELECT MAX(sequence) FROM decisions WHERE observed_ts<=? AND observed_ts>=? "
+                               "GROUP BY CAST(observed_ts/3600 AS INTEGER) ORDER BY MAX(sequence) DESC LIMIT 168) "
+                               "ORDER BY observed_ts DESC,sequence DESC", (boundary, boundary - 168 * 3600)).fetchall()
+            event_rows = con.execute("SELECT event FROM decisions WHERE observed_ts<=? AND observed_ts>=? AND "
+                                     "(json_extract(event,'$.execution.action') IN ('fill','cancel') OR "
+                                     "json_extract(event,'$.decision.action') IN ('entry_intent','exit_intent')) "
+                                     "ORDER BY observed_ts DESC,sequence DESC LIMIT 12", (boundary, boundary - 168 * 3600)).fetchall()
         if not rows or _epoch(rows[0][0]) != _epoch(latest.get("observed_ts")):
             raise ValueError("participation_latest_event_missing")
         saved_latest = _mapping(json.loads(rows[0][1]))
@@ -371,6 +396,12 @@ def _participation(paths, config, workspace, now, warnings):
                                     "equity_usdt": _valued_equity(event_state, observed),
                                     "net_realized_pnl_usdt": _number(event_state.get("net_realized_pnl_usdt")), "valuation_status": valuation})
             output["events"].append({"observed_ts": _iso(observed), "decision": event.get("decision"), "execution": event.get("execution")})
+        if event_rows:
+            events = [json.loads(row[0]) for row in reversed(event_rows)]
+            if any(not _forward_event(event) or event.get("identity") != identity or event.get("policy_hash") != policy_hash for event in events):
+                raise ValueError("participation_execution_event_provenance_invalid")
+            output["events"] = [{"observed_ts": _iso(event.get("observed_ts")), "decision": event.get("decision"),
+                                 "execution": event.get("execution")} for event in events]
         output["events"] = output["events"][-12:]
     except (OSError, ValueError, TypeError, sqlite3.Error):
         warnings.append("participation_evidence_unavailable")
@@ -391,7 +422,7 @@ def _forward_event(event):
 
 def _clear_participation_values(output):
     output.update(entry_count=None, closed_trade_count=None, net_realized_pnl_usdt=None, equity_usdt=None,
-                  curve=[], events=[], latest_decision=None, latest_execution=None, position=None)
+                  curve=[], events=[], latest_decision=None, latest_execution=None, signal_decision=None, position=None, pending=None)
 
 
 def _valued_equity(state, observed):

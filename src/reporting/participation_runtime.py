@@ -1,4 +1,4 @@
-"""Run the shared participation policy on genuinely observed hourly quotes.
+"""Run hourly participation signals and subsequent public quote execution.
 
 This module owns a separate virtual portfolio, never production orders/funds.
 Historical replay cannot be written into its forward cohort.
@@ -6,6 +6,7 @@ Historical replay cannot be written into its forward cohort.
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import math
 import os
@@ -153,10 +154,93 @@ def build_snapshot(*, market_data, top_of_book, audit, config, now, block=None, 
             "operational_block": block, "symbols": symbols, "data_errors": errors}
 
 
-def process_observation(*, snapshot, config, store, identity, source_run_id):
+def runtime_identity(config, settings, workspace=PROJECT_ROOT):
+    paths = {"policy": "src/strategy/participation_policy.py",
+             "runtime": "src/reporting/participation_runtime.py",
+             "store": "src/reporting/participation_store.py"}
+    parameters = None
+    if _get(settings, "quote_execution_enabled", False):
+        paths.update(quotes="src/reporting/participation_quotes.py", runner="scripts/run_participation_quotes.py")
+        parameters = {"quote_execution_enabled": True,
+                      "quote_execution_interval_seconds": float(_get(settings, "quote_execution_interval_seconds", 2.0))}
+    workspace = Path(workspace).resolve()
+    resolved = {name: (workspace / path).resolve() for name, path in paths.items()}
+    if any(not path.is_relative_to(workspace) for path in resolved.values()):
+        raise ValueError("participation identity source escapes workspace")
+    hashes = {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in resolved.items()}
+    binding = {"policy": policy.policy_hash(config), "code": hashes}
+    if parameters is not None:
+        binding["execution_schedule"] = parameters
+    return hashlib.sha256(json.dumps(binding, sort_keys=True).encode()).hexdigest(), hashes
+
+
+def isolated_path(raw, reports_dir, suffix):
+    path = Path(raw)
+    path = (path if path.is_absolute() else PROJECT_ROOT / path).resolve()
+    if (Path(reports_dir) / "participation").resolve() not in path.parents or path.suffix != suffix:
+        raise ValueError("participation requires an isolated " + suffix + " path under reports/participation")
+    return path
+
+
+def publish_latest(*, store, identity, path, source_hashes):
+    # Serialize publication with both writers and always read the newest committed
+    # event. A slow hourly publisher must never replace a later quote fill.
+    with store.transaction() as connection:
+        store.load(connection, identity)
+        event = store.latest(connection)
+        if event:
+            _save_report(path, {**event, "source_hashes": source_hashes})
+
+
+def _advance(snapshot, state, config, *, allow_entry, gap=False):
+    state = policy.mark_to_market(state, snapshot, config)
+    execution, closed = None, None
+    pending = state.get("pending")
+    if pending:
+        if gap and pending["action"] == "entry_intent":
+            execution = {"action": "cancel", "reason": "missing_forward_observation"}
+        else:
+            execution = policy.check_pending(pending, snapshot, state, config)
+        if execution["action"] == "fill":
+            state, closed = policy.apply_fill(state, execution, config)
+            state["entry_count"] += int(execution["side"] == "buy")
+        elif execution["action"] == "cancel":
+            state["pending"] = None
+        if not allow_entry:
+            execution = {**execution, "symbol": pending["symbol"], "decision_ts": pending["decision_ts"],
+                         "latency_seconds": snapshot["now_ts"] - pending["decision_ts"]}
+    state = policy.mark_to_market(state, snapshot, config)
+    if state.get("pending"):
+        decision = {"action": "hold", "reason": "pending_intent"}
+    elif allow_entry or state.get("position"):
+        decision = policy.decide(snapshot, state, config)
+        if decision["action"] in ("entry_intent", "exit_intent"):
+            state["pending"] = decision
+    else:
+        decision = {"action": "hold", "reason": "awaiting_next_hourly_signal"}
+    if closed:
+        state["closed_trade_count"] += 1
+        state["net_realized_pnl_usdt"] += closed["net_pnl_usdt"]
+    return state, decision, execution, closed
+
+
+def _event(snapshot, state, config, identity, source_run_id, *, kind, decision, execution, closed, gap=False):
+    return {"schema_version": "v5.participation_forward_observation.v1", "status": "observed",
+            "observation_kind": kind, "observed_ts": snapshot["now_ts"], "bar_ts": snapshot["bar_ts"],
+            "source_run_id": source_run_id, "cohort_started_at": state["cohort_started_at"], "identity": identity,
+            "policy_hash": policy.policy_hash(config), "mode": "forward_paper", "live_order_effect": "none",
+            "live_promotion_allowed": False, "historical_backfill": False, "observation_gap": gap,
+            "snapshot": snapshot, "decision": decision, "execution": execution, "closed_trade": closed,
+            "portfolio": state, "sampling": "hourly_closed_signals; subsequent_observed_quotes; no_intrabar_fill_backfill"}
+
+
+def process_observation(*, snapshot, config, store, identity, source_run_id, observation_clock=None):
     """Single atomic transition. Duplicate/older bars never execute again."""
     now, bar = snapshot["now_ts"], snapshot["bar_ts"]
     with store.transaction() as connection:
+        if observation_clock is not None:
+            snapshot = {**snapshot, "now_ts": observation_clock()}
+            now = snapshot["now_ts"]
         state = store.load(connection, identity)
         if state is None:
             state = {**policy.new_state(config), "cohort_started_at": now,
@@ -164,47 +248,69 @@ def process_observation(*, snapshot, config, store, identity, source_run_id):
                      "closed_trade_count": 0, "entry_count": 0, "net_realized_pnl_usdt": 0.0}
         last_bar = state.get("last_observed_bar_ts")
         if last_bar is not None and bar <= last_bar:
-            saved = connection.execute("SELECT event FROM decisions ORDER BY bar_ts DESC LIMIT 1").fetchone()
+            saved = store.latest(connection, hourly=True)
             if saved is None:
                 raise ValueError("portfolio has no committed observation event")
-            return {**json.loads(saved[0]), "status": "duplicate_or_older_bar",
+            return {**saved, "status": "duplicate_or_older_bar",
                     "requested_bar_ts": bar, "last_observed_bar_ts": last_bar}
         if state.get("last_observed_ts") is not None and now <= state["last_observed_ts"]:
             raise ValueError("forward observations must be strictly chronological")
         gap = last_bar is not None and bar != last_bar + config["bar_seconds"]
-        state = policy.mark_to_market(state, snapshot, config)
-        execution, closed = None, None
-        pending = state.get("pending")
-        if pending:
-            if gap and pending["action"] == "entry_intent":
-                execution = {"action": "cancel", "reason": "missing_forward_observation"}
-            else:
-                execution = policy.check_pending(pending, snapshot, state, config)
-            if execution["action"] == "fill":
-                state, closed = policy.apply_fill(state, execution, config)
-                state["entry_count"] += int(execution["side"] == "buy")
-            elif execution["action"] == "cancel":
-                state["pending"] = None
-        state = policy.mark_to_market(state, snapshot, config)
-        if state.get("pending"):
-            decision = {"action": "hold", "reason": "pending_intent"}
-        else:
-            decision = policy.decide(snapshot, state, config)
-            if decision["action"] in ("entry_intent", "exit_intent"):
-                state["pending"] = decision
-        if closed:
-            state["closed_trade_count"] += 1
-            state["net_realized_pnl_usdt"] += closed["net_pnl_usdt"]
+        state, decision, execution, closed = _advance(snapshot, state, config, allow_entry=True, gap=gap)
         state["last_observed_bar_ts"], state["last_observed_ts"] = bar, now
-        event = {"schema_version": "v5.participation_forward_observation.v1", "status": "observed",
-                 "observed_ts": now, "bar_ts": bar, "source_run_id": source_run_id,
-                 "cohort_started_at": state["cohort_started_at"], "identity": identity,
-                 "policy_hash": policy.policy_hash(config), "mode": "forward_paper",
-                 "live_order_effect": "none", "live_promotion_allowed": False,
-                 "historical_backfill": False, "observation_gap": gap,
-                 "snapshot": snapshot, "decision": decision, "execution": execution,
-                 "closed_trade": closed, "portfolio": state,
-                 "sampling": "hourly_observed_quotes; intrahour_stop_fills_not_observable"}
+        event = _event(snapshot, state, config, identity, source_run_id, kind="hourly",
+                       decision=decision, execution=execution, closed=closed, gap=gap)
+        store.save(connection, identity=identity, state=state, event=event)
+        return event
+
+
+def process_quote_observation(*, quotes, config, store, identity, reports_dir, now=None):
+    """Execute existing intents and manage positions; never open a new signal."""
+    with store.transaction() as connection:
+        observed = datetime.now(timezone.utc).timestamp() if now is None else float(now)
+        previous = store.load(connection, identity)
+        hourly = store.latest(connection, hourly=True)
+        if previous is None or hourly is None:
+            return {"status": "waiting_for_hourly_signal"}
+        if observed <= previous["last_observed_ts"]:
+            return {"status": "duplicate_or_older_quote"}
+        if not previous.get("pending") and not previous.get("position"):
+            return {"status": "idle_no_intent"}
+        snapshot = copy.deepcopy(hourly["snapshot"])
+        snapshot["now_ts"] = observed
+        snapshot["operational_block"] = operational_block(Path(reports_dir), observed) or snapshot.get("operational_block")
+        for symbol, row in snapshot["symbols"].items():
+            # Never reuse an hourly quote as though it were a newly received tick.
+            row["quote"] = dict(quotes.get(symbol) or {})
+            position = previous.get("position") or {}
+            if position.get("symbol") == symbol:
+                quote_ts = _epoch(row["quote"].get("ts"))
+                floor = max(position["entry_ts"], previous.get("last_valuation_quote_ts") or 0)
+                if quote_ts is not None and quote_ts < floor:
+                    row["quote"] = {}
+        negative_path = Path(reports_dir) / "negative_expectancy_cooldown.json"
+        if negative_path.exists():
+            negative = json.loads(negative_path.read_text(encoding="utf-8"))
+            for symbol, row in snapshot["symbols"].items():
+                until = _epoch(negative.get("symbols", {}).get(symbol, {}).get("cooldown_until_ms"))
+                if until is not None and until > observed:
+                    row["operational_block"] = "negative_expectancy_cooldown"
+        state, decision, execution, closed = _advance(snapshot, previous, config, allow_entry=False)
+        transition = ((execution or {}).get("action") in ("fill", "cancel")
+                      or decision["action"] == "exit_intent"
+                      or state.get("valuation_valid") != previous.get("valuation_valid")
+                      or state.get("peak_equity_usdt") != previous.get("peak_equity_usdt")
+                      or state.get("halted") != previous.get("halted"))
+        # Check every quote cycle; checkpoint unchanged valuations at most once
+        # per minute. Persist every new equity peak/halt immediately so a later
+        # tick or restart cannot forget the drawdown risk already observed.
+        if not transition and observed - previous["last_observed_ts"] < 60:
+            return {"status": "checked", "decision": decision, "execution": execution}
+        state["last_observed_ts"] = observed
+        event = _event(snapshot, state, config, identity, hourly["source_run_id"], kind="quote",
+                       decision=decision, execution=execution, closed=closed)
+        event["signal_observed_ts"] = hourly["observed_ts"]
+        event["signal_decision"] = hourly["decision"]
         store.save(connection, identity=identity, state=state, event=event)
         return event
 
@@ -216,7 +322,8 @@ def update_participation_runtime(*, cfg, market_data_1h, top_of_book, audit,
         return {"enabled": False}
     if _get(settings, "mode") != "forward_paper":
         raise ValueError("participation runtime requires forward_paper")
-    now = datetime.now(timezone.utc).timestamp() if now is None else float(now)
+    clock = (lambda: datetime.now(timezone.utc).timestamp()) if now is None else None
+    now = clock() if clock is not None else float(now)
     end = _epoch(_get(audit, "window_end_ts"))
     if end is None or not 0 <= now - end <= _get(settings, "max_signal_age_seconds", 900):
         raise ValueError("stale or future run cannot create prospective observations")
@@ -225,13 +332,8 @@ def update_participation_runtime(*, cfg, market_data_1h, top_of_book, audit,
         policy_path = PROJECT_ROOT / policy_path
     config = json.loads(policy_path.read_text(encoding="utf-8"))
     policy.validate_policy(config)
-    state_path = Path(_get(settings, "state_path"))
-    if not state_path.is_absolute():
-        state_path = PROJECT_ROOT / state_path
-    state_path = state_path.resolve()
-    allowed_state_root = (Path(reports_dir) / "participation").resolve()
-    if allowed_state_root not in state_path.parents or state_path.suffix != ".sqlite":
-        raise ValueError("participation state must be an isolated .sqlite file under runtime reports/participation")
+    state_path = isolated_path(_get(settings, "state_path"), reports_dir, ".sqlite")
+    latest_path = isolated_path(_get(settings, "latest_path", str(Path(reports_dir) / "participation/latest.json")), reports_dir, ".json")
     from src.reporting.candidate_snapshot import (
         candidate_snapshot_symbol_cost_table_paths, load_latest_symbol_cost_table,
     )
@@ -241,19 +343,16 @@ def update_participation_runtime(*, cfg, market_data_1h, top_of_book, audit,
     if negative_path.is_file():
         negative_state = json.loads(negative_path.read_text(encoding="utf-8"))
     # Bind executable decision/accounting code, not only parameter names.
-    source_hashes = {name: hashlib.sha256(Path(path).read_bytes()).hexdigest()
-                     for name, path in (("policy", policy.__file__), ("runtime", __file__),
-                                        ("store", Path(__file__).with_name("participation_store.py")))}
-    identity = hashlib.sha256(json.dumps({"policy": policy.policy_hash(config),
-                                        "code": source_hashes}, sort_keys=True).encode()).hexdigest()
+    identity, source_hashes = runtime_identity(config, settings)
     snapshot = build_snapshot(market_data=market_data_1h, top_of_book=top_of_book, audit=audit,
                               config=config, now=now, block=operational_block(Path(reports_dir), now),
                               costs=costs, negative_state=negative_state)
-    event = process_observation(snapshot=snapshot, config=config, store=ParticipationStore(state_path),
-                                identity=identity, source_run_id=str(_get(audit, "run_id", "")))
+    store = ParticipationStore(state_path)
+    event = process_observation(snapshot=snapshot, config=config, store=store,
+                                identity=identity, source_run_id=str(_get(audit, "run_id", "")), observation_clock=clock)
     event["source_hashes"] = source_hashes
     _save_report(Path(run_dir) / "participation_forward.json", event)
-    _save_report(Path(reports_dir) / "participation" / "latest.json", event)
+    publish_latest(store=store, identity=identity, path=latest_path, source_hashes=source_hashes)
     return {"enabled": True, "status": event["status"], "decision": event.get("decision"),
             "entry_count": event.get("portfolio", {}).get("entry_count"),
             "closed_trades": event.get("portfolio", {}).get("closed_trade_count"),

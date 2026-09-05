@@ -86,6 +86,27 @@ def enable_participation(runtime):
     return identity, policy_hash
 
 
+def enable_quote_execution(runtime, event):
+    from src.reporting.participation_runtime import runtime_identity
+    settings = runtime.config["participation"]
+    settings.update(quote_execution_enabled=True, quote_execution_interval_seconds=2,
+                    latest_path="reports/participation/quotes.latest.json")
+    for relative in ("src/reporting/participation_quotes.py", "scripts/run_participation_quotes.py"):
+        path = runtime.workspace / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# quote worker executable\n")
+    policy = json.loads((runtime.workspace / settings["policy_path"]).read_text())
+    identity, _ = runtime_identity(policy, settings, runtime.workspace)
+    event["identity"] = identity
+    write_json(runtime.workspace / settings["latest_path"], event)
+    with sqlite3.connect(runtime.workspace / settings["state_path"]) as con:
+        con.execute("UPDATE portfolio SET identity=?", (identity,))
+        con.execute("UPDATE decisions SET event=?", (json.dumps(event),))
+    write_json((runtime.workspace / settings["state_path"]).with_suffix(".worker.json"),
+               {"identity": identity, "observed_ts": NOW - 1, "status": "observed", "interval_seconds": 2})
+    return identity
+
+
 def forward(runtime, stamp=NOW - 60, count=1, **changes):
     identity, policy_hash = enable_participation(runtime)
     state = {"entry_count": 0, "closed_trade_count": 0, "net_realized_pnl_usdt": 0,
@@ -384,3 +405,41 @@ def test_http_endpoint_is_local_read_only_and_does_not_call_legacy_routes(runtim
     assert response.json["schema_version"] == "v5.command_center.v1"
     assert response.json["window_72h"]["actual_fill_events"]["value"] is None
     assert dashboard.app.test_client().post("/api/command_center").status_code == 405
+
+
+def test_same_hour_quote_event_and_pending_are_visible(runtime):
+    event = forward(runtime, stamp=NOW - 120)
+    enable_quote_execution(runtime, event)
+    latest = json.loads(json.dumps(event))
+    latest.update(observed_ts=NOW - 30, observation_kind="quote",
+                  signal_observed_ts=event["observed_ts"], signal_decision=event["decision"],
+                  execution={"action": "cancel", "reason": "entry_price_premium", "symbol": "BNB/USDT", "latency_seconds": 2})
+    latest["portfolio"]["pending"] = None
+    settings = runtime.config["participation"]
+    write_json(runtime.workspace / settings["latest_path"], latest)
+    with sqlite3.connect(runtime.workspace / settings["state_path"]) as con:
+        con.execute("INSERT INTO decisions(observed_ts,bar_ts,event) VALUES(?,?,?)",
+                    (latest["observed_ts"], latest["bar_ts"], json.dumps(latest)))
+    result = build(runtime)["participation"]
+    assert result["status"] == "observed"
+    assert result["quote_worker"]["status"] == "observed"
+    assert result["latest_execution"]["symbol"] == "BNB/USDT"
+    assert result["events"][-1]["execution"]["reason"] == "entry_price_premium"
+    assert len(result["curve"]) == 1
+
+
+def test_dead_quote_worker_never_presents_held_equity_as_current(runtime):
+    event = forward(runtime)
+    identity = enable_quote_execution(runtime, event)
+    event["portfolio"].update(position={"symbol": "BNB/USDT"}, valuation_status="observed_quote",
+                              last_valuation_quote_ts=NOW - 10)
+    settings = runtime.config["participation"]
+    write_json(runtime.workspace / settings["latest_path"], event)
+    with sqlite3.connect(runtime.workspace / settings["state_path"]) as con:
+        con.execute("UPDATE decisions SET event=?", (json.dumps(event),))
+    write_json((runtime.workspace / settings["state_path"]).with_suffix(".worker.json"),
+               {"identity": identity, "observed_ts": NOW - 60, "status": "observed"})
+    result = build(runtime)["participation"]
+    assert result["quote_worker"]["status"] == "unavailable"
+    assert result["equity_usdt"] is None
+    assert result["valuation_status"] == "quote_worker_unavailable"
