@@ -40,6 +40,17 @@ function sameInstrument(left?: unknown, right?: unknown) {
   return Boolean(a && b && a === b);
 }
 
+function positivePrice(value: unknown): number | null {
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null;
+  const price = Number(value);
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
+
+function formatPrice(value: unknown) {
+  const price = positivePrice(value);
+  return price === null ? '—' : fmtUsd(price);
+}
+
 function candleTimestamp(candle: KlineData) {
   const rawNumeric = Number(candle.timestamp ?? candle.ts ?? 0);
   if (Number.isFinite(rawNumeric) && rawNumeric > 0) {
@@ -119,11 +130,13 @@ function CandlestickSvg({
   timeframe,
   referencePrice,
   referenceLabel,
+  loading = false,
 }: {
   data: KlineData[];
   timeframe: string;
   referencePrice?: number;
   referenceLabel?: string;
+  loading?: boolean;
 }) {
   const [hover, setHover] = useState<ChartHover | null>(null);
   const latestInput = data[data.length - 1] || null;
@@ -138,7 +151,7 @@ function CandlestickSvg({
   if (!data.length) {
     return (
       <div className="flex items-center justify-center h-full text-[var(--text-dim)] text-sm">
-        暂无数据
+        {loading ? '行情读取中' : '暂无K线数据'}
       </div>
     );
   }
@@ -649,38 +662,37 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
     }
   }, [normalizedFocusSymbol]);
 
-  const spotlightIndex = selectedSymbol
-    ? sorted.findIndex((item) => sameInstrument(item.symbol, selectedSymbol))
-    : 0;
+  const spotlightIndex = sorted.findIndex((item) =>
+    sameInstrument(item.symbol, selectedSymbol || normalizedFocusSymbol) && Number(item.qty) > 0
+  );
   const spotlightPosition = spotlightIndex >= 0 ? sorted[spotlightIndex] : null;
   const activeSymbol = normalizeUsdtSymbol(selectedSymbol || normalizedFocusSymbol || defaultFocusSymbol);
   const matchingTrade = sortedTrades.find((trade) => sameInstrument(trade.symbol, activeSymbol)) || null;
   const fallbackTrade = !spotlightPosition ? matchingTrade : null;
   const activeDisplaySymbol = activeSymbol || normalizeUsdtSymbol(defaultFocusSymbol);
-  const activeReferencePrice =
-    spotlightPosition && Number(spotlightPosition.avgPrice) > 0
-      ? spotlightPosition.avgPrice
-      : (matchingTrade && Number(matchingTrade.price) > 0 ? matchingTrade.price : undefined);
-  const activeReferenceLabel = spotlightPosition
-    ? '持仓均价'
-    : (matchingTrade && Number(matchingTrade.price) > 0 ? '成交价' : undefined);
+  const activeReferencePrice = positivePrice(spotlightPosition?.avgPrice) ?? undefined;
+  const activeReferenceLabel = activeReferencePrice !== undefined ? '持仓均价' : undefined;
   const spotlightLabel = spotlightPosition
     ? symbolBase(spotlightPosition.symbol)
     : symbolBase(activeSymbol);
-  const chartCandles = Array.isArray(kline?.candles) ? kline.candles : [];
-  const chartSummary = kline?.summary || null;
+  const currentKline = kline && sameInstrument(kline.symbol, activeSymbol) && kline.timeframe === tf ? kline : null;
+  const chartCandles = Array.isArray(currentKline?.candles)
+    ? currentKline.candles.filter((candle) => [candle.open, candle.high, candle.low, candle.close].every((value) => positivePrice(value) !== null))
+    : [];
+  const chartSummary = currentKline?.summary || null;
   const latestCandle = chartCandles[chartCandles.length - 1] || null;
   const previousCandle = chartCandles[chartCandles.length - 2] || null;
-  const periodChange = latestCandle && previousCandle
-    ? latestCandle.close - previousCandle.close
-    : (Number(chartSummary?.close || 0) - Number(chartSummary?.open || 0));
-  const periodChangePct = previousCandle?.close
-    ? periodChange / previousCandle.close
-    : Number(chartSummary?.change_pct || 0);
-  const sessionRangePct =
-    Number(chartSummary?.low || 0) > 0
-      ? (Number(chartSummary?.high || 0) - Number(chartSummary?.low || 0)) / Number(chartSummary?.low)
-      : 0;
+  const chartOpen = positivePrice(chartSummary?.open) ?? positivePrice(latestCandle?.open);
+  const chartHigh = positivePrice(chartSummary?.high) ?? positivePrice(latestCandle?.high);
+  const chartLow = positivePrice(chartSummary?.low) ?? positivePrice(latestCandle?.low);
+  const chartClose = positivePrice(chartSummary?.close) ?? positivePrice(latestCandle?.close);
+  const periodBase = positivePrice(previousCandle?.close) ?? chartOpen;
+  const periodClose = positivePrice(latestCandle?.close) ?? chartClose;
+  const periodChange = periodClose !== null && periodBase !== null ? periodClose - periodBase : null;
+  const periodChangePct = periodChange !== null && periodBase !== null ? periodChange / periodBase : null;
+  const sessionRangePct = chartHigh !== null && chartLow !== null && chartHigh >= chartLow
+    ? (chartHigh - chartLow) / chartLow
+    : null;
   const averageVolume =
     chartCandles.length > 0
       ? chartCandles.reduce((sum, candle) => sum + Number(candle.volume || 0), 0) / chartCandles.length
@@ -693,12 +705,8 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
     chartCandles.length >= 20
       ? chartCandles.slice(-20).reduce((sum, candle) => sum + candle.close, 0) / 20
       : null;
-  const displayAvgPrice =
-    spotlightPosition && Number(spotlightPosition.avgPrice) > 0 ? spotlightPosition.avgPrice : activeReferencePrice;
-  const displayCurrentPrice =
-    spotlightPosition && Number(spotlightPosition.currentPrice) > 0
-      ? spotlightPosition.currentPrice
-      : (Number(chartSummary?.close || latestCandle?.close || 0) || 0);
+  const displayAvgPrice = positivePrice(spotlightPosition?.avgPrice);
+  const displayCurrentPrice = positivePrice(spotlightPosition?.currentPrice) ?? chartClose;
   const livePricePulse = useDataPulse(displayCurrentPrice, { durationMs: 680 });
 
   useEffect(() => {
@@ -713,7 +721,8 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
       if (!mounted) return;
       const payloadSymbol = normalizeUsdtSymbol(data?.symbol || activeSymbol);
       if (payloadSymbol && !sameInstrument(payloadSymbol, activeSymbol)) return;
-      setKline(data);
+      if (data?.timeframe && data.timeframe !== tf) return;
+      setKline({ ...data, symbol: payloadSymbol, timeframe: tf });
     });
     return () => {
       mounted = false;
@@ -744,7 +753,8 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
     api.positionKline(klineSymbol, tf).then((data) => {
       const payloadSymbol = normalizeUsdtSymbol(data?.symbol || activeSymbol);
       if (payloadSymbol && !sameInstrument(payloadSymbol, activeSymbol)) return;
-      setKline(data);
+      if (data?.timeframe && data.timeframe !== tf) return;
+      setKline({ ...data, symbol: payloadSymbol, timeframe: tf });
     });
   }, activeSymbol ? 10000 : null);
 
@@ -790,15 +800,15 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
             <div className="chart-live-symbol">
               <strong>{activeDisplaySymbol}</strong>
               <span className={livePricePulse.className} data-pulse={livePricePulse.dataPulse}>
-                {fmtUsd(displayCurrentPrice || undefined)}
+                {formatPrice(displayCurrentPrice)}
               </span>
-              <em className={periodChange >= 0 ? 'text-buy' : 'text-sell'}>
-                {periodChange >= 0 ? '+' : ''}{fmtUsd(periodChange)} {fmtPct(periodChangePct, 2)}
+              <em className={periodChange === null ? 'text-[var(--text-dim)]' : periodChange >= 0 ? 'text-buy' : 'text-sell'}>
+                {periodChange === null ? '—' : `${periodChange >= 0 ? '+' : ''}${fmtUsd(periodChange)} ${fmtPct(periodChangePct, 2)}`}
               </em>
             </div>
             <div className="chart-live-meta">
               <span>区间成交量 <strong>{formatCompactVolume(Number(chartSummary?.volume || 0))}</strong></span>
-              <span>振幅 <strong>{fmtPct(sessionRangePct, 2)}</strong></span>
+              <span>振幅 <strong>{sessionRangePct === null ? '—' : fmtPct(sessionRangePct, 2)}</strong></span>
               <span>/api/position_kline · 10s 更新</span>
             </div>
           </div>
@@ -815,11 +825,11 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
                 </div>
                 <div className="liquid-glass-thin metric-pill tone-amber px-4 py-3">
                   <div className="text-xs text-[var(--text-dim)]">均价</div>
-                  <div className="text-lg font-mono">{fmtUsd(displayAvgPrice)}</div>
+                  <div className="text-lg font-mono">{formatPrice(displayAvgPrice)}</div>
                 </div>
                 <div className="liquid-glass-thin metric-pill tone-coral px-4 py-3">
                   <div className="text-xs text-[var(--text-dim)]">现价</div>
-                  <div className="text-lg font-mono">{fmtUsd(displayCurrentPrice)}</div>
+                  <div className="text-lg font-mono">{formatPrice(displayCurrentPrice)}</div>
                 </div>
               </div>
               <div className={`xl:text-right px-2 pt-2 ${spotlightPosition.pnlPercent >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
@@ -831,22 +841,22 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
             <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 focus-summary-strip">
               <div className="material-surface material-clear clear-control metric-pill tone-sky px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">状态</div>
-                <div className="text-lg font-semibold">最近成交</div>
+                <div className="text-lg font-semibold">当前无持仓</div>
               </div>
               <div className="liquid-glass-thin metric-pill tone-sage px-4 py-3">
-                <div className="text-xs text-[var(--text-dim)]">方向</div>
+                <div className="text-xs text-[var(--text-dim)]">历史成交方向</div>
                 <div className="text-lg font-medium">{sideLabels[fallbackTrade.side] || fallbackTrade.side || '--'}</div>
               </div>
               <div className="liquid-glass-thin metric-pill tone-amber px-4 py-3">
-                <div className="text-xs text-[var(--text-dim)]">成交单价</div>
-                <div className="text-lg font-mono">{fmtUsd(fallbackTrade.price)}</div>
+                <div className="text-xs text-[var(--text-dim)]">历史最近成交价</div>
+                <div className="text-lg font-mono">{formatPrice(fallbackTrade.price)}</div>
               </div>
               <div className="liquid-glass-thin metric-pill tone-coral px-4 py-3">
-                <div className="text-xs text-[var(--text-dim)]">成交数量</div>
+                <div className="text-xs text-[var(--text-dim)]">历史成交数量</div>
                 <div className="text-lg font-mono">{fmtNum(fallbackTrade.qty, 6)}</div>
               </div>
               <div className="material-surface material-clear clear-control metric-pill tone-plum col-span-2 xl:col-span-1 px-4 py-3">
-                <div className="text-xs text-[var(--text-dim)]">时间</div>
+                <div className="text-xs text-[var(--text-dim)]">历史成交时间</div>
                 <div className="text-sm font-medium">{fallbackTrade.timestamp || '--'}</div>
                 <div className="text-[11px] text-[var(--text-dim)] mt-1">额 {fmtUsd(fallbackTrade.value)}</div>
               </div>
@@ -859,15 +869,15 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
               </div>
               <div className="liquid-glass-thin metric-pill tone-sage px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">最新价</div>
-                <div className="text-lg font-mono">{fmtUsd(displayCurrentPrice || undefined)}</div>
+                <div className="text-lg font-mono">{formatPrice(displayCurrentPrice)}</div>
               </div>
               <div className="liquid-glass-thin metric-pill tone-amber px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">区间高</div>
-                <div className="text-lg font-mono">{fmtUsd(chartSummary?.high)}</div>
+                <div className="text-lg font-mono">{formatPrice(chartHigh)}</div>
               </div>
               <div className="liquid-glass-thin metric-pill tone-coral px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">区间低</div>
-                <div className="text-lg font-mono">{fmtUsd(chartSummary?.low)}</div>
+                <div className="text-lg font-mono">{formatPrice(chartLow)}</div>
               </div>
               <div className="material-surface material-clear clear-control metric-pill tone-plum col-span-2 xl:col-span-1 px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">区间成交量</div>
@@ -896,8 +906,8 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
                   ))}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--text-dim)]">
-                  <span>数据源 {kline?.source || '--'}</span>
-                  <span>K线 {chartSummary?.bars || chartCandles.length || 0} 根</span>
+                  <span>数据源 {currentKline?.source || '--'}</span>
+                  <span>K线 {currentKline ? chartCandles.length : '—'} 根</span>
                   <span>更新时间 {chartSummary?.last_time || '--'}</span>
                 </div>
               </div>
@@ -906,31 +916,31 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
                 <div className="liquid-glass-inset tone-neutral px-3 py-2">
                   <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--text-dim)]">Open</div>
                   <div className="mt-1 text-sm font-mono text-white">
-                    {fmtUsd(Number(chartSummary?.open || latestCandle?.open || 0))}
+                    {formatPrice(chartOpen)}
                   </div>
                 </div>
                 <div className="liquid-glass-inset tone-neutral px-3 py-2">
                   <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--text-dim)]">High</div>
                   <div className="mt-1 text-sm font-mono text-emerald-200">
-                    {fmtUsd(Number(chartSummary?.high || latestCandle?.high || 0))}
+                    {formatPrice(chartHigh)}
                   </div>
                 </div>
                 <div className="liquid-glass-inset tone-neutral px-3 py-2">
                   <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--text-dim)]">Low</div>
                   <div className="mt-1 text-sm font-mono text-rose-200">
-                    {fmtUsd(Number(chartSummary?.low || latestCandle?.low || 0))}
+                    {formatPrice(chartLow)}
                   </div>
                 </div>
                 <div className="liquid-glass-inset tone-neutral px-3 py-2">
                   <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--text-dim)]">Close</div>
                   <div className="mt-1 text-sm font-mono text-white">
-                    {fmtUsd(Number(chartSummary?.close || latestCandle?.close || 0))}
+                    {formatPrice(chartClose)}
                   </div>
                 </div>
                 <div className="liquid-glass-inset tone-neutral px-3 py-2">
                   <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--text-dim)]">振幅 / 量能</div>
                   <div className="mt-1 text-sm font-mono text-white">
-                    {fmtPct(sessionRangePct)}
+                    {sessionRangePct === null ? '—' : fmtPct(sessionRangePct)}
                   </div>
                   <div className="text-[11px] text-[var(--text-dim)]">
                     Vol {formatCompactVolume(Number(chartSummary?.volume || 0))}
@@ -938,11 +948,11 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
                 </div>
                 <div className="liquid-glass-inset tone-neutral px-3 py-2">
                   <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--text-dim)]">本根变化</div>
-                  <div className={`mt-1 text-sm font-mono ${periodChange >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
-                    {fmtUsd(periodChange)}
+                  <div className={`mt-1 text-sm font-mono ${periodChange === null ? 'text-[var(--text-dim)]' : periodChange >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                    {periodChange === null ? '—' : fmtUsd(periodChange)}
                   </div>
-                  <div className={`text-[11px] ${periodChangePct >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
-                    {fmtPct(periodChangePct)}
+                  <div className={`text-[11px] ${periodChangePct === null ? 'text-[var(--text-dim)]' : periodChangePct >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                    {periodChangePct === null ? '—' : fmtPct(periodChangePct)}
                   </div>
                 </div>
               </div>
@@ -953,10 +963,10 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
                     <span className="text-[var(--text-dim)]">MA7 <span className="ml-1 font-mono text-sky-200">{ma7Value ? fmtUsd(ma7Value) : '--'}</span></span>
                     <span className="text-[var(--text-dim)]">MA20 <span className="ml-1 font-mono text-amber-200">{ma20Value ? fmtUsd(ma20Value) : '--'}</span></span>
                     <span className="text-[var(--text-dim)]">均量 <span className="ml-1 font-mono text-white">{formatCompactVolume(averageVolume)}</span></span>
-                    <span className="text-[var(--text-dim)]">{activeReferenceLabel || '参考价'} <span className="ml-1 font-mono text-amber-200">{fmtUsd(activeReferencePrice)}</span></span>
+                    {activeReferencePrice !== undefined && <span className="text-[var(--text-dim)]">{activeReferenceLabel} <span className="ml-1 font-mono text-amber-200">{formatPrice(activeReferencePrice)}</span></span>}
                   </div>
                   <div className="text-xs text-[var(--text-dim)]">
-                    最近收盘 <span className="ml-1 font-mono text-white">{fmtUsd(Number(chartSummary?.close || latestCandle?.close || 0))}</span>
+                    最近收盘 <span className="ml-1 font-mono text-white">{formatPrice(chartClose)}</span>
                   </div>
                 </div>
                 <div className="mt-3 h-[12rem] sm:h-[13.5rem] kline-chart-area">
@@ -965,6 +975,7 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
                     timeframe={tf}
                     referencePrice={activeReferencePrice}
                     referenceLabel={activeReferenceLabel}
+                    loading={currentKline === null}
                   />
                 </div>
               </div>

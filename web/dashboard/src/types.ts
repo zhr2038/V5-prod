@@ -158,6 +158,7 @@ export interface SlippageInsightsData {
 export interface DashboardData {
   account: AccountData;
   positions: Position[];
+  positionsObserved?: boolean;
   trades: Trade[];
   alphaScores: AlphaScore[];
   marketState: MarketStateData;

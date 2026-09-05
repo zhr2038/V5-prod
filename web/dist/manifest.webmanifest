@@ -1,12 +1,12 @@
 {
-  "name": "V5 生产交易看板",
-  "short_name": "V5看板",
-  "description": "V5 production trading dashboard",
+  "name": "V5 交易控制台",
+  "short_name": "V5 控制台",
+  "description": "账户、决策与策略验证",
   "display": "standalone",
   "start_url": "/",
   "scope": "/",
-  "theme_color": "#322f34",
-  "background_color": "#171a20",
+  "theme_color": "#101519",
+  "background_color": "#101519",
   "icons": [
     {
       "src": "/favicon.svg",

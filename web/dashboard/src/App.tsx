@@ -1,9 +1,7 @@
-import { lazy, startTransition, useEffect, useRef, useState, useCallback } from 'react';
-import { LiquidBg } from './components/LiquidBg';
-import { TopCommandBar } from './components/TopCommandBar';
-import { StatusRibbon } from './components/StatusRibbon';
-import { MainTradingGrid } from './components/MainTradingGrid';
-import { api, summarizeTradeOrders } from './api';
+import { startTransition, useEffect, useRef, useState, useCallback } from 'react';
+import { CommandCenter } from './components/CommandCenter';
+import type { CommandCenterData } from './commandTypes';
+import { api, mergePrimaryDashboard, secondaryRefreshState, summarizeTradeOrders } from './api';
 import { useInterval } from './hooks/useInterval';
 import type {
   DashboardData,
@@ -11,29 +9,12 @@ import type {
   MarketStateData,
   DecisionAuditData,
   HealthData,
-  ApiTelemetrySeriesData,
+  EquityPoint,
   Trade,
   QuantLabStatusData,
   QuantLabPermissionData,
   QuantLabCostEstimateData,
 } from './types';
-
-const ExecutionInsightsPanel = lazy(() =>
-  import('./components/ExecutionInsightsPanel').then((module) => ({ default: module.ExecutionInsightsPanel }))
-);
-function DeferredPanelFallback() {
-  return (
-    <div className="material-surface material-reading reading-frame p-5" aria-hidden="true">
-      <div className="flex flex-col gap-3">
-        <div className="h-3 w-32 rounded-full bg-white/[0.10]" />
-        <div className="grid grid-cols-2 gap-3">
-          <div className="h-12 rounded-2xl bg-white/[0.055]" />
-          <div className="h-12 rounded-2xl bg-white/[0.045]" />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 type IdleWindow = Window & {
   requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
@@ -272,11 +253,27 @@ function App() {
   const [quantLabStatus, setQuantLabStatus] = useState<QuantLabStatusData | null>(null);
   const [quantLabPermission, setQuantLabPermission] = useState<QuantLabPermissionData | null>(null);
   const [quantLabCost, setQuantLabCost] = useState<QuantLabCostEstimateData | null>(null);
-  const [apiTelemetrySeries, setApiTelemetrySeries] = useState<ApiTelemetrySeriesData | null>(null);
+
   const [updateTime, setUpdateTime] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [primaryRefreshFailed, setPrimaryRefreshFailed] = useState(false);
-  const [showDeferredPanels, setShowDeferredPanels] = useState(false);
+  const [primaryReceivedAt, setPrimaryReceivedAt] = useState<number | null>(null);
+  const [tradesFailed, setTradesFailed] = useState(false);
+  const [tradesReceivedAt, setTradesReceivedAt] = useState<number | null>(null);
+  const [secondaryRefresh, setSecondaryRefresh] = useState<{
+    failed: boolean; receivedAt: number | null; deferredReceivedAt: number | null;
+  }>({ failed: false, receivedAt: null, deferredReceivedAt: null });
+  const [command, setCommand] = useState<CommandCenterData | null>(null);
+  const [commandFailed, setCommandFailed] = useState(false);
+  const [commandReceivedAt, setCommandReceivedAt] = useState<number | null>(null);
+  const [equity, setEquity] = useState<EquityPoint[]>([]);
+  const [equityLoading, setEquityLoading] = useState(true);
+  const [equityFailed, setEquityFailed] = useState(false);
+  const commandBusy = useRef(false);
+  const equityBusy = useRef(false);
+  const primaryBusy = useRef(false);
+  const secondaryBusy = useRef(false);
+
   const manualFocusRef = useRef(false);
   const quantLabRequestIdRef = useRef(0);
   const [focusSymbol, setFocusSymbol] = useState('BNB-USDT');
@@ -350,92 +347,98 @@ function App() {
     void loadQuantLab(dashboardFocusForQuantLab(dashboard, symbol));
   }, [dashboard, loadQuantLab]);
 
-  const loadApiTelemetrySeries = useCallback(async () => {
-    const telemetrySeries = await api.apiTelemetrySeries(24, 5);
-    if (telemetrySeries) {
-      startTransition(() => {
-        setApiTelemetrySeries(telemetrySeries);
-      });
-    }
+  const loadCommand = useCallback(async () => {
+    if (document.hidden || commandBusy.current) return;
+    commandBusy.current = true;
+    try {
+      const payload = await api.commandCenter();
+      if (payload?.schema_version === 'v5.command_center.v1') {
+        setCommand(payload);
+        setCommandReceivedAt(Date.now());
+        setCommandFailed(false);
+      } else setCommandFailed(true);
+    } finally { commandBusy.current = false; }
+  }, []);
+
+  const loadEquity = useCallback(async () => {
+    if (document.hidden || equityBusy.current) return;
+    equityBusy.current = true;
+    setEquityLoading(true);
+    try {
+      const payload = await api.equityHistory();
+      if (Array.isArray(payload)) { setEquity(payload); setEquityFailed(false); }
+      else setEquityFailed(true);
+    } finally { equityBusy.current = false; setEquityLoading(false); }
   }, []);
 
   const loadPrimary = useCallback(async () => {
-    if (document.hidden) return;
+    if (document.hidden || primaryBusy.current) return;
+    primaryBusy.current = true;
     setLoading(true);
-    const d = await api.dashboard();
-    if (d) {
-      const nextDashboardBase = {
-        ...d,
-        trades: summarizeTradeOrders(d.trades),
-      } as DashboardData;
-      setDashboard((prev) => {
-        const merged = prev ? { ...prev, ...nextDashboardBase } : nextDashboardBase;
-        return merged;
-      });
-      syncPositionFocus(nextDashboardBase);
-      setMarketState(d.marketState || null);
-      setUpdateTime(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
-      setPrimaryRefreshFailed(false);
-    } else {
-      setPrimaryRefreshFailed(true);
-    }
-    setLoading(false);
+    try {
+      const d = await api.dashboard();
+      if (d) {
+        setDashboard((prev) => mergePrimaryDashboard(prev, d));
+        syncPositionFocus(d);
+        setMarketState(d.marketState || null);
+        const receivedAt = Date.now();
+        setPrimaryReceivedAt(receivedAt);
+        setUpdateTime(new Date(receivedAt).toLocaleTimeString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }));
+        setPrimaryRefreshFailed(false);
+      } else {
+        setPrimaryRefreshFailed(true);
+      }
+      setLoading(false);
 
-    // Auxiliary calls must not keep the whole dashboard in its UNKNOWN loading state.
-    const [r, liveTrades] = await Promise.all([
-      api.riskGuard(),
-      api.trades(),
-    ]);
-    setRiskGuard(r || null);
-    if (d) {
-      const authoritativeTrades = Array.isArray(liveTrades?.trades)
-        ? liveTrades.trades
-        : Array.isArray(d.trades)
-          ? d.trades
-          : [];
-      const normalizedTrades = summarizeTradeOrders(authoritativeTrades);
-      const authoritativeDashboard = {
-        ...d,
-        trades: normalizedTrades,
-      } as DashboardData;
-      setDashboard((prev) => prev ? {
-        ...prev,
-        trades: normalizedTrades,
-      } : authoritativeDashboard);
-
-      // The primary dashboard intentionally omits trades. Wait for the authoritative
-      // trade endpoint before deriving a fallback notional for the cost estimate.
-      const positionFocus = positionFocusFromDashboard(authoritativeDashboard);
-      const nextFocusSymbol = manualFocusRef.current
-        ? focusSymbol
-        : quantLabSymbol(positionFocus?.symbol) || focusSymbol;
-      void loadQuantLab(dashboardFocusForQuantLab(authoritativeDashboard, nextFocusSymbol));
+      // Auxiliary calls have independent freshness and must not turn missing trades into an empty history.
+      const [r, liveTrades] = await Promise.all([api.riskGuard(), api.trades()]);
+      setRiskGuard(r || null);
+      const observedTrades = Array.isArray(liveTrades?.trades) ? liveTrades.trades : null;
+      setTradesFailed(observedTrades === null);
+      if (observedTrades !== null) {
+        const normalizedTrades = summarizeTradeOrders(observedTrades);
+        setTradesReceivedAt(Date.now());
+        setDashboard((prev) => prev ? { ...prev, trades: normalizedTrades } : prev);
+      }
+      if (d) {
+        const authoritativeDashboard = observedTrades === null ? d : { ...d, trades: observedTrades };
+        // Use only a successful trade observation when deriving an execution notional.
+        const positionFocus = positionFocusFromDashboard(authoritativeDashboard);
+        const nextFocusSymbol = manualFocusRef.current
+          ? focusSymbol
+          : quantLabSymbol(positionFocus?.symbol) || focusSymbol;
+        void loadQuantLab(dashboardFocusForQuantLab(authoritativeDashboard, nextFocusSymbol));
+      }
+    } finally {
+      primaryBusy.current = false;
+      setLoading(false);
     }
   }, [focusSymbol, loadQuantLab, syncPositionFocus]);
 
   const loadSecondary = useCallback(async () => {
-    void loadApiTelemetrySeries();
-    const [deferred, dec, h] = await Promise.all([
-      api.dashboardDeferred(),
-      api.decisionAudit(),
-      api.health(),
-    ]);
-    startTransition(() => {
-      if (deferred) {
-        setDashboard((prev) => {
-          return mergeDeferredDashboard(prev, deferred);
-        });
-      }
-      if (dec) setDecisionAudit(dec);
-      if (h) setHealth(h);
-    });
-  }, [loadApiTelemetrySeries]);
+    if (secondaryBusy.current) return;
+    secondaryBusy.current = true;
+    try {
+      const [deferred, dec, h] = await Promise.all([
+        api.dashboardDeferred(), api.decisionAudit(), api.health(),
+      ]);
+      const receivedAt = Date.now();
+      startTransition(() => {
+        setSecondaryRefresh((prev) => secondaryRefreshState(prev, deferred, dec, h, receivedAt));
+        if (deferred) setDashboard((prev) => mergeDeferredDashboard(prev, deferred));
+        if (dec) setDecisionAudit(dec);
+        if (h) setHealth(h);
+      });
+    } finally { secondaryBusy.current = false; }
+  }, []);
 
   useEffect(() => {
     clearLegacyUiCache();
     let timeoutId: number | null = null;
     const primaryTimeoutId = globalThis.setTimeout(() => {
       void loadPrimary();
+      void loadCommand();
+      void loadEquity();
     }, 0);
     let idleId: number | null = null;
     const idleWindow = window as IdleWindow;
@@ -443,9 +446,6 @@ function App() {
 
     const runDeferred = () => {
       void loadSecondary();
-      startTransition(() => {
-        setShowDeferredPanels(true);
-      });
     };
 
     if (idleWindow.requestIdleCallback) {
@@ -463,7 +463,7 @@ function App() {
         globalThis.clearTimeout(timeoutId);
       }
     };
-  }, [loadPrimary, loadSecondary]);
+  }, [loadPrimary, loadSecondary, loadCommand, loadEquity]);
 
   useInterval(() => {
     loadPrimary();
@@ -471,70 +471,25 @@ function App() {
 
   useInterval(() => {
     loadSecondary();
+    void loadEquity();
   }, 60000);
 
-  useInterval(() => {
-    loadApiTelemetrySeries();
-  }, 30000);
+  useInterval(() => { void loadCommand(); }, 30000);
 
   const displayMarketState = marketState || dashboard?.marketState || null;
 
-  return (
-    <div className="dashboard-shell relative min-h-[100dvh] min-h-[100svh] min-h-screen">
-      <LiquidBg />
-
-      <div className="dashboard-frame relative z-10">
-        <TopCommandBar
-          systemStatus={dashboard?.systemStatus || null}
-          health={health}
-          updateTime={updateTime}
-          loading={loading}
-          refreshFailed={primaryRefreshFailed}
-          onRefresh={() => {
-            void loadPrimary();
-            void loadSecondary();
-            void loadApiTelemetrySeries();
-          }}
-          onSymbolSearch={handleSymbolSearch}
-        />
-
-        <StatusRibbon
-          account={dashboard?.account || null}
-          marketState={displayMarketState}
-          riskGuard={riskGuard}
-          quantLabStatus={quantLabStatus}
-          quantLabPermission={quantLabPermission}
-          systemStatus={dashboard?.systemStatus || null}
-        />
-
-        <div className="dashboard-workspace">
-          <MainTradingGrid
-            positions={dashboard?.positions || []}
-            trades={dashboard?.trades || []}
-            focusSymbol={focusSymbol}
-            account={dashboard?.account || null}
-            marketState={displayMarketState}
-            slippageInsights={dashboard?.slippageInsights || null}
-            timers={dashboard?.timers || null}
-            decisionAudit={decisionAudit}
-            apiTelemetry={dashboard?.apiTelemetry || null}
-            apiTelemetrySeries={apiTelemetrySeries}
-            quantLabCost={quantLabCost}
-            showDeferredPanels={showDeferredPanels}
-            fallback={<DeferredPanelFallback />}
-            ExecutionInsightsPanel={ExecutionInsightsPanel}
-          />
-        </div>
-
-        {loading && (
-          <div className="fixed bottom-4 right-5 z-50 flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-[var(--text-dim)]">
-            <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]/80" />
-            <span>刷新中</span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  return <CommandCenter
+    dashboard={dashboard} command={command} commandFailed={commandFailed} commandReceivedAt={commandReceivedAt}
+    equity={equity} equityLoading={equityLoading} equityFailed={equityFailed}
+    riskGuard={riskGuard} decisionAudit={decisionAudit} marketState={displayMarketState}
+    health={health} quantLabStatus={quantLabStatus} quantLabPermission={quantLabPermission} quantLabCost={quantLabCost}
+    focusSymbol={focusSymbol} loading={loading} refreshFailed={primaryRefreshFailed} updateTime={updateTime}
+    primaryReceivedAt={primaryReceivedAt} tradesFailed={tradesFailed} tradesReceivedAt={tradesReceivedAt}
+    secondaryFailed={secondaryRefresh.failed} secondaryReceivedAt={secondaryRefresh.receivedAt}
+    deferredReceivedAt={secondaryRefresh.deferredReceivedAt}
+    onSymbolSearch={handleSymbolSearch}
+    onRefresh={() => { void loadPrimary(); void loadSecondary(); void loadCommand(); void loadEquity(); }}
+  />;
 }
 
 export default App;

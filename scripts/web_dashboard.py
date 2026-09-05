@@ -6598,59 +6598,69 @@ def api_market_state():
         )
 
 
+_EQUITY_POINTS_CACHE: Dict[str, Any] = {}
+_EQUITY_POINTS_CACHE_LOCK = threading.Lock()
+_EQUITY_HISTORY_MAX_FILES = 800
+_EQUITY_HISTORY_MAX_FILE_BYTES = 65536
+
+
 def _load_equity_points(limit: int = 800, runtime_paths: Optional[DashboardRuntimePaths] = None):
-    """从 reports/runs/*/equity.jsonl 聚合权益点（真实口径：cash+持仓市值）。"""
+    """Read recent real runtime snapshots with bounded I/O and mtime invalidation."""
+    point_limit = max(0, min(int(limit), _EQUITY_HISTORY_MAX_FILES))
     runs_dir = (runtime_paths or _resolve_dashboard_runtime_paths()).runs_dir
-    if not runs_dir.exists():
+    if point_limit == 0 or not runs_dir.exists():
         return []
 
-    def _candidate_upper_epoch(run_dir: Path) -> Optional[float]:
-        run_epoch = _run_id_epoch(run_dir.name)
-        if run_epoch is not None:
-            return run_epoch + 3600.0
-        eq_file = run_dir / 'equity.jsonl'
-        try:
-            return eq_file.stat().st_mtime
-        except OSError:
-            return None
-
-    dedup: Dict[str, float] = {}
-    dedup_epoch: Dict[str, float] = {}
-    run_dirs = _sorted_run_dirs_by_artifact_mtime(runs_dir, 'equity.jsonl')
+    # Run ids are directory labels, not reliable bounds on their contained UTC
+    # events (production hourly labels use CST). Bound files before reading;
+    # never chase an ever-older minimum timestamp through the entire archive.
+    run_dirs = _sorted_run_dirs_by_artifact_mtime(runs_dir, 'equity.jsonl', limit=point_limit)
+    candidates = []
     for run_dir in run_dirs:
-        eq_file = run_dir / 'equity.jsonl'
+        path = run_dir / 'equity.jsonl'
         try:
-            with open(eq_file, 'r', encoding='utf-8', errors='ignore') as f:
-                for raw_line in f:
-                    line = raw_line.strip()
-                    if not line:
+            stat = path.stat()
+        except OSError:
+            continue
+        if path.is_file():
+            candidates.append((path, stat.st_mtime_ns, stat.st_size))
+    signature = tuple((str(path), mtime_ns, size) for path, mtime_ns, size in candidates)
+    cache_key = str(runs_dir.resolve()) + ':' + str(point_limit)
+    with _EQUITY_POINTS_CACHE_LOCK:
+        cached = _EQUITY_POINTS_CACHE.get(cache_key)
+        if cached is not None and cached['signature'] == signature:
+            return list(cached['points'])
+
+    # Newer source files win for duplicate instants; sort by event time rather
+    # than ISO text so timezone offsets cannot reorder the equity curve.
+    dedup: Dict[float, tuple[str, float]] = {}
+    for path, _, size in candidates:
+        try:
+            with path.open('rb') as stream:
+                offset = max(0, size - _EQUITY_HISTORY_MAX_FILE_BYTES)
+                stream.seek(offset)
+                raw = stream.read(_EQUITY_HISTORY_MAX_FILE_BYTES)
+            if offset:
+                raw = raw.partition(b'\n')[2]  # discard a truncated first line
+            for line in raw.splitlines():
+                try:
+                    row = json.loads(line)
+                    ts = row.get('ts')
+                    epoch = _coerce_timestamp_epoch(ts)
+                    equity = float(row.get('equity'))
+                    if epoch is None or not math.isfinite(epoch) or not math.isfinite(equity) or equity < 0:
                         continue
-                    try:
-                        row = json.loads(line)
-                        ts = row.get('ts')
-                        eq = row.get('equity')
-                        if ts is None or eq is None:
-                            continue
-                        ts_str = str(ts)
-                        if ts_str in dedup:
-                            continue
-                        dedup[ts_str] = float(eq)
-                        ts_epoch = _coerce_timestamp_epoch(ts_str)
-                        if ts_epoch is not None:
-                            dedup_epoch[ts_str] = ts_epoch
-                    except Exception:
-                        continue
-        except Exception:
+                    dedup.setdefault(epoch, (str(ts), equity))
+                except (ValueError, TypeError, AttributeError):
+                    continue
+        except OSError:
             continue
 
-        if len(dedup) >= limit and len(dedup_epoch) >= limit:
-            candidate_upper = _candidate_upper_epoch(run_dir)
-            if candidate_upper is not None and candidate_upper <= min(dedup_epoch.values()):
-                break
-
-    points = sorted(dedup.items(), key=lambda x: x[0])
-    if len(points) > limit:
-        points = points[-limit:]
+    points = [dedup[epoch] for epoch in sorted(dedup)[-point_limit:]]
+    with _EQUITY_POINTS_CACHE_LOCK:
+        if len(_EQUITY_POINTS_CACHE) >= 8 and cache_key not in _EQUITY_POINTS_CACHE:
+            _EQUITY_POINTS_CACHE.pop(next(iter(_EQUITY_POINTS_CACHE)))
+        _EQUITY_POINTS_CACHE[cache_key] = {'signature': signature, 'points': tuple(points)}
     return points
 
 
@@ -8283,6 +8293,28 @@ def api_smart_alerts():
         })
     except Exception as exc:
         return _json_internal_error_response(exc, alerts=[], status='error')
+
+
+@app.route('/api/command_center', methods=['GET'])
+def api_command_center():
+    """Read bounded local evidence without invoking trading or remote services."""
+    try:
+        from src.reporting.dashboard_command_center import build_command_center
+
+        config = load_config()
+        return jsonify(build_command_center(
+            config=config,
+            paths=_resolve_dashboard_runtime_paths(config),
+            workspace=WORKSPACE,
+            now=_utc_now().timestamp(),
+        ))
+    except Exception as exc:
+        return _json_internal_error_response(
+            exc, schema_version='v5.command_center.v1', read_only=True, status='unavailable',
+            latest_decision={}, candidates=[], window_72h={}, blockers=[], health={},
+            participation={'status': 'unavailable', 'enabled': None}, quant_lab={},
+            warnings=['command_center_unavailable'],
+        )
 
 
 @app.route('/api/auto_risk_guard')

@@ -106,7 +106,7 @@ def test_react_dashboard_bounds_fetches_and_renders_primary_before_auxiliary_cal
     primary_fetch = app_source.index("const d = await api.dashboard();")
     primary_rendered = app_source.index("setLoading(false);", primary_fetch)
     auxiliary_fetch = app_source.index("const [r, liveTrades] = await Promise.all([", primary_fetch)
-    authoritative_trades = app_source.index("const authoritativeTrades =", auxiliary_fetch)
+    authoritative_trades = app_source.index("const observedTrades =", auxiliary_fetch)
     quant_lab_fetch = app_source.index("void loadQuantLab(dashboardFocusForQuantLab(authoritativeDashboard, nextFocusSymbol));", authoritative_trades)
     assert primary_fetch < primary_rendered < auxiliary_fetch < authoritative_trades < quant_lab_fetch
 
@@ -224,7 +224,10 @@ def test_react_dashboard_treats_empty_trade_payload_as_authoritative():
     assert "if (incoming && Array.isArray(incoming.timers)) return incoming;" in source
     assert "Object.prototype.hasOwnProperty.call(deferred, 'apiTelemetry')" in source
     assert "Object.prototype.hasOwnProperty.call(deferred, 'slippageInsights')" in source
-    assert "const authoritativeTrades = Array.isArray(liveTrades?.trades) ? liveTrades.trades : d.trades;" in source
+    # Empty arrays are observations; failed responses preserve the last successful history.
+    # Runtime payload cases are also covered by web/dashboard/tests/command-data.test.mjs.
+    assert "const observedTrades = Array.isArray(liveTrades?.trades) ? liveTrades.trades : null;" in source
+    assert "if (observedTrades !== null)" in source
     assert "liveTrades.trades.length > 0" not in source
 
 
@@ -236,7 +239,7 @@ def test_react_dashboard_chart_focus_tracks_active_position_until_manual_search(
     assert "const manualFocusRef = useRef(false);" in source
     assert "const syncPositionFocus = useCallback((nextDashboard: DashboardData) => {" in source
     assert "if (manualFocusRef.current) return;" in source
-    assert "syncPositionFocus(nextDashboardBase);" in source
+    assert "syncPositionFocus(d);" in source
     assert "manualFocusRef.current = true;" in source
     assert "onSymbolSearch={handleSymbolSearch}" in source
 
@@ -278,7 +281,7 @@ def test_react_positions_poll_preserves_entry_time_fields():
     assert "formatChinaTimestampFromMs(position.latest_entry_ts_ms)" in api_source
     assert "const entryTimeMs = firstNumber(position.entryTimeMs, position.entry_ts_ms);" in api_source
     assert "const latestEntryTimeMs = firstNumber(position.latestEntryTimeMs, position.latest_entry_ts_ms);" in api_source
-    assert "positions: Array.isArray(payload.positions)" in api_source
+    assert "const positionsObserved = Array.isArray(payload.positions)" in api_source
     assert "payload.positions.map((position) => normalizePositionEntry(position))" in api_source
     assert "entryTimeMs," in api_source
     assert "latestEntryTime," in api_source

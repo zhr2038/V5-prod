@@ -16,6 +16,8 @@ import type {
   QuantLabGateDecisionData,
 } from './types';
 
+import type { CommandCenterData } from './commandTypes';
+
 const API_BASE = '';
 const DASHBOARD_FETCH_TIMEOUT_MS = 12_000;
 
@@ -309,13 +311,66 @@ export function summarizeTradeOrders(trades: Trade[] | undefined | null): Trade[
   return [...passthrough, ...summaries].sort((a, b) => tradeTimestampValue(b) - tradeTimestampValue(a));
 }
 
+export function authoritativeTradeList(incoming: Trade[] | undefined, fallback: Trade[] | undefined): Trade[] {
+  return Array.isArray(incoming) ? incoming : Array.isArray(fallback) ? fallback : [];
+}
+
+export function mergePrimaryDashboard(previous: DashboardData | null, incoming: DashboardData): DashboardData {
+  return {
+    ...previous,
+    ...incoming,
+    positions: incoming.positionsObserved === false ? previous?.positions ?? incoming.positions : incoming.positions,
+    // The primary endpoint deliberately omits trades. Only a real array is an observation.
+    trades: summarizeTradeOrders(authoritativeTradeList(incoming.trades, previous?.trades)),
+  };
+}
+
+export interface SecondaryRefreshState {
+  failed: boolean;
+  receivedAt: number | null;
+  deferredReceivedAt: number | null;
+}
+
+export function secondaryRefreshState(
+  previous: SecondaryRefreshState,
+  deferred: Partial<DashboardData> | null,
+  decision: DecisionAuditData | null,
+  health: HealthData | null,
+  receivedAt: number,
+): SecondaryRefreshState {
+  const complete = Boolean(deferred && decision && health);
+  return {
+    failed: !complete,
+    receivedAt: complete ? receivedAt : previous.receivedAt,
+    deferredReceivedAt: deferred ? receivedAt : previous.deferredReceivedAt,
+  };
+}
+
+export function normalizeEquityHistory(payload: unknown): import('./types').EquityPoint[] | null {
+  if (!Array.isArray(payload)) return null;
+  return payload.map((item) => {
+    const row = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+    // /api/equity_history uses `value`; accept the explicit equity alias only
+    // when value is absent. Null and missing values must never become zero.
+    const value = Object.prototype.hasOwnProperty.call(row, 'value') ? row.value : row.equity;
+    return { timestamp: typeof row.timestamp === 'string' ? row.timestamp : '',
+      equity: typeof value === 'number' ? value : Number.NaN };
+  });
+}
+
 export const api = {
+  commandCenter: () => fetchJson<CommandCenterData>('/api/command_center'),
+  equityHistory: async () => normalizeEquityHistory(await fetchJson<unknown>('/api/equity_history')),
   dashboard: async () => {
     const payload = await fetchJson<DashboardData & { positions?: ApiPositionPayload[] }>('/api/dashboard?view=primary');
     if (!payload) return null;
+    const positionsObserved = Array.isArray(payload.positions) && payload.positions.every(
+      position => position !== null && typeof position === 'object' && !Array.isArray(position),
+    );
     return {
       ...payload,
-      positions: Array.isArray(payload.positions)
+      positionsObserved,
+      positions: positionsObserved
         ? payload.positions.map((position) => normalizePositionEntry(position))
         : [],
     };
@@ -326,6 +381,7 @@ export const api = {
     if (!Array.isArray(payload.positions)) return payload;
     return {
       ...payload,
+      positionsObserved: true,
       positions: payload.positions.map((position) => normalizePositionEntry(position)),
     };
   },
@@ -339,10 +395,10 @@ export const api = {
   },
   trades: async () => {
     const payload = await fetchJson<{ trades?: ApiTradePayload[] }>('/api/trades');
-    if (!payload) return null;
-    const trades = Array.isArray(payload?.trades)
-      ? summarizeTradeOrders(payload.trades.map((trade, index) => normalizeTradeEntry(trade, index)))
-      : [];
+    if (!payload || !Array.isArray(payload.trades) || payload.trades.some(
+      trade => trade === null || typeof trade !== 'object' || Array.isArray(trade),
+    )) return null;
+    const trades = summarizeTradeOrders(payload.trades.map((trade, index) => normalizeTradeEntry(trade, index)));
     return { trades };
   },
   riskGuard: () => fetchJson<RiskGuardData>('/api/auto_risk_guard'),
