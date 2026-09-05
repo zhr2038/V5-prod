@@ -6259,8 +6259,8 @@ def _build_live_funding_vote(
                 negative_weight_share=float(data.get('negative_weight_share', 0.0) or 0.0),
                 strongest_sentiment=float(data.get('strongest_sentiment', 0.0) or 0.0),
                 max_abs_sentiment=float(data.get('max_abs_sentiment', 0.0) or 0.0),
-                extreme_positive_weight_share=float(data.get('extreme_positive_weight_share', 0.0) or 0.0),
-                extreme_negative_weight_share=float(data.get('extreme_negative_weight_share', 0.0) or 0.0),
+                extreme_positive_weight_share=data.get('extreme_positive_weight_share'),
+                extreme_negative_weight_share=data.get('extreme_negative_weight_share'),
                 **funding_kwargs,
             )
 

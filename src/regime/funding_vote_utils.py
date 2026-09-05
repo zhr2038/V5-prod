@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import math
 from typing import Any, Dict, Iterable, Mapping
 
 
@@ -17,6 +19,11 @@ def _as_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return float(default)
+
+
+def _observed_extreme_share(value: Any) -> float | None:
+    parsed = _as_float(value, float("nan"))
+    return parsed if math.isfinite(parsed) and 0 <= parsed <= 1 else None
 
 
 def summarize_funding_rows(
@@ -42,6 +49,7 @@ def summarize_funding_rows(
             "max_abs_sentiment": 0.0,
             "extreme_positive_weight_share": 0.0,
             "extreme_negative_weight_share": 0.0,
+            "extreme_sentiment_threshold": float(extreme_sentiment_threshold),
             "symbol_count": 0,
         }
 
@@ -86,6 +94,7 @@ def summarize_funding_rows(
         "max_abs_sentiment": round(max_abs_sentiment, 4),
         "extreme_positive_weight_share": round(extreme_positive_weight, 4),
         "extreme_negative_weight_share": round(extreme_negative_weight, 4),
+        "extreme_sentiment_threshold": float(extreme_sentiment_threshold),
         "symbol_count": int(len(entries)),
     }
 
@@ -102,7 +111,25 @@ def classify_funding_state(
     sentiment = _as_float(metrics.get("sentiment"), 0.0)
     positive_weight_share = _as_float(metrics.get("positive_weight_share"), 0.0)
     negative_weight_share = _as_float(metrics.get("negative_weight_share"), 0.0)
-    strongest_sentiment = _as_float(metrics.get("strongest_sentiment"), 0.0)
+    extreme_shares = {}
+    # Legacy composite caches are produced at the collector's fixed 0.12
+    # threshold. Their aggregate shares cannot be reinterpreted at a new one.
+    share_threshold = _as_float(metrics.get("extreme_sentiment_threshold"), DEFAULT_FUNDING_EXTREME_SENTIMENT_THRESHOLD)
+    threshold_matches = math.isfinite(share_threshold) and math.isclose(share_threshold, float(extreme_sentiment_threshold))
+    if not threshold_matches:
+        logging.getLogger(__name__).warning(
+            "funding extreme breadth threshold mismatch: observed=%s configured=%s; extreme trigger disabled",
+            share_threshold, extreme_sentiment_threshold,
+        )
+    for direction in ("positive", "negative"):
+        key = f"extreme_{direction}_weight_share"
+        value = _observed_extreme_share(metrics.get(key))
+        if value is None:
+            logging.getLogger(__name__).warning(
+                "funding extreme breadth unobservable: %s; extreme trigger disabled for this direction", key
+            )
+            value = 0.0
+        extreme_shares[direction] = value if threshold_matches else 0.0
     directional_floor = min(abs(float(trending_threshold)), abs(float(risk_off_threshold))) * 0.25
 
     if sentiment >= float(trending_threshold):
@@ -110,15 +137,12 @@ def classify_funding_state(
     if sentiment <= float(risk_off_threshold):
         return {"state": "RISK_OFF", "trigger": "average"}
 
-    if (
-        strongest_sentiment >= float(extreme_sentiment_threshold)
-        and positive_weight_share >= float(extreme_breadth_threshold)
-    ):
+    # Shares count only constituents beyond the configured extreme threshold.
+    # A small outlier plus many mildly negative/positive constituents is not
+    # broad extreme sentiment. The largest outlier's sign is not a breadth vote.
+    if extreme_shares["positive"] >= float(extreme_breadth_threshold):
         return {"state": "TRENDING", "trigger": "extreme_breadth"}
-    if (
-        strongest_sentiment <= -float(extreme_sentiment_threshold)
-        and negative_weight_share >= float(extreme_breadth_threshold)
-    ):
+    if extreme_shares["negative"] >= float(extreme_breadth_threshold):
         return {"state": "RISK_OFF", "trigger": "extreme_breadth"}
 
     if positive_weight_share >= float(breadth_threshold) and sentiment >= directional_floor:
@@ -164,8 +188,8 @@ def build_funding_vote(
     negative_weight_share: float = 0.0,
     strongest_sentiment: float = 0.0,
     max_abs_sentiment: float = 0.0,
-    extreme_positive_weight_share: float = 0.0,
-    extreme_negative_weight_share: float = 0.0,
+    extreme_positive_weight_share: float | None = None,
+    extreme_negative_weight_share: float | None = None,
     trending_threshold: float = DEFAULT_FUNDING_TRENDING_THRESHOLD,
     risk_off_threshold: float = DEFAULT_FUNDING_RISK_OFF_THRESHOLD,
     breadth_threshold: float = DEFAULT_FUNDING_BREADTH_THRESHOLD,
@@ -178,8 +202,11 @@ def build_funding_vote(
         "negative_weight_share": max(0.0, min(1.0, _as_float(negative_weight_share, 0.0))),
         "strongest_sentiment": max(-1.0, min(1.0, _as_float(strongest_sentiment, 0.0))),
         "max_abs_sentiment": max(0.0, min(1.0, _as_float(max_abs_sentiment, 0.0))),
-        "extreme_positive_weight_share": max(0.0, min(1.0, _as_float(extreme_positive_weight_share, 0.0))),
-        "extreme_negative_weight_share": max(0.0, min(1.0, _as_float(extreme_negative_weight_share, 0.0))),
+        "extreme_positive_weight_share": _observed_extreme_share(extreme_positive_weight_share),
+        "extreme_negative_weight_share": _observed_extreme_share(extreme_negative_weight_share),
+        "extreme_sentiment_threshold": (
+            DEFAULT_FUNDING_EXTREME_SENTIMENT_THRESHOLD if composite else float(extreme_sentiment_threshold)
+        ),
     }
     metrics["breadth_bias"] = round(metrics["positive_weight_share"] - metrics["negative_weight_share"], 4)
 
@@ -210,6 +237,8 @@ def build_funding_vote(
         "details": dict(details or {}),
         "raw_state": state,
         "trigger": classification["trigger"],
+        "classification_version": "actual_extreme_breadth_v2",
+        "extreme_breadth_sentiment_threshold": metrics["extreme_sentiment_threshold"],
         "breadth": metrics["breadth_bias"],
         "positive_weight_share": metrics["positive_weight_share"],
         "negative_weight_share": metrics["negative_weight_share"],

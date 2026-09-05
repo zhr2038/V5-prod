@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import sys
+import pytest
+import yaml
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -146,6 +148,34 @@ def _base_cfg(tmp_path: Path) -> AppConfig:
     cfg.execution.negative_expectancy_open_block_enabled = False
     cfg.execution.negative_expectancy_fast_fail_open_block_enabled = False
     return cfg
+
+
+@pytest.mark.parametrize("score,f5,f4,reason", [
+    (.455373768, .7848324515, 3., None),
+    (.3679, .7848, 3., "protect_entry_alpha6_score_too_low"),
+    (.4554, .2531, 3., "protect_entry_rsi_confirm_too_weak"),
+    (.4554, .7848, -.1, "protect_entry_volume_confirm_negative"),
+])
+def test_production_single_closed_round_removes_duplicate_wait_but_keeps_signal_gates(tmp_path, score, f5, f4, reason):
+    production = yaml.safe_load((ROOT / "configs/live_prod.yaml").read_text(encoding="utf-8"))
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.protect_entry_confirm_rounds = production["execution"]["protect_entry_confirm_rounds"]
+    assert cfg.execution.protect_entry_confirm_rounds == 1
+    assert AppConfig().execution.protect_entry_confirm_rounds == 2  # Other deployments retain their contract.
+    # A gate-only object has no exchange or runtime side effects.
+    pipe = object.__new__(V5Pipeline)
+    pipe.cfg = cfg
+    def unexpected_history_read(**kwargs):
+        raise AssertionError("one closed round must not wait for prior hourly scores")
+    pipe._load_protect_entry_history_alpha6_signals = unexpected_history_read
+    signal = {"symbol": "BNB/USDT", "side": "buy", "score": score, "raw_score": score,
+              "metadata": {"raw_factors": {"f4_volume_expansion": f4, "f5_rsi_trend_confirm": f5}}}
+    result = pipe._evaluate_protect_entry_gate(
+        symbol="BNB/USDT", strategy_signal_lookup={"Alpha6Factor": {"BNB/USDT": signal}},
+        current_auto_risk_level="PROTECT", now_utc=datetime(2026, 9, 5, 13, tzinfo=timezone.utc),
+        current_run_id="20260905_21",
+    )
+    assert (result or {}).get("reason") == reason
 
 
 def test_protect_trend_only_buy_is_skipped(tmp_path: Path) -> None:

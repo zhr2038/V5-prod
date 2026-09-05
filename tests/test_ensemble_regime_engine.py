@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -61,6 +62,21 @@ def test_recent_column_values_rejects_unknown_column(tmp_path) -> None:
 
     with sqlite3.connect(str(engine.regime_history_db)) as con:
         assert con.execute("SELECT name FROM sqlite_master WHERE name='regime_history'").fetchone() is not None
+
+
+def test_composite_funding_reader_preserves_missing_extreme_breadth_warning(tmp_path, caplog):
+    source = tmp_path / "funding_COMPOSITE.json"
+    source.write_text(json.dumps({"f6_sentiment": .0028, "positive_weight_share": .36,
+                                 "negative_weight_share": .64, "strongest_sentiment": -.1253}), encoding="utf-8")
+    engine = object.__new__(EnsembleRegimeEngine)
+    engine.cfg = RegimeConfig()
+    engine.weights = {"funding": .4}
+    engine.funding_signal_max_age_minutes = 180
+    engine._latest_fresh_file = lambda *args: source
+    vote = engine._get_funding_vote_v2()
+    assert vote["state"] == "SIDEWAYS"
+    assert vote["extreme_negative_weight_share"] is None
+    assert "extreme_negative_weight_share" in caplog.text
 
 
 def test_final_state_stuck_monitor_ignores_trending_by_default(tmp_path) -> None:
