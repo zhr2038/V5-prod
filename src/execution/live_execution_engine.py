@@ -1190,7 +1190,6 @@ class LiveExecutionEngine:
             "fixed_stop_loss",
             "exchange_risk",
             "emergency_close",
-            "zero_target_close",
             "position_reconcile_force_close",
             "risk_off",
             "risk_off_forced_close",

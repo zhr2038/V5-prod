@@ -505,6 +505,17 @@ class RiskConfig(BaseModel):
     # Hard cap for number of selected symbols. When set, overrides auto-risk level cap.
     max_positions_override: Optional[int] = Field(default=None, ge=1, le=20)
 
+    @model_validator(mode='before')
+    @classmethod
+    def _warn_unused_auto_risk_guard(cls, value):
+        if isinstance(value, dict) and "auto_risk_guard" in value:
+            logger.warning(
+                "risk.auto_risk_guard is unsupported and has never controlled execution; "
+                "remove it. Position caps come from AutoRiskGuard.LEVELS or "
+                "risk.max_positions_override."
+            )
+        return value
+
     @model_validator(mode='after')
     def _check_drawdown_logic(self):
         """验证回撤参数的逻辑合理性"""
@@ -2181,6 +2192,26 @@ class QuantLabConfig(BaseModel):
         return self
 
 
+class ParticipationRuntimeConfig(BaseModel):
+    """Shared strategy evaluation with a separate, real-time simulated ledger."""
+
+    enabled: bool = False
+    mode: str = "forward_paper"
+    policy_path: str = "configs/research/participation_policy_v1.json"
+    state_path: str = "reports/participation/forward.sqlite"
+    max_signal_age_seconds: float = Field(default=900.0, gt=0, le=3600)
+
+    @field_validator("mode")
+    @classmethod
+    def _validate_mode(cls, value: str) -> str:
+        if value != "forward_paper":
+            raise ValueError(
+                "participation.mode currently requires forward_paper; "
+                "a configuration switch cannot establish live strategy readiness"
+            )
+        return value
+
+
 class AppConfig(BaseModel):
     symbols: List[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"])
     timeframe_main: str = "1h"
@@ -2197,6 +2228,7 @@ class AppConfig(BaseModel):
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
     diagnostics: DiagnosticsConfig = Field(default_factory=DiagnosticsConfig)
     ml_labeler: MLLabelerConfig = Field(default_factory=MLLabelerConfig)
+    participation: ParticipationRuntimeConfig = Field(default_factory=ParticipationRuntimeConfig)
 
     @field_validator("symbols")
     @classmethod

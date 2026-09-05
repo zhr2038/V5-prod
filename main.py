@@ -3482,6 +3482,26 @@ def main() -> None:
             )
     except Exception as e:
         log.warning(f"spread snapshot failed: {e}")
+
+    # Shared decision/accounting kernel runs on this cycle's fresh observations.
+    # Its separate virtual portfolio is never appended to executable orders.
+    if bool(getattr(getattr(cfg, "participation", None), "enabled", False)):
+        try:
+            from src.reporting.participation_runtime import update_participation_runtime
+
+            participation_result = update_participation_runtime(
+                cfg=cfg,
+                market_data_1h=md_1h,
+                top_of_book=latest_top_of_book,
+                audit=audit,
+                run_dir=runtime_run_dir,
+                reports_dir=runtime_reports_dir,
+            )
+            audit.add_note("PARTICIPATION_FORWARD " + json.dumps(participation_result, ensure_ascii=True))
+            log.info("PARTICIPATION_FORWARD %s", participation_result)
+        except Exception as exc:
+            audit.add_note(f"PARTICIPATION_FORWARD_FAILED: {type(exc).__name__}: {exc}")
+            log.warning("participation forward runtime failed: %s", exc)
     
     # 淇濆瓨DecisionAudit
     audit.save(str(runtime_run_dir))

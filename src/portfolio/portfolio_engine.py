@@ -20,7 +20,7 @@ from src.execution.fill_store import (
     derive_runtime_named_artifact_path,
     derive_runtime_runs_dir,
 )
-from src.risk.auto_risk_guard import extract_risk_level
+from src.risk.auto_risk_guard import AutoRiskGuard, extract_risk_level
 from src.utils.math import clamp
 
 
@@ -453,13 +453,8 @@ class PortfolioEngine:
                 lvl = eval_level
             else:
                 lvl = guard_level
-            cap_map = {
-                "PROTECT": 1,
-                "DEFENSE": 3,
-                "NEUTRAL": 5,
-                "ATTACK": 8,
-            }
-            return cap_map.get(lvl)
+            level_config = AutoRiskGuard.LEVELS.get(lvl)
+            return level_config.max_positions if level_config is not None else None
         except Exception:
             return None
 

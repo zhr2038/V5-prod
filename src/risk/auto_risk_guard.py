@@ -61,7 +61,7 @@ class AutoRiskGuard:
             drawdown_trigger=0.15,
             drawdown_delever=0.80,
             score_threshold_pct=0.0,    # 接受所有信号
-            max_positions=5,
+            max_positions=8,
             cooldown_hours=2,
             description='趋势明确，积极进攻'
         ),
@@ -74,7 +74,7 @@ class AutoRiskGuard:
             drawdown_trigger=0.12,
             drawdown_delever=0.60,
             score_threshold_pct=0.10,   # 前10%信号
-            max_positions=4,
+            max_positions=5,
             cooldown_hours=3,
             description='正常震荡，标准操作'
         ),
@@ -100,7 +100,7 @@ class AutoRiskGuard:
             drawdown_trigger=0.05,
             drawdown_delever=0.30,
             score_threshold_pct=0.30,   # 前30%信号（只做强信号）
-            max_positions=2,
+            max_positions=1,
             cooldown_hours=6,
             description='大幅回撤，优先保本金'
         ),
@@ -160,6 +160,9 @@ class AutoRiskGuard:
                  dust_reject_rate: float,          # dust拒单率
                  recent_pnl_trend: str,            # 最近盈亏趋势 'up'|'down'|'flat'
                  consecutive_losses: int = 0,      # 连续亏损轮数
+                 *,
+                 no_trade_opportunities: bool = False,
+                 recovery_evidence_ok: bool = True,
                  ) -> Tuple[str, RiskLevel, str]:
         """
         评估并返回建议档位
@@ -171,7 +174,7 @@ class AutoRiskGuard:
         new_level = old_level
         reasons = []
         dd_pct = float(dd_pct or 0.0)
-        conversion_rate = float(conversion_rate or 0.0)
+        conversion_rate = None if conversion_rate is None else float(conversion_rate)
         dust_reject_rate = float(dust_reject_rate or 0.0)
         consecutive_losses = int(consecutive_losses or 0)
         
@@ -180,6 +183,8 @@ class AutoRiskGuard:
         self.metrics['last_conversion_rate'] = conversion_rate
         self.metrics['consecutive_loss_rounds'] = consecutive_losses
         self.metrics['consecutive_losses'] = consecutive_losses
+        self.metrics['no_trade_opportunities'] = bool(no_trade_opportunities)
+        self.metrics['recovery_evidence_ok'] = bool(recovery_evidence_ok)
         
         # 降级条件（优先级高）
         if dd_pct >= 0.12:
@@ -188,28 +193,39 @@ class AutoRiskGuard:
         elif dd_pct >= 0.08:
             new_level = 'DEFENSE'
             reasons.append(f"回撤扩大{dd_pct:.1%}，降低风险")
-        elif dust_reject_rate > 0.5 and conversion_rate < 0.3:
+        elif dust_reject_rate > 0.5 and (conversion_rate is None or conversion_rate < 0.3):
             new_level = 'DEFENSE'
             reasons.append(f"噪声交易过高（拒单{dust_reject_rate:.0%}），降低频率")
         elif consecutive_losses >= 3:
             new_level = 'DEFENSE'
             reasons.append(f"连续{consecutive_losses}轮亏损，防守为主")
         
-        # 升级条件（分级恢复，避免长期卡死在PROTECT）
-        if new_level == old_level or self._is_lower_level(new_level, old_level):
+        # A downgrade condition is a risk floor, never a shortcut to recovery.
+        # In particular, 8%-12% drawdown must not lift PROTECT to DEFENSE.
+        if self._is_lower_level(old_level, new_level):
+            new_level = old_level
+
+        # No opportunities is different from unsuccessful execution. Missing or
+        # stale execution evidence never satisfies the recovery prerequisite.
+        conversion_ok = (
+            conversion_rate is not None and conversion_rate > 0.5
+        ) or (conversion_rate is None and no_trade_opportunities)
+        if new_level == old_level and recovery_evidence_ok:
             trend_ok = recent_pnl_trend in ('up', 'flat')
             if old_level == 'PROTECT':
-                if dd_pct < 0.05 and conversion_rate > 0.5 and trend_ok and consecutive_losses == 0:
+                if dd_pct < 0.05 and conversion_ok and trend_ok and consecutive_losses == 0 and dust_reject_rate <= 0.5:
                     new_level = 'DEFENSE'
                     reasons.append("回撤已收敛，先从保护恢复到防守")
             elif old_level == 'DEFENSE':
-                if dd_pct < 0.05 and conversion_rate > 0.5 and trend_ok and consecutive_losses == 0:
+                if dd_pct < 0.05 and conversion_ok and trend_ok and consecutive_losses == 0 and dust_reject_rate <= 0.5:
                     new_level = 'NEUTRAL'
                     reasons.append("回撤控制，成交改善，恢复中性")
             elif old_level == 'NEUTRAL':
-                if dd_pct < 0.03 and conversion_rate > 0.6 and recent_pnl_trend == 'up' and consecutive_losses == 0:
+                if dd_pct < 0.03 and conversion_rate is not None and conversion_rate > 0.6 and recent_pnl_trend == 'up' and consecutive_losses == 0 and dust_reject_rate <= 0.5:
                     new_level = 'ATTACK'
                     reasons.append("表现稳定向上，切换进攻档位")
+        elif not recovery_evidence_ok:
+            reasons.append("恢复证据缺失或过期，仅允许维持或降低风险")
         
         # 执行切换
         if new_level != old_level:

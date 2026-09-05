@@ -189,18 +189,7 @@ risk:
   drawdown_trigger: 0.15  # 15%回撤触发保护
   drawdown_delever: 0.60
   
-  auto_risk_guard:
-    enabled: true
-    max_positions_by_regime:
-      trending: 8    # 趋势行情：最多8个币
-      sideways: 5    # 震荡行情：最多5个币
-      risk_off: 0    # RiskOff：空仓
-    drawdown_adjustment:
-      enabled: true
-      dd_0_5:    {max_positions: 8, position_size_pct: 1.0}
-      dd_5_10:   {max_positions: 5, position_size_pct: 0.7}
-      dd_10_15:  {max_positions: 3, position_size_pct: 0.5}
-      dd_15_plus: {max_positions: 1, position_size_pct: 0.15}
+  # Position counts use AutoRiskGuard.LEVELS; max_positions_override is explicit.
 
 rebalance:
   deadband_sideways: 0.07
@@ -852,3 +841,11 @@ event_driven:
     symbol_max_minutes: 120
     confirm_min: 1
     confirm_max: 4
+
+# Shared strategy kernel observes real cycles in its own virtual portfolio.
+participation:
+  enabled: true
+  mode: forward_paper
+  policy_path: configs/research/participation_policy_v1.json
+  state_path: reports/participation/forward.sqlite
+  max_signal_age_seconds: 900

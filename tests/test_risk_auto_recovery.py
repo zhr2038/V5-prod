@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import time
+
+import pytest
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -10,7 +12,7 @@ import scripts.risk_auto_recovery as risk_auto_recovery
 from src.risk.auto_risk_guard import AutoRiskGuard
 
 
-def test_execute_recovery_writes_guard_schema_compatible_state(monkeypatch, tmp_path: Path) -> None:
+def test_execute_recovery_rejects_target_without_rewriting_guard_state(monkeypatch, tmp_path: Path) -> None:
     workspace = tmp_path
     reports_dir = workspace / "reports" / "shadow_runtime"
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -36,23 +38,14 @@ def test_execute_recovery_writes_guard_schema_compatible_state(monkeypatch, tmp_
         encoding="utf-8",
     )
 
-    success, _ = manager.execute_recovery("DEFENSE")
+    before = manager.risk_state_file.read_bytes()
+    success, reason = manager.execute_recovery("DEFENSE")
 
-    assert success is True
-    state = json.loads(manager.risk_state_file.read_text(encoding="utf-8"))
-    assert state["current_level"] == "DEFENSE"
-    assert state["current_config"]["max_positions"] == AutoRiskGuard.LEVELS["DEFENSE"].max_positions
-    assert state["metrics"]["last_dd_pct"] == 0.25
-    assert state["history"][-1]["from"] == "PROTECT"
-    assert state["history"][-1]["to"] == "DEFENSE"
-    assert state["history"][-1]["reason"] == "[AUTO] recovery"
-    assert state["history"][-1]["ts"] == "2026-05-25T04:00:01Z"
-    assert state["last_update"] == "2026-05-25T04:00:01Z"
-    assert state["since"] == "2026-05-25T04:00:01Z"
-    assert state["level"] == "DEFENSE"
-
+    assert success is False
+    assert "scripts/auto_risk_eval.py" in reason
+    assert manager.risk_state_file.read_bytes() == before
     guard = AutoRiskGuard(state_path=manager.risk_state_file)
-    assert guard.current_level == "DEFENSE"
+    assert guard.current_level == "PROTECT"
 
 
 def test_get_drawdown_history_reads_runtime_runs_equity_jsonl(monkeypatch, tmp_path: Path) -> None:
@@ -330,3 +323,42 @@ def test_risk_auto_recovery_fails_fast_when_runtime_config_is_missing(tmp_path: 
         assert "runtime config not found" in str(exc)
     else:
         raise AssertionError("expected FileNotFoundError")
+
+
+@pytest.mark.parametrize("drawdown", [None, "invalid", float("nan"), float("inf"), -0.1])
+def test_missing_or_invalid_drawdown_cannot_be_reported_as_zero(monkeypatch, tmp_path, drawdown):
+    monkeypatch.setattr(
+        risk_auto_recovery.RiskAutoRecovery,
+        "_load_active_runtime_config",
+        lambda self: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+    manager = risk_auto_recovery.RiskAutoRecovery(workspace=tmp_path)
+    monkeypatch.setattr(manager, "get_drawdown_history", lambda hours: [{"drawdown": drawdown}])
+    assert manager.calculate_avg_drawdown() is None
+    result = manager.evaluate_recovery()
+    assert result["drawdown_status"] == "unavailable"
+    assert result["action"] == "canonical_required"
+    assert manager.check_recovery_conditions("PROTECT") == (False, None)
+
+
+def test_empty_history_and_missing_risk_state_remain_unknown(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        risk_auto_recovery.RiskAutoRecovery,
+        "_load_active_runtime_config",
+        lambda self: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+    manager = risk_auto_recovery.RiskAutoRecovery(workspace=tmp_path)
+    assert manager.calculate_avg_drawdown() is None
+    assert manager.get_current_risk_state()["current_level"] == "UNKNOWN"
+    assert manager.execute_recovery("ATTACK")[0] is False
+    assert not manager.risk_state_file.exists()
+
+
+@pytest.mark.parametrize("args", [["--execute"], ["--enable"], ["--disable"], ["--pause-hours", "0"]])
+def test_legacy_mutation_cli_fails_with_canonical_entrypoint(args, capsys, monkeypatch):
+    def forbidden_constructor():
+        raise AssertionError("Deprecated mutation must not load or modify runtime state")
+
+    monkeypatch.setattr(risk_auto_recovery, "RiskAutoRecovery", forbidden_constructor)
+    assert risk_auto_recovery.main(args) == 2
+    assert "scripts/auto_risk_eval.py" in capsys.readouterr().err

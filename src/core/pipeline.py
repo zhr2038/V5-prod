@@ -1811,7 +1811,6 @@ class V5Pipeline:
             "fixed_stop_loss",
             "exchange_risk",
             "emergency_close",
-            "zero_target_close",
             "position_reconcile_force_close",
             "risk_off",
             "risk_off_forced_close",
@@ -2554,7 +2553,8 @@ class V5Pipeline:
             getattr(self.cfg.execution, "swing_apply_only_to_normal_entry", True)
         )
         level = str(current_auto_risk_level or "").strip().upper()
-        if level not in {"PROTECT", "NORMAL"}:
+        # NORMAL is the legacy name retained in persisted position history.
+        if level not in {"ATTACK", "NEUTRAL", "DEFENSE", "PROTECT", "NORMAL"}:
             return None
 
         alpha6_signal = (strategy_signal_lookup.get("Alpha6Factor") or {}).get(symbol)

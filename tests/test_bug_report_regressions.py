@@ -137,7 +137,7 @@ def test_auto_risk_guard_accepts_none_conversion_rate_and_persists_losses(tmp_pa
     )
 
     assert level == "DEFENSE"
-    assert guard.metrics["last_conversion_rate"] == 0.0
+    assert guard.metrics["last_conversion_rate"] is None
     assert guard.metrics["consecutive_loss_rounds"] == 2
     assert guard._is_lower_level("TYPO_LEVEL", "NEUTRAL") is True
 

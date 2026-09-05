@@ -53,7 +53,8 @@ def test_calculate_metrics_ignores_orders_exit_for_dust_reject_rate() -> None:
         ]
     )
 
-    assert metrics["conversion_rate"] == 0.4
+    assert metrics["proposal_conversion_rate"] == 0.4
+    assert metrics["conversion_rate"] is None
     assert metrics["dust_reject_rate"] == 2 / 12
 
 
@@ -68,7 +69,8 @@ def test_calculate_metrics_uses_notional_rejects_not_exit_orders() -> None:
         ]
     )
 
-    assert metrics["conversion_rate"] == 0.2
+    assert metrics["proposal_conversion_rate"] == 0.2
+    assert metrics["conversion_rate"] is None
     assert metrics["dust_reject_rate"] == 0.0
 
 
@@ -83,7 +85,8 @@ def test_calculate_metrics_uses_reject_counts_when_router_decisions_are_missing(
         ]
     )
 
-    assert metrics["conversion_rate"] == 0.4
+    assert metrics["proposal_conversion_rate"] == 0.4
+    assert metrics["conversion_rate"] is None
     assert metrics["dust_reject_rate"] == 3 / 13
 
 
