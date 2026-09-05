@@ -171,11 +171,11 @@ export function EquityHistoryChart({ points, currentEquity, loading, failed, cla
 
       <div className="equity-history__plot" aria-describedby={descriptionId}>
         {selected.length > 0 ? (
-          <ResponsiveContainer width="100%" height={250} minWidth={0}>
+          <ResponsiveContainer width="100%" height={280} minWidth={0}>
             <LineChart data={chart.rows} margin={{ top: 18, right: 8, bottom: 4, left: 0 }} accessibilityLayer aria-label={`${periodLabel}真实权益历史曲线`}>
               <CartesianGrid vertical={false} stroke="#293139" strokeDasharray="2 6" />
-              <XAxis dataKey="time" type="number" domain={[startsAt, now]} scale="time" tickFormatter={(time: number) => DATE.format(time)} tickLine={false} axisLine={false} tick={{ fill: '#929da5', fontSize: 11 }} minTickGap={40} tickMargin={12} />
-              <YAxis domain={chart.domain} tickLine={false} axisLine={false} tick={{ fill: '#929da5', fontSize: 11 }} tickFormatter={(value: number) => new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(value)} width={54} tickMargin={10} tickCount={4} />
+              <XAxis dataKey="time" type="number" domain={[startsAt, now]} scale="time" tickFormatter={(time: number) => DATE.format(time)} tickLine={false} axisLine={false} tick={{ fill: '#a9b6bf', fontSize: 14 }} minTickGap={56} tickMargin={12} />
+              <YAxis domain={chart.domain} tickLine={false} axisLine={false} tick={{ fill: '#a9b6bf', fontSize: 14 }} tickFormatter={(value: number) => new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(value)} width={68} tickMargin={10} tickCount={4} />
               <Tooltip content={<EquityTooltip />} cursor={{ stroke: '#67717b', strokeWidth: 1, strokeDasharray: '3 4' }} isAnimationActive={false} filterNull />
               <Line type="linear" dataKey="equity" stroke="#e8b86d" strokeWidth={1.8} dot={<ObservationDot />} activeDot={{ r: 4, fill: '#e8b86d', stroke: '#101519', strokeWidth: 2 }} connectNulls={false} isAnimationActive={false} />
             </LineChart>

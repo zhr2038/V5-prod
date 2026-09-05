@@ -88,7 +88,7 @@ function ChartSession({ symbol, timeframe, setTimeframe, costPrice }: { symbol: 
   useEffect(() => {
     if (!host.current) return;
     const chart = createChart(host.current, {
-      autoSize: true, layout: { background: { type: ColorType.Solid, color: '#10171c' }, textColor: '#929fa8', fontFamily: 'Consolas, monospace', fontSize: 11, attributionLogo: true,
+      autoSize: true, layout: { background: { type: ColorType.Solid, color: '#10171c' }, textColor: '#a9b6bf', fontFamily: 'Consolas, monospace', fontSize: 14, attributionLogo: true,
         panes: { separatorColor: '#29343c', separatorHoverColor: '#5b594b', enableResize: true } },
       grid: { vertLines: { color: '#1a242c' }, horzLines: { color: '#1c262e' } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: { color: '#8b98a2', labelBackgroundColor: '#35414b' }, horzLine: { color: '#8b98a2', labelBackgroundColor: '#35414b' } },
