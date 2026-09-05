@@ -474,7 +474,10 @@ function App() {
     void loadEquity();
   }, 60000);
 
-  useInterval(() => { void loadCommand(); }, 30000);
+  // The quote worker publishes a heartbeat every 10 seconds. Poll fast enough
+  // that an active worker cannot age beyond its 30-second freshness boundary
+  // between successful page refreshes; hidden tabs still skip loadCommand.
+  useInterval(() => { void loadCommand(); }, 10000);
 
   const displayMarketState = marketState || dashboard?.marketState || null;
 

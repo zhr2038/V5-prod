@@ -31,7 +31,8 @@ inserted retrospectively.
 - The paper panel shows worker freshness, pending intentions, original signal
   time, cancellation reasons and measured signal-to-fill latency. The curve
   keeps at most one observation per hour over 168 hours. Chart placement is
-  unchanged.
+  unchanged. Visible pages refresh command status every 10 seconds, within the
+  worker's 30-second freshness boundary; hidden pages skip these requests.
 
 ## Cohort and operational boundary
 
