@@ -1,5 +1,6 @@
 """Render the real TSX component with observed/missing market inputs."""
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -51,6 +52,15 @@ def candle(close):
     return {"timestamp": 1788573600, "open": close, "high": close + 1, "low": close - 1, "close": close, "volume": 10}
 
 
+def render_panels(fixtures, timezone="UTC"):
+    if not NODE or not (FRONTEND / "node_modules/typescript").is_dir():
+        pytest.skip("render test requires installed dashboard Node dependencies")
+    result = subprocess.run([NODE, "-e", RENDER], cwd=FRONTEND, input=json.dumps(fixtures),
+                            text=True, encoding="utf-8", capture_output=True, timeout=30, check=True,
+                            env={**os.environ, "TZ": timezone})
+    return json.loads(result.stdout)
+
+
 @pytest.fixture(scope="module")
 def panels():
     if not NODE or not (FRONTEND / "node_modules/typescript").is_dir():
@@ -72,9 +82,7 @@ def panels():
         {"props": {"focusSymbol": "BTC-USDT"}, "kline": {"symbol": "BTC-USDT", "timeframe": "1h", "candles": [candle(100), candle(100)]}},
         {"props": {"focusSymbol": "BTC-USDT"}, "kline": {"symbol": "BTC-USDT", "timeframe": "1h", "candles": [{**candle(100), "close": None}]}},
     ]
-    result = subprocess.run([NODE, "-e", RENDER], cwd=FRONTEND, input=json.dumps(fixtures),
-                            text=True, encoding="utf-8", capture_output=True, timeout=30, check=True)
-    return json.loads(result.stdout)
+    return render_panels(fixtures)
 
 
 @pytest.mark.parametrize("index", [0, 1, 7])
@@ -118,3 +126,23 @@ def test_real_unchanged_prices_preserve_observed_zero_change(panels):
     assert "$100.00" in html
     assert "$0.00" in html
     assert "0.00%" in html
+
+
+@pytest.mark.parametrize("timezone", ["UTC", "America/Los_Angeles"])
+def test_candle_axis_and_last_bar_time_are_beijing_time_independent_of_browser_timezone(timezone):
+    stamps = [
+        {"timestamp": 1788570000, "time": "1999-01-01 01:00"},
+        {"ts": 1788570000000},
+        {"time": "2026-09-05 01:00"},
+        {"time": "2026-09-05T01:00:00Z"},
+        {"time": "2026-09-05T09:00:00+08:00"},
+    ]
+    fixtures = [{"props": {"focusSymbol": "BTC-USDT"}, "kline": {
+        "symbol": "BTC-USDT", "timeframe": "1h", "summary": {"last_time": "1999-01-01 01:00"},
+        "candles": [{"open": 100, "high": 101, "low": 99, "close": 100, **stamp}],
+    }} for stamp in stamps]
+    for html in render_panels(fixtures, timezone):
+        assert "末根K线 2026-09-05 09:00 北京时间" in html
+        assert ">09:00</text>" in html
+        assert "1999-01-01" not in html
+        assert "更新时间" not in html

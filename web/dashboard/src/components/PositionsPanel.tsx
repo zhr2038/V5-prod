@@ -59,19 +59,27 @@ function candleTimestamp(candle: KlineData) {
   const rawText = String(candle.time || '').trim();
   if (!rawText) return null;
   const normalized = rawText.includes('T') ? rawText : rawText.replace(' ', 'T');
-  const parsed = Date.parse(normalized);
+  // /api/position_kline serializes its timezone-free `time` field in UTC.
+  const withTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized) ? normalized : `${normalized}Z`;
+  const parsed = Date.parse(withTimezone);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
 function formatChartTime(ts: number | null, timeframe: string) {
   if (!ts) return '--';
-  const date = new Date(ts);
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-  const hh = String(date.getHours()).padStart(2, '0');
+  const date = new Date(ts + 8 * 60 * 60 * 1000);
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(date.getUTCDate()).padStart(2, '0');
+  const hh = String(date.getUTCHours()).padStart(2, '0');
   if (timeframe === '1h') return `${hh}:00`;
   if (timeframe === '4h') return `${mm}-${dd} ${hh}:00`;
   return `${mm}-${dd}`;
+}
+
+function formatCandleStart(ts: number | null) {
+  if (ts === null) return '—';
+  const date = new Date(ts + 8 * 60 * 60 * 1000);
+  return Number.isFinite(date.getTime()) ? `${date.toISOString().slice(0, 16).replace('T', ' ')} 北京时间` : '—';
 }
 
 function formatAxisPrice(value: number) {
@@ -908,7 +916,7 @@ export function PositionsPanel({ positions = [], trades = [], focusSymbol = defa
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--text-dim)]">
                   <span>数据源 {currentKline?.source || '--'}</span>
                   <span>K线 {currentKline ? chartCandles.length : '—'} 根</span>
-                  <span>更新时间 {chartSummary?.last_time || '--'}</span>
+                  <span>末根K线 {formatCandleStart(latestCandle ? candleTimestamp(latestCandle) : null)}</span>
                 </div>
               </div>
 
