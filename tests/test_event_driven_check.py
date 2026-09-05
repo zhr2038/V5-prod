@@ -532,7 +532,8 @@ def test_no_event_actions_message_does_not_blame_missing_signals_when_signals_ex
     assert message == "No event-driven actions - no actionable events"
 
 
-def test_trigger_live_execution_service_rejects_already_running_unit(monkeypatch) -> None:
+@pytest.mark.parametrize("resolved_systemctl", [None, "/usr/bin/systemctl", "/bin/systemctl"])
+def test_trigger_live_execution_service_rejects_already_running_unit(monkeypatch, resolved_systemctl) -> None:
     class Result:
         returncode = 0
         stdout = "active\n"
@@ -545,13 +546,14 @@ def test_trigger_live_execution_service_rejects_already_running_unit(monkeypatch
         return Result()
 
     monkeypatch.setattr(edc.subprocess, "run", fake_run)
+    monkeypatch.setattr(edc.shutil, "which", lambda name: resolved_systemctl)
 
     result = edc.trigger_live_execution_service("v5-prod.user.service")
 
     assert result["ok"] is False
     assert result["skipped_already_running"] is True
     assert "already active" in result["stderr"]
-    assert calls == [["systemctl", "--user", "is-active", "v5-prod.user.service"]]
+    assert calls == [[resolved_systemctl or "systemctl", "--user", "is-active", "v5-prod.user.service"]]
 
 
 def test_resolve_live_service_unit_rejects_non_v5_live_unit(monkeypatch) -> None:
