@@ -688,7 +688,7 @@ class V5Pipeline:
         for source in (signal, signal.get("metadata") if isinstance(signal.get("metadata"), dict) else {}):
             if not isinstance(source, dict):
                 continue
-            for key in ("expected_net_bps", "expected_edge_bps", "edge_bps"):
+            for key in ("expected_net_return_bps", "expected_net_bps"):
                 value = source.get(key)
                 if value is None:
                     continue
@@ -696,6 +696,17 @@ class V5Pipeline:
                     return float(value)
                 except Exception:
                     continue
+        return None
+
+    @staticmethod
+    def _signal_edge_diagnostic(signal: Optional[Dict[str, Any]]) -> Optional[float]:
+        """Legacy signed-edge diagnostics retain negative evidence, without asserting net units."""
+        if not isinstance(signal, dict):
+            return None
+        for source in (signal, signal.get("metadata") or {}):
+            for key in ("expected_net_return_bps", "expected_gross_return_bps", "expected_net_bps", "expected_edge_bps", "edge_bps"):
+                if key in source:
+                    return _float_or_none(source[key])
         return None
 
     @staticmethod
@@ -776,6 +787,38 @@ class V5Pipeline:
             "cost_aware_score_per_bps": float(score_per_bps) if score_per_bps is not None else not_obs,
             "cost_aware_min_score_floor": float(score_floor),
         }
+        if explicit_expected_net_bps is not None:
+            meta["expected_net_return_bps"] = explicit_expected_net_bps
+            meta["expected_edge_source"] = "explicit_net_requires_cost_binding"
+            meta["return_semantics"] = "net_forecast_requires_cost_binding"
+            return meta
+        if expected_edge_source == "score_proxy":
+            meta["expected_edge_bps_proxy"] = expected_edge_bps
+            meta["return_semantics"] = "score_proxy_not_profit_forecast"
+        elif expected_edge_bps is not None:
+            # Without its original costs/horizon, a net forecast cannot pass an entry cost gate.
+            meta["expected_net_return_bps"] = expected_edge_bps
+            meta["return_semantics"] = "net_forecast_requires_cost_binding"
+        contract_keys = ("expected_gross_return_bps", "expected_net_return_bps", "roundtrip_cost_bps",
+                         "horizon", "decision_horizon", "cost_basis", "forecast_version", "return_unit")
+        for signal in (alpha6_signal, trend_signal):
+            for source in (signal or {}, (signal or {}).get("metadata") or {}):
+                if "expected_gross_return_bps" in source or "expected_net_return_bps" in source:
+                    meta.update({key: source[key] for key in contract_keys if key in source})
+                    meta["expected_edge_source"] = "strategy_return_contract"
+                    meta["return_semantics"] = "explicit_return_contract"
+                    return meta
+                if "expected_net_bps" in source:
+                    meta["expected_net_return_bps"] = source["expected_net_bps"]
+                    meta.update({key: source[key] for key in contract_keys if key in source})
+                    meta["expected_edge_source"] = "strategy_net_requires_cost_binding"
+                    return meta
+                for key in ("expected_edge_bps", "edge_bps"):
+                    if key in source:
+                        meta["expected_edge_bps"] = source[key]
+                        meta["expected_edge_source"] = "legacy_unbound"
+                        meta["return_semantics"] = "legacy_return_semantics_missing"
+                        return meta
         if alpha6_score is not None and score_per_bps is not None and score_per_bps > 0:
             meta["alpha6_expected_edge_bps_proxy"] = max(0.0, float(alpha6_score) - float(score_floor)) / float(score_per_bps)
         return meta
@@ -3005,7 +3048,7 @@ class V5Pipeline:
             )
             expected_edge_bps = None
             for signal in (alpha6_signal, trend_signal):
-                expected_edge_bps = self._signal_expected_net_bps(signal)
+                expected_edge_bps = self._signal_edge_diagnostic(signal)
                 if expected_edge_bps is not None:
                     break
             fast_microstructure_confirmed = bool(
@@ -8333,7 +8376,7 @@ class V5Pipeline:
                         symbol=sym,
                         final_score=alpha.scores.get(sym),
                         strategy_signal_lookup=strategy_signal_lookup,
-                        explicit_expected_net_bps=candidate.get("expected_edge_bps"),
+                        explicit_expected_net_bps=None,
                     )
                     live_gate_block = self._market_impulse_probe_live_gate_decision(
                         symbol=sym,

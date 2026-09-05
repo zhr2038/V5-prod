@@ -341,7 +341,7 @@ def test_guard_cost_fallback_to_local(tmp_path: Path) -> None:
     guard.check_startup_permission(cfg, "run-1")
 
     kept, rows = guard.enrich_orders_with_cost(
-        [Order("BTC/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 60})],
+        [Order("BTC/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_gross_return_bps": 60, "roundtrip_cost_bps": 30, "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps", "forecast_version": "unit-test-v1"})],
         "normal",
         cfg,
     )
@@ -364,7 +364,7 @@ def test_guard_public_spread_proxy_cost_is_not_degraded(tmp_path: Path) -> None:
     guard.check_startup_permission(cfg, "run-1")
 
     kept, rows = guard.enrich_orders_with_cost(
-        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 60})],
+        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_gross_return_bps": 60, "roundtrip_cost_bps": 30, "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps", "forecast_version": "unit-test-v1"})],
         "normal",
         cfg,
     )
@@ -395,7 +395,7 @@ def test_guard_global_default_cost_is_degraded_not_normal(tmp_path: Path) -> Non
     guard.check_startup_permission(cfg, "run-1")
 
     kept, rows = guard.enrich_orders_with_cost(
-        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 60})],
+        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_gross_return_bps": 60, "roundtrip_cost_bps": 30, "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps", "forecast_version": "unit-test-v1"})],
         "normal",
         cfg,
     )
@@ -445,7 +445,7 @@ def test_live_cost_trust_guard_observe_only_records_would_block(tmp_path: Path) 
     guard.check_startup_permission(cfg, "run-1")
 
     kept, _rows = guard.enrich_orders_with_cost(
-        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 80, "strategy_candidate": "f3_dominant_entry"})],
+        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_gross_return_bps": 80, "roundtrip_cost_bps": 30, "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps", "forecast_version": "unit-test-v1", "strategy_candidate": "f3_dominant_entry"})],
         "normal",
         cfg,
     )
@@ -476,7 +476,7 @@ def test_live_cost_trust_guard_block_mode_still_observe_only(tmp_path: Path) -> 
     guard.check_startup_permission(cfg, "run-1")
 
     kept, rows = guard.enrich_orders_with_cost(
-        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 80, "strategy_candidate": "f3_dominant_entry"})],
+        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_gross_return_bps": 80, "roundtrip_cost_bps": 30, "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps", "forecast_version": "unit-test-v1", "strategy_candidate": "f3_dominant_entry"})],
         "normal",
         cfg,
     )
@@ -505,7 +505,7 @@ def test_live_cost_trust_guard_blocks_non_whitelist_in_cost_mode(tmp_path: Path)
     guard.check_startup_permission(cfg, "run-1")
 
     kept, rows = guard.enrich_orders_with_cost(
-        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 80, "strategy_candidate": "f3_dominant_entry"})],
+        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_gross_return_bps": 80, "roundtrip_cost_bps": 30, "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps", "forecast_version": "unit-test-v1", "strategy_candidate": "f3_dominant_entry"})],
         "normal",
         cfg,
     )
@@ -546,7 +546,7 @@ def test_live_cost_trust_guard_uses_permission_live_modes_when_cost_payload_omit
     guard.check_startup_permission(cfg, "run-1")
 
     kept, rows = guard.enrich_orders_with_cost(
-        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 80, "strategy_candidate": "f3_dominant_entry"})],
+        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_gross_return_bps": 80, "roundtrip_cost_bps": 30, "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps", "forecast_version": "unit-test-v1", "strategy_candidate": "f3_dominant_entry"})],
         "normal",
         cfg,
     )
@@ -590,7 +590,7 @@ def test_live_cost_trust_guard_allows_btc_strict_probe_exception(tmp_path: Path)
                 "OPEN_LONG",
                 10.0,
                 100.0,
-                {"expected_edge_bps": 80, "entry_reason": "btc_leadership_probe", "btc_leadership_probe": True},
+                {"expected_gross_return_bps": 80, "roundtrip_cost_bps": 30, "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps", "forecast_version": "unit-test-v1", "entry_reason": "btc_leadership_probe", "btc_leadership_probe": True},
             )
         ],
         "normal",
@@ -637,7 +637,7 @@ def test_live_cost_trust_guard_blocks_paper_only_even_when_whitelisted(tmp_path:
                 "OPEN_LONG",
                 10.0,
                 100.0,
-                {"expected_edge_bps": 80, "entry_reason": "btc_leadership_probe", "btc_leadership_probe": True},
+                {"expected_gross_return_bps": 80, "roundtrip_cost_bps": 30, "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps", "forecast_version": "unit-test-v1", "entry_reason": "btc_leadership_probe", "btc_leadership_probe": True},
             )
         ],
         "normal",
@@ -675,7 +675,7 @@ def test_live_cost_trust_guard_allows_scale_ready_normal_live_without_whitelist(
     guard.check_startup_permission(cfg, "run-1")
 
     kept, _rows = guard.enrich_orders_with_cost(
-        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 80, "strategy_candidate": "f3_dominant_entry"})],
+        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_gross_return_bps": 80, "roundtrip_cost_bps": 30, "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps", "forecast_version": "unit-test-v1", "strategy_candidate": "f3_dominant_entry"})],
         "normal",
         cfg,
     )
@@ -717,7 +717,7 @@ def test_live_cost_trust_guard_blocks_canary_notional_over_limit(tmp_path: Path)
                 "OPEN_LONG",
                 25.0,
                 100.0,
-                {"expected_edge_bps": 80, "entry_reason": "btc_leadership_probe", "btc_leadership_probe": True},
+                {"expected_gross_return_bps": 80, "roundtrip_cost_bps": 30, "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps", "forecast_version": "unit-test-v1", "entry_reason": "btc_leadership_probe", "btc_leadership_probe": True},
             )
         ],
         "normal",
@@ -749,7 +749,7 @@ def test_live_cost_trust_guard_never_blocks_close_or_paper_shadow(tmp_path: Path
     kept, _rows = guard.enrich_orders_with_cost(
         [
             Order("BNB/USDT", "sell", "CLOSE_LONG", 10.0, 100.0, {}),
-            Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 80, "paper_strategy": True}),
+            Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_gross_return_bps": 80, "roundtrip_cost_bps": 30, "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps", "forecast_version": "unit-test-v1", "paper_strategy": True}),
         ],
         "normal",
         cfg,
@@ -777,7 +777,7 @@ def test_live_cost_trusted_for_live_does_not_bypass_permission_gate(tmp_path: Pa
     guard.check_startup_permission(cfg, "run-1")
 
     kept, summary = guard.filter_orders(
-        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 80})]
+        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_gross_return_bps": 80, "roundtrip_cost_bps": 30, "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps", "forecast_version": "unit-test-v1"})]
     )
 
     assert kept == []

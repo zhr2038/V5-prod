@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 from configs.schema import AppConfig
+import pytest
+
 from src.core.models import Order
 from src.quant_lab_client.cost_gate import apply_quant_lab_cost_gate, local_cost_bps_for_order
 from src.quant_lab_client.models import CostEstimate
+
+
+def gross(value, **extra):
+    return {"expected_gross_return_bps": value, "roundtrip_cost_bps": 30.0,
+            "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps",
+            "forecast_version": "unit-test-v1", **extra}
 
 
 def _cfg() -> AppConfig:
@@ -22,7 +30,7 @@ def test_cost_gate_filters_low_edge() -> None:
         "OPEN_LONG",
         100.0,
         100.0,
-        {"expected_edge_bps": 10.0, "expected_edge_source": "final_score_proxy"},
+        gross(10.0, expected_edge_source="test_gross"),
     )
     estimate = CostEstimate(symbol="BTC-USDT", regime="normal", total_cost_bps=1.0, source="public_spread_proxy")
     result = apply_quant_lab_cost_gate(order, estimate, _cfg())
@@ -32,14 +40,14 @@ def test_cost_gate_filters_low_edge() -> None:
     assert result.local_cost_source == "roundtrip_fee_slippage"
     assert result.effective_total_cost_bps == 22.0
     assert result.min_required_edge_bps == 33.0
-    assert result.expected_edge_source == "final_score_proxy"
+    assert result.expected_edge_source == "test_gross"
     assert result.filtered is True
 
 
 def test_cost_gate_uses_roundtrip_all_in_cost_with_local_floor() -> None:
     cfg = AppConfig()
     cfg.execution.cost_aware_roundtrip_cost_bps = 30
-    order = Order("BTC/USDT", "buy", "OPEN_LONG", 100.0, 100.0, {"expected_edge_bps": 60.0})
+    order = Order("BTC/USDT", "buy", "OPEN_LONG", 100.0, 100.0, gross(60.0))
     estimate = CostEstimate.from_payload(
         {
             "symbol": "BTC-USDT",
@@ -79,7 +87,7 @@ def test_cost_gate_uses_roundtrip_all_in_cost_with_local_floor() -> None:
 def test_cost_gate_uses_higher_roundtrip_all_in_cost_over_local_floor() -> None:
     cfg = AppConfig()
     cfg.execution.cost_aware_roundtrip_cost_bps = 30
-    order = Order("BTC/USDT", "buy", "OPEN_LONG", 100.0, 100.0, {"expected_edge_bps": 80.0})
+    order = Order("BTC/USDT", "buy", "OPEN_LONG", 100.0, 100.0, gross(80.0))
     estimate = CostEstimate.from_payload(
         {
             "symbol": "BTC-USDT",
@@ -101,7 +109,7 @@ def test_cost_gate_allows_high_edge_and_missing_edge() -> None:
     cfg = _cfg()
     estimate = CostEstimate(symbol="BTC-USDT", regime="normal", total_cost_bps=5.0, source="public_spread_proxy")
     high_edge = apply_quant_lab_cost_gate(
-        Order("BTC/USDT", "buy", "OPEN_LONG", 100.0, 100.0, {"expected_edge_bps": 40.0}),
+        Order("BTC/USDT", "buy", "OPEN_LONG", 100.0, 100.0, gross(40.0)),
         estimate,
         cfg,
     )
@@ -214,3 +222,58 @@ def test_local_cost_uses_order_meta_roundtrip_first() -> None:
 
     assert result.local_cost_bps == 40.0
     assert result.local_cost_source == "order_meta.local_roundtrip_cost_bps"
+
+
+@pytest.mark.parametrize("value", [None, True, False, "invalid", float("nan"), float("inf"), -float("inf"), 100001, -10001])
+@pytest.mark.parametrize("field", ["expected_gross_return_bps", "expected_net_return_bps"])
+def test_invalid_forecast_never_passes_entry(value, field):
+    meta = gross(50)
+    meta.pop("expected_gross_return_bps")
+    meta[field] = value
+    estimate = CostEstimate(symbol="BTC-USDT", total_cost_bps=30)
+    buy = apply_quant_lab_cost_gate(Order("BTC/USDT", "buy", "OPEN_LONG", 100, 100, meta), estimate, _cfg(), mode="enforce")
+    assert buy.filtered and not buy.passed and buy.reason.startswith("invalid_expected_return:")
+    sell = apply_quant_lab_cost_gate(Order("BTC/USDT", "sell", "CLOSE_LONG", 100, 100, meta), estimate, _cfg(), mode="enforce")
+    assert sell.passed and not sell.filtered
+
+
+def test_gross_and_net_inputs_subtract_cost_once():
+    cfg = _cfg()
+    estimate = CostEstimate(symbol="BTC-USDT", total_cost_bps=30)
+    gross_meta = gross(50)
+    net_meta = gross_meta.copy()
+    net_meta.pop("expected_gross_return_bps")
+    net_meta["expected_net_return_bps"] = 20
+    results = [apply_quant_lab_cost_gate(Order("BTC/USDT", "buy", "OPEN_LONG", 100, 100, meta), estimate, cfg) for meta in (gross_meta, net_meta)]
+    for result in results:
+        assert result.passed
+        assert result.expected_gross_return_bps == 50
+        assert result.expected_net_return_bps == 20
+        assert result.roundtrip_cost_bps == 30
+    # Reprice the same forecast against higher current cost, once.
+    estimate.total_cost_bps = 40
+    result = apply_quant_lab_cost_gate(Order("BTC/USDT", "buy", "OPEN_LONG", 100, 100, net_meta), estimate, cfg)
+    assert result.expected_net_return_bps == 10 and result.filtered
+
+
+@pytest.mark.parametrize("patch", [
+    {"cost_basis": "one_way"}, {"return_unit": "percent"}, {"decision_horizon": "4h"},
+    {"horizon": None}, {"forecast_version": ""}, {"roundtrip_cost_bps": True},
+    {"expected_net_return_bps": 21},
+])
+def test_forecast_contract_mismatches_block(patch):
+    result = apply_quant_lab_cost_gate(Order("BTC/USDT", "buy", "OPEN_LONG", 100, 100, gross(50, **patch)), CostEstimate(symbol="BTC-USDT", total_cost_bps=30), _cfg())
+    assert result.filtered and result.reason.startswith("invalid_expected_return:")
+
+
+@pytest.mark.parametrize("edge,passed", [(-10000, False), (-1, False), (0, False), (44.9999, False), (45, True), (100000, True)])
+def test_valid_return_boundaries(edge, passed):
+    result = apply_quant_lab_cost_gate(Order("BTC/USDT", "buy", "OPEN_LONG", 100, 100, gross(edge)), CostEstimate(symbol="BTC-USDT", total_cost_bps=30), _cfg())
+    assert result.passed is passed
+
+
+@pytest.mark.parametrize("key", ["expected_edge_bps", "expected_net_edge_bps", "edge_bps"])
+@pytest.mark.parametrize("value", [50, float("nan"), float("inf"), True, "invalid", None])
+def test_legacy_aliases_cannot_guess_forecast_semantics(key, value):
+    result = apply_quant_lab_cost_gate(Order("BTC/USDT", "buy", "OPEN_LONG", 100, 100, {key: value}), CostEstimate(symbol="BTC-USDT", total_cost_bps=30), _cfg())
+    assert result.filtered and result.reason.startswith("invalid_expected_return:")

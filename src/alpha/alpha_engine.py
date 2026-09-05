@@ -9,6 +9,8 @@ from io import StringIO
 from decimal import Decimal
 import os
 import json
+import logging
+from src.alpha.weight_evidence import validate_weight_report, valid_ic_mean
 import time
 import numpy as np
 import pandas as pd
@@ -158,8 +160,15 @@ class AlphaEngine:
                 "reports/alpha_dynamic_weights_by_regime.json",
             )
             if not p.exists():
+                self.regime_weight_status = "report_missing"
+                logging.getLogger(__name__).warning("Regime weights use frozen static baseline: report_missing")
                 return {}
             data = json.loads(p.read_text(encoding="utf-8"))
+            reason = validate_weight_report(data, getattr(self.cfg, "dynamic_ic_weighting", {}))
+            self.regime_weight_status = reason or "evidence_admitted"
+            if reason:
+                logging.getLogger(__name__).warning("Regime weights use frozen static baseline: %s", reason)
+                return {}
             weights = (((data.get("regimes") or {}).get(regime_key) or {}).get("weights"))
             if not isinstance(weights, dict):
                 return {}
@@ -168,10 +177,14 @@ class AlphaEngine:
                 context=f"alpha.dynamic_weights_by_regime[{regime_key}]",
                 output="schema",
             )
-            return {str(k): float(v) for k, v in normalized.items()}
-        except ValueError:
-            raise
-        except Exception:
+            from src.quant_lab_client.return_contract import finite_number
+            values = {str(k): finite_number(v, minimum=-100, maximum=100) for k, v in normalized.items()}
+            if not any(values.values()):
+                raise ValueError("zero_regime_weights")
+            return values
+        except Exception as exc:
+            self.regime_weight_status = "invalid_or_missing_report"
+            logging.getLogger(__name__).warning("Regime weights use frozen static baseline: %s", type(exc).__name__)
             return {}
 
     @staticmethod
@@ -331,9 +344,16 @@ class AlphaEngine:
                 'reports/alpha_ic_monitor.json',
             )
             if not p.exists():
+                self.dynamic_weight_status = 'report_missing'
+                logging.getLogger(__name__).warning('Dynamic IC weights use frozen static baseline: report_missing')
                 return dict(default_weights)
 
             obj = json.loads(p.read_text(encoding='utf-8'))
+            reason = validate_weight_report(obj, ic_cfg, factors=[key for key, value in default_weights.items() if value])
+            self.dynamic_weight_status = reason or "evidence_admitted"
+            if reason:
+                logging.getLogger(__name__).warning("Dynamic IC weights use frozen static baseline: %s", reason)
+                return dict(default_weights)
             factor_ic = obj.get('factor_ic') if isinstance(obj, dict) else None
             if not isinstance(factor_ic, dict):
                 return dict(default_weights)
@@ -384,7 +404,9 @@ class AlphaEngine:
                     sign = -1.0 if float(out[k]) < 0 else 1.0
                     out[k] = round(sign * float(dyn[k]) * scale, 12)
             return out
-        except Exception:
+        except Exception as exc:
+            self.dynamic_weight_status = "frozen_baseline:invalid_report:" + type(exc).__name__
+            logging.getLogger(__name__).warning("Dynamic IC weights rejected: %s", self.dynamic_weight_status)
             return dict(default_weights)
 
     @staticmethod
@@ -392,8 +414,8 @@ class AlphaEngine:
         def _nested_mean(bucket_key: str) -> Optional[float]:
             try:
                 bucket = rec.get(bucket_key) or {}
-                if isinstance(bucket, dict) and bucket.get("count", 0):
-                    return float(bucket.get("mean"))
+                if isinstance(bucket, dict):
+                    return valid_ic_mean(bucket)
             except Exception:
                 return None
             return None
@@ -641,6 +663,7 @@ class AlphaEngine:
                     _coalesce(getattr(getattr(self.cfg, 'dynamic_ic_weighting', None), 'min_abs_ic', None), 0.003)
                 ),
                 'fallback_to_static': bool(getattr(getattr(self.cfg, 'dynamic_ic_weighting', None), 'fallback_to_static', True)),
+                **{key: getattr(self.cfg.dynamic_ic_weighting, key) for key in ('max_report_age_hours', 'min_samples', 'min_independent_samples', 'horizon_hours', 'expected_universe')},
             },
         })
         self.alpha6_strategy = alpha6_strategy

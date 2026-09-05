@@ -1,0 +1,16 @@
+[Unit]
+Description=V5 isolated same-capital forward research (public reads only)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/clawd/v5-prod
+Environment=PYTHONPATH=/home/ubuntu/clawd/v5-prod
+ExecStart=/home/ubuntu/clawd/v5-prod/.venv/bin/python scripts/run_review_forward.py --output /home/ubuntu/clawd/v5-prod/reports/review_comparison/review-20260906-v1
+TimeoutStartSec=55
+MemoryMax=768M
+CPUQuota=50%
+Nice=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

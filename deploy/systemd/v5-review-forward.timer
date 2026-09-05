@@ -1,0 +1,11 @@
+[Unit]
+Description=Collect a shared public quote once per minute for isolated research
+
+[Timer]
+OnCalendar=*-*-* *:*:50
+AccuracySec=1s
+Persistent=false
+Unit=v5-review-forward.service
+
+[Install]
+WantedBy=timers.target

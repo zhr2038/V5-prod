@@ -38,3 +38,35 @@ jobs:
           tests/test_quant_lab_live_execution_gate.py
           tests/test_negative_expectancy_cooldown.py
           tests/test_candidate_snapshot.py
+          tests/test_quant_lab_cost_gate.py
+          tests/test_weight_evidence.py
+          tests/test_return_contract_ingress.py
+          tests/test_release_manifest.py
+          tests/test_quote_portfolio.py
+          tests/test_original_v5_adapter.py
+          tests/test_participation_comparison.py
+          tests/test_review_comparison.py
+          tests/test_decision_reference_consumer.py
+          tests/test_participation_policy.py
+          tests/test_participation_runtime.py
+          tests/test_participation_quotes.py
+          tests/test_participation_exit_contract.py
+          tests/test_participation_config_and_store.py
+          tests/test_risk_auto_recovery.py
+          tests/test_protect_recovery_multi_position.py
+  full-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e . pytest
+      - name: Complete offline regression suite
+        run: python -m pytest -q --junitxml=full-tests.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-test-results
+          path: full-tests.xml

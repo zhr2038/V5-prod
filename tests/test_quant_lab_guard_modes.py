@@ -64,8 +64,8 @@ def _guard(tmp_path: Path, cfg: AppConfig, client: _ModeClient) -> QuantLabGuard
 
 def _orders() -> list[Order]:
     return [
-        Order("BTC/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 1.0}),
-        Order("ETH/USDT", "sell", "CLOSE_LONG", 10.0, 100.0, {"expected_edge_bps": 20.0}),
+        Order("BTC/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_gross_return_bps": 1.0, "roundtrip_cost_bps": 30, "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps", "forecast_version": "unit-test-v1"}),
+        Order("ETH/USDT", "sell", "CLOSE_LONG", 10.0, 100.0, {"expected_gross_return_bps": 20.0, "roundtrip_cost_bps": 30, "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps", "forecast_version": "unit-test-v1"}),
     ]
 
 
@@ -191,16 +191,16 @@ def test_enforce_mode_applies_permission_and_cost_gates(tmp_path: Path) -> None:
     result = guard.check_startup_permission(cfg, "run-mode")
     permission_kept = guard.filter_orders_by_permission(_orders(), result)
     final_kept, _rows = guard.enrich_orders_with_cost(
-        [Order("ETH/USDT", "sell", "CLOSE_LONG", 10.0, 100.0, {"expected_edge_bps": 1.0})],
+        [Order("ETH/USDT", "sell", "CLOSE_LONG", 10.0, 100.0, {"expected_gross_return_bps": 1.0, "roundtrip_cost_bps": 30, "horizon": "24h", "cost_basis": "roundtrip_all_in_quote_bps", "forecast_version": "unit-test-v1"})],
         "normal",
         cfg,
     )
 
     assert [order.side for order in permission_kept] == ["sell"]
-    assert final_kept == []
+    assert [order.side for order in final_kept] == ["sell"]
     summary = guard.summary_payload()
     assert summary["filtered_by_permission_count"] == 1
-    assert summary["filtered_by_cost_count"] == 1
+    assert summary["filtered_by_cost_count"] == 0
 
 
 def test_enforce_missing_edge_buy_blocks(tmp_path: Path) -> None:

@@ -1,5 +1,6 @@
 
 import json
+from src.alpha.weight_evidence import bind_evidence, factor_version
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -88,6 +89,7 @@ class AlphaICMonitor:
         telemetry_scores = dict(getattr(alpha_snapshot, "telemetry_scores", {}) or {})
         score_source = telemetry_scores or raw_scores
         return {
+            "factor_version": factor_version(),
             "ts_ms": int(now_ts_ms),
             "ts_iso": datetime.fromtimestamp(int(now_ts_ms) / 1000.0, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
             "scores": score_source,
@@ -143,6 +145,9 @@ class AlphaICMonitor:
             }
 
         return {
+            "universe": common,
+            "factor_version": factor_version(),
+            "valid_for_weighting": bool(prev.get("factor_version") == cur.get("factor_version") == factor_version() and np.isfinite(rets).all() and np.isfinite(score_s).all() and rets.nunique() > 1 and score_s.nunique() > 1 and all(np.isfinite(float(v)) for sym in common for v in (prev_factors.get(sym) or {}).values())),
             "from_ts_ms": int(prev.get("ts_ms") or 0),
             "to_ts_ms": int(cur.get("ts_ms") or 0),
             "from_ts_iso": prev.get("ts_iso"),
@@ -216,7 +221,7 @@ class AlphaICMonitor:
         long_mean = float(np.mean(score_ic_long)) if score_ic_long else 0.0
         decay_ratio = float(short_mean / long_mean) if abs(long_mean) > 1e-12 else 0.0
 
-        return {
+        report = {
             "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "score_source": (rows[-1].get("score_source") if rows else "scores"),
             "points_short": len(rows_short),
@@ -232,6 +237,12 @@ class AlphaICMonitor:
                 "decay_ratio": decay_ratio,
             },
         }
+
+        try:
+            return bind_evidence(report, rows)
+        except (ValueError, TypeError, KeyError):
+            report["evidence_rejection"] = "invalid_source_rows"
+            return report
 
     def update(self, *, now_ts_ms: int, alpha_snapshot: Any, closes: Dict[str, float]) -> Optional[Dict[str, Any]]:
         snap = self._build_snapshot(now_ts_ms=now_ts_ms, alpha_snapshot=alpha_snapshot, closes=closes)

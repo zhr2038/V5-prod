@@ -1,0 +1,10 @@
+[Unit]
+Description=Record V5 research reference every five minutes
+
+[Timer]
+OnCalendar=*-*-* *:0/5:40
+Persistent=true
+Unit=v5-decision-reference.service
+
+[Install]
+WantedBy=timers.target

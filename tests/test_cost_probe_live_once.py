@@ -33,6 +33,38 @@ from src.execution.account_store import AccountStore
 from src.execution.position_store import PositionStore
 
 
+@pytest.fixture(autouse=True)
+def fixed_probe_clock(monkeypatch):
+    """Authorization and reconcile freshness share one deterministic test clock."""
+    class ProbeClock(datetime):
+        instant = datetime(2026, 9, 6, 0, 0, 0, tzinfo=UTC)
+
+        @classmethod
+        def advance(cls, seconds):
+            cls.instant += timedelta(seconds=seconds)
+
+        @classmethod
+        def now(cls, tz=None):
+            instant = cls.instant
+            return instant.astimezone(tz) if tz is not None else instant.replace(tzinfo=None)
+
+    monkeypatch.setitem(globals(), "datetime", ProbeClock)
+    monkeypatch.setattr("scripts.cost_probe_live_once.datetime", ProbeClock)
+    monkeypatch.setattr("src.reporting.cost_probe_plan.datetime", ProbeClock)
+    monkeypatch.setattr("scripts.create_cost_probe_authorization.datetime", ProbeClock)
+    return ProbeClock
+
+
+def test_reconcile_expires_when_shared_test_clock_advances(tmp_path, fixed_probe_clock):
+    from src.reporting.cost_probe_plan import _reconcile_guard
+
+    path = tmp_path / "reconcile.json"
+    path.write_text(json.dumps({"ok": True, "generated_ts_ms": int(datetime.now(UTC).timestamp() * 1000)}), encoding="utf-8")
+    assert _reconcile_guard(path, max_age_sec=180, generated_at=datetime.now(UTC))[0] == "PASS"
+    fixed_probe_clock.advance(181)
+    assert _reconcile_guard(path, max_age_sec=180, generated_at=datetime.now(UTC))[:2] == ("BLOCK", "reconcile_status_stale")
+
+
 class _Response:
     def __init__(self, data):
         self.data = data
@@ -1295,7 +1327,7 @@ def _write_clean_runtime_state(project_root: Path) -> None:
     runtime_dir.mkdir(parents=True, exist_ok=True)
     (runtime_dir / "kill_switch.json").write_text(json.dumps({"enabled": False}), encoding="utf-8")
     (runtime_dir / "reconcile_status.json").write_text(
-        json.dumps({"ok": True, "generated_ts_ms": 1_788_000_000_000}),
+        json.dumps({"ok": True, "generated_ts_ms": int(datetime.now(UTC).timestamp() * 1000)}),
         encoding="utf-8",
     )
     with sqlite3.connect(str(runtime_dir / "orders.sqlite")) as con:

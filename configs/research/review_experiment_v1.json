@@ -1,0 +1,35 @@
+{
+  "schema_version": "v5.review_comparison.v1",
+  "experiment_id": "v5-review-20260906-v1",
+  "question": "With identical observed inputs and starting capital, does the frozen participation policy improve net portfolio equity over the repaired original V5 pipeline; does a 24h research reference add value to the same 24h holding candidate?",
+  "cohorts": {
+    "A_original_v5": "Repaired original V5 pipeline, frozen static factors, independent account and risk state",
+    "B_participation_v1": "Existing participation direction/ranking kernel and 72h maximum hold",
+    "C_hold24_only": "B with maximum_holding_hours changed to 24 only",
+    "D_reference_only": "C with fresh, previously received 24h DEFER advice blocking new entry only; missing/expired/NO_VIEW preserves C"
+  },
+  "initial_cash_usdt": 100,
+  "roundtrip_cost_scenarios_bps": [30, 60, 120],
+  "fee_currency_policy": "observed instrument contract; no unsupported fee-token conversion",
+  "fill_rule": "strictly subsequent observed ask/bid, validated quantity lot/minimum and fee currency",
+  "forward_start": "first complete decision hour after verified release",
+  "minimum_forward_calendar_days": 30,
+  "minimum_independent_entry_opportunities": 100,
+  "minimum_distinct_entry_days": 10,
+  "primary_comparisons": [["B_participation_v1", "A_original_v5"], ["C_hold24_only", "B_participation_v1"], ["D_reference_only", "C_hold24_only"]],
+  "promotion_requirements": {
+    "net_equity_delta_usdt": "strictly_positive",
+    "block_bootstrap_95pct_delta_lower_bound": "strictly_positive",
+    "maximum_drawdown": "no_greater_than_control",
+    "cost_60_and_120bps_net_equity_delta": "strictly_positive",
+    "remove_largest_profitable_closed_campaign": "net_equity_increment_remains_positive",
+    "time_and_regime_segments": "report_all_without_selecting_best_segment"
+  },
+  "weight_comparison": "Static and admitted dynamic evidence are separate experiments; missing valid historical weight reports yields insufficient evidence, never permission to enable dynamic production weights",
+  "fixed_monthly_cloud_api_cost_usdt": null,
+  "fixed_cost_status": "not_supplied_project_profit_unverified",
+  "previously_viewed_window": "2026-07-05T13:00:00Z/2026-09-05T00:00:00Z",
+  "previously_viewed_window_qualification": "diagnostic_only_never_out_of_sample",
+  "live_execution_eligible": false,
+  "automatic_live_scaling": false
+}

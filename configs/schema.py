@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Literal, Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -268,6 +268,11 @@ class TopkDropoutConfig(BaseModel):
 
 
 class DynamicICWeightingConfig(BaseModel):
+    max_report_age_hours: float = Field(default=6.0, gt=0, le=24)
+    min_samples: int = Field(default=96, ge=96)
+    min_independent_samples: int = Field(default=24, ge=24)
+    horizon_hours: int = Field(default=1, ge=1, le=72)
+    expected_universe: List[str] = Field(default_factory=lambda: ["BNB/USDT", "BTC/USDT", "ETH/USDT", "SOL/USDT"])
     enabled: bool = Field(default=True)
     ic_monitor_path: str = Field(default="reports/alpha_ic_monitor.json")
     min_abs_ic: float = Field(default=0.003, ge=0, le=1)
@@ -2217,7 +2222,15 @@ class ParticipationRuntimeConfig(BaseModel):
         return value
 
 
+class DecisionReferenceConfig(BaseModel):
+    enabled: bool = False
+    mode: Literal["record_only"] = "record_only"
+    endpoint: str = "http://qyun2.hrhome.top:8027/v1/trade-advice/latest"
+    output_path: str = "reports/decision_reference"
+
+
 class AppConfig(BaseModel):
+    decision_reference: DecisionReferenceConfig = Field(default_factory=DecisionReferenceConfig)
     symbols: List[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"])
     timeframe_main: str = "1h"
     timeframe_aux: str = "4h"

@@ -9,6 +9,8 @@
 """
 
 import json
+import logging
+from src.alpha.weight_evidence import validate_weight_report, valid_ic_mean
 import re
 from abc import ABC, abstractmethod
 from copy import deepcopy
@@ -583,8 +585,8 @@ class Alpha6FactorStrategy(BaseStrategy):
         def _nested_mean(bucket_key: str) -> Optional[float]:
             try:
                 bucket = rec.get(bucket_key) or {}
-                if isinstance(bucket, dict) and bucket.get("count", 0):
-                    return float(bucket.get("mean"))
+                if isinstance(bucket, dict):
+                    return valid_ic_mean(bucket)
             except Exception:
                 return None
             return None
@@ -600,9 +602,16 @@ class Alpha6FactorStrategy(BaseStrategy):
 
             p = Path(str(cfg.get('ic_monitor_path', 'reports/alpha_ic_monitor.json')))
             if not p.exists():
+                self.dynamic_weight_status = 'report_missing'
+                logging.getLogger(__name__).warning('Strategy IC weights use frozen static baseline: report_missing')
                 return dict(static_weights)
 
             obj = json.loads(p.read_text(encoding='utf-8'))
+            reason = validate_weight_report(obj, cfg, factors=[key for key, value in static_weights.items() if value])
+            self.dynamic_weight_status = reason or "evidence_admitted"
+            if reason:
+                logging.getLogger(__name__).warning("Strategy IC weights use frozen static baseline: %s", reason)
+                return dict(static_weights)
             factor_ic = obj.get('factor_ic') if isinstance(obj, dict) else None
             if not isinstance(factor_ic, dict):
                 return dict(static_weights)
@@ -653,7 +662,8 @@ class Alpha6FactorStrategy(BaseStrategy):
                     sign = -1.0 if float(out[k]) < 0 else 1.0
                     out[k] = round(sign * float(dyn[k]) * scale, 12)
             return out
-        except Exception:
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Dynamic IC weights rejected; frozen baseline: %s", type(exc).__name__)
             return dict(static_weights)
     
     def generate_signals(self, market_data: pd.DataFrame) -> List[Signal]:

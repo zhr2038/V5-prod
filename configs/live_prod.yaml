@@ -68,7 +68,7 @@ alpha:
     f5_rsi_trend_confirm: 0.10
   
   dynamic_weights_by_regime_path: reports/alpha_dynamic_weights_by_regime.json
-  dynamic_weights_by_regime_enabled: true
+  dynamic_weights_by_regime_enabled: false # frozen baseline pending isolated forward comparison
   use_multi_strategy: true
   multi_strategy_conflict_penalty_enabled: true
   multi_strategy_conflict_dominance_ratio: 1.35
@@ -141,7 +141,7 @@ alpha:
 
   # 动态IC权重：用 rolling IC 做因子权重再分配
   dynamic_ic_weighting:
-    enabled: true
+    enabled: false # evidence admission is necessary; it is not permission to deploy dynamic weights
     ic_monitor_path: reports/alpha_ic_monitor.json
     min_abs_ic: 0.003
     fallback_to_static: true
@@ -245,7 +245,7 @@ diagnostics:
   paper_strategy_horizons_hours: [4, 8, 12, 24, 48, 72]
   paper_strategy_rt_cost_bps: 30
   paper_strategy_live_ready_cost_sources: ["actual_fills", "mixed_actual_proxy"]
-  quant_lab_strategy_opportunity_advisory_enabled: true
+  quant_lab_strategy_opportunity_advisory_enabled: false # retired producer; never revive historical permission
   quant_lab_strategy_opportunity_advisory_paths:
     - /var/lib/v5-prod/strategy_opportunity_advisory.csv
     - /var/lib/v5-prod/quant_lab_latest_bundle.zip
@@ -261,14 +261,14 @@ diagnostics:
     - reports/quant_lab_latest_bundle.tar.gz
     - reports/quant_lab/latest_bundle.zip
     - reports/quant_lab/latest_bundle.tar.gz
-  quant_lab_strategy_opportunity_advisory_api_enabled: true
+  quant_lab_strategy_opportunity_advisory_api_enabled: false
   quant_lab_strategy_opportunity_advisory_api_paths:
     - /v1/strategy-opportunity-advisory/v5-compact
     - /v1/strategy-opportunity-advisory
     - /v1/reports/strategy-opportunity-advisory
   quant_lab_strategy_opportunity_advisory_max_age_minutes: 90
   quant_lab_strategy_opportunity_advisory_require_contract_version: true
-  quant_lab_paper_strategy_proposals_enabled: true
+  quant_lab_paper_strategy_proposals_enabled: false # archived proposals remain evidence only
   quant_lab_paper_strategy_proposals_paths:
     - /var/lib/v5-prod/paper_strategy_proposals.csv
     - /var/lib/v5-prod/quant_lab_latest_bundle.zip
@@ -285,7 +285,7 @@ diagnostics:
     - reports/quant_lab/latest_bundle.zip
     - reports/quant_lab/latest_bundle.tar.gz
   quant_lab_paper_strategy_proposals_max_age_minutes: 1440
-  quant_lab_paper_strategy_proposals_api_enabled: true
+  quant_lab_paper_strategy_proposals_api_enabled: false
   quant_lab_paper_strategy_proposals_api_path: /v1/paper-strategy/proposals
   enable_live_small_from_quant_lab: false
   paper_strategy_configs:
@@ -845,6 +845,12 @@ event_driven:
     confirm_max: 4
 
 # Shared strategy kernel observes real cycles in its own virtual portfolio.
+decision_reference:
+  enabled: true
+  mode: record_only
+  endpoint: http://qyun2.hrhome.top:8027/v1/trade-advice/latest
+  output_path: reports/decision_reference
+
 participation:
   enabled: true
   mode: forward_paper

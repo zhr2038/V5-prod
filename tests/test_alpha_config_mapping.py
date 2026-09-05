@@ -15,6 +15,7 @@ from pydantic import ValidationError
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from src.alpha.weight_evidence import bind_evidence, factor_version, UNIVERSE
 from configs.loader import load_config
 from configs.schema import AlphaConfig
 from src.alpha.alpha_engine import AlphaEngine
@@ -85,11 +86,19 @@ def _weight_engine(
     return engine
 
 
+def _with_weight_evidence(payload):
+    now = int(datetime.now(timezone.utc).timestamp() * 1000)
+    rows = [{"from_ts_ms": now - (96 - i) * 3600000, "to_ts_ms": now - (95 - i) * 3600000,
+             "universe": list(UNIVERSE), "factor_version": factor_version(),
+             "score_rank_ic": (-1) ** i * 0.2, "valid_for_weighting": True} for i in range(96)]
+    return bind_evidence(payload, rows)
+
+
 def _write_regime_weights(tmp_path: Path, weights: dict[str, float]) -> None:
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
     (reports_dir / "alpha_dynamic_weights_by_regime.json").write_text(
-        json.dumps({"regimes": {"Trending": {"weights": weights}}}),
+        json.dumps(_with_weight_evidence({"regimes": {"Trending": {"weights": weights}}})),
         encoding="utf-8",
     )
 
@@ -101,11 +110,11 @@ def _write_ic_monitor(tmp_path: Path) -> None:
     for key in BASE_FACTOR_WEIGHTS:
         mean = 0.03 if key == "f1_mom_5d" else -0.03
         factor_ic[key] = {
-            "rank_ic_short": {"count": 12, "mean": mean},
-            "rank_ic_long": {"count": 12, "mean": mean},
+            "rank_ic_short": {"count": 24, "mean": mean},
+            "rank_ic_long": {"count": 96, "mean": mean},
         }
     (reports_dir / "alpha_ic_monitor.json").write_text(
-        json.dumps({"factor_ic": factor_ic}),
+        json.dumps(_with_weight_evidence({"factor_ic": factor_ic})),
         encoding="utf-8",
     )
 

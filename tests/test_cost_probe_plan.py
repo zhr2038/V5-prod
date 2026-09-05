@@ -3,17 +3,38 @@ from __future__ import annotations
 import csv
 import json
 import sqlite3
+import pytest
 from datetime import UTC, datetime
 
 from configs.schema import AppConfig
 from src.reporting.cost_probe_plan import (
     CostProbeEngine,
+    _reconcile_guard,
     build_cost_probe_dry_run_plan,
     build_cost_probe_p3_preflight,
     write_cost_probe_dry_run_outputs,
 )
 
 GENERATED_AT = datetime(2026, 6, 18, 12, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("value", [None, 0, -1, True, "invalid", float("nan"), float("inf"), 1234.5])
+def test_reconcile_clean_requires_a_valid_timestamp(tmp_path, value):
+    path = tmp_path / "reconcile.json"
+    path.write_text(json.dumps({"ok": True, "generated_ts_ms": value}))
+    status, reason, _ = _reconcile_guard(path, max_age_sec=180, generated_at=GENERATED_AT)
+    assert (status, reason) == ("BLOCK", "reconcile_timestamp_invalid_or_missing")
+
+
+@pytest.mark.parametrize("age,expected", [(0, "reconcile_clean"), (180, "reconcile_clean"),
+                                        (181, "reconcile_status_stale"), (-5, "reconcile_clean"),
+                                        (-5.001, "reconcile_timestamp_future"), (-86400, "reconcile_timestamp_future")])
+def test_reconcile_timestamp_age_and_future_boundaries(tmp_path, age, expected):
+    path = tmp_path / "reconcile.json"
+    path.write_text(json.dumps({"ok": True, "generated_ts_ms": round((GENERATED_AT.timestamp() - age) * 1000)}))
+    status, reason, _ = _reconcile_guard(path, max_age_sec=180, generated_at=GENERATED_AT)
+    assert reason == expected
+    assert (status == "PASS") == (expected == "reconcile_clean")
 
 
 def test_cost_probe_plan_is_blocked_when_prod_switches_are_closed(tmp_path):

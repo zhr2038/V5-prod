@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -998,13 +999,22 @@ def _reconcile_guard(
         return "BLOCK", "reconcile_status_missing", "missing"
     ok = _json_bool(payload.get("ok"))
     reason = str(payload.get("reason") or "")
-    ts_ms = _int_value(payload.get("generated_ts_ms") or payload.get("ts_ms"))
     if not ok:
         return "BLOCK", f"reconcile_not_ok:{reason or 'unknown'}", json.dumps(payload, ensure_ascii=False)
-    if ts_ms > 0:
-        age_sec = max(generated_at.timestamp() - ts_ms / 1000.0, 0.0)
-        if age_sec > max_age_sec:
-            return "BLOCK", "reconcile_status_stale", f"age_sec={age_sec:.1f}"
+    raw_ts = payload.get("generated_ts_ms")
+    if raw_ts is None or raw_ts == "":
+        raw_ts = payload.get("ts_ms")
+    try:
+        ts_ms = float(raw_ts)
+    except (TypeError, ValueError, OverflowError):
+        ts_ms = float("nan")
+    if isinstance(raw_ts, bool) or not math.isfinite(ts_ms) or ts_ms <= 0 or not ts_ms.is_integer():
+        return "BLOCK", "reconcile_timestamp_invalid_or_missing", "positive finite integer milliseconds required"
+    age_sec = generated_at.timestamp() - ts_ms / 1000.0
+    if age_sec < -5.0:
+        return "BLOCK", "reconcile_timestamp_future", f"age_sec={age_sec:.3f}"
+    if age_sec > max_age_sec:
+        return "BLOCK", "reconcile_status_stale", f"age_sec={age_sec:.1f}"
     return "PASS", "reconcile_clean", "ok"
 
 

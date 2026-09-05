@@ -1,0 +1,13 @@
+[Unit]
+Description=V5 record-only research reference consumer
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/clawd/v5-prod
+Environment=PYTHONPATH=/home/ubuntu/clawd/v5-prod
+ExecStart=/home/ubuntu/clawd/v5-prod/.venv/bin/python scripts/consume_decision_reference.py --config configs/live_prod.yaml
+NoNewPrivileges=true
+PrivateTmp=true
+TimeoutStartSec=45
+MemoryMax=256M
