@@ -443,3 +443,15 @@ def test_dead_quote_worker_never_presents_held_equity_as_current(runtime):
     assert result["quote_worker"]["status"] == "unavailable"
     assert result["equity_usdt"] is None
     assert result["valuation_status"] == "quote_worker_unavailable"
+
+
+@pytest.mark.parametrize("publication_offset, expected", [(2, "observed"), (20, "unavailable")])
+def test_quote_heartbeat_uses_file_read_time_but_still_rejects_future_publication(runtime, publication_offset, expected):
+    event = forward(runtime)
+    identity = enable_quote_execution(runtime, event)
+    settings = runtime.config["participation"]
+    write_json((runtime.workspace / settings["state_path"]).with_suffix(".worker.json"),
+               {"identity": identity, "observed_ts": NOW + publication_offset, "status": "observed"})
+    result = build_command_center(config=runtime.config, paths=runtime.paths, workspace=runtime.workspace,
+                                  now=NOW, observation_clock=lambda: NOW + 3)["participation"]
+    assert result["quote_worker"]["status"] == expected

@@ -33,6 +33,9 @@ inserted retrospectively.
   keeps at most one observation per hour over 168 hours. Chart placement is
   unchanged. Visible pages refresh command status every 10 seconds, within the
   worker's 30-second freshness boundary; hidden pages skip these requests.
+  Heartbeat and valuation freshness are evaluated after reading their files.
+  A publication during dashboard aggregation is therefore not mislabeled as
+  future data; timestamps genuinely later than the read still fail validation.
 
 ## Cohort and operational boundary
 
@@ -50,7 +53,7 @@ execution is not evidence of positive future returns or live readiness.
 
 ## Validation
 
-- 110 targeted Python tests pass across participation policy, runtime, store,
+- 112 targeted Python tests pass across participation policy, runtime, store,
   quote execution, exit contracts and the command-center API.
 - 32 Node tests pass, including actual TSX rendering of pending intentions,
   cancellations, measured fill latency and an expired worker heartbeat.
@@ -60,6 +63,17 @@ execution is not evidence of positive future returns or live readiness.
 - The production public WebSocket was read-only tested for all four symbols
   before deployment. Production release, hash, service and rendered-page
   evidence is saved separately with the deployment record.
+
+The first natural production cycle at 19:00 Beijing time created a BNB paper
+entry at `19:00:57.222164`. The worker filled it at `19:00:58.825098` using a
+public quote timestamped `19:00:58.669`: latency **1.602934 seconds**, not the
+previous one-hour wait. Simulated notional was 10.5 USDT, with a modeled entry
+price of 748.7742 after the existing slippage assumption. At the 20:00 cycle,
+the same position remained open and the cohort still had exactly one entry.
+There were no closed trades or realized profits at this observation. The
+worker had zero restarts/reconnections, and the live ledger counts remained
+3,806 orders, 1,474 fills and zero positions. These counts corroborate the
+paper-only boundary; this is not a claim that the strategy is profitable.
 
 ## Risks and rollback
 
@@ -81,3 +95,6 @@ verifies that no later release has changed the target files, stops/disables the
 new paper worker, restores the backed-up files and resumes the original timers.
 Both paper cohorts and their evidence are retained. Never reset the production
 Git checkout or overwrite a later release to perform a rollback.
+If subsequent Web-only releases have been applied, run their recorded rollback
+commands in reverse deployment order before rolling back the core release.
+Each command guards against later file drift; do not bypass that guard.

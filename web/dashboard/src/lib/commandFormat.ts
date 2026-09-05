@@ -88,6 +88,7 @@ const reasons: Record<string, string> = {
   awaiting_next_hourly_signal: '等待下个小时信号',
   awaiting_subsequent_quote: '等待信号之后的新报价',
   quote_unobservable: '当前盘口不可用',
+  quote_worker_unavailable: '报价检查待确认',
   waiting_for_hourly_signal: '等待首个小时信号',
   idle_no_intent: '当前没有待执行意向',
   ema20_trend_exit: '趋势失效，准备退出',

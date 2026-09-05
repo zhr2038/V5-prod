@@ -286,7 +286,7 @@ def _fill_metrics(paths, start, now, candidate_pairs, warnings):
         return locals().get("result", unavailable)
 
 
-def _participation(paths, config, workspace, now, warnings):
+def _participation(paths, config, workspace, now, warnings, observation_clock=None):
     settings = _mapping(config.get("participation"))
     enabled = settings.get("enabled")
     enabled = enabled if isinstance(enabled, bool) else None
@@ -321,6 +321,15 @@ def _participation(paths, config, workspace, now, warnings):
         if quote_enabled:
             worker, worker_status = _json(state_path.with_suffix(".worker.json"), root)
             worker = worker or {}
+        latest, latest_status = _json(latest_path, root)
+        # A quote writer can publish while the 72-hour dashboard is aggregating.
+        # Judge both files at their read completion, not at request start, while
+        # retaining the explicit time supplied by deterministic/offline callers.
+        if observation_clock is not None:
+            now = _epoch(observation_clock())
+            if now is None:
+                raise ValueError("participation_observation_clock_invalid")
+        if quote_enabled:
             stamp = _epoch(worker.get("observed_ts"))
             status = "observed" if (worker_status == "observed" and worker.get("status") == "observed"
                       and worker.get("identity") == identity and stamp is not None and 0 <= now - stamp <= 30) else "unavailable"
@@ -328,7 +337,6 @@ def _participation(paths, config, workspace, now, warnings):
                                       "interval_seconds": worker.get("interval_seconds"),
                                       "websocket_connected": worker.get("websocket_connected"),
                                       "last_check_status": worker.get("last_check_status"), "last_error": worker.get("last_error")}
-        latest, latest_status = _json(latest_path, root)
         output["status"] = latest_status
         if latest is None:
             return output
@@ -447,7 +455,7 @@ def _finite_json(value):
     return value
 
 
-def build_command_center(*, config, paths, workspace: Path, now: float):
+def build_command_center(*, config, paths, workspace: Path, now: float, observation_clock=None):
     """Aggregate a closed 72-hour event window from approved local artifacts."""
     warnings = []
     now = _epoch(now)
@@ -487,7 +495,7 @@ def build_command_center(*, config, paths, workspace: Path, now: float):
                     symbols[reason].add(str(route["symbol"]))
     workspace = Path(workspace).resolve()
     health = _health(paths, config, workspace, now, warnings)
-    participation = _participation(paths, config, Path(workspace).resolve(), now, warnings)
+    participation = _participation(paths, config, Path(workspace).resolve(), now, warnings, observation_clock)
     candidates = _candidate_rows(latest, paths.reports_dir, now, warnings)
     latest_decision["router_reasons"] = list(dict.fromkeys(str(route["reason"]) for route in _rows(latest_audit.get("router_decisions"))
                                                         if route.get("action") == "skip" and route.get("reason")))

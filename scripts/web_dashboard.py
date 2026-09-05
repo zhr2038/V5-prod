@@ -8328,6 +8328,7 @@ def api_command_center():
             paths=_resolve_dashboard_runtime_paths(config),
             workspace=WORKSPACE,
             now=_utc_now().timestamp(),
+            observation_clock=lambda: _utc_now().timestamp(),
         ))
     except Exception as exc:
         return _json_internal_error_response(
