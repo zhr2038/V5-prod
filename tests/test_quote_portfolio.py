@@ -38,7 +38,9 @@ def test_base_fee_and_quantity_steps_retain_residual_dust_and_cost_basis():
     assert book.positions["BNB/USDT"]["qty"] == Decimal("0.0005")
     assert mark["dust_positions"]["BNB/USDT"] == Decimal("0.0005")
     assert mark["liquidation_value_usdt"] == 0
-    assert mark["equity_usdt"] == Decimal("99.8501")
+    assert mark["immediately_executable_equity_usdt"] == Decimal("99.8501")
+    assert mark["restricted_residual_value_usdt"] == Decimal("0.04995")
+    assert mark["equity_usdt"] == Decimal("99.90005")
     assert mark["unrealized_pnl_usdt"] < 0
 
 

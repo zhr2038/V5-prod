@@ -65,6 +65,7 @@ export interface ParticipationSummary {
 }
 
 export interface CommandCenterData {
+  review_comparison?: import('./reviewTypes').ReviewView;
   schema_version: string;
   generated_at: string;
   read_only: boolean;

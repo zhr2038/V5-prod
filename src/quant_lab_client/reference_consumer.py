@@ -115,6 +115,9 @@ def record_cycle(*, payload: dict | None, contexts: list[dict], now: float, outp
             if not re.fullmatch(r"advice-[a-f0-9]{64}", str(advice.get("advice_id", ""))):
                 continue
             receipt = {"advice_id": advice["advice_id"], "published_at": payload.get("publication", {}).get("published_at"),
+                       "reference_schema": payload.get("schema_version"),
+                       "analysis_source_identity": payload.get("worker_commit"),
+                       "strategy_version": advice.get("strategy_version"),
                        "generated_at": advice.get("generated_at"), "expires_at": advice.get("expires_at"),
                        "horizon_hours": advice.get("horizon_hours"), "cost_version": advice.get("cost", {}).get("version"),
                        "experiment_version": advice.get("experiment_version"), "adoption": "not_adopted",
