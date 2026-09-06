@@ -46,6 +46,9 @@ jobs:
           tests/test_original_v5_adapter.py
           tests/test_participation_comparison.py
           tests/test_review_comparison.py
+          tests/test_review_boundary_regressions.py
+          tests/test_review_acceptance.py
+          tests/test_review_report_view.py
           tests/test_decision_reference_consumer.py
           tests/test_participation_policy.py
           tests/test_participation_runtime.py

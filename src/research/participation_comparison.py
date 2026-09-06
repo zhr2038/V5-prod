@@ -6,17 +6,19 @@ import hashlib
 import json
 
 from src.research.quote_portfolio import QuotePortfolio, serializable
+from src.research.reference_contract import reference_use
 from src.strategy import participation_policy as policy
 
 
 class ParticipationComparison:
-    def __init__(self, config, *, use_reference=False):
+    def __init__(self, config, *, use_reference=False, reference_contract=None):
         self.config = copy.deepcopy(config)
         policy.validate_policy(config)
         self.state = policy.new_state(config)
         self.book = QuotePortfolio(initial_cash=config["initial_cash_usdt"], fee_bps=config["fee_bps"],
                                    slippage_bps=config["slippage_bps"], maximum_quote_age_seconds=config["maximum_quote_age_seconds"])
         self.use_reference = use_reference
+        self.reference_contract = copy.deepcopy(reference_contract)
         self.last_observed = None
         self.last_bar = None
         self.events = []
@@ -26,8 +28,14 @@ class ParticipationComparison:
         self.state["cash_usdt"] = float(self.book.cash)
         self.state["equity_usdt"] = float(mark["equity_usdt"])
         self.state["peak_equity_usdt"] = float(self.book.peak)
-        self.state["halted"] = self.state["halted"] or float(mark["drawdown_fraction"]) >= self.config["maximum_trial_drawdown_fraction"]
-        active = [value for symbol, value in self.book.positions.items() if symbol not in mark["dust_positions"]]
+        if not self.state["halted"] and float(mark["drawdown_fraction"]) >= self.config["maximum_trial_drawdown_fraction"]:
+            self.state["halted"] = True
+            self.state["halted_reason"] = {"reason": "economic_equity_trial_drawdown", "observed_at": snapshot["now_ts"],
+                                           "drawdown_fraction": float(mark["drawdown_fraction"])}
+        mark["trial_halted"] = self.state["halted"]
+        mark["trial_stop_reason"] = self.state.get("halted_reason")
+        active = [value for symbol, value in self.book.positions.items()
+                  if not (value.get("management_status") == "residual_after_exit" and symbol in mark["dust_positions"])]
         if len(active) > 1:
             raise ValueError("participation comparison exceeded its single-position mandate")
         if active:
@@ -42,14 +50,8 @@ class ParticipationComparison:
             self.state["position"] = None
         return mark
 
-    @staticmethod
-    def _reference_defer(reference, now):
-        if not reference or reference.get("horizon_hours") != 24:
-            return False
-        return (reference.get("live_execution_eligible") is False
-                and reference.get("first_received_ts", float("inf")) <= now
-                and reference.get("published_ts", float("inf")) <= now < reference.get("expires_ts", 0)
-                and reference.get("research_evaluable") is True and reference.get("action") == "DEFER")
+    def _reference_defer(self, reference, now):
+        return reference_use(reference, now, self.reference_contract)["defer"]
 
     def observe(self, snapshot, *, references=None, allow_new_signal=True):
         now = snapshot["now_ts"]
@@ -95,7 +97,8 @@ class ParticipationComparison:
             if decision["action"] == "entry_intent" and self.use_reference:
                 reference = (references or {}).get(decision["symbol"])
                 if self._reference_defer(reference, now):
-                    decision = {**decision, "action": "reference_deferred_entry", "reference_advice_id": reference.get("advice_id")}
+                    decision = {**decision, "action": "reference_deferred_entry", "reference_advice_id": reference.get("advice_id"),
+                                "reference_use": reference_use(reference, now, self.reference_contract)}
             if decision["action"] in {"entry_intent", "exit_intent"}:
                 self.state["pending"] = decision
         self.last_observed = now

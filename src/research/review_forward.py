@@ -15,6 +15,7 @@ import requests
 from src.data.okx_ccxt_provider import OKXCCXTProvider
 from src.reporting.participation_runtime import _save_report
 from src.research.review_comparison import Comparison, digest, summarize, validate_frame
+from src.research.reference_contract import reference_use
 
 
 def capture_artifacts(project, root, now, symbols):
@@ -61,26 +62,48 @@ def public_get(path, params):
     return value["data"]
 
 
-def references_at(path, now):
+def references_at(path, now, *, diagnostics=None):
+    """Read failure has no veto authority over a candidate or its hard exits."""
+    status = diagnostics if diagnostics is not None else {}
+    status.update(status="observed" if path.exists() else "missing", live_order_effect="none")
+    try:
+        return _read_references_at(path, now)
+    except (OSError, sqlite3.Error, ValueError, KeyError, TypeError) as exc:
+        status.update(status="reference_read_failed", reason=type(exc).__name__)
+        return {}
+
+
+def _read_references_at(path, now):
     if not path.exists():
         return {}
-    with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as con:
-        rows = con.execute("SELECT first_received,payload,receipt FROM advice WHERE first_received<=? AND expires_at>? ORDER BY first_received", (now, now)).fetchall()
+    with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)) as con:
+        rows = con.execute("SELECT first_received,payload,receipt FROM advice WHERE first_received<=? AND first_received>=? ORDER BY first_received,advice_id", (now, now - 7200)).fetchall()
     result = {}
     for received, raw, receipt_raw in rows:
         advice, receipt = json.loads(raw), json.loads(receipt_raw)
-        if receipt["reason"] != "record_only_not_adopted" or advice["horizon_hours"] != 24:
+        if advice.get("horizon_hours") != 24:
             continue
         symbol = advice["symbol"].removesuffix("USDT") + "/USDT"
+        def timestamp(value):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+            except (AttributeError, TypeError, ValueError):
+                return None
         result[symbol] = {"advice_id": advice["advice_id"], "first_received_ts": received,
-                          "published_ts": datetime.fromisoformat(receipt["published_at"].replace("Z", "+00:00")).timestamp(),
-                          "expires_ts": datetime.fromisoformat(advice["expires_at"].replace("Z", "+00:00")).timestamp(),
+                          "published_ts": timestamp(receipt.get("published_at")),
+                          "expires_ts": timestamp(advice.get("expires_at")),
                           "horizon_hours": 24, "action": advice["action"], **advice["eligibility"],
+                          "live_order_effect": advice.get("live_order_effect"),
+                          "receipt_reason": receipt.get("reason"),
+                          "reference_schema": receipt.get("reference_schema"),
+                          "experiment_version": receipt.get("experiment_version"),
+                          "strategy_version": receipt.get("strategy_version"),
+                          "analysis_source_identity": receipt.get("analysis_source_identity"),
                           "cost_version": advice["cost"]["version"]}
     return result
 
 
-def collect(*, symbols, root, reference_path):
+def collect(*, symbols, root, reference_path, entry_minimum_notional_usdt=10):
     now = time.time()
     bar = int(now // 3600) * 3600
     cache_path = root / "hour-input.json"
@@ -104,14 +127,18 @@ def collect(*, symbols, root, reference_path):
     rows = {}
     for symbol in symbols:
         spec, quote = specs[symbol], quotes[symbol]
-        rows[symbol] = {"quote": {"bid": float(quote["bidPx"]), "ask": float(quote["askPx"]), "ts": float(quote["ts"]) / 1000},
+        rows[symbol] = {"entry_minimum_notional_usdt": entry_minimum_notional_usdt,
+                        "quote": {"bid": float(quote["bidPx"]), "ask": float(quote["askPx"]), "ts": float(quote["ts"]) / 1000},
                         "instrument": {"symbol": symbol, "lot_size": spec["lotSz"], "minimum_qty": spec["minSz"],
-                                       "minimum_notional_usdt": 10, "minimum_notional_source": "common_research_policy",
+                                       "minimum_notional_usdt": 0,
+                                       "minimum_notional_source": "not_reported_no_additional_notional_limit_assumed",
                                        "buy_fee_currency": spec["baseCcy"], "sell_fee_currency": spec["quoteCcy"],
                                        "fee_currency_source": "explicit_spot_received_currency_model",
                                        "observed_ts": cache["instrument_raw"]["ts"], "source_hash": digest(spec)}}
+    reference_read = {}
+    references = references_at(reference_path, now, diagnostics=reference_read)
     frame = {"observed_at": now, "bar_ts": bar, "symbols": rows, "market_data": cache["market_data"],
-             "instrument_raw": cache["instrument_raw"], "references": references_at(reference_path, now),
+             "instrument_raw": cache["instrument_raw"], "references": references, "reference_read": reference_read,
              "historical_backfill": False, "live_order_effect": "none"}
     frame["input_artifacts"] = capture_artifacts(Path(__file__).resolve().parents[2], root, now, symbols)
     validate_frame(frame)
@@ -176,8 +203,12 @@ def process(*, cfg, policy, experiment, project, root, frame, identity):
         if not events or events[-1]["observed_at"] != event["observed_at"]:
             events.append(event)
         report = summarize(events, new_checkpoint, experiment)
+        first_observation = con.execute("SELECT min(observed_at) FROM events").fetchone()[0]
         report.update(identity=identity["identity"], latest_observed_at=frame["observed_at"],
-                      input_hash=digest(frame), storage="independent_comparison_sqlite", report_sampling="hourly_plus_latest; raw_minute_events_retained")
+                      ledger_start_ts=first_observation, latest_decision_clock=event["decision_clock"],
+                      reference_read=frame.get("reference_read", {"status": "not_provided"}),
+                      latest_reference_observation={s: reference_use(frame.get("references", {}).get(s), frame["observed_at"], experiment.get("reference_contract")) for s in frame["symbols"]},
+                      input_hash=digest(frame), storage="independent_comparison_sqlite", report_sampling="common_decisions_plus_latest; raw_minute_events_retained")
         _save_report(root / "manifest.json", identity)
         _save_report(root / "latest.json", report)
         return report

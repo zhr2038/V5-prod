@@ -455,6 +455,40 @@ def _finite_json(value):
     return value
 
 
+def _review_comparison(reports_dir, now):
+    """Only the explicitly selected independent ledger; never pick the newest directory."""
+    root = Path(reports_dir) / "review_comparison"
+    output = {"status": "missing", "read_only": True, "live_execution_eligible": False, "report": None}
+    try:
+        pointer, status = _json(root / "current.json", root)
+        if not pointer:
+            return {**output, "status": status}
+        directory = pointer.get("directory", "")
+        if not re.fullmatch(r"review-[a-z0-9-]+", directory):
+            raise ValueError("invalid_review_directory")
+        study = _safe(root / directory, root)
+        report, report_status = _json(study / "latest.json", root)
+        manifest, _ = _json(study / "manifest.json", root)
+        worker, _ = _json(study / "worker-status.json", root)
+        output.update(ledger=directory, expected_identity=pointer.get("identity"), worker=worker)
+        if not report:
+            return {**output, "status": report_status}
+        identity = pointer.get("identity")
+        if not identity or report.get("identity") != identity or not manifest or manifest.get("identity") != identity:
+            raise ValueError("review_identity_mismatch")
+        with closing(sqlite3.connect((study / "comparison.sqlite").resolve().as_uri() + "?mode=ro", uri=True)) as con:
+            row = con.execute("SELECT value FROM meta WHERE key='identity'").fetchone()
+            if not row or row[0] != identity:
+                raise ValueError("review_ledger_identity_mismatch")
+        if report.get("live_execution_eligible") is not False or report.get("automatic_live_scaling") is not False:
+            raise ValueError("review_boundary_invalid")
+        freshness = _fresh(report.get("latest_observed_at"), now, 180)
+        return {**output, **freshness, "status": "worker_failed" if worker and worker.get("ok") is False else freshness["status"],
+                "report": report, "frozen_predecessors": pointer.get("frozen_predecessors", [])}
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        return {**output, "status": "invalid", "reason": str(exc)[:200], "report": None}
+
+
 def build_command_center(*, config, paths, workspace: Path, now: float, observation_clock=None):
     """Aggregate a closed 72-hour event window from approved local artifacts."""
     warnings = []
@@ -508,6 +542,7 @@ def build_command_center(*, config, paths, workspace: Path, now: float, observat
                "window_72h": window, "blockers": [{"reason": reason, "count": count, "unit": "router_block_events", "symbols": sorted(symbols[reason])}
                                                    for reason, count in frequencies.most_common(20)],
                "health": health, "participation": participation,
+               "review_comparison": _review_comparison(paths.reports_dir, now),
                "quant_lab": {"mode": "enforced" if enforced is True else "advisory" if enforced is False else "unknown",
                              "permission": qlab.get("raw_permission_decision", qlab.get("quant_lab_permission", qlab.get("permission"))),
                              "effective_permission": qlab.get("final_permission"), "source_mode": qlab.get("mode"),

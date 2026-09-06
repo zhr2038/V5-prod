@@ -49,6 +49,8 @@ class QuotePortfolio:
             raise ValueError("instrument_source_hash_required")
         step, minimum = number(instrument["lot_size"]), number(instrument["minimum_qty"])
         notional = number(instrument["minimum_notional_usdt"])
+        if instrument.get("minimum_notional_source") == "common_research_policy":
+            raise ValueError("research_entry_floor_is_not_an_exchange_specification")
         if min(step, minimum) <= 0 or notional < 0:
             raise ValueError("invalid_instrument_constraints")
         observed = number(instrument["observed_ts"])
@@ -90,6 +92,8 @@ class QuotePortfolio:
         notional = quantity * price
         if quantity < minimum or notional < minimum_notional:
             raise ValueError("below_minimum_executable_size")
+        if side == "buy" and notional < number(row.get("entry_minimum_notional_usdt", 0)):
+            raise ValueError("below_research_entry_minimum")
         fee_amount = (quantity if currency == base else notional) * self.fee
         fee_usdt = quantity * price * self.fee
         realized = Decimal(0)
@@ -103,11 +107,12 @@ class QuotePortfolio:
                 position = {"symbol": symbol, "qty": Decimal(0), "cash_cost": Decimal(0),
                             "entry_ts": number(now), "entry_fee_usdt": Decimal(0), "metadata": copy.deepcopy(intent.get("metadata", {}))}
                 self.positions[symbol] = position
-            elif rounded(position["qty"], step) < minimum or rounded(position["qty"], step) * bid < minimum_notional:
+            elif position.get("management_status") == "residual_after_exit":
                 # A new executable campaign starts now; old dust and its cost are retained.
                 position["entry_ts"] = number(now)
                 position["metadata"] = {**copy.deepcopy(intent.get("metadata", {})), "carried_dust_cost_usdt": str(position["cash_cost"])}
                 position["entry_fee_usdt"] = Decimal(0)
+            position["management_status"] = "active"
             position["qty"] += received
             position["cash_cost"] += spent
             position["entry_fee_usdt"] += fee_usdt
@@ -120,10 +125,14 @@ class QuotePortfolio:
             self.cash += proceeds
             position["qty"] -= consumed
             position["cash_cost"] -= allocated_cost
+            residual = rounded(position["qty"], step) < minimum or rounded(position["qty"], step) * bid < minimum_notional
+            # Only an actually executed exit may leave an explicit residual. A price
+            # decline below an entry budget never silently removes an active holding.
+            position["management_status"] = "residual_after_exit" if residual else "active"
             self.closed_lots.append({"symbol": symbol, "entry_ts": position["entry_ts"], "exit_ts": number(now),
                                      "consumed_qty": consumed, "allocated_cost_usdt": allocated_cost,
                                      "net_pnl_usdt": realized, "reason": intent.get("reason"),
-                                     "campaign_closed": rounded(position["qty"], step) < minimum or rounded(position["qty"], step) * bid < minimum_notional})
+                                     "campaign_closed": residual})
             if position["qty"] == 0:
                 del self.positions[symbol]
         fill = {"intent_id": key, "symbol": symbol, "side": side, "decision_ts": intent["decision_ts"],
@@ -137,7 +146,8 @@ class QuotePortfolio:
         return copy.deepcopy(fill)
 
     def mark(self, rows, *, now):
-        liquidation, cost_basis, gross_exposure, dust = Decimal(0), Decimal(0), Decimal(0), {}
+        liquidation, economic_value, cost_basis, gross_exposure = (Decimal(0) for _ in range(4))
+        dust, restricted = {}, {}
         for symbol, position in self.positions.items():
             row = rows[symbol]
             bid, _ask, _ts, step, minimum, min_notional = self._market(row, now)
@@ -146,24 +156,44 @@ class QuotePortfolio:
             currency = row["instrument"]["sell_fee_currency"]
             if currency not in {base, quote_ccy}:
                 raise ValueError("unsupported_liquidation_fee_currency")
-            qty = rounded(position["qty"] / (1 + self.fee if currency == base else 1), step)
+            available = position["qty"] / (1 + self.fee if currency == base else 1)
+            qty = rounded(available, step)
+            net_full_value = available * price * (1 - self.fee if currency == quote_ccy else 1)
             proceeds = qty * price
+            reason = None
             if qty < minimum or proceeds < min_notional:
+                reason = "below_exchange_minimum_quantity" if qty < minimum else "below_verified_exchange_notional"
                 proceeds = Decimal(0)
                 dust[symbol] = position["qty"]
+                executable_consumed = Decimal(0)
             elif currency == quote_ccy:
                 proceeds *= 1 - self.fee
+                executable_consumed = qty
+            else:
+                executable_consumed = qty * (1 + self.fee)
+            remaining = max(Decimal(0), position["qty"] - executable_consumed)
+            if remaining:
+                restricted[symbol] = {"quantity": remaining, "market_value_usdt": remaining * bid,
+                                      "estimated_net_value_usdt": net_full_value - proceeds,
+                                      "cost_basis_usdt": position["cash_cost"] * remaining / position["qty"],
+                                      "reason": reason or "quantity_step_residual",
+                                      "management_status": position.get("management_status", "active")}
             liquidation += proceeds
+            economic_value += net_full_value
             cost_basis += position["cash_cost"]
             gross_exposure += position["qty"] * bid
-        equity = self.cash + liquidation
+        equity = self.cash + economic_value
         self.peak = max(self.peak, equity)
         return {"cash_usdt": self.cash, "equity_usdt": equity, "net_equity_increment_usdt": equity - self.initial_cash,
-                "liquidation_value_usdt": liquidation, "unrealized_pnl_usdt": liquidation - cost_basis,
+                "economic_equity_usdt": equity, "asset_equity_usdt": self.cash + gross_exposure,
+                "asset_market_value_usdt": gross_exposure,
+                "liquidation_value_usdt": liquidation, "immediately_executable_equity_usdt": self.cash + liquidation,
+                "restricted_residual_value_usdt": economic_value - liquidation,
+                "restricted_positions": restricted, "unrealized_pnl_usdt": economic_value - cost_basis,
                 "gross_exposure_usdt": gross_exposure, "drawdown_fraction": 1 - equity / self.peak,
                 "dust_positions": dust, "positions": copy.deepcopy(self.positions),
                 "fee_usdt": sum((fill["fee_usdt"] for fill in self.fills), Decimal(0)),
-                "valuation": "subsequent_observed_bid_net_of_fees_slippage_and_lot_constraints"}
+                "valuation": "observed_bid_economic_value_net_of_model_costs; executable_liquidation_and_residual_separate"}
 
     def checkpoint(self):
         return serializable({"initial_cash": self.initial_cash, "cash": self.cash,

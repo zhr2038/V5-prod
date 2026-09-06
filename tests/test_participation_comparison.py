@@ -31,10 +31,14 @@ def test_reference_missing_or_expired_exactly_preserves_candidate_portfolio():
 
 def test_reference_only_defers_new_risk_and_never_suppresses_stop_exit():
     control = ParticipationComparison(CONFIG)
-    treatment = ParticipationComparison(CONFIG, use_reference=True)
+    contract = {"reference_schema": "qlab.decision.result.v2", "experiment_version": "frozen-experiment",
+                "strategy_version": "frozen-strategy", "cost_version": "current-cost-v1",
+                "analysis_source_identity": "a" * 40, "horizon_hours": 24}
+    treatment = ParticipationComparison(CONFIG, use_reference=True, reference_contract=contract)
     ref = {"BTC/USDT": {"horizon_hours": 24, "action": "DEFER", "expires_ts": 400000,
                          "published_ts": 360001, "first_received_ts": 360001,
-                         "research_evaluable": True, "live_execution_eligible": False, "advice_id": "advice-a"}}
+                         "research_evaluable": True, "live_execution_eligible": False, "advice_id": "advice-a",
+                         "live_order_effect": "none", **contract}}
     assert control.observe(observed())["decision"]["action"] == "entry_intent"
     assert treatment.observe(observed(), references=ref)["decision"]["action"] == "reference_deferred_entry"
     control.observe(observed(360012))

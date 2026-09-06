@@ -5,7 +5,7 @@ Description=V5 isolated same-capital forward research (public reads only)
 Type=oneshot
 WorkingDirectory=/home/ubuntu/clawd/v5-prod
 Environment=PYTHONPATH=/home/ubuntu/clawd/v5-prod
-ExecStart=/home/ubuntu/clawd/v5-prod/.venv/bin/python scripts/run_review_forward.py --output /home/ubuntu/clawd/v5-prod/reports/review_comparison/review-20260906-v1
+ExecStart=/home/ubuntu/clawd/v5-prod/.venv/bin/python scripts/run_review_forward.py --experiment configs/research/review_experiment_v2.json --output /home/ubuntu/clawd/v5-prod/reports/review_comparison/review-20260906-v2
 TimeoutStartSec=55
 MemoryMax=768M
 CPUQuota=50%

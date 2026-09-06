@@ -19,6 +19,8 @@ from src.reporting.participation_runtime import build_snapshot
 from src.research.original_v5_adapter import OriginalV5Adapter
 from src.research.participation_comparison import ParticipationComparison
 from src.research.quote_portfolio import QuotePortfolio, serializable
+from src.research.reference_contract import reference_use, validate_reference_contract
+from src.research.review_acceptance import evaluate_acceptance
 
 
 COHORTS = ("A_original_v5", "B_participation_v1", "C_hold24_only", "D_reference_only")
@@ -56,11 +58,18 @@ def validate_frame(frame):
 class Comparison:
     def __init__(self, cfg, policy, experiment, *, root: Path, checkpoint=None):
         self.root, self.cfg, self.experiment = root, cfg, experiment
+        if experiment.get("schema_version") == "v5.review_comparison.v2":
+            validate_reference_contract(experiment.get("reference_contract"))
         self.policy = copy.deepcopy(policy)
         self.policy["initial_cash_usdt"] = experiment["initial_cash_usdt"]
         self.scenarios = {}
         self.last_observed = None
         self.last_bar = None
+        self.last_decision_bar = None
+        clock = experiment.get("decision_clock", {"offset_seconds": 0, "maximum_lateness_seconds": 3599})
+        self.decision_offset, self.maximum_lateness = clock["offset_seconds"], clock["maximum_lateness_seconds"]
+        if not 0 <= self.decision_offset < 3600 or not 0 <= self.maximum_lateness < 3600 - self.decision_offset:
+            raise ValueError("invalid frozen common decision clock")
         self.metrics = {}
         for cost in experiment["roundtrip_cost_scenarios_bps"]:
             config = {**self.policy, "fee_bps": 10, "slippage_bps": cost / 2 - 10}
@@ -75,12 +84,14 @@ class Comparison:
                                                         slippage_bps=config["slippage_bps"], maximum_quote_age_seconds=30),
                         "B_participation_v1": ParticipationComparison(config),
                         "C_hold24_only": ParticipationComparison({**config, "maximum_holding_hours": 24}),
-                        "D_reference_only": ParticipationComparison({**config, "maximum_holding_hours": 24}, use_reference=True),
+                        "D_reference_only": ParticipationComparison({**config, "maximum_holding_hours": 24}, use_reference=True,
+                                                                    reference_contract=experiment.get("reference_contract")),
                         "pending": [], "audit": None}
             self.scenarios[str(cost)] = scenario
         if checkpoint:
             self.metrics = checkpoint.get("metrics", {})
             self.last_observed, self.last_bar = checkpoint["last_observed"], checkpoint["last_bar"]
+            self.last_decision_bar = checkpoint.get("last_decision_bar")
             for cost, saved in checkpoint["scenarios"].items():
                 scenario = self.scenarios[cost]
                 scenario["pending"], scenario["audit"] = saved["pending"], saved["audit"]
@@ -89,7 +100,7 @@ class Comparison:
                     item = scenario[name]
                     item.book = QuotePortfolio.restore(saved[name]["book"])
                     item.state = saved[name]["state"]
-                    item.last_observed, item.last_bar = self.last_observed, self.last_bar
+                    item.last_observed, item.last_bar = self.last_observed, self.last_decision_bar
 
     def checkpoint(self):
         scenarios = {}
@@ -99,14 +110,18 @@ class Comparison:
             for name in COHORTS[1:]:
                 saved[name] = {"book": scenario[name].book.checkpoint(), "state": scenario[name].state}
             scenarios[cost] = saved
-        return serializable({"last_observed": self.last_observed, "last_bar": self.last_bar, "scenarios": scenarios, "metrics": self.metrics})
+        return serializable({"last_observed": self.last_observed, "last_bar": self.last_bar,
+                             "last_decision_bar": self.last_decision_bar, "scenarios": scenarios, "metrics": self.metrics})
 
     def observe(self, frame):
         validate_frame(frame)
         now, bar = frame["observed_at"], frame["bar_ts"]
         if self.last_observed is not None and (now <= self.last_observed or bar < self.last_bar):
             raise ValueError("duplicate_or_reversed_comparison_observation")
-        hourly = self.last_bar != bar
+        cutoff = bar + self.decision_offset
+        deadline = cutoff + self.maximum_lateness
+        hourly = self.last_decision_bar != bar and cutoff <= now <= deadline
+        phase = "DECIDED" if hourly else "ALREADY_DECIDED" if self.last_decision_bar == bar else "WAITING_COMMON_CUTOFF" if now < cutoff else "MISSED_COMMON_DEADLINE"
         gap = self.last_observed is not None and now - self.last_observed > 180
         market = {symbol: MarketSeries(**value) for symbol, value in frame["market_data"].items()}
         rows = copy.deepcopy(frame["symbols"])
@@ -114,6 +129,8 @@ class Comparison:
         for symbol, value in market.items():
             rows[symbol]["close"] = value.close[-1]
         result = {"observed_at": now, "bar_ts": bar, "hourly_decision": hourly, "observation_gap": gap,
+                  "decision_clock": {"status": phase, "cutoff_ts": cutoff, "deadline_ts": deadline,
+                                     "actual_decision_ts": now if hourly else None, "scope": "all_cohorts_shared_cutoff"},
                   "input_hash": digest(frame), "scenarios": {}, "live_order_effect": "none"}
         counters = self.metrics.setdefault("observations", {"count": 0, "gaps": 0})
         counters["count"] += 1
@@ -141,7 +158,7 @@ class Comparison:
                     value = asdict(order)
                     scenario["pending"].append({**value, "intent_id": digest([cost, now, index, value]),
                                                 "decision_ts": now, "metadata": order.meta})
-            audit = scenario["audit"]
+            audit = scenario["audit"] or {"regime": "Unknown"}
             # Candidate direction/ranking uses the same price/factor inputs, never A's account vetoes.
             shared_audit = {**audit, "window_end_ts": bar, "router_decisions": [], "quant_lab": {}}
             snapshot = build_snapshot(market_data=market, top_of_book={s: r["quote"] for s, r in rows.items()},
@@ -150,6 +167,7 @@ class Comparison:
                 raise ValueError("shared factor input incomplete: " + json.dumps(snapshot["data_errors"], sort_keys=True))
             for symbol, row in snapshot["symbols"].items():
                 row["instrument"] = rows[symbol]["instrument"]
+                row["entry_minimum_notional_usdt"] = rows[symbol].get("entry_minimum_notional_usdt", self.experiment.get("entry_minimum_notional_usdt", 10))
                 row["cost_bps"] = float(cost)
             entries = {"A_original_v5": {"portfolio": serializable(book.mark(rows, now=now)),
                                           "decision": copy.deepcopy(scenario["pending"]), "execution": executions,
@@ -160,7 +178,51 @@ class Comparison:
                     item.state["pending"] = None
                 entries[name] = item.observe(snapshot, references=frame.get("references", {}), allow_new_signal=hourly)
                 item.events.clear()  # The immutable event ledger owns history, not process memory.
-            result["scenarios"][cost] = {"regime": audit.get("regime"), "cohorts": entries}
+            funnel = self.metrics.setdefault("reference_funnel:" + cost, {
+                "candidates": 0, "valid_reference_coverage": 0, "matched_candidates": 0,
+                "defer_eligible": 0, "decisions_changed": 0, "statuses": {}, "late_arrivals": 0,
+                "independent_changed_opportunities": 0, "last_changed_until": {}, "uncovered_opportunities": {}})
+            late_arrivals = []
+            for opportunity_id, opportunity in list(funnel["uncovered_opportunities"].items()):
+                ref = frame.get("references", {}).get(opportunity["symbol"])
+                use = reference_use(ref, now, self.experiment.get("reference_contract"))
+                if use["valid"] and opportunity["decision_ts"] < ref["first_received_ts"] < opportunity["bar_ts"] + 3600:
+                    late_arrivals.append({**opportunity, "opportunity_id": opportunity_id, "advice_id": ref["advice_id"],
+                                          "first_received_ts": ref["first_received_ts"], "observed_at": now, "decision_unchanged": True})
+                    funnel["late_arrivals"] += 1
+                    del funnel["uncovered_opportunities"][opportunity_id]
+                elif now >= opportunity["bar_ts"] + 3600:
+                    del funnel["uncovered_opportunities"][opportunity_id]
+            reference_decisions = []
+            control = entries["C_hold24_only"].get("decision") or {}
+            treatment = entries["D_reference_only"].get("decision") or {}
+            control_symbol = control.get("symbol") if control.get("action") == "entry_intent" else None
+            treatment_symbol = treatment.get("symbol") if treatment.get("action") in {"entry_intent", "reference_deferred_entry"} else None
+            # Count the union of real C/D candidates once per symbol/hour. When
+            # account histories diverge, D-only changes must not disappear.
+            for symbol in sorted({s for s in (control_symbol, treatment_symbol) if s}) if hourly else []:
+                use = reference_use(frame.get("references", {}).get(symbol), now, self.experiment.get("reference_contract"))
+                matched = control_symbol == treatment_symbol == symbol
+                changed = treatment_symbol == symbol and treatment.get("action") == "reference_deferred_entry"
+                reference_decision = {**use, "opportunity_id": digest([cost, bar, symbol]), "symbol": symbol,
+                                      "matched_candidate": matched, "decision_changed": changed,
+                                      "control_candidate": control_symbol == symbol, "treatment_candidate": treatment_symbol == symbol,
+                                      "decision_quote_hash": digest(rows[symbol]["quote"]),
+                                      "control_snapshot_hash": entries["C_hold24_only"]["snapshot_hash"],
+                                      "treatment_snapshot_hash": entries["D_reference_only"]["snapshot_hash"]}
+                for key, count in {"candidates": 1, "valid_reference_coverage": int(use["valid"]),
+                                   "matched_candidates": int(matched), "defer_eligible": int(use["defer"] and treatment_symbol == symbol),
+                                   "decisions_changed": int(changed)}.items():
+                    funnel[key] += count
+                funnel["statuses"][use["status"]] = funnel["statuses"].get(use["status"], 0) + 1
+                if changed and matched and now >= funnel["last_changed_until"].get(symbol, 0):
+                    funnel["independent_changed_opportunities"] += 1
+                    funnel["last_changed_until"][symbol] = now + 86400
+                if not use["valid"]:
+                    funnel["uncovered_opportunities"][reference_decision["opportunity_id"]] = {"symbol": symbol, "decision_ts": now, "bar_ts": bar}
+                reference_decisions.append(reference_decision)
+            result["scenarios"][cost] = {"regime": audit.get("regime"), "cohorts": entries,
+                                         "reference_decisions": reference_decisions, "late_reference_arrivals": late_arrivals}
             for name, entry in entries.items():
                 mark = entry["portfolio"]
                 key = cost + ":" + name
@@ -174,6 +236,8 @@ class Comparison:
                     total["utilized_seconds"] += seconds * float(prior["gross_exposure_usdt"]) / max(float(prior["equity_usdt"]), 1e-9)
                 total["last_mark"] = mark
         self.last_observed, self.last_bar = now, bar
+        if hourly:
+            self.last_decision_bar = bar
         return result
 
 
@@ -185,7 +249,18 @@ def summarize(events, checkpoint, experiment):
               "project_profit_verified": False, "scenarios": {}, "comparisons": {},
               "baseline_scope": "fixed_hourly_V5_decisions_with_shared_quote_execution_not_full_live_executor",
               "fee_basis": "explicit_10bps_per_side_research_assumption_not_calibrated_fills"}
+    result["reference_contract"] = experiment.get("reference_contract")
+    result["decision_clock"] = experiment.get("decision_clock")
+    result["reference_funnel"] = {}
+    for cost in experiment["roundtrip_cost_scenarios_bps"]:
+        funnel = copy.deepcopy(checkpoint.get("metrics", {}).get("reference_funnel:" + str(cost), {}))
+        funnel.pop("uncovered_opportunities", None)
+        funnel.pop("last_changed_until", None)
+        funnel["coverage_rate"] = funnel.get("valid_reference_coverage", 0) / funnel["candidates"] if funnel.get("candidates") else None
+        funnel["interpretation"] = "NO_EFFECTIVE_REFERENCE_COMPARISON" if not funnel.get("decisions_changed") else "TREATMENT_OBSERVED_NOT_PROFIT_PROVEN"
+        result["reference_funnel"][str(cost)] = funnel
     if not events:
+        result["acceptance"] = evaluate_acceptance(result, experiment)
         return result
     result.update(start_ts=events[0]["observed_at"], end_ts=events[-1]["observed_at"],
                   calendar_days=(events[-1]["observed_at"] - events[0]["observed_at"]) / 86400,
@@ -297,5 +372,7 @@ def summarize(events, checkpoint, experiment):
     result["independent_24h_entry_opportunities"] = len(independent)
     result["overlapping_entry_observations"] = len(opportunities) - len(independent)
     result["distinct_independent_entry_days"] = len({int(t) // 86400 for t in independent})
-    result["promotion_status"] = "MANUAL_REVIEW_REQUIRED_NEVER_AUTOMATIC"
+    result["acceptance"] = evaluate_acceptance(result, experiment)
+    result["status"] = result["acceptance"]["status"]
+    result["promotion_status"] = "RESEARCH_REVIEW_ONLY_LIVE_AUTHORIZATION_SEPARATE"
     return serializable(result)
