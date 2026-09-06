@@ -14,7 +14,7 @@ import requests
 
 from src.data.okx_ccxt_provider import OKXCCXTProvider
 from src.reporting.participation_runtime import _save_report
-from src.research.review_comparison import Comparison, digest, summarize, validate_frame
+from src.research.review_comparison import Comparison, digest, summarize, validate_frame, validate_signal_data
 from src.research.reference_contract import reference_use
 
 
@@ -103,26 +103,101 @@ def _read_references_at(path, now):
     return result
 
 
-def collect(*, symbols, root, reference_path, entry_minimum_notional_usdt=10):
-    now = time.time()
-    bar = int(now // 3600) * 3600
+def _raw_evidence(root, raw):
+    """Content-addressed immutable bytes, including malformed/failed acquisitions."""
+    sha = hashlib.sha256(raw).hexdigest()
+    path = root / "raw-hour-inputs" / (sha + ".json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("xb") as stream:
+            stream.write(raw)
+    except FileExistsError:
+        if path.read_bytes() != raw:
+            raise ValueError("raw acquisition evidence hash conflict")
+    return sha
+
+
+def _hour_market(symbols, root, bar, now):
+    """At most one fetch per invocation and one per 30 seconds, across restarts.
+
+    Cache validity is a data property, never just an hour label. An invalid
+    acquisition is archived but cannot replace the last validated cache.
+    """
     cache_path = root / "hour-input.json"
-    cache = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else {}
-    if cache.get("bar_ts") != bar:
+    reason, evidence = "no_current_valid_cache", None
+    if cache_path.exists():
+        raw = cache_path.read_bytes()
+        try:
+            cache = json.loads(raw)
+            if cache["bar_ts"] == bar:
+                validate_signal_data(cache["market_data"], symbols, bar)
+                return cache["market_data"], {"status": "valid", "source": "validated_cache", "evidence_sha256": cache.get("evidence_sha256")}
+        except (ValueError, TypeError, KeyError, AttributeError, IndexError) as exc:
+            evidence = _raw_evidence(root, raw)
+            reason = str(exc)
+    attempt_path = root / "hour-attempt.json"
+    try:
+        attempt = json.loads(attempt_path.read_text())
+    except (OSError, ValueError):
+        attempt = {}
+    if not isinstance(attempt, dict):
+        attempt = {}
+    attempted_at = attempt.get("attempted_at")
+    if attempt.get("bar_ts") == bar and isinstance(attempted_at, (int, float)) and not isinstance(attempted_at, bool) and 0 <= now - attempted_at < 30:
+        return {}, {"status": "unavailable", "reason": attempt.get("reason") or reason,
+                    "source": "bounded_retry_wait", "retry_after_ts": attempt["attempted_at"] + 30,
+                    "evidence_sha256": attempt.get("evidence_sha256", evidence)}
+    # Persist before the remote call so failed/interrupted requests cannot busy-loop.
+    attempt = {"bar_ts": bar, "attempted_at": now, "reason": "acquisition_incomplete"}
+    _save_report(attempt_path, attempt)
+    try:
         provider = OKXCCXTProvider()
         market = provider.fetch_ohlcv(symbols, timeframe="1h", limit=600, end_ts_ms=bar * 1000)
-        instruments = public_get("/api/v5/public/instruments", {"instType": "SPOT"})
-        cache = {"bar_ts": bar, "market_data": {symbol: asdict(value) for symbol, value in market.items()},
-                 "instrument_raw": {"ts": time.time(), "data": [r for r in instruments if r["instId"].replace("-", "/") in symbols]}}
-        # Explicitly discard any unclosed bar; never infer that the latest API row is complete.
+        cache = {"bar_ts": bar, "collected_at": time.time(),
+                 "market_data": {symbol: asdict(value) for symbol, value in market.items()}}
+        evidence = _raw_evidence(root, json.dumps(cache, sort_keys=True).encode())
+        # Retain raw unclosed rows as evidence; only reuse confirmed closed rows.
         for value in cache["market_data"].values():
             indexes = [i for i, stamp in enumerate(value["ts"]) if stamp / 1000 + 3600 <= bar]
             for key in ("ts", "open", "high", "low", "close", "volume"):
                 value[key] = [value[key][i] for i in indexes]
+        validate_signal_data(cache["market_data"], symbols, bar)
+        cache["evidence_sha256"] = evidence
         _save_report(cache_path, cache)
+        return cache["market_data"], {"status": "valid", "source": "fresh_acquisition", "evidence_sha256": evidence}
+    except Exception as exc:
+        # This catch is confined to public signal acquisition, not account processing.
+        reason = type(exc).__name__ + ": " + str(exc)[:500]
+        if evidence is None:
+            evidence = _raw_evidence(root, json.dumps({**attempt, "error": reason}).encode())
+        _save_report(attempt_path, {**attempt, "reason": reason, "evidence_sha256": evidence})
+        return {}, {"status": "unavailable", "reason": reason, "source": "failed_acquisition",
+                    "evidence_sha256": evidence, "retry_after_ts": now + 30}
+
+
+def collect(*, symbols, root, reference_path, entry_minimum_notional_usdt=10):
+    now = time.time()
+    bar = int(now // 3600) * 3600
+    market, signal = _hour_market(symbols, root, bar, now)
+    # Instrument/quote availability is independent of signal history availability.
+    spec_path = root / "instrument-input.json"
+    try:
+        instruments = json.loads(spec_path.read_text())
+    except (OSError, ValueError):
+        instruments = {}
+    if not isinstance(instruments, dict):
+        instruments = {}
+    if instruments.get("bar_ts") != bar:
+        data = public_get("/api/v5/public/instruments", {"instType": "SPOT"})
+        instruments = {"bar_ts": bar, "ts": time.time(), "data": [r for r in data if r["instId"].replace("-", "/") in symbols]}
+        _save_report(spec_path, instruments)
     tickers = public_get("/api/v5/market/tickers", {"instType": "SPOT"})
     now = time.time()
-    specs = {row["instId"].replace("-", "/"): row for row in cache["instrument_raw"]["data"]}
+    observed_bar = int(now // 3600) * 3600
+    if observed_bar != bar:
+        market, signal = {}, {"status": "unavailable", "reason": "hour_changed_during_acquisition", "evidence_sha256": signal.get("evidence_sha256")}
+        bar = observed_bar
+    specs = {row["instId"].replace("-", "/"): row for row in instruments["data"]}
     quotes = {row["instId"].replace("-", "/"): row for row in tickers}
     rows = {}
     for symbol in symbols:
@@ -134,11 +209,11 @@ def collect(*, symbols, root, reference_path, entry_minimum_notional_usdt=10):
                                        "minimum_notional_source": "not_reported_no_additional_notional_limit_assumed",
                                        "buy_fee_currency": spec["baseCcy"], "sell_fee_currency": spec["quoteCcy"],
                                        "fee_currency_source": "explicit_spot_received_currency_model",
-                                       "observed_ts": cache["instrument_raw"]["ts"], "source_hash": digest(spec)}}
+                                       "observed_ts": instruments["ts"], "source_hash": digest(spec)}}
     reference_read = {}
     references = references_at(reference_path, now, diagnostics=reference_read)
-    frame = {"observed_at": now, "bar_ts": bar, "symbols": rows, "market_data": cache["market_data"],
-             "instrument_raw": cache["instrument_raw"], "references": references, "reference_read": reference_read,
+    frame = {"observed_at": now, "bar_ts": bar, "symbols": rows, "market_data": market, "signal_data": signal,
+             "instrument_raw": instruments, "references": references, "reference_read": reference_read,
              "historical_backfill": False, "live_order_effect": "none"}
     frame["input_artifacts"] = capture_artifacts(Path(__file__).resolve().parents[2], root, now, symbols)
     validate_frame(frame)
@@ -209,6 +284,9 @@ def process(*, cfg, policy, experiment, project, root, frame, identity):
                       reference_read=frame.get("reference_read", {"status": "not_provided"}),
                       latest_reference_observation={s: reference_use(frame.get("references", {}).get(s), frame["observed_at"], experiment.get("reference_contract")) for s in frame["symbols"]},
                       input_hash=digest(frame), storage="independent_comparison_sqlite", report_sampling="common_decisions_plus_latest; raw_minute_events_retained")
+        report["signal_data"] = frame.get("signal_data", {"status": "valid"})
+        report["continuation"] = json.loads(saved["continuation"]) if "continuation" in saved else None
+        report["risk_comparison_limitation"] = "frozen_v2_keeps_drawdown_no_greater_than_control; low_or_zero_exposure_control_is_not_comparable_risk_evidence; any_new_risk_rule_requires_a_separate_predeclared_version"
         _save_report(root / "manifest.json", identity)
         _save_report(root / "latest.json", report)
         return report
