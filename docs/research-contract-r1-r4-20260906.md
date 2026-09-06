@@ -1,5 +1,15 @@
 # R1–R4 research contract repair, 2026-09-06
 
+Natural startup exposed a cold-start omission in release `848361c6`: before the
+first shared cutoff there is no original pipeline factor audit. Requiring it for
+an otherwise flat quote-only observation failed with `factor_provenance_unobservable`.
+The interrupted-processing guard stopped further writes: the attempt has zero
+completed events and is preserved. `test_review_cold_start.py` reproduces this with
+the real adapter and snapshot builder (no factor mocks). Flat pre-decision
+observations now record only quotes; the actual shared decision still requires
+complete real factor provenance. Failed attempt state is not cleared or replayed;
+the corrected release starts another explicitly identified directory.
+
 This release improves research credibility. It does not establish profitability,
 replace the production strategy, alter live risk, or authorize live orders.
 

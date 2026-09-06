@@ -159,12 +159,20 @@ class Comparison:
                     scenario["pending"].append({**value, "intent_id": digest([cost, now, index, value]),
                                                 "decision_ts": now, "metadata": order.meta})
             audit = scenario["audit"] or {"regime": "Unknown"}
-            # Candidate direction/ranking uses the same price/factor inputs, never A's account vetoes.
-            shared_audit = {**audit, "window_end_ts": bar, "router_decisions": [], "quant_lab": {}}
-            snapshot = build_snapshot(market_data=market, top_of_book={s: r["quote"] for s, r in rows.items()},
-                                      audit=shared_audit, config=self.policy, now=now)
-            if snapshot["data_errors"]:
-                raise ValueError("shared factor input incomplete: " + json.dumps(snapshot["data_errors"], sort_keys=True))
+            if scenario["audit"] is None:
+                # A fresh flat account can observe quotes before its first fixed
+                # decision. No factor forecast exists yet and none is fabricated.
+                if hourly or book.positions or any(scenario[n].book.positions for n in COHORTS[1:]):
+                    raise ValueError("factor_audit_required_for_decision_or_existing_position")
+                snapshot = {**copy.deepcopy(raw_snapshot), "regime": "Unknown",
+                            "operational_block": "awaiting_first_common_factor_decision"}
+            else:
+                # Candidate ranking never inherits A's independent account vetoes.
+                shared_audit = {**audit, "window_end_ts": bar, "router_decisions": [], "quant_lab": {}}
+                snapshot = build_snapshot(market_data=market, top_of_book={s: r["quote"] for s, r in rows.items()},
+                                          audit=shared_audit, config=self.policy, now=now)
+                if snapshot["data_errors"]:
+                    raise ValueError("shared factor input incomplete: " + json.dumps(snapshot["data_errors"], sort_keys=True))
             for symbol, row in snapshot["symbols"].items():
                 row["instrument"] = rows[symbol]["instrument"]
                 row["entry_minimum_notional_usdt"] = rows[symbol].get("entry_minimum_notional_usdt", self.experiment.get("entry_minimum_notional_usdt", 10))
