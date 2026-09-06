@@ -41,6 +41,9 @@ export interface ParticipationAction {
 }
 
 export interface ParticipationSummary {
+  identity?: string;
+  policy_hash?: string;
+  cohort_started_at?: string;
   enabled: boolean | null;
   mode: string;
   status: string;
