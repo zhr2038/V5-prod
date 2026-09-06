@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from src.research.review_integrity import integrity_requirements
 
 
 def finite(value):
@@ -32,6 +33,11 @@ def evaluate_acceptance(report, experiment):
         threshold("independent_entry_opportunities", report.get("independent_24h_entry_opportunities", 0), experiment["minimum_independent_entry_opportunities"], sample=True)
         threshold("distinct_entry_days", report.get("distinct_independent_entry_days", 0), experiment["minimum_distinct_entry_days"], sample=True)
         sample_ready = all(row["result"] == "PASS" for row in rows)
+        integrity = integrity_requirements(report.get("observation_integrity", {}))
+        integrity_ready = all(row["result"] == "PASS" for row in integrity)
+        rows.append({"criterion": "observation_integrity", "actual": report.get("observation_integrity", {}).get("judgment"),
+                     "required": "all_frozen_observation_requirements_pass", "result": "PASS" if integrity_ready else "INSUFFICIENT",
+                     "reason": None if integrity_ready else "observation_evidence_incomplete", "details": integrity})
         exposure_ready = True
         funnel = report.get("reference_funnel", {}).get(primary, {})
         if treatment == "D_reference_only":
@@ -62,7 +68,9 @@ def evaluate_acceptance(report, experiment):
         rows.append({"criterion": "all_observed_time_and_regime_segments_reported", "actual": segments,
                      "required": "all_observed_segments_without_selection", "result": "PASS" if available else "INSUFFICIENT",
                      "reason": None if available else "no_observed_segments"})
-        if not exposure_ready and funnel.get("candidates", 0):
+        if sample_ready and not integrity_ready:
+            status = "INSUFFICIENT_OBSERVATION_EVIDENCE"
+        elif not exposure_ready and funnel.get("candidates", 0):
             status = "INSUFFICIENT_REFERENCE_EXPOSURE"
         elif not sample_ready:
             status = "INSUFFICIENT_FORWARD_EVIDENCE"
@@ -76,6 +84,6 @@ def evaluate_acceptance(report, experiment):
             status = "READY_FOR_MANUAL_RESEARCH_REVIEW"
         evaluations[key] = {"status": status, "requirements": rows, "live_execution_eligible": False}
     statuses = {value["status"] for value in evaluations.values()}
-    overall = next((s for s in ("INSUFFICIENT_REFERENCE_EXPOSURE", "INSUFFICIENT_FORWARD_EVIDENCE", "RESULT_NOT_SUPPORTED") if s in statuses), "READY_FOR_MANUAL_RESEARCH_REVIEW")
+    overall = next((s for s in ("INSUFFICIENT_OBSERVATION_EVIDENCE", "INSUFFICIENT_REFERENCE_EXPOSURE", "INSUFFICIENT_FORWARD_EVIDENCE", "RESULT_NOT_SUPPORTED") if s in statuses), "READY_FOR_MANUAL_RESEARCH_REVIEW")
     return {"status": overall, "comparisons": evaluations, "live_execution_eligible": False,
             "automatic_live_scaling": False, "scope": "research_evidence_only_no_order_or_risk_authority"}

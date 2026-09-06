@@ -1,0 +1,21 @@
+{
+  "version": "v5.review_observation_integrity.v1",
+  "declared_at_utc": "2026-09-06T12:06:47Z",
+  "scope": "read_only_research_evidence_no_live_authority",
+  "cadence_seconds": 60,
+  "schedule_offset_seconds": 50,
+  "completion_jitter_seconds": 30,
+  "minimum_quote_slot_coverage": 0.99,
+  "minimum_signal_slot_coverage": 0.99,
+  "maximum_interval_seconds": 180,
+  "maximum_missing_duration_fraction": 0.01,
+  "maximum_holding_missing_seconds": 0,
+  "maximum_holding_signal_unavailable_observations": 0,
+  "maximum_uncovered_common_decisions": 0,
+  "minimum_prospective_days": 30,
+  "legacy_scope": "pre_policy_events_retained_but_do_not_count_as_prospective_integrity_evidence",
+  "missing_duration_definition": "sum(interval-cadence) for intervals greater than cadence+jitter; holding gaps use the previous observed holding, including residual assets",
+  "slot_definition": "floor((observed_at-schedule_offset)/cadence); multiple observations in a slot count once",
+  "drawdown_scope": "observed_quotes_only_unknown_between_observations",
+  "threshold_change_requires_new_reporting_policy_version": true
+}

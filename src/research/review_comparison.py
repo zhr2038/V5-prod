@@ -21,6 +21,7 @@ from src.research.participation_comparison import ParticipationComparison
 from src.research.quote_portfolio import QuotePortfolio, serializable
 from src.research.reference_contract import reference_use, validate_reference_contract
 from src.research.review_acceptance import evaluate_acceptance
+from src.research.review_integrity import observe_integrity, integrity_report
 
 
 COHORTS = ("A_original_v5", "B_participation_v1", "C_hold24_only", "D_reference_only")
@@ -30,17 +31,13 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, allow_nan=False).encode()).hexdigest()
 
 
-def validate_frame(frame):
-    now, bar = frame["observed_at"], frame["bar_ts"]
-    if isinstance(now, bool) or not np.isfinite(now) or bar % 3600 or not 0 <= now - bar < 3600:
-        raise ValueError("invalid observable decision time")
-    if frame.get("historical_backfill") is not False or frame.get("live_order_effect") != "none":
-        raise ValueError("forward input boundary required")
-    if set(frame["market_data"]) != set(frame["symbols"]):
+def validate_signal_data(market_data, symbols, bar):
+    if set(market_data) != set(symbols):
         raise ValueError("incomplete shared input universe")
-    checker = QuotePortfolio(initial_cash=100, fee_bps=10, slippage_bps=5, maximum_quote_age_seconds=30)
-    for symbol, value in frame["market_data"].items():
+    for symbol, value in market_data.items():
         series = MarketSeries(**value)
+        if series.symbol != symbol or series.timeframe != "1h":
+            raise ValueError("market symbol or timeframe binding mismatch")
         columns = [getattr(series, key) for key in ("ts", "open", "high", "low", "close", "volume")]
         if len(series.ts) < 60 or len({len(c) for c in columns}) != 1:
             raise ValueError("incomplete market warmup")
@@ -50,8 +47,28 @@ def validate_frame(frame):
             raise ValueError("last candle must close at decision hour")
         if any(not np.isfinite(x) for c in columns for x in c):
             raise ValueError("invalid market values")
-        checker._market(frame["symbols"][symbol], now)
-        if frame["symbols"][symbol]["instrument"].get("symbol") != symbol:
+
+
+def validate_frame(frame):
+    now, bar = frame["observed_at"], frame["bar_ts"]
+    if isinstance(now, bool) or not np.isfinite(now) or bar % 3600 or not 0 <= now - bar < 3600:
+        raise ValueError("invalid observable decision time")
+    if frame.get("historical_backfill") is not False or frame.get("live_order_effect") != "none":
+        raise ValueError("forward input boundary required")
+    signal = frame.get("signal_data", {"status": "valid"})
+    if signal.get("status") == "unavailable":
+        if frame["market_data"] or not signal.get("reason"):
+            raise ValueError("unavailable signals require empty data and an explicit reason")
+    elif signal.get("status") == "valid":
+        validate_signal_data(frame["market_data"], frame["symbols"], bar)
+    else:
+        raise ValueError("unknown signal availability")
+    checker = QuotePortfolio(initial_cash=100, fee_bps=10, slippage_bps=5, maximum_quote_age_seconds=30)
+    if not frame["symbols"]:
+        raise ValueError("empty quote universe")
+    for symbol, row in frame["symbols"].items():
+        checker._market(row, now)
+        if row["instrument"].get("symbol") != symbol:
             raise ValueError("instrument symbol binding mismatch")
 
 
@@ -115,13 +132,17 @@ class Comparison:
 
     def observe(self, frame):
         validate_frame(frame)
+        if set(frame["symbols"]) != set(self.policy["symbols"]):
+            raise ValueError("incomplete shared quote universe")
+        previous_marks = {k: v.get("last_mark") for k, v in self.metrics.items() if ":" in k and "last_mark" in v}
         now, bar = frame["observed_at"], frame["bar_ts"]
         if self.last_observed is not None and (now <= self.last_observed or bar < self.last_bar):
             raise ValueError("duplicate_or_reversed_comparison_observation")
         cutoff = bar + self.decision_offset
         deadline = cutoff + self.maximum_lateness
-        hourly = self.last_decision_bar != bar and cutoff <= now <= deadline
-        phase = "DECIDED" if hourly else "ALREADY_DECIDED" if self.last_decision_bar == bar else "WAITING_COMMON_CUTOFF" if now < cutoff else "MISSED_COMMON_DEADLINE"
+        signals_valid = frame.get("signal_data", {"status": "valid"})["status"] == "valid"
+        hourly = signals_valid and self.last_decision_bar != bar and cutoff <= now <= deadline
+        phase = "DECIDED" if hourly else "ALREADY_DECIDED" if self.last_decision_bar == bar else "WAITING_COMMON_CUTOFF" if now < cutoff else "MISSED_COMMON_DEADLINE" if now > deadline else "SIGNAL_DATA_UNAVAILABLE"
         gap = self.last_observed is not None and now - self.last_observed > 180
         market = {symbol: MarketSeries(**value) for symbol, value in frame["market_data"].items()}
         rows = copy.deepcopy(frame["symbols"])
@@ -129,6 +150,9 @@ class Comparison:
         for symbol, value in market.items():
             rows[symbol]["close"] = value.close[-1]
         result = {"observed_at": now, "bar_ts": bar, "hourly_decision": hourly, "observation_gap": gap,
+                  "signal_data": copy.deepcopy(frame.get("signal_data", {"status": "valid"})),
+                  "exit_evaluation": {"A": "hourly_pipeline_only" if signals_valid else "pending_quote_execution_only_hourly_signals_unavailable",
+                                      "BCD": "declared_rules" if signals_valid else "quote_trial_hard_time_and_last_observed_regime; current_hour_ema_unavailable"},
                   "decision_clock": {"status": phase, "cutoff_ts": cutoff, "deadline_ts": deadline,
                                      "actual_decision_ts": now if hourly else None, "scope": "all_cohorts_shared_cutoff"},
                   "input_hash": digest(frame), "scenarios": {}, "live_order_effect": "none"}
@@ -159,7 +183,13 @@ class Comparison:
                     scenario["pending"].append({**value, "intent_id": digest([cost, now, index, value]),
                                                 "decision_ts": now, "metadata": order.meta})
             audit = scenario["audit"] or {"regime": "Unknown"}
-            if scenario["audit"] is None:
+            if not signals_valid:
+                # Keep the existing regime observation, never fabricate fresh indicators.
+                # The unchanged participation kernel can still mark, execute pending
+                # sells, and evaluate trial, time and quoted hard stops.
+                snapshot = {**copy.deepcopy(raw_snapshot), "regime": audit.get("regime", "Unknown"),
+                            "operational_block": "signal_data_unavailable"}
+            elif scenario["audit"] is None:
                 # A fresh flat account can observe quotes before its first fixed
                 # decision. No factor forecast exists yet and none is fabricated.
                 if hourly or book.positions or any(scenario[n].book.positions for n in COHORTS[1:]):
@@ -243,6 +273,7 @@ class Comparison:
                     total["exposed_seconds"] += seconds * (float(prior["gross_exposure_usdt"]) > 0)
                     total["utilized_seconds"] += seconds * float(prior["gross_exposure_usdt"]) / max(float(prior["equity_usdt"]), 1e-9)
                 total["last_mark"] = mark
+        observe_integrity(self.metrics, result, self.last_observed, self.experiment, previous_marks, self.last_decision_bar)
         self.last_observed, self.last_bar = now, bar
         if hourly:
             self.last_decision_bar = bar
@@ -259,6 +290,7 @@ def summarize(events, checkpoint, experiment):
               "fee_basis": "explicit_10bps_per_side_research_assumption_not_calibrated_fills"}
     result["reference_contract"] = experiment.get("reference_contract")
     result["decision_clock"] = experiment.get("decision_clock")
+    result["observation_integrity"] = integrity_report(checkpoint.get("metrics", {}))
     result["reference_funnel"] = {}
     for cost in experiment["roundtrip_cost_scenarios_bps"]:
         funnel = copy.deepcopy(checkpoint.get("metrics", {}).get("reference_funnel:" + str(cost), {}))
@@ -322,6 +354,9 @@ def summarize(events, checkpoint, experiment):
                                    exposure_time_fraction=total["exposed_seconds"] / total["duration"] if total["duration"] else 0,
                                    time_weighted_capital_utilization=total["utilized_seconds"] / total["duration"] if total["duration"] else 0,
                                    accounting_sampling="all_observed_minutes")
+            stats[name].update(observed_maximum_drawdown_fraction=stats[name]["maximum_drawdown_fraction"],
+                               drawdown_scope="observed_quotes_only_unknown_between_observations",
+                               exposure_scope="last_observed_holdings_carried_between_quotes_estimate_not_monitoring_proof")
             daily_curves[name] = daily
         result["scenarios"][cost] = stats
         comparisons = {}
