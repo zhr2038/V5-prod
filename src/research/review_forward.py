@@ -131,6 +131,9 @@ def _hour_market(symbols, root, bar, now):
             cache = json.loads(raw)
             if cache["bar_ts"] == bar:
                 validate_signal_data(cache["market_data"], symbols, bar)
+                if not cache.get("evidence_sha256"):
+                    cache["evidence_sha256"] = _raw_evidence(root, raw)
+                    _save_report(cache_path, cache)
                 return cache["market_data"], {"status": "valid", "source": "validated_cache", "evidence_sha256": cache.get("evidence_sha256")}
         except (ValueError, TypeError, KeyError, AttributeError, IndexError) as exc:
             evidence = _raw_evidence(root, raw)

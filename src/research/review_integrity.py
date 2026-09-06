@@ -20,6 +20,7 @@ def observe_integrity(metrics, event, previous_at, experiment, previous_marks, p
     state = metrics.setdefault("integrity", {
         "policy_version": POLICY["version"], "policy_sha256": POLICY_HASH,
         "start_ts": now, "first_slot": slot, "last_slot": None, "last_signal_slot": None,
+        "metric_interval_start_ts": previous_at if previous_at is not None else now,
         "valid_quote_observations": 0, "valid_signal_observations": 0,
         "observed_quote_slots": 0, "observed_signal_slots": 0,
         "maximum_interval_seconds": 0, "missing_duration_seconds": 0,
@@ -75,13 +76,14 @@ def integrity_report(metrics):
     if not value:
         return {"judgment": "INSUFFICIENT", "reason": "observation_evidence_unavailable", "policy_version": POLICY["version"]}
     duration = value["end_ts"] - value["start_ts"]
+    interval_duration = value["end_ts"] - value["metric_interval_start_ts"]
     planned = value["last_slot"] - value["first_slot"] + 1
     value.update(planned_observations=planned,
                  missed_quote_slots=planned - value["observed_quote_slots"],
                  quote_slot_coverage=value["observed_quote_slots"] / planned,
                  signal_slot_coverage=value["observed_signal_slots"] / planned,
                  prospective_days=duration / 86400,
-                 missing_duration_fraction=value["missing_duration_seconds"] / duration if duration else None,
+                 missing_duration_fraction=value["missing_duration_seconds"] / interval_duration if interval_duration else None,
                  exposure_scope="last_observed_holdings_carried_between_quotes_estimate_not_monitoring_proof",
                  drawdown_scope=POLICY["drawdown_scope"])
     value["requirements"] = integrity_requirements(value)

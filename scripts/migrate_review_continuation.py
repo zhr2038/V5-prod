@@ -53,10 +53,19 @@ def prepare_continuation(predecessor, destination, identity):
         # SQLite backup is authoritative, even if the old database used WAL.
         with closing(sqlite3.connect(destination / "comparison.sqlite")) as output:
             con.backup(output)
+            def event_digest(connection):
+                result = hashlib.sha256()
+                for row in connection.execute("SELECT observed_at,input_hash,frame,event FROM events ORDER BY observed_at"):
+                    result.update(json.dumps(row, separators=(",", ":")).encode())
+                return result.hexdigest()
+            original_events = event_digest(con)
+            if event_digest(output) != original_events:
+                raise ValueError("event byte content changed during SQLite backup")
     continuation = {"kind": "collection_repair_account_continuation_not_new_capital_or_strategy",
                     "predecessor_directory": predecessor.name, "predecessor_identity": manifest["identity"],
                     "successor_identity": identity["identity"], "boundary_ts": last,
                     "inherited_events": count, "predecessor_database_sha256": before["comparison.sqlite"],
+                    "inherited_event_rows_sha256": original_events,
                     "checkpoint_sha256": hashlib.sha256(meta["checkpoint"].encode()).hexdigest(),
                     "changed_source_paths": sorted(changed), "historical_events_replayed": False,
                     "new_integrity_evidence_start": "first_successful_natural_successor_observation",
