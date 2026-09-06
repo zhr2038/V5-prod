@@ -38,6 +38,18 @@ def evaluate_acceptance(report, experiment):
         rows.append({"criterion": "observation_integrity", "actual": report.get("observation_integrity", {}).get("judgment"),
                      "required": "all_frozen_observation_requirements_pass", "result": "PASS" if integrity_ready else "INSUFFICIENT",
                      "reason": None if integrity_ready else "observation_evidence_incomplete", "details": integrity})
+        legacy_count = report.get("observation_integrity", {}).get("legacy_observations", 0)
+        if legacy_count:
+            legacy = report.get("legacy_observation_integrity") or {}
+            legacy_rows = [r for r in integrity_requirements(legacy) if r["criterion"] != "prospective_days"]
+            legacy_ready = (legacy.get("valid_quote_observations") == legacy_count
+                            and legacy.get("evidence_origin") == "retrospective_recorded_events_not_new_forward_observations"
+                            and all(r["result"] == "PASS" for r in legacy_rows))
+            integrity_ready = integrity_ready and legacy_ready
+            rows.append({"criterion": "inherited_observation_integrity", "actual": legacy.get("judgment"),
+                         "required": "all_retained_account_intervals_assessed_without_counting_as_new_forward_days",
+                         "result": "PASS" if legacy_ready else "INSUFFICIENT",
+                         "reason": None if legacy_ready else "inherited_observation_evidence_incomplete", "details": legacy_rows})
         exposure_ready = True
         funnel = report.get("reference_funnel", {}).get(primary, {})
         if treatment == "D_reference_only":

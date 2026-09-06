@@ -26,6 +26,9 @@ export interface ReviewView {
     latest_reference_observation: Record<string, { status: string }>;
     reference_read?: { status: string; reason?: string };
     signal_data?: { status: string; reason?: string };
+    legacy_observation_integrity?: { judgment: string; valid_quote_observations?: number;
+      planned_observations?: number; maximum_interval_seconds?: number; missing_duration_seconds?: number;
+      holding_missing_seconds?: Record<string, number>; uncovered_common_decision_count?: number } | null;
     continuation?: { predecessor_directory: string; predecessor_identity: string; boundary_ts: number; kind: string } | null;
     observation_integrity?: { judgment: string; policy_version: string; start_ts?: number; legacy_observations?: number;
       planned_observations?: number; valid_quote_observations?: number; valid_signal_observations?: number;

@@ -119,3 +119,26 @@ def integrity_requirements(value):
         values = value.get(name)
         check(name, max(values.values()) if isinstance(values, dict) and values and all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0 for v in values.values()) else None, POLICY[limit])
     return requirements
+
+
+def retained_observation_report(events, experiment):
+    """Read recorded event metadata only; never replay an account or a quote fill.
+
+    Missing signal_data in pre-N1 events means full validation was required by
+    that writer. This says nothing about intervals with no committed event.
+    """
+    metrics, previous, previous_marks, previous_decision = {}, None, {}, None
+    for event in events:
+        metrics.setdefault("observations", {"count": 0})["count"] += 1
+        observe_integrity(metrics, event, previous, experiment, previous_marks, previous_decision)
+        previous = event["observed_at"]
+        if event["hourly_decision"]:
+            previous_decision = event["bar_ts"]
+        previous_marks = {cost + ":" + name: entry["portfolio"]
+                          for cost, scenario in event["scenarios"].items() for name, entry in scenario["cohorts"].items()}
+    result = integrity_report(metrics)
+    result["evidence_origin"] = "retrospective_recorded_events_not_new_forward_observations"
+    result["requirements"] = [r for r in result.get("requirements", []) if r["criterion"] != "prospective_days"]
+    result["judgment"] = "PASS" if result["requirements"] and all(r["result"] == "PASS" for r in result["requirements"]) else "INSUFFICIENT"
+    result["prospective_days"] = 0
+    return result

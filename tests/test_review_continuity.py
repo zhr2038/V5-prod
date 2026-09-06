@@ -190,3 +190,17 @@ def test_quote_only_time_exit_uses_unchanged_holding_limit(monkeypatch, tmp_path
     assert event["scenarios"]["30"]["cohorts"]["C_hold24_only"]["decision"]["reason"] == "time_stop"
     assert event["scenarios"]["30"]["cohorts"]["B_participation_v1"]["decision"]["reason"] == "position_open"
     assert not event["hourly_decision"]
+
+
+def test_retained_event_quality_is_retrospective_and_never_replays_accounts(monkeypatch, tmp_path):
+    from src.research.review_integrity import retained_observation_report
+    runner = comparison(monkeypatch, tmp_path)
+    events = [runner.observe(market(HOUR + 410)), runner.observe(market(HOUR + 470)),
+              runner.observe(market(HOUR + 650))]
+    checkpoint = copy.deepcopy(runner.checkpoint())
+    originals = copy.deepcopy(events)
+    quality = retained_observation_report(iter(events), runner.experiment)
+    assert quality['valid_quote_observations'] == 3
+    assert quality['holding_missing_seconds']['30:C_hold24_only'] == 120
+    assert quality['judgment'] == 'INSUFFICIENT' and quality['prospective_days'] == 0
+    assert runner.checkpoint() == checkpoint and events == originals

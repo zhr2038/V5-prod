@@ -25,6 +25,7 @@ def hashes(root):
 
 
 def prepare_continuation(predecessor, destination, identity):
+    from src.research.review_integrity import POLICY_HASH, retained_observation_report
     predecessor, destination = predecessor.resolve(), destination.resolve()
     if destination.parent != predecessor.parent or destination == predecessor or destination.exists():
         raise ValueError("new sibling research directory required")
@@ -44,11 +45,21 @@ def prepare_continuation(predecessor, destination, identity):
         if meta.get("identity") != manifest["identity"] or meta.get("processing"):
             raise ValueError("source identity mismatch or interrupted processing; audited recovery required")
         checkpoint = json.loads(meta["checkpoint"])
-        if "integrity" in checkpoint.get("metrics", {}):
-            raise ValueError("this one-time migration only accepts a pre-integrity ledger")
+        integrity = checkpoint.get("metrics", {}).get("integrity")
+        if integrity and integrity.get("policy_sha256") != POLICY_HASH:
+            raise ValueError("cannot silently migrate a different frozen observation policy")
         count, last = con.execute("SELECT count(*),max(observed_at) FROM events").fetchone()
         if not count or last != checkpoint["last_observed"]:
             raise ValueError("source checkpoint does not match final committed event")
+        previous_continuation = json.loads(meta["continuation"]) if "continuation" in meta else None
+        pre_policy_boundary = (previous_continuation.get("pre_policy_boundary_ts", previous_continuation["boundary_ts"])
+                               if previous_continuation else last)
+        if "legacy_observation_integrity" in meta:
+            legacy = json.loads(meta["legacy_observation_integrity"])
+        else:
+            legacy = retained_observation_report(
+                (json.loads(row[0]) for row in con.execute("SELECT event FROM events WHERE observed_at<=? ORDER BY observed_at", (pre_policy_boundary,))),
+                identity["experiment"])
         shutil.copytree(predecessor, destination)
         # SQLite backup is authoritative, even if the old database used WAL.
         with closing(sqlite3.connect(destination / "comparison.sqlite")) as output:
@@ -68,14 +79,22 @@ def prepare_continuation(predecessor, destination, identity):
                     "inherited_event_rows_sha256": original_events,
                     "checkpoint_sha256": hashlib.sha256(meta["checkpoint"].encode()).hexdigest(),
                     "changed_source_paths": sorted(changed), "historical_events_replayed": False,
-                    "new_integrity_evidence_start": "first_successful_natural_successor_observation",
+                    "new_integrity_evidence_start": integrity["start_ts"] if integrity and "start_ts" in integrity else "first_successful_natural_successor_observation",
                     "old_events_source_identity": manifest["identity"], "account_state_reset": False}
+    continuation.update(previous_continuation=previous_continuation, pre_policy_boundary_ts=pre_policy_boundary,
+                        observation_policy_metrics_preserved=bool(integrity))
     with closing(sqlite3.connect(destination / "comparison.sqlite")) as con:
         con.execute("UPDATE meta SET value=? WHERE key='identity'", (identity["identity"],))
-        con.execute("INSERT INTO meta VALUES('continuation',?)", (json.dumps(continuation, sort_keys=True),))
+        con.execute("INSERT OR REPLACE INTO meta VALUES('continuation',?)", (json.dumps(continuation, sort_keys=True),))
+        con.execute("INSERT OR REPLACE INTO meta VALUES('legacy_observation_integrity',?)", (json.dumps(legacy, sort_keys=True),))
         con.commit()
         assert con.execute("SELECT value FROM meta WHERE key='checkpoint'").fetchone()[0] == meta["checkpoint"]
-    (destination / "predecessor-manifest.json").write_bytes((predecessor / "manifest.json").read_bytes())
+    source_manifests = destination / "source-manifests"
+    source_manifests.mkdir(exist_ok=True)
+    prefix = hashlib.sha256(manifest["identity"].encode()).hexdigest()
+    (source_manifests / (prefix + ".json")).write_bytes((predecessor / "manifest.json").read_bytes())
+    if (predecessor / "continuation.json").exists():
+        (source_manifests / (prefix + "-continuation.json")).write_bytes((predecessor / "continuation.json").read_bytes())
     (destination / "manifest.json").write_text(json.dumps(identity, sort_keys=True, indent=2), encoding="utf-8")
     (destination / "continuation.json").write_text(json.dumps(continuation, sort_keys=True, indent=2), encoding="utf-8")
     after = hashes(predecessor)
@@ -83,7 +102,7 @@ def prepare_continuation(predecessor, destination, identity):
         raise ValueError("source changed during migration; destination must not be activated")
     copied = hashes(destination)
     if any(copied.get(name) != sha for name, sha in before.items()
-           if name != "manifest.json" and not name.startswith("comparison.sqlite")):
+           if name not in {"manifest.json", "continuation.json"} and not name.startswith("comparison.sqlite")):
         raise ValueError("copied account state or evidence mismatch")
     return {**continuation, "predecessor_files": before, "destination_files": copied}
 
