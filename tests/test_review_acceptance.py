@@ -85,3 +85,16 @@ def test_cash_control_limitation_does_not_relax_the_frozen_v2_drawdown_rule():
     row = next(r for r in result["comparisons"]["B_participation_v1_minus_A_original_v5"]["requirements"]
                if r["criterion"] == "maximum_drawdown_no_greater_than_control")
     assert row["result"] == "FAIL" and row["required"]["maximum"] == 0
+
+
+def test_continued_account_must_also_account_for_pre_policy_missing_intervals():
+    report = sufficient_report()
+    report['observation_integrity']['legacy_observations'] = 303
+    assert evaluate_acceptance(report, EXPERIMENT)['status'] == 'INSUFFICIENT_OBSERVATION_EVIDENCE'
+    legacy = copy.deepcopy(report['observation_integrity'])
+    legacy.update(evidence_origin='retrospective_recorded_events_not_new_forward_observations',
+                  valid_quote_observations=303, prospective_days=0)
+    report['legacy_observation_integrity'] = legacy
+    assert evaluate_acceptance(report, EXPERIMENT)['status'] == 'READY_FOR_MANUAL_RESEARCH_REVIEW'
+    legacy['holding_missing_seconds'] = {'30:C_hold24_only': 60}
+    assert evaluate_acceptance(report, EXPERIMENT)['status'] == 'INSUFFICIENT_OBSERVATION_EVIDENCE'

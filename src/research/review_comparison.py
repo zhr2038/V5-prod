@@ -280,7 +280,7 @@ class Comparison:
         return result
 
 
-def summarize(events, checkpoint, experiment):
+def summarize(events, checkpoint, experiment, *, legacy_observation_integrity=None):
     """Account statistics and paired daily block bootstrap; never price-label trade counts."""
     result = {"experiment_id": experiment["experiment_id"], "status": "INSUFFICIENT_FORWARD_EVIDENCE",
               "live_execution_eligible": False, "automatic_live_scaling": False,
@@ -291,6 +291,7 @@ def summarize(events, checkpoint, experiment):
     result["reference_contract"] = experiment.get("reference_contract")
     result["decision_clock"] = experiment.get("decision_clock")
     result["observation_integrity"] = integrity_report(checkpoint.get("metrics", {}))
+    result["legacy_observation_integrity"] = copy.deepcopy(legacy_observation_integrity)
     result["reference_funnel"] = {}
     for cost in experiment["roundtrip_cost_scenarios_bps"]:
         funnel = copy.deepcopy(checkpoint.get("metrics", {}).get("reference_funnel:" + str(cost), {}))

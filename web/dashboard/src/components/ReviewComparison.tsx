@@ -7,6 +7,7 @@ const labels: Record<string, string> = {
   INSUFFICIENT_FORWARD_EVIDENCE: '前瞻证据不足', INSUFFICIENT_REFERENCE_EXPOSURE: '参考处理暴露不足',
   INSUFFICIENT_OBSERVATION_EVIDENCE: '持续观察证据不足', SIGNAL_DATA_UNAVAILABLE: '信号数据缺失，保留报价与已声明退出检查',
   observation_integrity: '持续观察完整性', observation_evidence_incomplete: '观察覆盖或持续时间不足',
+  inherited_observation_integrity: '继承区间观察完整性', inherited_observation_evidence_incomplete: '继承区间存在缺测或质量证据缺失',
   integrity_policy_binding: '观察规则版本', prospective_days: '本规则前瞻日数', quote_slot_coverage: '有效报价时段覆盖率', signal_slot_coverage: '有效信号时段覆盖率',
   maximum_interval_seconds: '最大观察间隔（秒）', missing_duration_fraction: '缺失时长比例', uncovered_common_decision_count: '未覆盖共同决策数',
   holding_missing_seconds: '持仓期缺测（秒）', holding_signal_unavailable_observations: '持仓期信号缺失观察数',
@@ -31,6 +32,7 @@ export default function ReviewComparison({ data, unavailable }: { data?: ReviewV
   const funnel = report?.reference_funnel[cost];
   const clock = report?.latest_decision_clock;
   const quality = report?.observation_integrity;
+  const legacy = report?.legacy_observation_integrity;
   return <section className="cc-review" aria-label="独立 A B C D 研究实验">
     <div className="cc-section-title"><div><span className="cc-section-index">R1–R4</span><h2>独立 A / B / C / D 对照</h2><p>各自从 100 USDT 开始。与实盘、上方原 participation 的账本和收益分别核算。</p></div><strong>{unavailable ? '页面数据待确认' : labels[data?.status || 'missing'] || data?.status}</strong></div>
     {!report ? <p className="cc-empty">{data?.reason || data?.worker?.detail || '等待已校验的新实验身份与首个自然观测。已有账本继续保留。'}</p> : <>
@@ -52,7 +54,9 @@ export default function ReviewComparison({ data, unavailable }: { data?: ReviewV
       <details open><summary>持续观察完整性 · {labels[quality?.judgment || 'INSUFFICIENT']}</summary>
         <p>计划 {fmt(quality?.planned_observations, 0)} 次 · 有效报价 {fmt(quality?.valid_quote_observations, 0)} 次 · 有效信号 {fmt(quality?.valid_signal_observations, 0)} 次 · 最大间隔 {fmt(quality?.maximum_interval_seconds, 1)} 秒 · 缺测 {fmt(quality?.missing_duration_seconds, 1)} 秒 · 未覆盖共同决策 {fmt(quality?.uncovered_common_decision_count, 0)} 次。</p>
         <p>规则 <code>{quality?.policy_version}</code> · 前瞻完整性记录自 {dateTime(quality?.start_ts)} 起；此前 {fmt(quality?.legacy_observations, 0)} 次观察保留，但不计作本规则的前瞻验证。</p>
+        {!!quality?.legacy_observations && <p>继承区间质量：{labels[legacy?.judgment || 'INSUFFICIENT']}。已保存事件只读统计：计划 {fmt(legacy?.planned_observations, 0)} 次 / 有效 {fmt(legacy?.valid_quote_observations, 0)} 次，最大间隔 {fmt(legacy?.maximum_interval_seconds, 1)} 秒，缺测 {fmt(legacy?.missing_duration_seconds, 1)} 秒，未覆盖共同决策 {fmt(legacy?.uncovered_common_decision_count, 0)} 次。该区间仍参与账户曲线，因此其缺测也会阻止研究验收，不能靠切换源版本消除。</p>}
         {Object.keys(report.scenarios[cost] || {}).map(name => <p key={name}>{names[name]}：持仓期缺测 {fmt(quality?.holding_missing_seconds?.[`${cost}:${name}`], 1)} 秒 · 持仓期信号缺失 {fmt(quality?.holding_signal_unavailable_observations?.[`${cost}:${name}`], 0)} 次</p>)}
+        {legacy && <p>继承区间持仓缺测：{Object.keys(report.scenarios[cost] || {}).map(name => `${names[name]} ${fmt(legacy.holding_missing_seconds?.[`${cost}:${name}`], 1)} 秒`).join(' · ')}。这只是已有观察记录的质量核算，没有回放成交或补造缺失价格。</p>}
         <div className="cc-review-scroll"><table><thead><tr><th>观察条件</th><th>实际值</th><th>冻结要求</th><th>结果</th></tr></thead><tbody>{quality?.requirements?.map(r => <tr key={r.criterion}><th>{labels[r.criterion] || r.criterion}</th><td><code>{fmt(r.actual)}</code></td><td><code>{fmt(r.required)}</code></td><td>{labels[r.result] || r.result}</td></tr>)}</tbody></table></div>
         <p>回撤仅来自已观察报价，缺测区间的最坏风险未知。暴露时间沿用上次持仓作估算，不能视为连续监控证明。</p>
       </details>

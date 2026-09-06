@@ -280,7 +280,8 @@ def process(*, cfg, policy, experiment, project, root, frame, identity):
         events = [json.loads(row[0]) for row in con.execute("SELECT event FROM events WHERE json_extract(event,'$.hourly_decision')=1 ORDER BY observed_at")]
         if not events or events[-1]["observed_at"] != event["observed_at"]:
             events.append(event)
-        report = summarize(events, new_checkpoint, experiment)
+        report = summarize(events, new_checkpoint, experiment,
+                           legacy_observation_integrity=json.loads(saved["legacy_observation_integrity"]) if "legacy_observation_integrity" in saved else None)
         first_observation = con.execute("SELECT min(observed_at) FROM events").fetchone()[0]
         report.update(identity=identity["identity"], latest_observed_at=frame["observed_at"],
                       ledger_start_ts=first_observation, latest_decision_clock=event["decision_clock"],
