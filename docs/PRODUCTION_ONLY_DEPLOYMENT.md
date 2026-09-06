@@ -174,3 +174,25 @@ The tuned model artifacts needed by this shadow flow are part of the production 
 
 - `models/ml_factor_model_gpu_tuned.json`
 - `models/ml_factor_model_gpu_tuned_config.json`
+# Runtime payload cleanup, 2026-09-06
+
+The default production file selection ships `web/dist`, `web/static` and
+`web/templates`. Frontend build sources and dependencies stay in the development
+checkout. The standalone bundle test harness, repository tests, archived research,
+and personal notes are not runtime payload. Full repository CI still runs all
+tests, including the archived regression suite; no tests are deleted.
+
+Use `production_snapshot` plus `iter_production_files` when creating an immutable
+release. Generate the release manifest from exactly the selected committed bytes,
+record excluded paths, and verify dependencies and runtime overrides before the
+symlink switch. Do not prune a running release in place or edit its manifest to
+make missing files pass. Keep the previous complete release as the rollback point.
+
+All `src/` and research configuration files remain byte-identical during this
+layout-only cleanup. Confirm `source_identity` against the active research ledger
+before switching, retaining its existing directory and start time. Never remove
+shared `.venv`, `.env`, models, runtime state, reports, orders or research ledgers.
+Disabled shadow experiment code can be removed from the server only after checking
+processes, units and cron references, archiving its exact source with file hashes,
+and verifying a downloaded recovery copy. Preserve that experiment's data/models/
+reports/logs and record its retired execution status separately.

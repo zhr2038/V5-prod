@@ -28,7 +28,10 @@ PRODUCTION_SYNC_ITEMS = (
     "deploy",
     "scripts",
     "src",
-    "web",
+    # Build in the checkout/CI. The server serves the verified output directly.
+    "web/dist",
+    "web/static",
+    "web/templates",
     "docs/CURRENT_PRODUCTION_FLOW.md",
     "docs/PRODUCTION_MINIMAL_FILES.md",
     "docs/PRODUCTION_ONLY_DEPLOYMENT.md",
@@ -45,6 +48,7 @@ PRODUCTION_SYNC_EXCLUDES = (
     ".mypy_cache",
     ".ruff_cache",
     "scripts/archive",
+    "scripts/test_v5_bundle_export.py",
 )
 
 GIT_COMMAND_TIMEOUT = 30
