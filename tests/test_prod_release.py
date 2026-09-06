@@ -122,6 +122,29 @@ def test_iter_production_files_excludes_runtime_state(tmp_path: Path) -> None:
     assert files == ["main.py", "scripts/run.py"]
 
 
+def test_default_production_payload_keeps_runtime_but_omits_build_and_archived_code(tmp_path: Path) -> None:
+    runtime = {
+        "main.py", "event_driven_check.py", "configs/live_prod.yaml",
+        "configs/research/review_experiment_v2.json", "src/research/review_forward.py",
+        "src/execution/live_execution_engine.py", "scripts/run_review_forward.py",
+        "scripts/verify_release_manifest.py", "scripts/emergency_close_all.py",
+        "deploy/locks/v5-production.txt", "web/dist/index.html",
+        "web/dist/assets/index.js", "web/static/js/monitor_v2.js", "web/templates/monitor.html",
+    }
+    non_runtime = {
+        "web/dashboard/src/App.tsx", "web/dashboard/package-lock.json",
+        "web/dashboard/node_modules/pkg/index.js", "tests/test_order.py",
+        "archive/20260313-research-cleanup/src/old.py", "scripts/archive/research/old.py",
+        "scripts/test_v5_bundle_export.py", "reports/positions.sqlite", "state/kill_switch.json",
+    }
+    for relative in runtime | non_runtime:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(relative, encoding="utf-8")
+    actual = {path.relative_to(tmp_path).as_posix() for path in iter_production_files(tmp_path)}
+    assert actual == runtime
+
+
 def test_iter_production_files_excludes_nested_node_modules(tmp_path: Path) -> None:
     (tmp_path / "web" / "dashboard" / "src").mkdir(parents=True, exist_ok=True)
     (tmp_path / "web" / "dashboard" / "src" / "App.tsx").write_text("export {}", encoding="utf-8")
