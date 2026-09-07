@@ -1934,6 +1934,7 @@ class V5Pipeline:
             "f5_rsi_trend_confirm": None if f5_rsi_trend_confirm is None else float(f5_rsi_trend_confirm),
             "swing_atr_early_exit_min_loss_net_bps": float(min_loss_net_bps),
             "swing_atr_early_exit_f5_floor": float(f5_floor),
+            "atr_early_exit_exception_policy": "deprecated_inactive",
             "regime": str(regime_state.value if hasattr(regime_state, "value") else regime_state or ""),
             "risk_off": bool(risk_off),
             "exit_priority": "soft",
@@ -6544,7 +6545,9 @@ class V5Pipeline:
                     except Exception:
                         swing_context = None
                 if isinstance(swing_context, dict):
-                    if hold_hours is None and swing_context.get("hold_hours") is not None:
+                    # Exit producers may use a different wall clock. All branches
+                    # of this decision use the same observed time and position entry.
+                    if swing_context.get("hold_hours") is not None:
                         hold_hours = float(swing_context.get("hold_hours"))
                     if swing_context.get("required_hold_hours") is not None:
                         min_hold_hours = float(swing_context.get("required_hold_hours"))
@@ -6552,9 +6555,15 @@ class V5Pipeline:
                 net_bps = _float_or_none(meta.get("net_bps"))
                 if net_bps is None and isinstance(swing_context, dict):
                     net_bps = _float_or_none(swing_context.get("net_bps"))
-                f5_rsi_trend_confirm = _float_or_none(meta.get("f5_rsi_trend_confirm"))
-                if f5_rsi_trend_confirm is None and isinstance(swing_context, dict):
-                    f5_rsi_trend_confirm = _float_or_none(swing_context.get("f5_rsi_trend_confirm"))
+                entry_f5 = (swing_context or {}).get("f5_rsi_trend_confirm")
+                current_factors = (getattr(alpha, "raw_factors", {}) or {}).get(str(order.symbol), {}) or {}
+                f5_rsi_trend_confirm = _float_or_none(current_factors.get("f5_rsi_trend_confirm"))
+                factor_context = {
+                    "entry_f5_rsi_trend_confirm": entry_f5,
+                    "f5_source": "decision_alpha_snapshot" if f5_rsi_trend_confirm is not None else "unavailable",
+                    "exit_decision_ts": now_utc.isoformat(),
+                }
+                meta.update(factor_context)
 
                 atr_guard_blocked, atr_guard_context = self._swing_atr_early_exit_guard_context(
                     symbol=str(order.symbol),
@@ -6568,6 +6577,7 @@ class V5Pipeline:
                     regime_state=getattr(regime, "state", None),
                 ) if is_swing_hold_position and not is_probe_exit else (False, {})
                 if atr_guard_context:
+                    atr_guard_context.update(factor_context)
                     meta.update(atr_guard_context)
                     if not atr_guard_blocked:
                         allowed_before_min_hold = True

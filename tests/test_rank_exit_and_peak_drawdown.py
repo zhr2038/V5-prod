@@ -95,6 +95,8 @@ def _run_swing_min_hold_exit_case(
     swing_position: bool = True,
     regime_result: RegimeResult | None = None,
     cfg_mutator=None,
+    current_f5: float | None = 0.35,
+    exit_meta=None,
 ):
     now = datetime(2026, 5, 2, 5, 0, tzinfo=timezone.utc)
     entry_ts = (now - timedelta(hours=hold_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -124,7 +126,7 @@ def _run_swing_min_hold_exit_case(
             intent="CLOSE_LONG",
             notional_usdt=12.0,
             signal_price=signal_price,
-            meta={"reason": exit_reason},
+            meta={"reason": exit_reason, **(exit_meta or {})},
         )
     ]
     market_data = {"BNB/USDT": _series("BNB/USDT", signal_price)}
@@ -157,10 +159,34 @@ def _run_swing_min_hold_exit_case(
         cash_usdt=988.0,
         equity_peak_usdt=1000.0,
         audit=audit,
-        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BNB/USDT": 1.0}),
+        precomputed_alpha=AlphaSnapshot(
+            raw_factors={"BNB/USDT": {"f5_rsi_trend_confirm": current_f5}},
+            z_factors={}, scores={"BNB/USDT": 1.0}),
         precomputed_regime=regime_result or _regime(),
     )
     return out, audit
+
+
+@pytest.mark.parametrize("hours,stale,blocked", [(23.99, 24.01, True), (24.01, 23.99, False)])
+def test_exit_hold_uses_common_decision_time_not_order_metadata(tmp_path, hours, stale, blocked):
+    out, audit = _run_swing_min_hold_exit_case(
+        tmp_path, hold_hours=hours, exit_reason="atr_trailing", exit_meta={"hold_hours": stale})
+    sells = [o for o in out.orders if o.side == "sell"]
+    assert bool(sells) is not blocked
+    row = next(d for d in audit.router_decisions if d.get("reason") == "swing_atr_early_exit_guard") if blocked else sells[0].meta
+    assert row["hold_hours_at_exit_check"] == pytest.approx(hours)
+
+
+@pytest.mark.parametrize("current", [-.55, None])
+def test_exit_reports_current_f5_separately_from_entry(tmp_path, current):
+    _, audit = _run_swing_min_hold_exit_case(
+        tmp_path, hold_hours=15, exit_reason="atr_trailing", f5_rsi_trend_confirm=.78,
+        current_f5=current, exit_meta={"f5_rsi_trend_confirm": .78})
+    row = next(d for d in audit.router_decisions if d.get("reason") == "swing_atr_early_exit_guard")
+    assert row["f5_rsi_trend_confirm"] == current
+    assert row["entry_f5_rsi_trend_confirm"] == .78
+    assert row["f5_source"] == ("decision_alpha_snapshot" if current is not None else "unavailable")
+    assert row["atr_early_exit_exception_policy"] == "deprecated_inactive"
 
 
 def test_swing_atr_early_exit_guard_blocks_small_loss_before_24h(tmp_path):

@@ -1386,6 +1386,9 @@ def test_live_execution_allows_atr_swing_exit_after_min_hold() -> None:
         assert order_meta["swing_min_hold_guard_blocked"] is False
         assert order_meta["soft_exit_blocked_by_min_hold"] is False
         assert order_meta["hold_hours_at_exit_check"] == pytest.approx(25.0, abs=0.05)
+        assert order_meta["reason"] == "atr_trailing"
+        assert order_meta["source_reason"] == "atr_trailing"
+        assert order_meta["action"] != "skip"
 
 
 def test_live_execution_does_not_block_non_swing_atr_exit_before_min_hold() -> None:
