@@ -1373,6 +1373,14 @@ class ExecutionConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _compat_pre(cls, data: object) -> object:
+        if isinstance(data, dict) and any(key in data for key in (
+            "swing_atr_early_exit_min_loss_net_bps", "swing_atr_early_exit_allow_if_f5_turns_negative",
+            "swing_atr_early_exit_f5_floor", "swing_atr_early_exit_allow_if_risk_off",
+        )):
+            logger.warning(
+                "Deprecated ATR early-exit exception settings are inactive: ATR remains a soft exit "
+                "before swing_min_hold_hours; configured hard/risk/operator exits retain priority."
+            )
         # Backward-compat: if mode not present, derive from dry_run.
         if isinstance(data, dict) and "mode" not in data and "dry_run" in data:
             d = dict(data)

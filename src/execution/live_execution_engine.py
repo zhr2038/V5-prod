@@ -1416,6 +1416,11 @@ class LiveExecutionEngine:
         }
         if atr_guard_context:
             context.update(atr_guard_context)
+        if not blocked:
+            # A successful guard check is not an exit signal. Preserve the source
+            # reason so fills cannot be reported as executions of a blocked action.
+            context["reason"] = reason
+            context["action"] = "allow"
         meta.update(context)
         o.meta = meta
         return context if blocked else None

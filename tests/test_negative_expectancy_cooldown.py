@@ -804,15 +804,17 @@ def test_negative_expectancy_prefers_order_lifecycle_roundtrip_when_summary_miss
     assert stats["closed_cycles"] == 1
     assert stats["net_pnl_sum_usdt"] == pytest.approx(-1.08214485632)
     assert stats["net_expectancy_bps"] == pytest.approx(-679.5675)
-    assert stats["roundtrip_summary_closed_cycles"] == 1
-    assert stats["roundtrip_summary_net_bps"] == pytest.approx(stats["net_expectancy_bps"])
-    assert stats["mismatch_bps"] == 0.0
+    assert stats["degraded"] is True
+    assert stats["degraded_reason"] == "legacy_lifecycle_inventory_unverified"
+    assert stats["inventory_verified"] is False
+    assert "roundtrip_summary_closed_cycles" not in stats
+    assert "mismatch_bps" not in stats
     assert stats["cycle_attributions"][0]["entry_order_id"] == "entry-ord"
     assert stats["cycle_attributions"][0]["exit_order_id"] == "exit-ord"
     assert stats["cycle_attributions"][0]["entry_ts"] == "2026-06-25T08:01:13.268000Z"
     assert stats["cycle_attributions"][0]["exit_ts"] == "2026-06-25T14:00:42.328000Z"
-    assert state["roundtrip_summary_net_bps"] == pytest.approx(stats["net_expectancy_bps"])
-    assert state["mismatch_bps"] == 0.0
+    assert state.get("roundtrip_summary_net_bps") is None
+    assert state.get("mismatch_bps") is None
 
 
 def test_negative_expectancy_excludes_premature_swing_soft_exit_from_fast_fail(

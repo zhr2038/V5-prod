@@ -21,8 +21,10 @@ jobs:
           python -m ruff check
           scripts/cost_probe_live_once.py
           src/risk/negative_expectancy_cooldown.py
+          src/risk/account_inventory.py
           tests/test_cost_probe_live_once.py
           tests/test_negative_expectancy_cooldown.py
+          tests/test_account_inventory_expectancy.py
           tests/test_prod_systemd_units.py
       - name: Test guarded cost probe, release evidence, and live gate paths
         run: >
@@ -37,6 +39,9 @@ jobs:
           tests/test_quant_lab_permission_contract_behavior.py
           tests/test_quant_lab_live_execution_gate.py
           tests/test_negative_expectancy_cooldown.py
+          tests/test_account_inventory_expectancy.py
+          tests/test_rank_exit_and_peak_drawdown.py
+          tests/test_live_execution_idempotency.py
           tests/test_candidate_snapshot.py
           tests/test_quant_lab_cost_gate.py
           tests/test_weight_evidence.py

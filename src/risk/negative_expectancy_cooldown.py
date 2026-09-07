@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Iterable, Set
 
 from src.execution.fill_store import derive_fill_store_path
+from src.risk.account_inventory import attribute_inventory, read_rows
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 logger = logging.getLogger(__name__)
@@ -315,6 +316,14 @@ class NegativeExpectancyCooldown:
                 **self._attribution_counts_from_stat(stat),
                 "closed_cycles": int(stat.get("closed_cycles") or 0),
                 "net_expectancy_bps": float(stat.get("net_expectancy_bps") or 0.0),
+                "net_pnl_sum_usdt": float(stat.get("net_pnl_sum_usdt") or 0.0),
+                "source": stat.get("source"),
+                "evidence_valid": stat.get("evidence_valid"),
+                "degraded_reason": stat.get("degraded_reason"),
+                "attribution_contract": stat.get("attribution_contract"),
+                "inventory_remaining_qty": stat.get("inventory_remaining_qty"),
+                "inventory_remaining_known_cost_usdt": stat.get("inventory_remaining_known_cost_usdt"),
+                "inventory_unknown_cost_qty": stat.get("inventory_unknown_cost_qty"),
                 "cycle_attributions": list(cycle_attributions) if isinstance(cycle_attributions, list) else [],
             }
         payload = {
@@ -1103,8 +1112,9 @@ class NegativeExpectancyCooldown:
             row = dict(stat)
             row["source"] = "strategy_roundtrip_canonical"
             row["canonical_roundtrip_source"] = str(stat.get("source") or "order_lifecycle_csv")
-            row["degraded_reason"] = ""
-            row.update(self._roundtrip_sanity_from_stat(row))
+            row["degraded"] = True
+            row["degraded_reason"] = "legacy_lifecycle_inventory_unverified"
+            row["inventory_verified"] = False
             out[sym] = row
         return out
 
@@ -2209,6 +2219,11 @@ class NegativeExpectancyCooldown:
         since_ms: int,
         allowed_symbols: Optional[Set[str]],
     ) -> Dict[str, Dict[str, Any]]:
+        account_stats = self._scan_account_inventory(since_ms=since_ms, allowed_symbols=allowed_symbols)
+        if account_stats is not None:
+            # A known inventory conflict or missing bill must not fall through to
+            # an attractive legacy CSV result (nor inherit its cycle diagnostics).
+            return account_stats
         fills_stats: Dict[str, Dict[str, Any]] = {}
         orders_stats: Dict[str, Dict[str, Any]] = {}
         recent_trade_stats: Dict[str, Dict[str, Any]] = {}
@@ -2265,6 +2280,61 @@ class NegativeExpectancyCooldown:
             fills_stats,
             recent_trade_stats,
         )
+
+    def _scan_account_inventory(self, *, since_ms, allowed_symbols):
+        fills_path = Path(self.cfg.fills_db_path)
+        bills_path = Path(self.cfg.orders_db_path).parent / "bills.sqlite"
+        if not bills_path.exists():
+            return None  # Historical/offline integrations retain explicit degraded fallback.
+        try:
+            inventory = attribute_inventory(
+                fills=read_rows(fills_path, "fills"), bills=read_rows(bills_path, "bills"),
+                since_ms=since_ms, allowed_symbols=allowed_symbols, metadata=self._load_order_meta_by_id(),
+                eligible=lambda meta: not self._negative_expectancy_exclusion_reason(meta))
+        except (sqlite3.Error, ValueError, KeyError, TypeError, OSError) as exc:
+            reason = "account_inventory_unavailable:" + type(exc).__name__
+            logger.warning("NegativeExpectancy %s", reason)
+            return {sym: dict(self._empty_expectancy_row(source="account_inventory_unverified"),
+                             evidence_valid=False, degraded=True, degraded_reason=reason)
+                    for sym in (allowed_symbols or self._scope_symbols or [])}
+        output = {}
+        for sym, result in inventory.items():
+            st = self._empty_expectancy_accumulator()
+            for cycle in result["cycles"]:
+                gross, net, cost = map(float, (cycle["gross_pnl"], cycle["net_pnl"], cycle["cost"]))
+                entry_ts, exit_ts = cycle["entry_ts_ms"], cycle["exit_ts_ms"]
+                st["closed_cycles"] += 1
+                st["closed_cycles_included_by_close_ts"] += 1
+                st["closed_cycles_with_entry_before_window"] += int(entry_ts < since_ms)
+                st["closed_notional_usdt"] += cost
+                st["gross_pnl_sum_usdt"] += gross
+                st["net_pnl_sum_usdt"] += net
+                st["last_close_ts_ms"] = max(st["last_close_ts_ms"], exit_ts)
+                meta = dict(cycle["meta"])
+                reason = meta.get("exit_reason") or meta.get("reason") or meta.get("source_reason")
+                if reason in {"swing_min_hold_exit_block", "swing_atr_early_exit_guard"}:
+                    reason = meta.get("original_exit_reason") or meta.get("source_reason") or reason
+                meta.update(entry_order_id=cycle["entry_order_id"], exit_order_id=cycle["exit_order_id"],
+                            roundtrip_id=cycle["entry_order_id"] + ":" + cycle["exit_order_id"],
+                            qty=str(cycle["qty"]), entry_ts=self._ms_to_iso(entry_ts), exit_ts=self._ms_to_iso(exit_ts),
+                            hold_hours=(exit_ts - entry_ts) / 3_600_000,
+                            hold_minutes=(exit_ts - entry_ts) / 60_000, exit_reason=reason)
+                self._record_fast_fail_or_premature_soft_exit(
+                    st, row=meta, gross_pnl=gross, net_pnl=net, notional=cost,
+                    hold_ms=exit_ts - entry_ts, fast_fail_hold_ms=self.cfg.fast_fail_max_hold_minutes * 60_000,
+                    net_bps=net / cost * 10000 if cost > 0 else None)
+            reasons = sorted({row["reason"] for row in result["issues"]})
+            verified = not reasons
+            output[sym] = self._build_expectancy_row(
+                **st, source="account_inventory_verified" if verified else "account_inventory_unverified",
+                degraded_reason="; ".join(reasons))
+            output[sym].update({k: v for k, v in result.items() if k not in {"cycles", "issues"}})
+            output[sym]["evidence_valid"] = verified
+            output[sym]["inventory_issues"] = result["issues"]
+            output[sym]["attribution_contract"] = "account-inventory-v1"
+            if reasons:
+                logger.warning("NegativeExpectancy inventory attribution incomplete: %s %s", sym, "; ".join(reasons))
+        return output
 
     @staticmethod
     def _coerce_float(value: Any) -> Optional[float]:
@@ -2478,8 +2548,6 @@ class NegativeExpectancyCooldown:
                     )
                 )
             summary = roundtrip_summary.get(sym)
-            if not summary and str((st or {}).get("source") or "") == "strategy_roundtrip_canonical":
-                summary = self._roundtrip_sanity_from_stat(st)
             if not summary:
                 continue
             neg_net_bps = float((st or {}).get("net_expectancy_bps") or 0.0)
@@ -2526,6 +2594,11 @@ class NegativeExpectancyCooldown:
             stat_row = dict(st)
             stat_row["updated_ts_ms"] = now_ms
             stats_cache[sym] = stat_row
+
+            if st.get("evidence_valid") is False:
+                # Incomplete evidence cannot create or erase an existing cooldown.
+                warnings.append(self._release_warning("account_inventory_unverified", f"{sym}: {st.get('degraded_reason')}"))
+                continue
 
             trigger_negative = False
             metric_used = "net_expectancy_bps" if exp_th_bps is not None else "net_expectancy_usdt"
