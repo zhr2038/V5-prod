@@ -103,12 +103,46 @@ def test_react_dashboard_bounds_fetches_and_renders_primary_before_auxiliary_cal
     assert "signal: controller.signal," in api_source
     assert "globalThis.clearTimeout(timeoutId);" in api_source
 
-    primary_fetch = app_source.index("const d = await api.dashboard();")
+    primary_fetch = app_source.index("d = await api.dashboard();")
     primary_rendered = app_source.index("setLoading(false);", primary_fetch)
     auxiliary_fetch = app_source.index("const [r, liveTrades] = await Promise.all([", primary_fetch)
     authoritative_trades = app_source.index("const observedTrades =", auxiliary_fetch)
     quant_lab_fetch = app_source.index("void loadQuantLab(dashboardFocusForQuantLab(authoritativeDashboard, nextFocusSymbol));", authoritative_trades)
     assert primary_fetch < primary_rendered < auxiliary_fetch < authoritative_trades < quant_lab_fetch
+    primary_start = app_source.index("void loadPrimary(() => {")
+    secondary_start = app_source.index("scheduleSecondary();", primary_start)
+    command_start = app_source.index("void loadCommand();", primary_start)
+    equity_start = app_source.index("void loadEquity();", primary_start)
+    assert primary_start < secondary_start < command_start < equity_start
+
+
+def test_dashboard_api_primary_view_skips_slow_auxiliary_endpoints(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def fail_if_called():
+        raise AssertionError("slow auxiliary endpoint should not block the primary dashboard")
+
+    monkeypatch.setattr(module, "api_account", lambda: module.jsonify({
+        "cash_usdt": 100.0,
+        "positions_value_usdt": 0.0,
+        "total_equity_usdt": 100.0,
+        "initial_capital_usdt": 120.0,
+    }))
+    monkeypatch.setattr(module, "api_positions", lambda: module.jsonify({"positions": []}))
+    monkeypatch.setattr(module, "api_status", lambda: module.jsonify({"timer_active": True, "dry_run": False}))
+    monkeypatch.setattr(module, "api_market_state", fail_if_called)
+    monkeypatch.setattr(module, "api_ml_training", fail_if_called)
+
+    response = client.get("/api/dashboard?view=primary")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["account"]["totalEquity"] == 100.0
+    assert payload["positions"] == []
+    assert payload["systemStatus"]["isRunning"] is True
+    assert "marketState" not in payload
+    assert "mlTraining" not in payload
 
 
 def test_react_dashboard_labels_bounded_rows_ranges_and_cost_times_truthfully():

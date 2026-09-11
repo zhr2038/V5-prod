@@ -371,24 +371,29 @@ function App() {
     } finally { equityBusy.current = false; setEquityLoading(false); }
   }, []);
 
-  const loadPrimary = useCallback(async () => {
+  const loadPrimary = useCallback(async (afterPrimary?: () => void) => {
     if (document.hidden || primaryBusy.current) return;
     primaryBusy.current = true;
     setLoading(true);
     try {
-      const d = await api.dashboard();
-      if (d) {
-        setDashboard((prev) => mergePrimaryDashboard(prev, d));
-        syncPositionFocus(d);
-        setMarketState(d.marketState || null);
-        const receivedAt = Date.now();
-        setPrimaryReceivedAt(receivedAt);
-        setUpdateTime(new Date(receivedAt).toLocaleTimeString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }));
-        setPrimaryRefreshFailed(false);
-      } else {
-        setPrimaryRefreshFailed(true);
+      let d: DashboardData | null = null;
+      try {
+        d = await api.dashboard();
+        if (d) {
+          setDashboard((prev) => mergePrimaryDashboard(prev, d!));
+          syncPositionFocus(d);
+          if (d.marketState) setMarketState(d.marketState);
+          const receivedAt = Date.now();
+          setPrimaryReceivedAt(receivedAt);
+          setUpdateTime(new Date(receivedAt).toLocaleTimeString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }));
+          setPrimaryRefreshFailed(false);
+        } else {
+          setPrimaryRefreshFailed(true);
+        }
+      } finally {
+        setLoading(false);
+        afterPrimary?.();
       }
-      setLoading(false);
 
       // Auxiliary calls have independent freshness and must not turn missing trades into an empty history.
       const [r, liveTrades] = await Promise.all([api.riskGuard(), api.trades()]);
@@ -419,13 +424,24 @@ function App() {
     if (secondaryBusy.current) return;
     secondaryBusy.current = true;
     try {
-      const [deferred, dec, h] = await Promise.all([
-        api.dashboardDeferred(), api.decisionAudit(), api.health(),
+      const [deferred, dec, h, nextMarketState, mlTraining] = await Promise.all([
+        api.dashboardDeferred(), api.decisionAudit(), api.health(), api.marketState(), api.mlTraining(),
       ]);
       const receivedAt = Date.now();
       startTransition(() => {
         setSecondaryRefresh((prev) => secondaryRefreshState(prev, deferred, dec, h, receivedAt));
-        if (deferred) setDashboard((prev) => mergeDeferredDashboard(prev, deferred));
+        if (deferred || nextMarketState || mlTraining) {
+          setDashboard((prev) => {
+            const merged = deferred ? mergeDeferredDashboard(prev, deferred) : prev;
+            if (!merged) return merged;
+            return {
+              ...merged,
+              ...(nextMarketState ? { marketState: nextMarketState } : {}),
+              ...(mlTraining ? { mlTraining } : {}),
+            };
+          });
+        }
+        if (nextMarketState) setMarketState(nextMarketState);
         if (dec) setDecisionAudit(dec);
         if (h) setHealth(h);
       });
@@ -435,26 +451,30 @@ function App() {
   useEffect(() => {
     clearLegacyUiCache();
     let timeoutId: number | null = null;
-    const primaryTimeoutId = globalThis.setTimeout(() => {
-      void loadPrimary();
-      void loadCommand();
-      void loadEquity();
-    }, 0);
     let idleId: number | null = null;
     const idleWindow = window as IdleWindow;
     const deferSlowPath = isTouchWebKit();
+    let cancelled = false;
 
-    const runDeferred = () => {
-      void loadSecondary();
+    const scheduleSecondary = () => {
+      if (cancelled) return;
+      if (idleWindow.requestIdleCallback) {
+        idleId = idleWindow.requestIdleCallback(() => void loadSecondary(), { timeout: deferSlowPath ? 2600 : 1200 });
+      } else {
+        timeoutId = globalThis.setTimeout(() => void loadSecondary(), deferSlowPath ? 1800 : 400);
+      }
     };
 
-    if (idleWindow.requestIdleCallback) {
-      idleId = idleWindow.requestIdleCallback(() => runDeferred(), { timeout: deferSlowPath ? 2600 : 1200 });
-    } else {
-      timeoutId = globalThis.setTimeout(runDeferred, deferSlowPath ? 1800 : 400);
-    }
+    const primaryTimeoutId = globalThis.setTimeout(() => {
+      void loadPrimary(() => {
+        scheduleSecondary();
+        void loadCommand();
+        void loadEquity();
+      });
+    }, 0);
 
     return () => {
+      cancelled = true;
       globalThis.clearTimeout(primaryTimeoutId);
       if (idleId !== null && idleWindow.cancelIdleCallback) {
         idleWindow.cancelIdleCallback(idleId);
@@ -491,7 +511,13 @@ function App() {
     secondaryFailed={secondaryRefresh.failed} secondaryReceivedAt={secondaryRefresh.receivedAt}
     deferredReceivedAt={secondaryRefresh.deferredReceivedAt}
     onSymbolSearch={handleSymbolSearch}
-    onRefresh={() => { void loadPrimary(); void loadSecondary(); void loadCommand(); void loadEquity(); }}
+    onRefresh={() => {
+      void loadPrimary(() => {
+        void loadSecondary();
+        void loadCommand();
+        void loadEquity();
+      });
+    }}
   />;
 }
 

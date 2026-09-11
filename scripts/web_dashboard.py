@@ -6835,8 +6835,17 @@ def api_dashboard():
         account_data = _call_dashboard_api(api_account, default={}, label='account', errors=errors)
         positions_payload = _call_dashboard_api(api_positions, default={'positions': []}, label='positions', errors=errors)
         status_data = _call_dashboard_api(api_status, default={}, label='status', errors=errors)
-        market_state_data = _call_dashboard_api(api_market_state, default={}, label='market_state', errors=errors)
-        ml_training = _call_dashboard_api(api_ml_training, default={'status': 'unknown'}, label='ml_training', errors=errors)
+        primary_view = view == 'primary'
+        # Keep the first-screen contract bounded to account/position/runtime truth.
+        # Market-state and ML reads are slower auxiliary data and have dedicated APIs.
+        market_state_data = (
+            {} if primary_view
+            else _call_dashboard_api(api_market_state, default={}, label='market_state', errors=errors)
+        )
+        ml_training = (
+            {} if primary_view
+            else _call_dashboard_api(api_ml_training, default={'status': 'unknown'}, label='ml_training', errors=errors)
+        )
         positions_data = positions_payload
         if isinstance(positions_payload, dict):
             positions_data = positions_payload.get('positions', positions_payload.get('data', []))
@@ -6945,9 +6954,11 @@ def api_dashboard():
             'mlTraining': ml_training,
         }
 
-        if view == 'primary':
+        if primary_view:
             dashboard_data.pop('trades', None)
             dashboard_data.pop('alphaScores', None)
+            dashboard_data.pop('marketState', None)
+            dashboard_data.pop('mlTraining', None)
             return jsonify(dashboard_data)
 
         trades_payload = _call_dashboard_api(api_trades, default={'trades': []}, label='trades', errors=errors)
