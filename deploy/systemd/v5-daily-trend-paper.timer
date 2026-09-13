@@ -1,0 +1,12 @@
+[Unit]
+Description=Observe the frozen BTC/ETH daily-trend paper account after UTC daily close
+
+[Timer]
+OnCalendar=*-*-* 00:10:00 UTC
+AccuracySec=10s
+RandomizedDelaySec=20s
+Persistent=true
+Unit=v5-daily-trend-paper.service
+
+[Install]
+WantedBy=timers.target

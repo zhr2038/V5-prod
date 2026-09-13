@@ -130,7 +130,9 @@ if [[ "$USER_MODE" == "1" ]]; then
       --mapping v5-cost-rollup-real.user.service=v5-cost-rollup-real.user.service \
       --mapping v5-cost-rollup-real.user.timer=v5-cost-rollup-real.user.timer \
       --mapping v5-spread-rollup.user.service=v5-spread-rollup.service \
-      --mapping v5-spread-rollup.timer=v5-spread-rollup.timer
+      --mapping v5-spread-rollup.timer=v5-spread-rollup.timer \
+      --mapping v5-daily-trend-paper.service=v5-daily-trend-paper.service \
+      --mapping v5-daily-trend-paper.timer=v5-daily-trend-paper.timer
     render_units "$DST" "$SHADOW_ROOT" \
       --mapping v5-shadow-tuned-xgboost.user.service=v5-shadow-tuned-xgboost.user.service \
       --mapping v5-shadow-tuned-xgboost.user.timer=v5-shadow-tuned-xgboost.user.timer
@@ -151,6 +153,8 @@ if [[ "$USER_MODE" == "1" ]]; then
       v5-cost-rollup.timer v5-cost-rollup.service \
       v5-spread-rollup.timer v5-spread-rollup.service >/dev/null 2>&1 || true
     for disabled_unit in \
+      v5-review-forward.timer v5-review-forward.service \
+      v5-participation-quotes.service \
       v5-shadow-regime.user.timer v5-shadow-regime.user.service \
       v5-daily-ml-training.timer v5-daily-ml-training.service \
       v5-model-promotion-gate.timer v5-model-promotion-gate.service \
@@ -169,14 +173,15 @@ if [[ "$USER_MODE" == "1" ]]; then
     systemctl --user enable --now v5-ledger.timer
     systemctl --user enable --now v5-cost-rollup-real.user.timer
     systemctl --user enable --now v5-spread-rollup.timer
-    echo "[install_systemd] ML training/promotion/shadow XGBoost timers are research-only and disabled in live_prod."
+    systemctl --user enable --now v5-daily-trend-paper.timer
+    echo "[install_systemd] Superseded paper workers and ML research timers are disabled in live_prod."
     if [[ "$ENABLE_PROD_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-prod.user.timer
     fi
     if [[ "$ENABLE_EVENT_DRIVEN_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-event-driven.timer
     fi
-    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|quant-lab-selfcheck|sentiment-collect|auto-risk-eval|reconcile|ledger|cost-rollup-real|spread-rollup)" || true
+    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|quant-lab-selfcheck|sentiment-collect|auto-risk-eval|reconcile|ledger|cost-rollup-real|spread-rollup|daily-trend-paper)" || true
   else
     systemctl --user enable --now v5-hourly.timer
     systemctl --user enable --now v5-daily.timer

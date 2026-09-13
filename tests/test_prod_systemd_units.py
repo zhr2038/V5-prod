@@ -9,6 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROD_SYSTEMD_SERVICE_UNITS = (
     "v5-auto-risk-eval.service",
     "v5-cost-rollup-real.user.service",
+    "v5-daily-trend-paper.service",
     "v5-daily-ml-training.service",
     "v5-event-driven.service",
     "v5-ledger.service",
@@ -96,6 +97,17 @@ def test_trade_monitor_timer_runs_after_hourly_live_window() -> None:
 
     assert "OnCalendar=*-*-* *:07:00" in timer
     assert "Unit=v5-trade-monitor.service" in timer
+
+
+def test_daily_trend_paper_is_utc_daily_public_research_only() -> None:
+    service = (PROJECT_ROOT / "deploy" / "systemd" / "v5-daily-trend-paper.service").read_text(encoding="utf-8")
+    timer = (PROJECT_ROOT / "deploy" / "systemd" / "v5-daily-trend-paper.timer").read_text(encoding="utf-8")
+    assert "scripts/run_daily_trend_paper.py" in service
+    assert "reports/daily_trend_paper/v5-daily-trend-paper-20260914-v1" in service
+    assert "NoNewPrivileges=true" in service
+    assert "OnCalendar=*-*-* 00:10:00 UTC" in timer
+    assert "Persistent=true" in timer
+    assert "Unit=v5-daily-trend-paper.service" in timer
 
 
 def test_live_prod_service_fails_when_pre_trade_auto_sync_fails() -> None:

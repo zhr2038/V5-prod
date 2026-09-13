@@ -1,0 +1,27 @@
+{
+  "schema_version": "v5.daily_trend_paper.v1",
+  "experiment_id": "v5-daily-trend-paper-20260914-v1",
+  "symbols": [
+    "BTC/USDT",
+    "ETH/USDT"
+  ],
+  "initial_cash_per_symbol_usdt": 50,
+  "sma_days": 100,
+  "momentum_days": 30,
+  "fee_bps_per_side": 10,
+  "slippage_bps_per_side": 5,
+  "minimum_explicit_roundtrip_cost_bps": 30,
+  "entry_minimum_notional_usdt": 10,
+  "maximum_quote_age_seconds": 120,
+  "maximum_future_quote_skew_seconds": 5,
+  "entry_execution_window_seconds": 1800,
+  "start_utc": "2026-09-14T00:00:00Z",
+  "review_utc": "2026-12-13T00:00:00Z",
+  "review_window_days": 90,
+  "signal": "closed UTC daily close above trailing 100-day simple moving average and trailing 30-day return positive",
+  "execution": "one observation after UTC midnight; trade at the first observed public bid or ask with explicit fee and slippage; late entries are skipped and exits use the first subsequent observed quote",
+  "capital": "two independent 50 USDT sleeves; no transfer between symbols, leverage, borrowing or shorting",
+  "paper_only": true,
+  "live_order_effect": "none",
+  "allow_live_promotion": false
+}

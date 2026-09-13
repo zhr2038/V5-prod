@@ -69,6 +69,7 @@ export interface ParticipationSummary {
 
 export interface CommandCenterData {
   review_comparison?: import('./reviewTypes').ReviewView;
+  daily_trend_paper?: import('./dailyTrendTypes').DailyTrendView;
   schema_version: string;
   generated_at: string;
   read_only: boolean;

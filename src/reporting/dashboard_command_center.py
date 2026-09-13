@@ -482,10 +482,82 @@ def _review_comparison(reports_dir, now):
                 raise ValueError("review_ledger_identity_mismatch")
         if report.get("live_execution_eligible") is not False or report.get("automatic_live_scaling") is not False:
             raise ValueError("review_boundary_invalid")
+        frozen, _ = _json(study / "FROZEN.json", root)
+        if frozen:
+            if frozen.get("status") != "FROZEN" or frozen.get("identity") != identity:
+                raise ValueError("review_freeze_marker_invalid")
+            return {
+                **output,
+                "status": "frozen",
+                "report": report,
+                "freeze": frozen,
+                "frozen_predecessors": pointer.get("frozen_predecessors", []),
+            }
         freshness = _fresh(report.get("latest_observed_at"), now, 180)
         return {**output, **freshness, "status": "worker_failed" if worker and worker.get("ok") is False else freshness["status"],
                 "report": report, "frozen_predecessors": pointer.get("frozen_predecessors", [])}
     except (OSError, ValueError, sqlite3.Error) as exc:
+        return {**output, "status": "invalid", "reason": str(exc)[:200], "report": None}
+
+
+def _daily_trend_paper(reports_dir, now):
+    """Read only the explicitly selected, immutable daily-trend paper ledger."""
+    root = Path(reports_dir) / "daily_trend_paper"
+    output = {
+        "status": "missing",
+        "read_only": True,
+        "paper_only": True,
+        "live_order_effect": "none",
+        "live_execution_eligible": False,
+        "report": None,
+    }
+    try:
+        pointer, pointer_status = _json(root / "current.json", root)
+        if not pointer:
+            return {**output, "status": pointer_status}
+        directory = pointer.get("directory", "")
+        if not re.fullmatch(r"v5-daily-trend-paper-[a-z0-9-]+", directory):
+            raise ValueError("invalid_daily_trend_directory")
+        study = _safe(root / directory, root)
+        report, report_status = _json(study / "latest.json", root)
+        manifest, _ = _json(study / "manifest.json", root)
+        worker, _ = _json(study / "worker-status.json", root)
+        output.update(ledger=directory, worker=worker)
+        if not report:
+            return {**output, "status": report_status}
+        identity = pointer.get("identity")
+        if (
+            not identity
+            or pointer.get("experiment_id") != report.get("experiment_id")
+            or report.get("identity") != identity
+            or not manifest
+            or manifest.get("identity") != identity
+            or manifest.get("experiment_id") != report.get("experiment_id")
+        ):
+            raise ValueError("daily_trend_identity_mismatch")
+        if (
+            report.get("schema_version") != "v5.daily_trend_paper.v1"
+            or report.get("paper_only") is not True
+            or report.get("live_order_effect") != "none"
+            or report.get("live_execution_eligible") is not False
+            or report.get("automatic_live_scaling") is not False
+        ):
+            raise ValueError("daily_trend_boundary_invalid")
+        if worker and worker.get("identity") != identity:
+            raise ValueError("daily_trend_worker_identity_mismatch")
+        with closing(sqlite3.connect((study / "ledger.sqlite").resolve().as_uri() + "?mode=ro", uri=True)) as con:
+            row = con.execute("SELECT value FROM meta WHERE key='source_identity'").fetchone()
+            if not row or row[0] != identity:
+                raise ValueError("daily_trend_ledger_identity_mismatch")
+        frozen, _ = _json(study / "FROZEN.json", root)
+        if frozen:
+            if frozen.get("status") != "FROZEN" or frozen.get("identity") != identity:
+                raise ValueError("daily_trend_freeze_marker_invalid")
+            return {**output, "status": "frozen", "report": report, "freeze": frozen}
+        freshness = _fresh(report.get("observed_at"), now, 36 * 3600)
+        status = "worker_failed" if worker and worker.get("ok") is False else freshness["status"]
+        return {**output, **freshness, "status": status, "report": report}
+    except (OSError, ValueError, TypeError, sqlite3.Error) as exc:
         return {**output, "status": "invalid", "reason": str(exc)[:200], "report": None}
 
 
@@ -543,6 +615,7 @@ def build_command_center(*, config, paths, workspace: Path, now: float, observat
                                                    for reason, count in frequencies.most_common(20)],
                "health": health, "participation": participation,
                "review_comparison": _review_comparison(paths.reports_dir, now),
+               "daily_trend_paper": _daily_trend_paper(paths.reports_dir, now),
                "quant_lab": {"mode": "enforced" if enforced is True else "advisory" if enforced is False else "unknown",
                              "permission": qlab.get("raw_permission_decision", qlab.get("quant_lab_permission", qlab.get("permission"))),
                              "effective_permission": qlab.get("final_permission"), "source_mode": qlab.get("mode"),
