@@ -54,6 +54,8 @@ def test_all_cost_scenarios_share_inputs_and_restore_independent_accounts(tmp_pa
     assert report["live_execution_eligible"] is False
     assert set(report["scenarios"]) == {"30", "60", "120"}
     assert all(p["real_live_trades"] == 0 for scenario in report["scenarios"].values() for p in scenario.values())
+    assert all("independent_closed_trade_count" in p for scenario in report["scenarios"].values() for p in scenario.values())
+    assert all("exit_allocation_segment_count" in p for scenario in report["scenarios"].values() for p in scenario.values())
     assert all(p["paired_daily_block_bootstrap_95pct_delta_usdt"] is None for scenario in report["comparisons"].values() for p in scenario.values())
 
 

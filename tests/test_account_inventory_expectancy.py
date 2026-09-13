@@ -134,6 +134,30 @@ def test_partial_fills_of_same_orders_count_once(tmp_path):
     assert result["evidence_valid"] is True
 
 
+def test_one_exit_over_old_residual_and_new_inventory_is_one_independent_trade(tmp_path):
+    trade, _, guard = history(tmp_path)
+    trade(-2 * 86_400_000, "old", "buy", ".000262", "700")
+    trade(1000, "new", "buy", ".021442", "736")
+    trade(60 * 60_000, "close", "sell", ".021704", "730")
+
+    result = scan(guard)
+    assert result["closed_cycles"] == 1
+    assert result["independent_closed_trade_count"] == 1
+    assert result["inventory_allocation_segment_count"] == 2
+    assert result["closed_cycle_count_semantics"] == "unique_strategy_exit_order"
+    assert result["inventory_cost_allocation"] == "fifo_lots_proportional_by_consumed_base_quantity"
+    attribution = result["cycle_attributions"][0]
+    assert attribution["exit_order_id"] == "close"
+    assert attribution["entry_order_id"] == "new"
+    assert attribution["entry_order_ids"] == ["old", "new"]
+    assert attribution["allocation_segment_count"] == 2
+    assert result["fast_fail_closed_cycles"] == 1
+    expected_cost = Decimal(".000262") * Decimal("700") + Decimal(".021442") * Decimal("736")
+    expected_proceeds = Decimal(".021704") * Decimal("730")
+    assert result["closed_notional_usdt"] == pytest.approx(float(expected_cost))
+    assert result["net_pnl_sum_usdt"] == pytest.approx(float(expected_proceeds - expected_cost))
+
+
 @pytest.mark.parametrize("column,value", [("bal_chg", "NaN"), ("bal_chg", "999"), ("ord_id", "different")])
 def test_invalid_or_mismatched_cash_bill_is_not_verified(tmp_path, column, value):
     import sqlite3

@@ -97,6 +97,7 @@ class QuotePortfolio:
         fee_amount = (quantity if currency == base else notional) * self.fee
         fee_usdt = quantity * price * self.fee
         realized = Decimal(0)
+        campaign_started = False
         if side == "buy":
             received = quantity - (fee_amount if currency == base else 0)
             spent = notional + (fee_amount if currency == quote_ccy else 0)
@@ -105,19 +106,43 @@ class QuotePortfolio:
             self.cash -= spent
             if position is None:
                 position = {"symbol": symbol, "qty": Decimal(0), "cash_cost": Decimal(0),
-                            "entry_ts": number(now), "entry_fee_usdt": Decimal(0), "metadata": copy.deepcopy(intent.get("metadata", {}))}
+                            "entry_ts": number(now), "entry_fee_usdt": Decimal(0),
+                            "campaign_id": str(key), "metadata": copy.deepcopy(intent.get("metadata", {}))}
                 self.positions[symbol] = position
+                campaign_started = True
             elif position.get("management_status") == "residual_after_exit":
-                # A new executable campaign starts now; old dust and its cost are retained.
+                # A new executable campaign starts now. The prior campaign's
+                # residual quantity and cost remain economic inventory, while its
+                # price peak must never become the new campaign's trailing peak.
+                carried_qty, carried_cost = position["qty"], position["cash_cost"]
+                predecessor_campaign_id = position.get("campaign_id")
                 position["entry_ts"] = number(now)
-                position["metadata"] = {**copy.deepcopy(intent.get("metadata", {})), "carried_dust_cost_usdt": str(position["cash_cost"])}
+                position["campaign_id"] = str(key)
+                position["metadata"] = {
+                    **copy.deepcopy(intent.get("metadata", {})),
+                    "predecessor_campaign_id": predecessor_campaign_id,
+                    "carried_residual_quantity": str(carried_qty),
+                    "carried_residual_cost_usdt": str(carried_cost),
+                    "residual_cost_allocation": "proportional_by_consumed_base_quantity",
+                }
                 position["entry_fee_usdt"] = Decimal(0)
+                position.pop("highest_px", None)
+                position.pop("highest_px_campaign_id", None)
+                campaign_started = True
+            elif not position.get("campaign_id"):
+                # Backward-compatible labeling for an already active checkpoint.
+                # Versioned research activation never reuses such a checkpoint.
+                position["campaign_id"] = f"legacy:{symbol}:{position['entry_ts']}"
             position["management_status"] = "active"
             position["qty"] += received
             position["cash_cost"] += spent
             position["entry_fee_usdt"] += fee_usdt
             position["entry_price"] = position["cash_cost"] / position["qty"]
+            if campaign_started:
+                position["highest_px"] = max(position["entry_price"], price)
+                position["highest_px_campaign_id"] = position["campaign_id"]
         else:
+            campaign_id = str(position.get("campaign_id") or f"legacy:{symbol}:{position['entry_ts']}")
             consumed = quantity + (fee_amount if currency == base else 0)
             proceeds = notional - (fee_amount if currency == quote_ccy else 0)
             allocated_cost = position["cash_cost"] * consumed / position["qty"]
@@ -129,16 +154,20 @@ class QuotePortfolio:
             # Only an actually executed exit may leave an explicit residual. A price
             # decline below an entry budget never silently removes an active holding.
             position["management_status"] = "residual_after_exit" if residual else "active"
-            self.closed_lots.append({"symbol": symbol, "entry_ts": position["entry_ts"], "exit_ts": number(now),
+            self.closed_lots.append({"symbol": symbol, "campaign_id": campaign_id,
+                                     "entry_ts": position["entry_ts"], "exit_ts": number(now),
                                      "consumed_qty": consumed, "allocated_cost_usdt": allocated_cost,
                                      "net_pnl_usdt": realized, "reason": intent.get("reason"),
-                                     "campaign_closed": residual})
+                                     "campaign_closed": residual,
+                                     "residual_cost_allocation": "proportional_by_consumed_base_quantity"})
             if position["qty"] == 0:
                 del self.positions[symbol]
+        campaign_id = str(position.get("campaign_id") if position else "")
         fill = {"intent_id": key, "symbol": symbol, "side": side, "decision_ts": intent["decision_ts"],
                 "observed_at": number(now), "quote_ts": ts, "price": price, "quantity": quantity,
                 "notional_usdt": notional, "fee_currency": currency, "fee_amount": fee_amount,
                 "fee_usdt": fee_usdt, "realized_pnl_usdt": realized,
+                "campaign_id": campaign_id, "campaign_started": campaign_started,
                 "instrument_source_hash": row["instrument"].get("source_hash"), "live_order_effect": "none"}
         self.fills.append(fill)
         self.filled_ids.add(key)

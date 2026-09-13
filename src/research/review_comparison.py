@@ -75,7 +75,7 @@ def validate_frame(frame):
 class Comparison:
     def __init__(self, cfg, policy, experiment, *, root: Path, checkpoint=None):
         self.root, self.cfg, self.experiment = root, cfg, experiment
-        if experiment.get("schema_version") == "v5.review_comparison.v2":
+        if experiment.get("schema_version") in {"v5.review_comparison.v2", "v5.review_comparison.v3"}:
             validate_reference_contract(experiment.get("reference_contract"))
         self.policy = copy.deepcopy(policy)
         self.policy["initial_cash_usdt"] = experiment["initial_cash_usdt"]
@@ -290,6 +290,9 @@ def summarize(events, checkpoint, experiment, *, legacy_observation_integrity=No
               "fee_basis": "explicit_10bps_per_side_research_assumption_not_calibrated_fills"}
     result["reference_contract"] = experiment.get("reference_contract")
     result["decision_clock"] = experiment.get("decision_clock")
+    result["position_lifecycle_contract"] = experiment.get("position_lifecycle_contract")
+    result["trade_count_contract"] = experiment.get("trade_count_contract")
+    result["predecessor"] = experiment.get("predecessor")
     result["observation_integrity"] = integrity_report(checkpoint.get("metrics", {}))
     result["legacy_observation_integrity"] = copy.deepcopy(legacy_observation_integrity)
     result["reference_funnel"] = {}
@@ -333,16 +336,20 @@ def summarize(events, checkpoint, experiment, *, legacy_observation_integrity=No
                     utilized += seconds * float(prior["gross_exposure_usdt"]) / max(float(prior["equity_usdt"]), 1e-9)
                 prev_equity = equity
             # Aggregate partial exits of one opening campaign before the robustness check.
+            # campaign_id is independent of timestamps and survives checkpoint restore.
             campaigns, completed = {}, set()
             for lot in book.closed_lots:
-                key = (lot["symbol"], str(lot["entry_ts"]))
+                key = (lot["symbol"], str(lot.get("campaign_id") or lot["entry_ts"]))
                 campaigns[key] = campaigns.get(key, 0.) + float(lot["net_pnl_usdt"])
                 if lot.get("campaign_closed"):
                     completed.add(key)
             net = float(last["net_equity_increment_usdt"])
             realized = [value for key, value in campaigns.items() if key in completed]
             stats[name] = {**last, "actual_simulated_fills": len(book.fills), "real_live_trades": 0,
+                           "exit_allocation_segment_count": len(book.closed_lots),
+                           "independent_closed_trade_count": len(realized),
                            "closed_campaigns": len(realized), "partially_realized_open_campaigns": len(campaigns) - len(completed),
+                           "trade_count_semantics": "fills_are_executions; exit_segments_are_cost_allocations; independent_closed_trades_are_completed_campaign_ids",
                            "net_expectancy_per_realized_campaign_usdt": statistics.mean(realized) if realized else None,
                            "maximum_drawdown_fraction": max(float(x["drawdown_fraction"]) for x in curve),
                            "net_equity_without_largest_profitable_campaign_usdt": net - max([0., *realized]),
@@ -392,7 +399,15 @@ def summarize(events, checkpoint, experiment, *, legacy_observation_integrity=No
                 continue
             key = (control["symbol"], event["observed_at"])
             fill = next((f for f in control_book.fills if f["side"] == "buy" and f["symbol"] == key[0] and f["decision_ts"] == key[1]), None)
-            lots = [lot for lot in control_book.closed_lots if fill and lot["symbol"] == key[0] and lot["entry_ts"] == fill["observed_at"]]
+            lots = [
+                lot for lot in control_book.closed_lots
+                if fill and lot["symbol"] == key[0]
+                and (
+                    lot.get("campaign_id") == fill.get("campaign_id")
+                    if fill.get("campaign_id")
+                    else lot["entry_ts"] == fill["observed_at"]
+                )
+            ]
             completed = any(lot.get("campaign_closed") for lot in lots)
             pairs[str(key)] = {"symbol": key[0], "decision_ts": key[1], "advice_id": treatment["reference_advice_id"],
                                "control_entry_executed": fill is not None, "campaign_completed": completed,

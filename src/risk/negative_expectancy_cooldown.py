@@ -324,6 +324,10 @@ class NegativeExpectancyCooldown:
                 "inventory_remaining_qty": stat.get("inventory_remaining_qty"),
                 "inventory_remaining_known_cost_usdt": stat.get("inventory_remaining_known_cost_usdt"),
                 "inventory_unknown_cost_qty": stat.get("inventory_unknown_cost_qty"),
+                "independent_closed_trade_count": int(stat.get("independent_closed_trade_count") or 0),
+                "inventory_allocation_segment_count": int(stat.get("inventory_allocation_segment_count") or 0),
+                "closed_cycle_count_semantics": stat.get("closed_cycle_count_semantics"),
+                "inventory_cost_allocation": stat.get("inventory_cost_allocation"),
                 "cycle_attributions": list(cycle_attributions) if isinstance(cycle_attributions, list) else [],
             }
         payload = {
@@ -753,6 +757,7 @@ class NegativeExpectancyCooldown:
                         or expanded.get("entryOrdId")
                         or ""
                     ),
+                    "entry_order_ids": list(expanded.get("entry_order_ids") or []),
                     "exit_order_id": str(
                         expanded.get("exit_order_id")
                         or expanded.get("exit_ord_id")
@@ -775,6 +780,9 @@ class NegativeExpectancyCooldown:
                     ),
                     "exit_reason": str(expanded.get("exit_reason") or expanded.get("reason") or ""),
                     "exit_priority": str(expanded.get("exit_priority") or ""),
+                    "allocation_segment_count": int(expanded.get("allocation_segment_count") or 1),
+                    "inventory_cost_allocation": str(expanded.get("inventory_cost_allocation") or ""),
+                    "primary_entry_selection": str(expanded.get("primary_entry_selection") or ""),
                     "net_bps": float(net_bps) if net_bps is not None else None,
                     "attribution": attrs,
                 }
@@ -2300,7 +2308,7 @@ class NegativeExpectancyCooldown:
         output = {}
         for sym, result in inventory.items():
             st = self._empty_expectancy_accumulator()
-            for cycle in result["cycles"]:
+            for cycle in result["independent_trades"]:
                 gross, net, cost = map(float, (cycle["gross_pnl"], cycle["net_pnl"], cycle["cost"]))
                 entry_ts, exit_ts = cycle["entry_ts_ms"], cycle["exit_ts_ms"]
                 st["closed_cycles"] += 1
@@ -2315,7 +2323,11 @@ class NegativeExpectancyCooldown:
                 if reason in {"swing_min_hold_exit_block", "swing_atr_early_exit_guard"}:
                     reason = meta.get("original_exit_reason") or meta.get("source_reason") or reason
                 meta.update(entry_order_id=cycle["entry_order_id"], exit_order_id=cycle["exit_order_id"],
+                            entry_order_ids=cycle["entry_order_ids"],
                             roundtrip_id=cycle["entry_order_id"] + ":" + cycle["exit_order_id"],
+                            allocation_segment_count=cycle["allocation_segment_count"],
+                            inventory_cost_allocation=cycle["inventory_cost_allocation"],
+                            primary_entry_selection=cycle["primary_entry_selection"],
                             qty=str(cycle["qty"]), entry_ts=self._ms_to_iso(entry_ts), exit_ts=self._ms_to_iso(exit_ts),
                             hold_hours=(exit_ts - entry_ts) / 3_600_000,
                             hold_minutes=(exit_ts - entry_ts) / 60_000, exit_reason=reason)
@@ -2328,10 +2340,13 @@ class NegativeExpectancyCooldown:
             output[sym] = self._build_expectancy_row(
                 **st, source="account_inventory_verified" if verified else "account_inventory_unverified",
                 degraded_reason="; ".join(reasons))
-            output[sym].update({k: v for k, v in result.items() if k not in {"cycles", "issues"}})
+            output[sym].update({
+                k: v for k, v in result.items()
+                if k not in {"cycles", "independent_trades", "issues"}
+            })
             output[sym]["evidence_valid"] = verified
             output[sym]["inventory_issues"] = result["issues"]
-            output[sym]["attribution_contract"] = "account-inventory-v1"
+            output[sym]["attribution_contract"] = "account-inventory-v2"
             if reasons:
                 logger.warning("NegativeExpectancy inventory attribution incomplete: %s %s", sym, "; ".join(reasons))
         return output

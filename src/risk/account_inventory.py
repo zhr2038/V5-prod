@@ -16,6 +16,7 @@ from pathlib import Path
 
 ZERO = Decimal(0)
 EPS = Decimal("1e-12")
+INVENTORY_COST_ALLOCATION = "fifo_lots_proportional_by_consumed_base_quantity"
 
 
 def dec(value):
@@ -43,6 +44,49 @@ def read_rows(path: Path, table: str):
     with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)) as con:
         con.row_factory = sqlite3.Row
         return [dict(row) for row in con.execute(f"SELECT * FROM {table} ORDER BY ts_ms")]
+
+
+def independent_exit_trades(cycles):
+    """Aggregate FIFO cost-allocation segments by one strategy exit order.
+
+    A single sell order can consume a tiny old residual and the current entry.
+    Those are two accounting segments, but only one independently initiated exit
+    trade. The largest allocated-cost entry is the primary entry for holding-time
+    diagnostics; every segment remains attached for audit.
+    """
+    grouped = {}
+    for index, cycle in enumerate(cycles):
+        exit_id = str(cycle.get("exit_order_id") or f"missing-exit-id:{index}")
+        grouped.setdefault(exit_id, []).append(cycle)
+
+    trades = []
+    for exit_id, segments in grouped.items():
+        ordered = sorted(segments, key=lambda row: (int(row["entry_ts_ms"]), str(row["entry_order_id"])))
+        primary = max(
+            ordered,
+            key=lambda row: (dec(row["cost"]), dec(row["qty"]), int(row["entry_ts_ms"])),
+        )
+        entry_ids = list(dict.fromkeys(str(row["entry_order_id"]) for row in ordered))
+        trades.append({
+            "entry_order_id": str(primary["entry_order_id"]),
+            "entry_order_ids": entry_ids,
+            "primary_entry_selection": "largest_allocated_cost_then_quantity_then_latest_entry",
+            "exit_order_id": exit_id,
+            "entry_ts_ms": int(primary["entry_ts_ms"]),
+            "earliest_allocation_entry_ts_ms": min(int(row["entry_ts_ms"]) for row in ordered),
+            "exit_ts_ms": max(int(row["exit_ts_ms"]) for row in ordered),
+            "qty": sum((dec(row["qty"]) for row in ordered), ZERO),
+            "cost": sum((dec(row["cost"]) for row in ordered), ZERO),
+            "gross_pnl": sum((dec(row["gross_pnl"]) for row in ordered), ZERO),
+            "net_pnl": sum((dec(row["net_pnl"]) for row in ordered), ZERO),
+            "meta": dict(primary.get("meta") or {}),
+            "allocation_segment_count": len(ordered),
+            "allocation_segments_with_entry_before_primary": sum(
+                int(int(row["entry_ts_ms"]) < int(primary["entry_ts_ms"])) for row in ordered
+            ),
+            "inventory_cost_allocation": INVENTORY_COST_ALLOCATION,
+        })
+    return sorted(trades, key=lambda row: (row["exit_ts_ms"], row["exit_order_id"]))
 
 
 def attribute_inventory(*, fills, bills, since_ms, allowed_symbols, metadata, eligible):
@@ -182,8 +226,15 @@ def attribute_inventory(*, fills, bills, since_ms, allowed_symbols, metadata, el
                     lots.pop(0)
             if remaining > ZERO and is_strategy:
                 issue("missing_entry_inventory", ts)
+        allocation_segments = list(cycles.values())
+        independent_trades = independent_exit_trades(allocation_segments)
         by_symbol[symbol] = {
-            "cycles": list(cycles.values()), "issues": issues, "inventory_adjustments": adjustments,
+            "cycles": allocation_segments, "independent_trades": independent_trades,
+            "inventory_allocation_segment_count": len(allocation_segments),
+            "independent_closed_trade_count": len(independent_trades),
+            "closed_cycle_count_semantics": "unique_strategy_exit_order",
+            "inventory_cost_allocation": INVENTORY_COST_ALLOCATION,
+            "issues": issues, "inventory_adjustments": adjustments,
             "inventory_remaining_qty": str(sum((lot["qty"] for lot in lots), ZERO)),
             "inventory_remaining_known_cost_usdt": str(sum((lot["cost"] or ZERO for lot in lots), ZERO)),
             "inventory_unknown_cost_qty": str(sum((lot["qty"] for lot in lots if lot["cost"] is None), ZERO)),
