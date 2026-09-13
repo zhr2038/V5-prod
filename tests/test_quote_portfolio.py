@@ -44,6 +44,30 @@ def test_base_fee_and_quantity_steps_retain_residual_dust_and_cost_basis():
     assert mark["unrealized_pnl_usdt"] < 0
 
 
+def test_residual_reentry_starts_a_new_campaign_without_inheriting_the_old_peak():
+    book = QuotePortfolio(initial_cash=100, fee_bps=10, slippage_bps=0)
+    book.fill(intent(key="old-entry"), row(buy_fee="BNB"), now=101)
+    old = book.positions["BNB/USDT"]
+    old["highest_px"] = Decimal("150")
+    old["highest_px_campaign_id"] = "old-entry"
+
+    book.fill(intent(side="sell", key="old-exit", decision=102), row(now=103), now=103)
+    residual_qty = book.positions["BNB/USDT"]["qty"]
+    residual_cost = book.positions["BNB/USDT"]["cash_cost"]
+    assert book.positions["BNB/USDT"]["management_status"] == "residual_after_exit"
+
+    new_fill = book.fill(intent(key="new-entry", decision=104, notional=10), row(now=105), now=105)
+    current = book.positions["BNB/USDT"]
+    assert current["campaign_id"] == "new-entry"
+    assert current["entry_ts"] == Decimal("105")
+    assert current["highest_px_campaign_id"] == "new-entry"
+    assert current["highest_px"] == max(current["entry_price"], new_fill["price"])
+    assert current["highest_px"] < Decimal("150")
+    assert Decimal(current["metadata"]["carried_residual_quantity"]) == residual_qty
+    assert Decimal(current["metadata"]["carried_residual_cost_usdt"]) == residual_cost
+    assert current["metadata"]["residual_cost_allocation"] == "proportional_by_consumed_base_quantity"
+
+
 def test_independent_books_do_not_share_cash_positions_fills_or_peak():
     books = [QuotePortfolio(initial_cash=100, fee_bps=10, slippage_bps=5) for _ in range(2)]
     books[0].fill(intent(), row(), now=101)

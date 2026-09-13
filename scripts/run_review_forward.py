@@ -9,6 +9,15 @@ from src.reporting.participation_runtime import _save_report
 from src.research.review_forward import collect, process, source_identity
 
 
+SUPPORTED_EXPERIMENT_SCHEMAS = {"v5.review_comparison.v2", "v5.review_comparison.v3"}
+
+
+def require_writable_experiment(root):
+    marker = root / "FROZEN.json"
+    if marker.exists():
+        raise ValueError("frozen_research_experiment_is_read_only")
+
+
 def main():
     import fcntl
 
@@ -24,14 +33,18 @@ def main():
     with (root / "worker.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
+            require_writable_experiment(root)
             config_path = project / "configs/live_prod.yaml"
             cfg = load_config(str(config_path), env_path=None)
             experiment_path = (project / args.experiment).resolve()
             if not experiment_path.is_relative_to(project / "configs/research"):
                 raise ValueError("frozen repository research configuration required")
             experiment = json.loads(experiment_path.read_text(encoding="utf-8"))
-            if experiment.get("schema_version") != "v5.review_comparison.v2" or not experiment.get("reference_contract"):
-                raise ValueError("new clock and valuation require a new v2 experiment; v1 ledgers remain frozen")
+            if experiment.get("schema_version") not in SUPPORTED_EXPERIMENT_SCHEMAS or not experiment.get("reference_contract"):
+                raise ValueError("versioned clock and valuation contract required; old ledgers remain frozen")
+            if experiment.get("schema_version") == "v5.review_comparison.v3":
+                if not experiment.get("position_lifecycle_contract") or not experiment.get("trade_count_contract"):
+                    raise ValueError("v3 campaign lifecycle and trade count contracts required")
             policy = json.loads((project / "configs/research/participation_policy_v1.json").read_text(encoding="utf-8"))
             identity = source_identity(project, experiment, config_path)
             frame = collect(symbols=policy["symbols"], root=root, reference_path=project / "reports/decision_reference/receipts.sqlite",

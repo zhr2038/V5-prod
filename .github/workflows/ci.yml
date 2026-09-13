@@ -20,11 +20,18 @@ jobs:
         run: >
           python -m ruff check
           scripts/cost_probe_live_once.py
+          scripts/run_review_forward.py
+          src/research/original_v5_adapter.py
+          src/research/quote_portfolio.py
+          src/research/review_comparison.py
           src/risk/negative_expectancy_cooldown.py
           src/risk/account_inventory.py
           tests/test_cost_probe_live_once.py
           tests/test_negative_expectancy_cooldown.py
           tests/test_account_inventory_expectancy.py
+          tests/test_quote_portfolio.py
+          tests/test_review_campaign_lineage.py
+          tests/test_review_comparison.py
           tests/test_prod_systemd_units.py
       - name: Test guarded cost probe, release evidence, and live gate paths
         run: >
@@ -55,6 +62,7 @@ jobs:
           tests/test_review_cold_start.py
           tests/test_review_continuity.py
           tests/test_review_continuation.py
+          tests/test_review_campaign_lineage.py
           tests/test_review_acceptance.py
           tests/test_review_report_view.py
           tests/test_decision_reference_consumer.py

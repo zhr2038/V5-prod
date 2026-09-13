@@ -86,8 +86,15 @@ class OriginalV5Adapter:
             if qty <= 0:
                 continue
             avg = float(value.get("entry_price", value["cash_cost"] / value["qty"]))
-            highest = max(float(value.get("highest_px", avg)), price)
+            campaign_id = str(value.get("campaign_id") or "")
+            peak_campaign_id = str(value.get("highest_px_campaign_id") or "")
+            stored_highest = float(value.get("highest_px", avg))
+            if campaign_id and peak_campaign_id != campaign_id:
+                stored_highest = avg
+            highest = max(avg, stored_highest, price)
             value["highest_px"] = number(highest)
+            if campaign_id:
+                value["highest_px_campaign_id"] = campaign_id
             iso = datetime.fromtimestamp(float(value["entry_ts"]), timezone.utc).isoformat()
             positions.append(Position(symbol=symbol, qty=qty, avg_px=avg, entry_ts=iso,
                                       highest_px=highest, last_update_ts=iso, last_mark_px=price,
