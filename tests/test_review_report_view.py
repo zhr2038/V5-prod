@@ -45,6 +45,13 @@ def test_worker_failure_and_future_report_stay_explicit(tmp_path):
     assert _review_comparison(tmp_path, 1010)['status'] == 'worker_failed'
 
 
+def test_frozen_current_review_is_historical_even_when_its_last_report_is_fresh(tmp_path):
+    directory = study(tmp_path)
+    write(directory / 'FROZEN.json', {'status': 'FROZEN', 'identity': 'frozen'})
+    result = _review_comparison(tmp_path, 1010)
+    assert result['status'] == 'frozen' and result['report'] is not None
+
+
 def test_escaping_pointer_does_not_read_other_account(tmp_path):
     root = tmp_path / 'review_comparison'
     write(root / 'current.json', {'directory': '../participation', 'identity': 'frozen'})

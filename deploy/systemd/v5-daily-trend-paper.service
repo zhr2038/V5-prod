@@ -1,0 +1,18 @@
+[Unit]
+Description=V5 frozen BTC/ETH daily-trend paper observation (public reads only)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/clawd/v5-prod
+Environment=PYTHONPATH=/home/ubuntu/clawd/v5-prod
+ExecStart=/home/ubuntu/clawd/v5-prod/.venv/bin/python scripts/run_daily_trend_paper.py --config configs/research/daily_trend_paper_v1.json --output /home/ubuntu/clawd/v5-prod/reports/daily_trend_paper/v5-daily-trend-paper-20260914-v1
+TimeoutStartSec=90
+MemoryMax=256M
+CPUQuota=25%
+Nice=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

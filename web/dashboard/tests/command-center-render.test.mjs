@@ -63,6 +63,25 @@ function fixture() {
         ledger: { status: 'observed', observed_at: STAMP, ok: true },
       },
       participation: { enabled: true, mode: 'forward_paper', status: 'observed', observed_at: STAMP, live_order_effect: 'none', live_promotion_allowed: false, entry_count: 0, closed_trade_count: 0, net_realized_pnl_usdt: 0, equity_usdt: 106.86, valuation_status: 'flat_cash', curve: [] },
+      daily_trend_paper: {
+        status: 'observed', ledger: 'v5-daily-trend-paper-20260914-v1', worker: { ok: true, observed_at: NOW / 1000 },
+        report: {
+          schema_version: 'v5.daily_trend_paper.v1', experiment_id: 'v5-daily-trend-paper-20260914-v1', identity: 'daily-identity',
+          status: 'WAITING_FOR_START', finalized: false, observed_at: NOW / 1000, completed_bar_ts: NOW / 1000 - 86400,
+          decision_ts: NOW / 1000, initial_capital_usdt: 100, total_equity_usdt: 100, net_equity_increment_usdt: 0,
+          modeled_fee_usdt: 0, explicit_roundtrip_cost_bps: 30, observed_maximum_drawdown_fraction: 0,
+          observation_gap_days: 0, cumulative_missed_decision_days: 0, observation_count: 0,
+          evidence_status: 'COLLECTING_FORWARD_EVIDENCE',
+          start_utc: '2026-09-14T00:00:00Z', review_utc: '2026-12-13T00:00:00Z', paper_only: true,
+          live_order_effect: 'none', live_execution_eligible: false, automatic_live_scaling: false,
+          actions: [],
+          sleeves: Object.fromEntries(['BTC/USDT', 'ETH/USDT'].map(symbol => [symbol, {
+            signal: { long: false, close: 100, sma: 101, momentum_return: -0.01, sma_days: 100, momentum_days: 30 },
+            portfolio: { equity_usdt: 50, net_equity_increment_usdt: 0, gross_exposure_usdt: 0, cash_usdt: 50, drawdown_fraction: 0 },
+            observed_maximum_drawdown_fraction: 0, actual_simulated_fill_count: 0, independent_closed_campaign_count: 0,
+          }])),
+        },
+      },
       quant_lab: { mode: 'advisory', permission: 'ABORT', permission_gate_enforced: false },
     },
     commandFailed: false, commandReceivedAt: NOW, primaryReceivedAt: NOW,
@@ -97,6 +116,15 @@ test('real empty positions and observed zeros remain valid without granting live
   assert.match(html, /0\.00%/);
   assert.match(observationStep(html), /^<li class="complete">/);
   assert.match(html, /尚未授权，不会自动扩大实盘风险/);
+});
+
+test('the active paper section shows only the frozen daily rule and explicit no-live boundary', () => {
+  const html = section(render(fixture()), 'participation');
+  assert.match(html, /BTC \/ ETH 日线趋势/);
+  assert.match(html, /当前唯一新增的前瞻实验/);
+  assert.match(html, /日线趋势验证/);
+  assert.match(html, /不读取交易密钥、不下单、不改变真实仓位/);
+  assert.doesNotMatch(html, /独立 A \/ B \/ C \/ D 对照/);
 });
 
 test('unobserved positions never claim current flatness, including retained position rows', () => {

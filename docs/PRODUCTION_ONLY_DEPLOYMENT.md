@@ -106,9 +106,11 @@ The production-only systemd install covers:
 - `v5-ledger.timer`
 - `v5-cost-rollup-real.user.service`
 - `v5-cost-rollup-real.user.timer`
+- `v5-daily-trend-paper.service`
+- `v5-daily-trend-paper.timer`
 
-Operational timers for sentiment refresh, reconcile, and ledger are enabled by default.
-ML training, model promotion, and tuned XGBoost shadow timers are research-only and remain disabled in `live_prod`.
+Operational timers for sentiment refresh, reconcile, and ledger are enabled by default. The isolated daily-trend paper timer is also enabled; it uses public market reads and has no live-order effect.
+The superseded participation quote worker and A/B/C/D review timer remain disabled. ML training, model promotion, and tuned XGBoost shadow timers are research-only and remain disabled in `live_prod`.
 
 Live trading timers remain explicit operator choices:
 

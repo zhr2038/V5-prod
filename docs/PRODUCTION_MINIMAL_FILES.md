@@ -71,6 +71,8 @@ Safety and support:
 - `deploy/systemd/v5-cost-rollup-real.user.timer`
 - `deploy/systemd/v5-spread-rollup.service`
 - `deploy/systemd/v5-spread-rollup.timer`
+- `deploy/systemd/v5-daily-trend-paper.service`
+- `deploy/systemd/v5-daily-trend-paper.timer`
 - `deploy/systemd/v5-event-driven.service`
 - `deploy/systemd/v5-event-driven.timer`
 - `deploy/install_systemd.sh`

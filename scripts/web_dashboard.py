@@ -8334,7 +8334,8 @@ def api_command_center():
         return _json_internal_error_response(
             exc, schema_version='v5.command_center.v1', read_only=True, status='unavailable',
             latest_decision={}, candidates=[], window_72h={}, blockers=[], health={},
-            participation={'status': 'unavailable', 'enabled': None}, quant_lab={},
+            participation={'status': 'unavailable', 'enabled': None},
+            daily_trend_paper={'status': 'unavailable', 'report': None}, quant_lab={},
             warnings=['command_center_unavailable'],
         )
 

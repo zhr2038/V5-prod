@@ -133,6 +133,7 @@ def test_install_systemd_user_production_only_supports_shadow_root_and_required_
     prod_unit = (units_dir / "v5-prod.user.service").read_text(encoding="utf-8")
     trade_monitor_unit = (units_dir / "v5-trade-monitor.service").read_text(encoding="utf-8")
     trade_monitor_timer = (units_dir / "v5-trade-monitor.timer").read_text(encoding="utf-8")
+    daily_trend_timer = (units_dir / "v5-daily-trend-paper.timer").read_text(encoding="utf-8")
     shadow_unit = (units_dir / "v5-shadow-tuned-xgboost.user.service").read_text(encoding="utf-8")
     systemctl_calls = systemctl_log.read_text(encoding="utf-8")
 
@@ -140,10 +141,15 @@ def test_install_systemd_user_production_only_supports_shadow_root_and_required_
     assert "User=admin" not in prod_unit
     assert _bash_path(project_root) in trade_monitor_unit
     assert "Unit=v5-trade-monitor.service" in trade_monitor_timer
+    assert "Unit=v5-daily-trend-paper.service" in daily_trend_timer
     assert "/srv/shadow-runtime" in shadow_unit
     assert "--user enable --now v5-trade-monitor.timer" in systemctl_calls
     assert "--user enable --now v5-quant-lab-selfcheck.timer" in systemctl_calls
     assert "--user enable --now v5-spread-rollup.timer" in systemctl_calls
+    assert "--user enable --now v5-daily-trend-paper.timer" in systemctl_calls
+    assert "--user disable --now v5-review-forward.timer" in systemctl_calls
+    assert "--user disable --now v5-review-forward.service" in systemctl_calls
+    assert "--user disable --now v5-participation-quotes.service" in systemctl_calls
     assert "--user restart v5-web-dashboard.service" in systemctl_calls
     assert "--user enable --now v5-shadow-tuned-xgboost.user.timer" not in systemctl_calls
     assert "--user disable --now v5-shadow-tuned-xgboost.user.timer" in systemctl_calls

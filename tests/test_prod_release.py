@@ -305,6 +305,12 @@ def test_production_unit_mappings_include_trade_monitor() -> None:
     assert mappings["v5-trade-monitor.timer"] == "v5-trade-monitor.timer"
 
 
+def test_production_unit_mappings_include_daily_trend_paper() -> None:
+    mappings = dict(PRODUCTION_USER_UNIT_MAPPINGS)
+    assert mappings["v5-daily-trend-paper.service"] == "v5-daily-trend-paper.service"
+    assert mappings["v5-daily-trend-paper.timer"] == "v5-daily-trend-paper.timer"
+
+
 def test_shadow_sync_items_cover_shadow_runtime_without_dashboard_payload() -> None:
     assert "main.py" in SHADOW_SYNC_ITEMS
     assert "configs" in SHADOW_SYNC_ITEMS
