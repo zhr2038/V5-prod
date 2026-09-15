@@ -111,11 +111,25 @@ def _should_upload(sftp: paramiko.SFTPClient, local_path: Path, remote_path: str
         remote_stat = sftp.stat(remote_path)
     except FileNotFoundError:
         return True
+    if stat.S_IMODE(int(remote_stat.st_mode)) != _file_mode(local_path):
+        return True
     if int(remote_stat.st_size) != int(local_stat.st_size):
         return True
     if int(getattr(remote_stat, "st_mtime", -1)) == int(local_stat.st_mtime):
         return False
     return not _remote_file_matches(sftp, local_path, remote_path)
+
+
+def _assert_in_place_sync_root(sftp: paramiko.SFTPClient, remote_root: str) -> None:
+    try:
+        remote_stat = sftp.lstat(remote_root)
+    except FileNotFoundError:
+        return
+    if stat.S_ISLNK(int(remote_stat.st_mode)):
+        raise RuntimeError(
+            f"refusing in-place sync through symbolic link: {remote_root}; "
+            "use deploy/publish_prod_release.py to stage and atomically switch an immutable release"
+        )
 
 
 def _should_restart_web_dashboard(changed_paths: Iterable[str]) -> bool:
@@ -337,6 +351,7 @@ def _validate_units(
     service_user: str,
     ssh_user: str,
     *,
+    remote_root: str,
     enable_prod_timer: bool,
     enable_event_driven_timer: bool,
 ) -> str:
@@ -386,6 +401,7 @@ def _validate_units(
     if enable_prod_timer:
         checks.extend(
             [
+                f"test -x {shlex.quote(posixpath.join(remote_root, 'scripts/run_hourly_live_window.sh'))}",
                 "test \"$(systemctl --user is-active v5-prod.user.timer)\" = active",
                 "systemctl --user show v5-prod.user.timer --property=UnitFileState",
             ]
@@ -446,6 +462,7 @@ def main() -> None:
     client.connect(**connect_kwargs)
     try:
         sftp = client.open_sftp()
+        _assert_in_place_sync_root(sftp, remote_root)
         _ensure_remote_dir(sftp, remote_root)
         with production_snapshot(workspace_root) as snapshot_root:
             uploaded, skipped, rel_paths = _upload_files(sftp, snapshot_root, remote_root)
@@ -455,6 +472,7 @@ def main() -> None:
             shadow_skipped = 0
             shadow_pruned: list[str] = []
             if not args.skip_shadow_sync:
+                _assert_in_place_sync_root(sftp, shadow_root)
                 _ensure_remote_dir(sftp, shadow_root)
                 shadow_uploaded, shadow_skipped, _shadow_rel_paths = _upload_files(
                     sftp,
@@ -497,6 +515,7 @@ def main() -> None:
                     client,
                     service_user,
                     args.user,
+                    remote_root=remote_root,
                     enable_prod_timer=args.enable_prod_timer,
                     enable_event_driven_timer=args.enable_event_driven_timer,
                 )
