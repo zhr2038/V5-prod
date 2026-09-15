@@ -401,6 +401,7 @@ class _FakeSFTP:
         self.chmod_calls: list[tuple[str, int]] = []
         self.utime_calls: list[tuple[str, tuple[int, int]]] = []
         self.created_dirs: list[str] = []
+        self.stat_calls: list[str] = []
         self.listdir_calls: list[str] = []
 
     def _norm(self, path: str) -> str:
@@ -413,6 +414,7 @@ class _FakeSFTP:
 
     def stat(self, path: str):
         normalized = self._norm(path)
+        self.stat_calls.append(normalized)
         if normalized in self.files:
             return _FakeAttr(
                 normalized.rsplit("/", 1)[-1],
@@ -558,6 +560,17 @@ def test_upload_files_defers_web_dist_html_until_after_assets(tmp_path: Path) ->
         "/remote/web/dist/assets/index-new.js",
         "/remote/web/static/app.js",
     ]
+
+
+def test_upload_files_caches_remote_directory_checks(tmp_path: Path) -> None:
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "one.py").write_text("one\n", encoding="utf-8")
+    (tmp_path / "scripts" / "two.py").write_text("two\n", encoding="utf-8")
+    fake_sftp = _FakeSFTP({})
+
+    _upload_files(fake_sftp, tmp_path, "/remote", items=("scripts",))
+
+    assert fake_sftp.stat_calls.count("/remote/scripts") == 1
 
 
 def test_prune_remote_files_removes_stale_production_files_only(tmp_path: Path) -> None:

@@ -62,7 +62,12 @@ def _remote_join(root: str, rel_path: Path) -> str:
     return "/".join([root.rstrip("/"), *parts])
 
 
-def _ensure_remote_dir(sftp: paramiko.SFTPClient, remote_dir: str) -> None:
+def _ensure_remote_dir(
+    sftp: paramiko.SFTPClient,
+    remote_dir: str,
+    *,
+    known_dirs: set[str] | None = None,
+) -> None:
     parts = []
     if remote_dir.startswith("/"):
         prefix = "/"
@@ -73,10 +78,14 @@ def _ensure_remote_dir(sftp: paramiko.SFTPClient, remote_dir: str) -> None:
     for segment in segments:
         parts.append(segment)
         candidate = prefix + "/".join(parts)
+        if known_dirs is not None and candidate in known_dirs:
+            continue
         try:
             sftp.stat(candidate)
         except FileNotFoundError:
             sftp.mkdir(candidate)
+        if known_dirs is not None:
+            known_dirs.add(candidate)
 
 
 def _file_mode(path: Path) -> int:
@@ -161,6 +170,7 @@ def _upload_files(
     uploaded = 0
     skipped = 0
     rel_paths: list[str] = []
+    known_dirs: set[str] = set()
     local_paths = sorted(
         iter_production_files(workspace_root, items=items),
         key=lambda path: _upload_order_key(path, workspace_root),
@@ -169,7 +179,7 @@ def _upload_files(
         rel_path = local_path.relative_to(workspace_root)
         remote_path = _remote_join(remote_root, rel_path)
         parent = remote_path.rsplit("/", 1)[0]
-        _ensure_remote_dir(sftp, parent)
+        _ensure_remote_dir(sftp, parent, known_dirs=known_dirs)
         if not _should_upload(sftp, local_path, remote_path):
             skipped += 1
             continue
