@@ -10,6 +10,8 @@ import shlex
 import stat
 import subprocess
 import sys
+import tarfile
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,7 +37,6 @@ from deploy.sync_prod_release import (
     _resolve_service_user,
     _resolve_shadow_root,
     _run,
-    _upload_files,
     _validate_units,
 )
 from scripts.verify_release_manifest import verify
@@ -188,6 +189,66 @@ def _write_remote_file(
         if _remote_lstat(sftp, remote_path) is not None:
             raise
         sftp.rename(temporary, remote_path)
+
+
+def _build_release_archive(
+    snapshot_root: Path,
+    relative_paths: list[str],
+    archive_path: Path,
+) -> str:
+    with tarfile.open(archive_path, "w:gz") as archive:
+        for relative in relative_paths:
+            local_path = snapshot_root / relative
+            info = tarfile.TarInfo(relative)
+            local_stat = local_path.stat()
+            info.size = local_stat.st_size
+            info.mode = _file_mode(local_path)
+            info.mtime = int(local_stat.st_mtime)
+            info.uid = 0
+            info.gid = 0
+            info.uname = ""
+            info.gname = ""
+            with local_path.open("rb") as handle:
+                archive.addfile(info, handle)
+    return _sha256_file(archive_path)
+
+
+def _upload_release_archive(
+    client: paramiko.SSHClient,
+    sftp: paramiko.SFTPClient,
+    snapshot_root: Path,
+    *,
+    release_root: str,
+    release_target: str,
+    relative_paths: list[str],
+) -> str:
+    remote_archive = posixpath.join(
+        release_root,
+        f".{posixpath.basename(release_target)}.tar.gz-{uuid.uuid4().hex[:12]}",
+    )
+    with tempfile.TemporaryDirectory(prefix="v5-release-upload-") as temp_dir:
+        local_archive = Path(temp_dir) / "release.tar.gz"
+        archive_sha256 = _build_release_archive(snapshot_root, relative_paths, local_archive)
+        sftp.put(str(local_archive), remote_archive)
+    sftp.chmod(remote_archive, 0o600)
+    try:
+        _ensure_remote_dir(sftp, release_target)
+        expected_count = len(relative_paths)
+        command = " && ".join(
+            (
+                f"tar --no-same-owner -xzf {shlex.quote(remote_archive)} -C {shlex.quote(release_target)}",
+                f"test \"$(find {shlex.quote(release_target)} -type f | wc -l)\" -eq {expected_count}",
+            )
+        )
+        code, out, err = _run(client, command)
+        if code != 0:
+            raise RuntimeError(f"release archive extraction failed\nSTDOUT:\n{out}\nSTDERR:\n{err}")
+    finally:
+        try:
+            sftp.remove(remote_archive)
+        except FileNotFoundError:
+            pass
+    return archive_sha256
 
 
 def _link_runtime_entries(
@@ -390,18 +451,16 @@ def main() -> None:
                 previous_manifest_bytes=previous_manifest_bytes,
                 previous_target=previous_target,
             )
-            _ensure_remote_dir(sftp, release_target)
-            uploaded, skipped, changed_paths = _upload_files(
+            changed_paths = sorted(manifest["files"])
+            archive_sha256 = _upload_release_archive(
+                client,
                 sftp,
                 snapshot_root,
-                release_target,
-                items=RELEASE_SYNC_ITEMS,
+                release_root=release_root,
+                release_target=release_target,
+                relative_paths=changed_paths,
             )
-            if skipped or uploaded != len(manifest["files"]):
-                raise RuntimeError(
-                    "new release upload was not complete: "
-                    f"uploaded={uploaded} skipped={skipped} expected={len(manifest['files'])}"
-                )
+            uploaded = len(changed_paths)
             _link_runtime_entries(sftp, release_target, runtime_sources)
             manifest_payload = (
                 json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
@@ -449,6 +508,7 @@ def main() -> None:
                     "previous_target": previous_target,
                     "release_target": release_target,
                     "uploaded_files": uploaded,
+                    "archive_sha256": archive_sha256,
                     "first_file": changed_paths[0] if changed_paths else None,
                     "last_file": changed_paths[-1] if changed_paths else None,
                     "manifest_sha256": _sha256_bytes(manifest_payload),

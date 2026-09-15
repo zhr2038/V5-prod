@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import os
 import shutil
@@ -32,7 +33,11 @@ from deploy.sync_prod_release import (
     _user_bus_wrapped_command,
     _validate_units,
 )
-from deploy.publish_prod_release import _build_release_manifest, _updated_manifest_dropin
+from deploy.publish_prod_release import (
+    _build_release_archive,
+    _build_release_manifest,
+    _updated_manifest_dropin,
+)
 
 
 def _require_executable(name: str) -> str:
@@ -757,6 +762,21 @@ def test_manifest_dropin_update_preserves_other_service_directives() -> None:
     assert updated.count("verify_release_manifest.py") == 1
     assert "/new/verify_release_manifest.py" in updated
     assert "ExecCondition=/srv/release-ops/start-gate.py" in updated
+
+
+def test_release_archive_uses_manifest_paths_and_expected_modes(tmp_path: Path) -> None:
+    (tmp_path / "scripts").mkdir()
+    script = tmp_path / "scripts" / "run.sh"
+    script.write_bytes(b"#!/bin/sh\necho ok\n")
+    archive_path = tmp_path / "release.tar.gz"
+
+    digest = _build_release_archive(tmp_path, ["scripts/run.sh"], archive_path)
+
+    assert digest == hashlib.sha256(archive_path.read_bytes()).hexdigest()
+    with tarfile.open(archive_path, "r:gz") as archive:
+        member = archive.getmember("scripts/run.sh")
+        assert member.mode == 0o755
+        assert archive.extractfile(member).read() == script.read_bytes()
 
 
 def test_sync_prod_release_defaults_follow_ssh_user() -> None:
