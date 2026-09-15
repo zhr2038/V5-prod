@@ -36,6 +36,7 @@ from deploy.sync_prod_release import (
 from deploy.publish_prod_release import (
     _build_release_archive,
     _build_release_manifest,
+    _existing_manifest_service_names,
     _updated_manifest_dropin,
 )
 
@@ -762,6 +763,24 @@ def test_manifest_dropin_update_preserves_other_service_directives() -> None:
     assert updated.count("verify_release_manifest.py") == 1
     assert "/new/verify_release_manifest.py" in updated
     assert "ExecCondition=/srv/release-ops/start-gate.py" in updated
+
+
+def test_existing_manifest_dropins_are_included_for_pointer_updates() -> None:
+    fake_sftp = _FakeSFTP(
+        {
+            "/home/user/.config/systemd/user/v5-reference.service.d/90-release-manifest.conf": (
+                b"[Service]\nExecStartPre=/old/verify_release_manifest.py --root /active\n"
+            ),
+            "/home/user/.config/systemd/user/unrelated.service.d/90-release-manifest.conf": (
+                b"[Service]\nEnvironment=EXAMPLE=1\n"
+            ),
+        }
+    )
+
+    assert _existing_manifest_service_names(
+        fake_sftp,
+        "/home/user/.config/systemd/user",
+    ) == ("v5-reference.service",)
 
 
 def test_release_archive_uses_manifest_paths_and_expected_modes(tmp_path: Path) -> None:

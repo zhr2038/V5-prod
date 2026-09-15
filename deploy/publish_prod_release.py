@@ -324,6 +324,28 @@ def _manifest_service_names() -> tuple[str, ...]:
     )
 
 
+def _existing_manifest_service_names(
+    sftp: paramiko.SFTPClient,
+    unit_root: str,
+) -> tuple[str, ...]:
+    names: list[str] = []
+    try:
+        entries = sftp.listdir_attr(unit_root)
+    except FileNotFoundError:
+        return ()
+    for entry in entries:
+        if not entry.filename.endswith(".service.d") or not stat.S_ISDIR(int(entry.st_mode)):
+            continue
+        remote_path = posixpath.join(unit_root, entry.filename, "90-release-manifest.conf")
+        remote_stat = _remote_lstat(sftp, remote_path)
+        if remote_stat is None or not stat.S_ISREG(int(remote_stat.st_mode)):
+            continue
+        if b"verify_release_manifest.py" not in _read_remote_bytes(sftp, remote_path):
+            continue
+        names.append(entry.filename.removesuffix(".d"))
+    return tuple(sorted(names))
+
+
 def _updated_manifest_dropin(existing: bytes | None, exec_start_pre: str) -> bytes:
     if existing is None:
         return f"[Service]\n{exec_start_pre}\n".encode()
@@ -352,11 +374,18 @@ def _install_manifest_dropins(
     remote_root: str,
     verifier_release: str,
 ) -> tuple[str, ...]:
-    unit_names = _manifest_service_names()
     python = posixpath.join(remote_root, ".venv/bin/python")
     verifier = posixpath.join(verifier_release, "scripts/verify_release_manifest.py")
     exec_start_pre = f"ExecStartPre={python} -B {verifier} --root {remote_root} --runtime"
     unit_root = f"/home/{service_user}/.config/systemd/user"
+    unit_names = tuple(
+        sorted(
+            {
+                *_manifest_service_names(),
+                *_existing_manifest_service_names(sftp, unit_root),
+            }
+        )
+    )
     for unit_name in unit_names:
         remote_path = posixpath.join(unit_root, f"{unit_name}.d", "90-release-manifest.conf")
         existing = None
