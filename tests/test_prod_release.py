@@ -719,9 +719,13 @@ def test_validate_units_skips_optional_live_timer_checks_when_not_enabled(monkey
 
 
 def test_immutable_release_manifest_records_expected_modes_and_excludes_runtime(tmp_path: Path) -> None:
-    (tmp_path / "main.py").write_text("print('ok')\n", encoding="utf-8")
+    main_path = tmp_path / "main.py"
+    main_path.write_text("print('ok')\n", encoding="utf-8")
+    main_path.chmod(0o755)
     (tmp_path / "scripts").mkdir()
-    (tmp_path / "scripts" / "run.sh").write_text("#!/bin/sh\necho ok\n", encoding="utf-8")
+    run_path = tmp_path / "scripts" / "run.sh"
+    run_path.write_text("#!/bin/sh\necho ok\n", encoding="utf-8")
+    run_path.chmod(0o755)
     (tmp_path / "models").mkdir()
     (tmp_path / "models" / "private.pkl").write_bytes(b"runtime model")
     previous = {
