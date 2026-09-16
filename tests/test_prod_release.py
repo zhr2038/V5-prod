@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import os
 import shutil
@@ -21,6 +22,7 @@ from deploy.prod_release import (
 )
 from deploy.sync_prod_release import (
     SHADOW_SYNC_ITEMS,
+    _assert_in_place_sync_root,
     _prune_remote_files,
     _resolve_remote_root,
     _resolve_service_user,
@@ -30,6 +32,12 @@ from deploy.sync_prod_release import (
     _upload_files,
     _user_bus_wrapped_command,
     _validate_units,
+)
+from deploy.publish_prod_release import (
+    _build_release_archive,
+    _build_release_manifest,
+    _existing_manifest_service_names,
+    _updated_manifest_dropin,
 )
 
 
@@ -366,21 +374,40 @@ def test_production_sync_relative_paths_and_roots(tmp_path: Path) -> None:
 
 
 class _FakeAttr:
-    def __init__(self, filename: str, *, is_dir: bool, size: int = 0, mtime: int = 0) -> None:
+    def __init__(
+        self,
+        filename: str,
+        *,
+        is_dir: bool,
+        size: int = 0,
+        mtime: int = 0,
+        mode: int = 0o755,
+        is_symlink: bool = False,
+    ) -> None:
         self.filename = filename
-        self.st_mode = (stat.S_IFDIR if is_dir else stat.S_IFREG) | 0o755
+        file_type = stat.S_IFLNK if is_symlink else (stat.S_IFDIR if is_dir else stat.S_IFREG)
+        self.st_mode = file_type | mode
         self.st_size = size
         self.st_mtime = mtime
 
 
 class _FakeSFTP:
-    def __init__(self, files: dict[str, bytes]) -> None:
+    def __init__(
+        self,
+        files: dict[str, bytes],
+        *,
+        modes: dict[str, int] | None = None,
+        symlinks: set[str] | None = None,
+    ) -> None:
         self.files = {self._norm(path): content for path, content in files.items()}
+        self.modes = {self._norm(path): mode for path, mode in (modes or {}).items()}
+        self.symlinks = {self._norm(path) for path in (symlinks or set())}
         self.removed: list[str] = []
         self.uploaded: list[str] = []
         self.chmod_calls: list[tuple[str, int]] = []
         self.utime_calls: list[tuple[str, tuple[int, int]]] = []
         self.created_dirs: list[str] = []
+        self.stat_calls: list[str] = []
         self.listdir_calls: list[str] = []
 
     def _norm(self, path: str) -> str:
@@ -393,11 +420,23 @@ class _FakeSFTP:
 
     def stat(self, path: str):
         normalized = self._norm(path)
+        self.stat_calls.append(normalized)
         if normalized in self.files:
-            return _FakeAttr(normalized.rsplit("/", 1)[-1], is_dir=False, size=len(self.files[normalized]))
+            return _FakeAttr(
+                normalized.rsplit("/", 1)[-1],
+                is_dir=False,
+                size=len(self.files[normalized]),
+                mode=self.modes.get(normalized, 0o755),
+            )
         if self._is_dir(normalized):
             return _FakeAttr(normalized.rsplit("/", 1)[-1], is_dir=True)
         raise FileNotFoundError(normalized)
+
+    def lstat(self, path: str):
+        normalized = self._norm(path)
+        if normalized in self.symlinks:
+            return _FakeAttr(normalized.rsplit("/", 1)[-1], is_dir=False, is_symlink=True)
+        return self.stat(normalized)
 
     def listdir_attr(self, path: str):
         normalized = self._norm(path).rstrip("/")
@@ -435,9 +474,12 @@ class _FakeSFTP:
         normalized = self._norm(remote_path)
         self.uploaded.append(normalized)
         self.files[normalized] = Path(local_path).read_bytes()
+        self.modes[normalized] = 0o666
 
     def chmod(self, path: str, mode: int) -> None:
-        self.chmod_calls.append((self._norm(path), mode))
+        normalized = self._norm(path)
+        self.chmod_calls.append((normalized, mode))
+        self.modes[normalized] = mode
 
     def utime(self, path: str, times: tuple[int, int]) -> None:
         self.utime_calls.append((self._norm(path), times))
@@ -462,6 +504,32 @@ def test_should_upload_detects_same_size_content_drift(tmp_path: Path) -> None:
     fake_sftp = _FakeSFTP({"/remote/main.py": b"print('old')\n"})
 
     assert _should_upload(fake_sftp, local, "/remote/main.py") is True
+
+
+def test_should_upload_repairs_same_content_with_wrong_mode(tmp_path: Path) -> None:
+    local = tmp_path / "run.sh"
+    local.write_bytes(b"#!/bin/sh\necho same\n")
+    fake_sftp = _FakeSFTP(
+        {"/remote/run.sh": local.read_bytes()},
+        modes={"/remote/run.sh": 0o644},
+    )
+
+    uploaded, skipped, rel_paths = _upload_files(
+        fake_sftp,
+        tmp_path,
+        "/remote",
+        items=("run.sh",),
+    )
+
+    assert (uploaded, skipped, rel_paths) == (1, 0, ["run.sh"])
+    assert fake_sftp.chmod_calls == [("/remote/run.sh", 0o755)]
+
+
+def test_in_place_sync_rejects_symbolic_link_root() -> None:
+    fake_sftp = _FakeSFTP({}, symlinks={"/remote"})
+
+    with pytest.raises(RuntimeError, match="refusing in-place sync through symbolic link"):
+        _assert_in_place_sync_root(fake_sftp, "/remote")
 
 
 def test_should_restart_web_dashboard_only_for_web_runtime_changes() -> None:
@@ -498,6 +566,17 @@ def test_upload_files_defers_web_dist_html_until_after_assets(tmp_path: Path) ->
         "/remote/web/dist/assets/index-new.js",
         "/remote/web/static/app.js",
     ]
+
+
+def test_upload_files_caches_remote_directory_checks(tmp_path: Path) -> None:
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "one.py").write_text("one\n", encoding="utf-8")
+    (tmp_path / "scripts" / "two.py").write_text("two\n", encoding="utf-8")
+    fake_sftp = _FakeSFTP({})
+
+    _upload_files(fake_sftp, tmp_path, "/remote", items=("scripts",))
+
+    assert fake_sftp.stat_calls.count("/remote/scripts") == 1
 
 
 def test_prune_remote_files_removes_stale_production_files_only(tmp_path: Path) -> None:
@@ -586,6 +665,7 @@ def test_validate_units_requires_active_dashboard_and_optional_live_timers(monke
             object(),
             "ubuntu",
             "ubuntu",
+            remote_root="/home/ubuntu/clawd/v5-prod",
             enable_prod_timer=True,
             enable_event_driven_timer=True,
         )
@@ -602,6 +682,7 @@ def test_validate_units_requires_active_dashboard_and_optional_live_timers(monke
     assert 'is-enabled v5-shadow-tuned-xgboost.user.timer)" = disabled' in inner
     assert 'is-active v5-shadow-tuned-xgboost.user.timer)" != active' in inner
     assert "is-active v5-prod.user.timer" in inner
+    assert "test -x /home/ubuntu/clawd/v5-prod/scripts/run_hourly_live_window.sh" in inner
     assert "is-active v5-event-driven.timer" in inner
 
 
@@ -619,6 +700,7 @@ def test_validate_units_skips_optional_live_timer_checks_when_not_enabled(monkey
             object(),
             "ubuntu",
             "ubuntu",
+            remote_root="/home/ubuntu/clawd/v5-prod",
             enable_prod_timer=False,
             enable_event_driven_timer=False,
         )
@@ -633,6 +715,91 @@ def test_validate_units_skips_optional_live_timer_checks_when_not_enabled(monkey
     assert "is-active v5-event-driven.timer" not in inner
     assert "show v5-prod.user.timer" not in inner
     assert "show v5-event-driven.timer" not in inner
+    assert "run_hourly_live_window.sh" not in inner
+
+
+def test_immutable_release_manifest_records_expected_modes_and_excludes_runtime(tmp_path: Path) -> None:
+    main_path = tmp_path / "main.py"
+    main_path.write_text("print('ok')\n", encoding="utf-8")
+    main_path.chmod(0o755)
+    (tmp_path / "scripts").mkdir()
+    run_path = tmp_path / "scripts" / "run.sh"
+    run_path.write_text("#!/bin/sh\necho ok\n", encoding="utf-8")
+    run_path.chmod(0o755)
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "private.pkl").write_bytes(b"runtime model")
+    previous = {
+        "schema_version": "review.release.v1",
+        "code_revision": "b" * 40,
+        "dependencies": {"example": "1.0"},
+        "required_runtime_values": {"state/mode.json": {"mode": "shadow"}},
+        "files": {},
+    }
+
+    manifest = _build_release_manifest(
+        tmp_path,
+        revision="a" * 40,
+        source_tree="c" * 40,
+        previous_manifest=previous,
+        previous_manifest_bytes=b"{}",
+        previous_target="/srv/releases/previous",
+    )
+
+    assert manifest["files"].keys() == {"main.py", "scripts/run.sh"}
+    assert manifest["file_modes"] == {"main.py": 0o755, "scripts/run.sh": 0o755}
+    assert "models/private.pkl" not in manifest["files"]
+    assert manifest["dependencies"] == {"example": "1.0"}
+    assert manifest["release_integrity_repair"]["atomic_pointer_switch"] is True
+
+
+def test_manifest_dropin_update_preserves_other_service_directives() -> None:
+    existing = (
+        "[Service]\n"
+        "ExecStartPre=/old/python /old/verify_release_manifest.py --root /active --runtime\n"
+        "ExecCondition=/srv/release-ops/start-gate.py\n"
+    ).encode()
+
+    updated = _updated_manifest_dropin(
+        existing,
+        "ExecStartPre=/active/.venv/bin/python /new/verify_release_manifest.py --root /active --runtime",
+    ).decode()
+
+    assert updated.count("verify_release_manifest.py") == 1
+    assert "/new/verify_release_manifest.py" in updated
+    assert "ExecCondition=/srv/release-ops/start-gate.py" in updated
+
+
+def test_existing_manifest_dropins_are_included_for_pointer_updates() -> None:
+    fake_sftp = _FakeSFTP(
+        {
+            "/home/user/.config/systemd/user/v5-reference.service.d/90-release-manifest.conf": (
+                b"[Service]\nExecStartPre=/old/verify_release_manifest.py --root /active\n"
+            ),
+            "/home/user/.config/systemd/user/unrelated.service.d/90-release-manifest.conf": (
+                b"[Service]\nEnvironment=EXAMPLE=1\n"
+            ),
+        }
+    )
+
+    assert _existing_manifest_service_names(
+        fake_sftp,
+        "/home/user/.config/systemd/user",
+    ) == ("v5-reference.service",)
+
+
+def test_release_archive_uses_manifest_paths_and_expected_modes(tmp_path: Path) -> None:
+    (tmp_path / "scripts").mkdir()
+    script = tmp_path / "scripts" / "run.sh"
+    script.write_bytes(b"#!/bin/sh\necho ok\n")
+    archive_path = tmp_path / "release.tar.gz"
+
+    digest = _build_release_archive(tmp_path, ["scripts/run.sh"], archive_path)
+
+    assert digest == hashlib.sha256(archive_path.read_bytes()).hexdigest()
+    with tarfile.open(archive_path, "r:gz") as archive:
+        member = archive.getmember("scripts/run.sh")
+        assert member.mode == 0o755
+        assert archive.extractfile(member).read() == script.read_bytes()
 
 
 def test_sync_prod_release_defaults_follow_ssh_user() -> None:

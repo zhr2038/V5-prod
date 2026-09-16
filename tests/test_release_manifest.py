@@ -1,4 +1,5 @@
 import hashlib
+import os
 
 import pytest
 
@@ -24,4 +25,20 @@ def test_startup_rejects_changed_code_and_runtime_permission(tmp_path):
 def test_verifier_never_accepts_files_outside_release(tmp_path):
     manifest = {"schema_version": "review.release.v1", "code_revision": "a"*40, "files": {"../state/orders.sqlite": "b"*64}}
     with pytest.raises(ValueError, match="outside_release"):
+        verify(tmp_path, manifest)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits are enforced on production")
+def test_verifier_rejects_wrong_file_mode(tmp_path):
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\necho ok\n")
+    script.chmod(0o644)
+    manifest = {
+        "schema_version": "review.release.v1",
+        "code_revision": "a" * 40,
+        "files": {"run.sh": hashlib.sha256(script.read_bytes()).hexdigest()},
+        "file_modes": {"run.sh": 0o755},
+    }
+
+    with pytest.raises(ValueError, match="mode_mismatch:644!=755"):
         verify(tmp_path, manifest)

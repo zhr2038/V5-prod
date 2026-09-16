@@ -2,9 +2,9 @@
 
 ## Goal
 
-Keep the production runtime root as a runnable synced copy without depending on manual server-side edits.
+Keep the production runtime root as an atomic pointer to a verified, committed release without depending on manual server-side edits.
 
-The production server should be treated as a sync target, not as the authoritative Git workspace.
+The production server should be treated as a release target, not as the authoritative Git workspace.
 
 ## Why the old server copy became dirty
 
@@ -32,7 +32,9 @@ Persistent server-local state:
 - `.env`
 - `.venv/`
 - `reports/`
+- `state/`
 - `logs/`
+- `models/`
 - `data/` caches produced on the server
 
 Production Python dependencies come from `requirements.txt`. Optional ML/research-only dependencies live in `requirements-research.txt` and are not required for `live_prod`.
@@ -53,10 +55,10 @@ Synced code surface:
 
 ## Standard deploy flow
 
-1. Sync the production release:
+1. Publish the committed production release:
 
 ```bash
-python deploy/sync_prod_release.py \
+python deploy/publish_prod_release.py \
   --host <host> \
   --user <user> \
   --password '***' \
@@ -66,7 +68,13 @@ python deploy/sync_prod_release.py \
   --enable-event-driven-timer
 ```
 
-2. The sync script uploads only the production surface and then runs:
+The publisher uploads the production surface to a new directory under
+`/home/ubuntu/clawd/v5-releases/<git-revision>`, links the existing persistent
+runtime entries, verifies file hashes, executable modes, dependencies, and
+runtime overrides, then atomically replaces the `v5-prod` symbolic link. It
+retains the previous release directory as the rollback point.
+
+2. After the pointer switch, the publisher runs:
 
 ```bash
 bash deploy/install_systemd.sh \
@@ -83,12 +91,17 @@ bash deploy/install_systemd.sh \
 
 The installed units point at the rendered target root, even if the repository source units still carry a historical default path.
 
+`deploy/sync_prod_release.py` remains available for regular non-release sync
+targets such as an isolated shadow workspace. It refuses to write through a
+symbolic-link root. This prevents an incremental sync from mutating the active
+release and the retained rollback directory at the same time.
+
 ## Operational rules
 
-- Do not hand-edit files inside the live runtime root unless the goal is a hotfix.
+- Do not hand-edit files inside a release directory.
 - Do not rely on `git pull` inside the live directory as the normal deployment path.
 - Treat `reports/` and `logs/` as mutable runtime state.
-- If a hotfix is made directly on the server, backport it into the main repository before the next sync.
+- Build a new committed release for a hotfix and switch the pointer through the publisher.
 
 ## Scope of the production install
 

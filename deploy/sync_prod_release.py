@@ -62,7 +62,12 @@ def _remote_join(root: str, rel_path: Path) -> str:
     return "/".join([root.rstrip("/"), *parts])
 
 
-def _ensure_remote_dir(sftp: paramiko.SFTPClient, remote_dir: str) -> None:
+def _ensure_remote_dir(
+    sftp: paramiko.SFTPClient,
+    remote_dir: str,
+    *,
+    known_dirs: set[str] | None = None,
+) -> None:
     parts = []
     if remote_dir.startswith("/"):
         prefix = "/"
@@ -73,10 +78,14 @@ def _ensure_remote_dir(sftp: paramiko.SFTPClient, remote_dir: str) -> None:
     for segment in segments:
         parts.append(segment)
         candidate = prefix + "/".join(parts)
+        if known_dirs is not None and candidate in known_dirs:
+            continue
         try:
             sftp.stat(candidate)
         except FileNotFoundError:
             sftp.mkdir(candidate)
+        if known_dirs is not None:
+            known_dirs.add(candidate)
 
 
 def _file_mode(path: Path) -> int:
@@ -111,11 +120,25 @@ def _should_upload(sftp: paramiko.SFTPClient, local_path: Path, remote_path: str
         remote_stat = sftp.stat(remote_path)
     except FileNotFoundError:
         return True
+    if stat.S_IMODE(int(remote_stat.st_mode)) != _file_mode(local_path):
+        return True
     if int(remote_stat.st_size) != int(local_stat.st_size):
         return True
     if int(getattr(remote_stat, "st_mtime", -1)) == int(local_stat.st_mtime):
         return False
     return not _remote_file_matches(sftp, local_path, remote_path)
+
+
+def _assert_in_place_sync_root(sftp: paramiko.SFTPClient, remote_root: str) -> None:
+    try:
+        remote_stat = sftp.lstat(remote_root)
+    except FileNotFoundError:
+        return
+    if stat.S_ISLNK(int(remote_stat.st_mode)):
+        raise RuntimeError(
+            f"refusing in-place sync through symbolic link: {remote_root}; "
+            "use deploy/publish_prod_release.py to stage and atomically switch an immutable release"
+        )
 
 
 def _should_restart_web_dashboard(changed_paths: Iterable[str]) -> bool:
@@ -147,6 +170,7 @@ def _upload_files(
     uploaded = 0
     skipped = 0
     rel_paths: list[str] = []
+    known_dirs: set[str] = set()
     local_paths = sorted(
         iter_production_files(workspace_root, items=items),
         key=lambda path: _upload_order_key(path, workspace_root),
@@ -155,7 +179,7 @@ def _upload_files(
         rel_path = local_path.relative_to(workspace_root)
         remote_path = _remote_join(remote_root, rel_path)
         parent = remote_path.rsplit("/", 1)[0]
-        _ensure_remote_dir(sftp, parent)
+        _ensure_remote_dir(sftp, parent, known_dirs=known_dirs)
         if not _should_upload(sftp, local_path, remote_path):
             skipped += 1
             continue
@@ -337,6 +361,7 @@ def _validate_units(
     service_user: str,
     ssh_user: str,
     *,
+    remote_root: str,
     enable_prod_timer: bool,
     enable_event_driven_timer: bool,
 ) -> str:
@@ -386,6 +411,7 @@ def _validate_units(
     if enable_prod_timer:
         checks.extend(
             [
+                f"test -x {shlex.quote(posixpath.join(remote_root, 'scripts/run_hourly_live_window.sh'))}",
                 "test \"$(systemctl --user is-active v5-prod.user.timer)\" = active",
                 "systemctl --user show v5-prod.user.timer --property=UnitFileState",
             ]
@@ -446,6 +472,7 @@ def main() -> None:
     client.connect(**connect_kwargs)
     try:
         sftp = client.open_sftp()
+        _assert_in_place_sync_root(sftp, remote_root)
         _ensure_remote_dir(sftp, remote_root)
         with production_snapshot(workspace_root) as snapshot_root:
             uploaded, skipped, rel_paths = _upload_files(sftp, snapshot_root, remote_root)
@@ -455,6 +482,7 @@ def main() -> None:
             shadow_skipped = 0
             shadow_pruned: list[str] = []
             if not args.skip_shadow_sync:
+                _assert_in_place_sync_root(sftp, shadow_root)
                 _ensure_remote_dir(sftp, shadow_root)
                 shadow_uploaded, shadow_skipped, _shadow_rel_paths = _upload_files(
                     sftp,
@@ -497,6 +525,7 @@ def main() -> None:
                     client,
                     service_user,
                     args.user,
+                    remote_root=remote_root,
                     enable_prod_timer=args.enable_prod_timer,
                     enable_event_driven_timer=args.enable_event_driven_timer,
                 )

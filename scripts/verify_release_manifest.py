@@ -5,6 +5,8 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
+import os
+import stat
 from pathlib import Path
 
 
@@ -19,6 +21,11 @@ def verify(root: Path, manifest: dict, *, dependencies=False, runtime=False):
             errors.append(relative + ":missing_or_outside_release")
         elif hashlib.sha256(path.read_bytes()).hexdigest() != expected:
             errors.append(relative + ":hash_mismatch")
+        elif os.name == "posix" and relative in manifest.get("file_modes", {}):
+            expected_mode = int(manifest["file_modes"][relative])
+            actual_mode = stat.S_IMODE(path.stat().st_mode)
+            if actual_mode != expected_mode:
+                errors.append(relative + f":mode_mismatch:{actual_mode:o}!={expected_mode:o}")
     if dependencies:
         for package, expected in manifest["dependencies"].items():
             try:
