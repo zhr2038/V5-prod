@@ -362,6 +362,14 @@ html { scroll-behavior: smooth; background: #101519; }
 .cc-candidate-detail p { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 0; color: var(--cc-accent); font-size: 16px; }
 @media (max-width: 720px) { .cc-candidate-detail dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .cc-review { margin-top: 36px; padding-top: 28px; border-top: 1px solid var(--cc-line, #2d383e); font-size: 16px; line-height: 1.7; }
+.cc-review > .cc-section-title { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: start; }
+.cc-review > .cc-section-title > div { display: grid; grid-template-columns: auto minmax(0, 1fr); min-width: 0; column-gap: 10px; row-gap: 6px; }
+.cc-review > .cc-section-title p { grid-column: 1 / -1; margin: 0; line-height: 1.7; }
+.cc-review > .cc-section-title > strong { white-space: nowrap; }
+@media (max-width: 640px) {
+  .cc-review > .cc-section-title { grid-template-columns: minmax(0, 1fr); }
+  .cc-review > .cc-section-title > strong { justify-self: start; }
+}
 .cc-review h3 { margin: 28px 0 12px; }
 .cc-review-notice { padding: 12px 16px; border-left: 3px solid #e8b967; background: #e8b9670d; }
 .cc-review-clock { padding: 14px 0; }
