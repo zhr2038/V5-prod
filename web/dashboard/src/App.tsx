@@ -424,27 +424,48 @@ function App() {
     if (secondaryBusy.current) return;
     secondaryBusy.current = true;
     try {
-      const [deferred, dec, h, nextMarketState, mlTraining] = await Promise.all([
-        api.dashboardDeferred(), api.decisionAudit(), api.health(), api.marketState(), api.mlTraining(),
+      const deferredPromise = api.dashboardDeferred().then((deferred) => {
+        if (deferred) {
+          startTransition(() => {
+            setDashboard((prev) => mergeDeferredDashboard(prev, deferred));
+          });
+        }
+        return deferred;
+      });
+      const decisionPromise = api.decisionAudit().then((decision) => {
+        if (decision) startTransition(() => setDecisionAudit(decision));
+        return decision;
+      });
+      const healthPromise = api.health().then((nextHealth) => {
+        if (nextHealth) startTransition(() => setHealth(nextHealth));
+        return nextHealth;
+      });
+      const marketPromise = api.marketState().then((nextMarketState) => {
+        if (nextMarketState) {
+          startTransition(() => {
+            setMarketState(nextMarketState);
+            setDashboard((prev) => prev ? { ...prev, marketState: nextMarketState } : prev);
+          });
+        }
+        return nextMarketState;
+      });
+      const mlPromise = api.mlTraining().then((mlTraining) => {
+        if (mlTraining) {
+          startTransition(() => {
+            setDashboard((prev) => prev ? { ...prev, mlTraining } : prev);
+          });
+        }
+        return mlTraining;
+      });
+
+      const [deferred, dec, h] = await Promise.all([
+        deferredPromise, decisionPromise, healthPromise,
       ]);
       const receivedAt = Date.now();
       startTransition(() => {
         setSecondaryRefresh((prev) => secondaryRefreshState(prev, deferred, dec, h, receivedAt));
-        if (deferred || nextMarketState || mlTraining) {
-          setDashboard((prev) => {
-            const merged = deferred ? mergeDeferredDashboard(prev, deferred) : prev;
-            if (!merged) return merged;
-            return {
-              ...merged,
-              ...(nextMarketState ? { marketState: nextMarketState } : {}),
-              ...(mlTraining ? { mlTraining } : {}),
-            };
-          });
-        }
-        if (nextMarketState) setMarketState(nextMarketState);
-        if (dec) setDecisionAudit(dec);
-        if (h) setHealth(h);
       });
+      await Promise.all([marketPromise, mlPromise]);
     } finally { secondaryBusy.current = false; }
   }, []);
 

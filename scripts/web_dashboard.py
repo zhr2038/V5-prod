@@ -923,6 +923,7 @@ def _legacy_display_score(score: float) -> float:
 
 DEFAULT_SCORE_AUDIT_SCAN_LIMIT = 48
 DEFAULT_MARKET_AUDIT_SCAN_LIMIT = 48
+DEFAULT_DECISION_AUDIT_SCAN_LIMIT = 48
 
 
 def _load_recent_scan_limit(env_name: str, default: Optional[int] = None) -> Optional[int]:
@@ -8523,7 +8524,10 @@ def api_decision_audit():
         if not runtime_paths.runs_dir.exists():
             return jsonify(_empty_decision_audit_payload('No runs directory'))
 
-        decision_audit_scan_limit = _load_recent_scan_limit('V5_DASHBOARD_DECISION_AUDIT_SCAN_LIMIT')
+        decision_audit_scan_limit = _load_recent_scan_limit(
+            'V5_DASHBOARD_DECISION_AUDIT_SCAN_LIMIT',
+            default=DEFAULT_DECISION_AUDIT_SCAN_LIMIT,
+        )
         audit_entries = _iter_decision_audits(runtime_paths.reports_dir, scan_limit=decision_audit_scan_limit)
         if not audit_entries:
             return jsonify(_empty_decision_audit_payload('No audit files found'))
