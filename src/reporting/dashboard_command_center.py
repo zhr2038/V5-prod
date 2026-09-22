@@ -14,6 +14,7 @@ from pathlib import Path
 
 from src.execution.fill_store import derive_runtime_named_json_path
 from src.reporting.participation_runtime import runtime_identity
+from src.research.daily_trend_benchmark import build_daily_trend_benchmark
 
 SCHEMA = "v5.command_center.v1"
 MAX_JSON_BYTES = 4 * 1024 * 1024
@@ -549,6 +550,12 @@ def _daily_trend_paper(reports_dir, now):
             row = con.execute("SELECT value FROM meta WHERE key='source_identity'").fetchone()
             if not row or row[0] != identity:
                 raise ValueError("daily_trend_ledger_identity_mismatch")
+        try:
+            output["benchmark"] = build_daily_trend_benchmark(study, report)
+        except (OSError, ValueError, TypeError, KeyError, ArithmeticError, sqlite3.Error) as exc:
+            # A missing/corrupt baseline must stay explicit without erasing the
+            # independently verified strategy report or fabricating zero excess.
+            output["benchmark"] = {"status": "unavailable", "reason": str(exc)[:200]}
         frozen, _ = _json(study / "FROZEN.json", root)
         if frozen:
             if frozen.get("status") != "FROZEN" or frozen.get("identity") != identity:
@@ -558,6 +565,77 @@ def _daily_trend_paper(reports_dir, now):
         status = "worker_failed" if worker and worker.get("ok") is False else freshness["status"]
         return {**output, **freshness, "status": status, "report": report}
     except (OSError, ValueError, TypeError, sqlite3.Error) as exc:
+        return {**output, "status": "invalid", "reason": str(exc)[:200], "report": None}
+
+
+def _paired_reference_paper(reports_dir, now):
+    """One explicitly registered cohort, with exact committed-report binding."""
+    root = Path(reports_dir) / "paired_reference_paper"
+    directory = "v5-reference-paired-20260922-v1"
+    output = {"status": "missing", "ledger": directory, "read_only": True,
+              "paper_only": True, "live_order_effect": "none", "live_execution_eligible": False, "report": None}
+    try:
+        study = _safe(root / directory, root)
+        report, status = _json(study / "latest.json", root)
+        worker, _ = _json(study / "worker-status.json", root)
+        output["worker"] = worker
+        if not report:
+            return {**output, "status": "worker_failed" if worker and worker.get("ok") is False else status}
+        manifest, _ = _json(study / "manifest.json", root)
+        identity = report.get("identity")
+        if (not identity or not manifest or manifest.get("identity") != identity
+                or _mapping(manifest.get("experiment")).get("experiment_id") != directory
+                or report.get("experiment_id") != directory
+                or manifest.get("ledger_start_ts") != report.get("ledger_start_ts")):
+            raise ValueError("paired_reference_manifest_identity_mismatch")
+        if (report.get("schema_version") != "v5.paired_reference_paper.v1"
+                or report.get("paper_only") is not True or report.get("live_order_effect") != "none"
+                or report.get("live_execution_eligible") is not False
+                or report.get("automatic_live_scaling") is not False):
+            raise ValueError("paired_reference_boundary_invalid")
+        if worker and worker.get("identity") not in (None, identity):
+            raise ValueError("paired_reference_worker_identity_mismatch")
+        database = _safe(study / "comparison.sqlite", study)
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as con:
+            con.execute("PRAGMA query_only=ON")
+            saved = con.execute("SELECT value FROM meta WHERE key='identity'").fetchone()
+            event = con.execute("SELECT input_hash,report FROM events WHERE observed_at=?",
+                                (report.get("latest_observed_at"),)).fetchone()
+            if not saved or saved[0] != identity:
+                raise ValueError("paired_reference_ledger_identity_mismatch")
+            if (not event or len(event[1]) > MAX_JSON_BYTES
+                    or event[0] != report.get("input_hash") or json.loads(event[1]) != report):
+                raise ValueError("paired_reference_report_not_committed")
+        frozen, _ = _json(study / "FROZEN.json", root)
+        if frozen:
+            if frozen.get("status") != "FROZEN" or frozen.get("identity") != identity:
+                raise ValueError("paired_reference_freeze_marker_invalid")
+            return {**output, "status": "frozen", "report": report, "freeze": frozen}
+        freshness = _fresh(report.get("latest_observed_at"), now, 180)
+        return {**output, **freshness,
+                "status": "worker_failed" if worker and worker.get("ok") is False else freshness["status"],
+                "report": report}
+    except (OSError, ValueError, TypeError, sqlite3.Error) as exc:
+        return {**output, "status": "invalid", "reason": str(exc)[:200], "report": None}
+
+
+def _live_cost_evidence(paths, now):
+    output = {"status": "missing", "read_only": True, "report": None}
+    try:
+        report, status = _json(derive_runtime_named_json_path(paths.orders_db, "live_cost_evidence"),
+                               Path(paths.reports_dir))
+        if not report:
+            return {**output, "status": status}
+        if (report.get("schema_version") != "v5.live_cost_evidence.v1"
+                or report.get("live_order_effect") != "none"
+                or report.get("updates_live_cost_model") is not False
+                or report.get("status") not in {"OBSERVED", "NO_FILLS", "UNAVAILABLE"}):
+            raise ValueError("live_cost_evidence_boundary_invalid")
+        freshness = _fresh(report.get("generated_at_utc"), now, 1800)
+        return {**output, **freshness,
+                "status": "unavailable" if report.get("status") == "UNAVAILABLE" else freshness["status"],
+                "report": report}
+    except (OSError, ValueError, TypeError) as exc:
         return {**output, "status": "invalid", "reason": str(exc)[:200], "report": None}
 
 
@@ -616,6 +694,8 @@ def build_command_center(*, config, paths, workspace: Path, now: float, observat
                "health": health, "participation": participation,
                "review_comparison": _review_comparison(paths.reports_dir, now),
                "daily_trend_paper": _daily_trend_paper(paths.reports_dir, now),
+               "paired_reference_paper": _paired_reference_paper(paths.reports_dir, now),
+               "live_cost_evidence": _live_cost_evidence(paths, now),
                "quant_lab": {"mode": "enforced" if enforced is True else "advisory" if enforced is False else "unknown",
                              "permission": qlab.get("raw_permission_decision", qlab.get("quant_lab_permission", qlab.get("permission"))),
                              "effective_permission": qlab.get("final_permission"), "source_mode": qlab.get("mode"),

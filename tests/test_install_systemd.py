@@ -147,6 +147,10 @@ def test_install_systemd_user_production_only_supports_shadow_root_and_required_
     assert "--user enable --now v5-quant-lab-selfcheck.timer" in systemctl_calls
     assert "--user enable --now v5-spread-rollup.timer" in systemctl_calls
     assert "--user enable --now v5-daily-trend-paper.timer" in systemctl_calls
+    assert "--user enable --now v5-paired-reference-paper.timer" in systemctl_calls
+    assert "--user enable --now v5-live-cost-evidence.timer" in systemctl_calls
+    paired_unit = (units_dir / "v5-paired-reference-paper.service").read_text(encoding="utf-8")
+    assert "run_paired_reference_paper.py" in paired_unit and _bash_path(project_root) in paired_unit
     assert "--user disable --now v5-review-forward.timer" in systemctl_calls
     assert "--user disable --now v5-review-forward.service" in systemctl_calls
     assert "--user disable --now v5-participation-quotes.service" in systemctl_calls

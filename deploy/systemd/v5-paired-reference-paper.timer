@@ -1,0 +1,11 @@
+[Unit]
+Description=Observe paired paper accounts every minute; decisions follow frozen hourly clock
+
+[Timer]
+OnCalendar=*-*-* *:*:20 UTC
+AccuracySec=1s
+Persistent=false
+Unit=v5-paired-reference-paper.service
+
+[Install]
+WantedBy=timers.target

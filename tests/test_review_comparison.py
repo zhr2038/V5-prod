@@ -36,7 +36,13 @@ def config():
     return load_config(str(PROJECT / "configs/live_prod.yaml"), env_path=None)
 
 
-def test_all_cost_scenarios_share_inputs_and_restore_independent_accounts(tmp_path):
+def test_all_cost_scenarios_share_inputs_and_restore_independent_accounts(tmp_path, monkeypatch):
+    from src.data.okx_instruments import OKXSpotInstrumentsCache
+    # The adapter writes an isolated cache, but the generic pytest convenience
+    # path otherwise redirects reads to a machine-global temp cache. Bind the
+    # test reader to its actual recorded input, independent of prior test order.
+    monkeypatch.setattr(OKXSpotInstrumentsCache, "_resolve_cache_path", classmethod(lambda cls, path: Path.cwd() / path))
+    monkeypatch.setattr(OKXSpotInstrumentsCache, "_resolve_seed_cache_path", classmethod(lambda cls, path, resolved: None))
     comparison = Comparison(config(), POLICY, EXPERIMENT, root=tmp_path / "accounts")
     for scenario in comparison.scenarios.values():
         path = scenario["adapter"].root / "reports/okx_spot_instruments.json"

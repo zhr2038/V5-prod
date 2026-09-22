@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh real execution cost evidence every fifteen minutes
+
+[Timer]
+OnCalendar=*-*-* *:02,17,32,47:40 UTC
+AccuracySec=5s
+Persistent=true
+Unit=v5-live-cost-evidence.service
+
+[Install]
+WantedBy=timers.target

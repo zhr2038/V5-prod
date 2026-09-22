@@ -70,6 +70,8 @@ export interface ParticipationSummary {
 export interface CommandCenterData {
   review_comparison?: import('./reviewTypes').ReviewView;
   daily_trend_paper?: import('./dailyTrendTypes').DailyTrendView;
+  paired_reference_paper?: import('./pairedPaperTypes').PairedPaperView;
+  live_cost_evidence?: import('./liveCostTypes').LiveCostView;
   schema_version: string;
   generated_at: string;
   read_only: boolean;
