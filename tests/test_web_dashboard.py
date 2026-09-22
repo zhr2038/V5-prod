@@ -114,6 +114,18 @@ def test_react_dashboard_bounds_fetches_and_renders_primary_before_auxiliary_cal
     command_start = app_source.index("void loadCommand();", primary_start)
     equity_start = app_source.index("void loadEquity();", primary_start)
     assert primary_start < secondary_start < command_start < equity_start
+    secondary_loader = app_source.index("const loadSecondary = useCallback")
+    deferred_start = app_source.index("const deferredPromise = api.dashboardDeferred().then", secondary_loader)
+    decision_start = app_source.index("const decisionPromise = api.decisionAudit().then", deferred_start)
+    health_start = app_source.index("const healthPromise = api.health().then", decision_start)
+    market_start = app_source.index("const marketPromise = api.marketState().then", health_start)
+    ml_start = app_source.index("const mlPromise = api.mlTraining().then", market_start)
+    core_receipt = app_source.index(
+        "deferredPromise, decisionPromise, healthPromise,",
+        ml_start,
+    )
+    slow_auxiliary_wait = app_source.index("await Promise.all([marketPromise, mlPromise]);", core_receipt)
+    assert deferred_start < decision_start < health_start < market_start < ml_start < core_receipt < slow_auxiliary_wait
 
 
 def test_dashboard_api_primary_view_skips_slow_auxiliary_endpoints(monkeypatch):
@@ -3964,6 +3976,54 @@ def test_api_decision_audit_limits_recent_run_scan(monkeypatch, tmp_path):
     assert payload["strategy_signal_source"] == "previous_run_strategy_file"
     assert payload["strategy_signals"][0]["strategy"] == "WithinLimit"
     assert reads["decision_audit"] <= 4
+
+
+def test_api_decision_audit_uses_bounded_default_scan(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(module, "load_config", lambda: {"execution": {"order_store_path": "reports/orders.sqlite"}})
+    monkeypatch.delenv("V5_DASHBOARD_DECISION_AUDIT_SCAN_LIMIT", raising=False)
+
+    total_runs = module.DEFAULT_DECISION_AUDIT_SCAN_LIMIT + 24
+    latest_run_id = ""
+    for idx in range(total_runs):
+        day, hour = divmod(idx, 24)
+        latest_run_id = f"202603{13 + day:02d}_{hour:02d}"
+        run_dir = runs_dir / latest_run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "decision_audit.json").write_text(
+            json.dumps(
+                {
+                    "run_id": latest_run_id,
+                    "regime": "TRENDING",
+                    "counts": {"selected": idx, "orders_rebalance": 0, "orders_exit": 0},
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+    original_read_text = Path.read_text
+    reads = {"decision_audit": 0}
+
+    def counting_read_text(path, *args, **kwargs):
+        if Path(path).name == "decision_audit.json":
+            reads["decision_audit"] += 1
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    assert response.get_json()["run_id"] == latest_run_id
+    assert reads["decision_audit"] <= module.DEFAULT_DECISION_AUDIT_SCAN_LIMIT
 
 
 def test_api_decision_audit_recent_fill_summary_prefers_fill_timestamps(monkeypatch, tmp_path):
