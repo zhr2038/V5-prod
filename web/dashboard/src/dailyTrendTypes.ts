@@ -1,5 +1,38 @@
 type Numeric = string | number;
 
+export interface BenchmarkAccount {
+  equity_usdt: number;
+  net_equity_increment_usdt: number;
+  net_return_fraction: number;
+  realized_pnl_usdt: number;
+  unrealized_pnl_usdt: number;
+  observed_maximum_drawdown_fraction: number;
+  independent_closed_campaign_count: number;
+}
+
+export interface DailyTrendBenchmark {
+  status: string;
+  reason?: string;
+  observation_count?: number;
+  strategy?: BenchmarkAccount;
+  passive?: BenchmarkAccount;
+  cash?: BenchmarkAccount;
+  excess_vs_passive_usdt?: number;
+  excess_vs_cash_usdt?: number;
+  limitations?: string[];
+  curve?: {
+    observed_at: number;
+    strategy_equity_usdt: number;
+    passive_equity_usdt: number;
+    cash_equity_usdt: number;
+    strategy_net_return_fraction: number;
+    passive_net_return_fraction: number;
+    excess_vs_passive_usdt: number;
+    strategy_drawdown_fraction: number;
+    passive_drawdown_fraction: number;
+  }[];
+}
+
 export interface DailyTrendSleeve {
   signal: {
     long: boolean;
@@ -25,6 +58,7 @@ export interface DailyTrendView {
   status: string;
   reason?: string;
   ledger?: string;
+  benchmark?: DailyTrendBenchmark;
   worker?: { ok: boolean; detail?: string; observed_at?: number };
   report: null | {
     schema_version: string;

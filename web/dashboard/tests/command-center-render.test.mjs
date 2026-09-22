@@ -39,6 +39,9 @@ function loadSource(filename) {
 }
 
 const { CommandCenter } = loadSource(resolve(sourceRoot, 'components/CommandCenter.tsx'));
+const { default: DailyTrendPaper } = loadSource(resolve(sourceRoot, 'components/DailyTrendPaper.tsx'));
+const { default: PairedReferencePaper } = loadSource(resolve(sourceRoot, 'components/PairedReferencePaper.tsx'));
+const { default: LiveCostEvidence } = loadSource(resolve(sourceRoot, 'components/LiveCostEvidence.tsx'));
 const metric = (value) => ({ value, status: 'observed', unit: 'observations' });
 
 function fixture() {
@@ -121,10 +124,86 @@ test('real empty positions and observed zeros remain valid without granting live
 test('the active paper section shows only the frozen daily rule and explicit no-live boundary', () => {
   const html = section(render(fixture()), 'participation');
   assert.match(html, /BTC \/ ETH 日线趋势/);
-  assert.match(html, /当前唯一新增的前瞻实验/);
+  assert.match(html, /与同起点持币和现金基准比较/);
   assert.match(html, /日线趋势验证/);
   assert.match(html, /不读取交易密钥、不下单、不改变真实仓位/);
   assert.doesNotMatch(html, /独立 A \/ B \/ C \/ D 对照/);
+});
+
+test('daily benchmark separates mark-to-market gains from timing excess and completed campaigns', () => {
+  const data = fixture().command.daily_trend_paper;
+  const account = { equity_usdt: 112, net_equity_increment_usdt: 12, net_return_fraction: .12,
+    realized_pnl_usdt: 0, unrealized_pnl_usdt: 12, observed_maximum_drawdown_fraction: .003,
+    independent_closed_campaign_count: 0 };
+  data.benchmark = { status: 'observed', strategy: account, passive: account,
+    cash: { ...account, equity_usdt: 100, net_equity_increment_usdt: 0, net_return_fraction: 0, unrealized_pnl_usdt: 0 },
+    excess_vs_passive_usdt: 0, curve: [] };
+  const html = renderToStaticMarkup(React.createElement(DailyTrendPaper, { data, unavailable: false }));
+  assert.match(html, /相对持币增益/);
+  assert.match(html, /已实现收益/);
+  assert.match(html, /浮动收益/);
+  assert.match(html, /完整进出闭环为 0/);
+  assert.match(html, /尚未产生择时超额/);
+  assert.match(html, /未包含完整日内风险/);
+  data.benchmark = { status: 'unavailable', reason: 'archive hash mismatch' };
+  const invalid = renderToStaticMarkup(React.createElement(DailyTrendPaper, { data, unavailable: false }));
+  assert.match(invalid, /基准对照尚不可用/);
+  assert.match(invalid, /archive hash mismatch/);
+  assert.doesNotMatch(invalid, /尚未产生择时超额/);
+});
+
+test('paired account report cannot label price observations or zero closures as live evidence', () => {
+  const account = { equity_usdt: 100, cash_usdt: 100, net_equity_increment_usdt: 0,
+    realized_pnl_usdt: 0, unrealized_pnl_usdt: 0, maximum_drawdown_fraction: 0,
+    actual_simulated_fills: 0, independent_closed_campaign_count: 0 };
+  const scenario = { accounts: { A_original_v5: account, B_defer_4h: account }, comparison: {
+    net_equity_delta_usdt: 0, avoided_net_loss_usdt: 0, missed_net_profit_usdt: 0,
+    completed_matched_veto_campaigns: 0 } };
+  const data = { status: 'observed', report: { ...scenario, status: 'COLLECTING_FORWARD_EVIDENCE',
+    ledger_start_ts: NOW / 1000, latest_observed_at: NOW / 1000, calendar_days: 0,
+    cost_model: { explicit_roundtrip_cost_bps: 30, calibrated_to_real_fills: false, fixed_operating_cost_included: false },
+    references: { valid: 0, candidates: 0, deferred: 0, matched_candidates: 0, matched_vetoes: 0, valid_coverage_rate: null },
+    coverage: { observed_decision_hours: 0, expected_decision_hours: 0, missed_decision_hours: 0 },
+    scenarios: { 30: scenario, 60: scenario, 120: scenario },
+    acceptance: { requirements: [{ criterion: 'forward_calendar_days', actual: 0, required: '>=30', result: 'INSUFFICIENT' }] } } };
+  const html = renderToStaticMarkup(React.createElement(PairedReferencePaper, { data, unavailable: false }));
+  assert.match(html, /配对闭环为 0/);
+  assert.match(html, /模型尚未按真实成交校准/);
+  assert.match(html, /不是项目最终利润/);
+  assert.match(html, /不改变原 V5 实盘运行/);
+  assert.match(html, /不会自动晋级实盘/);
+  assert.match(html, /120 bps/);
+  assert.match(html, /自身模拟风控/);
+  assert.match(html, /尚未观测/);
+  assert.match(html, /每小时评估风控/);
+  assert.match(html, /原实盘外部风控每 30 分钟评估/);
+  assert.match(html, /至少三轮历史后才允许恢复/);
+  data.report.accounts = {
+    A_original_v5: { ...account, risk_snapshot: { current_level: 'PROTECT', metrics: { recovery_evidence_ok: false } } },
+    B_defer_4h: { ...account, risk_snapshot: { current_level: 'NEUTRAL', metrics: { recovery_evidence_ok: true } } },
+  };
+  const risk = renderToStaticMarkup(React.createElement(PairedReferencePaper, { data, unavailable: false }));
+  assert.match(risk, /保护/);
+  assert.match(risk, /中性/);
+  assert.match(risk, /恢复证据不足/);
+  assert.doesNotMatch(risk, /尚未观测/);
+});
+
+test('cost evidence shows signed one-way measurements and missing expected cost without inventing calibration', () => {
+  const data = { status: 'observed', report: { status: 'OBSERVED', generated_at_utc: STAMP, window_days: 30,
+    fill_count: 3, qualified_fill_count: 2, qualified_order_count: 1, fee_known_fill_count: 3,
+    missing_reason_counts: { ORDER_LINK_MISSING: 1 }, groups: [{ symbol: 'BTC/USDT', side: 'buy',
+      origin: 'strategy', qualified_order_count: 1, mean_fee_bps: 10, mean_signed_slippage_bps: -2,
+      mean_one_way_cost_bps: 8 }], recent_fills: [{ symbol: 'BTC/USDT', side: 'buy', fill_ts_ms: NOW,
+      fee_bps: 10, signed_slippage_bps: -2, expected_one_way_cost_bps: null,
+      observed_one_way_cost_bps: 8, cost_error_bps: null, missing_reasons: [] }] } };
+  const html = renderToStaticMarkup(React.createElement(LiveCostEvidence, { data, unavailable: false }));
+  assert.match(html, /-2\.000/);
+  assert.match(html, /缺少关联订单 1/);
+  assert.match(html, /预估缺失时保持空缺/);
+  assert.match(html, /负滑点表示价格改善/);
+  assert.match(html, /不会自动改动实盘费用模型或原 V5 开仓规则/);
+  assert.match(html, /不能把有效样本数称为“校准通过”/);
 });
 
 test('unobserved positions never claim current flatness, including retained position rows', () => {

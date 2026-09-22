@@ -1,0 +1,18 @@
+[Unit]
+Description=V5 independent original-policy versus DEFER paper comparison
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/clawd/v5-prod
+Environment=PYTHONPATH=/home/ubuntu/clawd/v5-prod
+ExecStart=/home/ubuntu/clawd/v5-prod/.venv/bin/python scripts/run_paired_reference_paper.py --experiment configs/research/paired_reference_paper_v1.json --output /home/ubuntu/clawd/v5-prod/reports/paired_reference_paper/v5-reference-paired-20260922-v1
+TimeoutStartSec=180
+MemoryMax=768M
+CPUQuota=35%
+Nice=15
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

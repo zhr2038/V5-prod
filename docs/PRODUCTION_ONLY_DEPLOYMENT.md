@@ -121,8 +121,28 @@ The production-only systemd install covers:
 - `v5-cost-rollup-real.user.timer`
 - `v5-daily-trend-paper.service`
 - `v5-daily-trend-paper.timer`
+- `v5-paired-reference-paper.service`
+- `v5-paired-reference-paper.timer`
+- `v5-live-cost-evidence.service`
+- `v5-live-cost-evidence.timer`
 
 Operational timers for sentiment refresh, reconcile, and ledger are enabled by default. The isolated daily-trend paper timer is also enabled; it uses public market reads and has no live-order effect.
+The paired reference paper worker samples public quotes every minute and evaluates
+the isolated hourly V5 baseline and DEFER-only entry variant against one frozen
+configuration. Its account stores are separate from live orders and positions.
+The cost-evidence worker reads the live fills/order databases every 15 minutes
+and writes `reports/live_cost_evidence.json`; it never places orders or changes
+the cost model. Missing/invalid quotes remain unavailable, and signed price
+improvement remains negative cost. Neither service enables live promotion.
+See `docs/PAIRED_REFERENCE_PAPER.md` for the experiment identity and review rules.
+
+To roll back these additions, disable and stop `v5-paired-reference-paper.timer`
+and `v5-live-cost-evidence.timer`, let any active oneshot finish, then switch to
+the retained previous release and reinstall its units. Preserve all new paper
+ledger/runtime files and reports; never rewind an experiment database. An old
+V5 reader may reject qlab result v3 for advisory receipt purposes, so keep the
+v3 reader compatibility patch if qlab has already published v3. Live risk,
+capital limits and trading-timer authorization remain unchanged.
 The superseded participation quote worker and A/B/C/D review timer remain disabled. ML training, model promotion, and tuned XGBoost shadow timers are research-only and remain disabled in `live_prod`.
 
 Live trading timers remain explicit operator choices:

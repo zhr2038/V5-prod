@@ -48,7 +48,7 @@ def _reference_reason(advice, payload, now):
     try:
         if not re.fullmatch(r"advice-[a-f0-9]{64}", advice["advice_id"]):
             return "invalid_advice_identity"
-        if payload.get("schema_version") != "qlab.decision.result.v2":
+        if payload.get("schema_version") not in {"qlab.decision.result.v2", "qlab.decision.result.v3"}:
             return "legacy_schema_never_restores_permission"
         if advice.get("live_order_effect") != "none" or advice.get("eligibility", {}).get("live_execution_eligible") is not False:
             return "invalid_research_boundary"

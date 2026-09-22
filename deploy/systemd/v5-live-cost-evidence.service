@@ -1,0 +1,16 @@
+[Unit]
+Description=V5 read-only real fill and submission quote cost evidence
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/clawd/v5-prod
+Environment=PYTHONPATH=/home/ubuntu/clawd/v5-prod
+ExecStart=/home/ubuntu/clawd/v5-prod/.venv/bin/python scripts/report_live_cost_evidence.py
+TimeoutStartSec=60
+MemoryMax=256M
+CPUQuota=25%
+Nice=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

@@ -88,6 +88,10 @@ PRODUCTION_USER_UNIT_MAPPINGS = (
     ("v5-spread-rollup.timer", "v5-spread-rollup.timer"),
     ("v5-daily-trend-paper.service", "v5-daily-trend-paper.service"),
     ("v5-daily-trend-paper.timer", "v5-daily-trend-paper.timer"),
+    ("v5-paired-reference-paper.service", "v5-paired-reference-paper.service"),
+    ("v5-paired-reference-paper.timer", "v5-paired-reference-paper.timer"),
+    ("v5-live-cost-evidence.service", "v5-live-cost-evidence.service"),
+    ("v5-live-cost-evidence.timer", "v5-live-cost-evidence.timer"),
 )
 
 

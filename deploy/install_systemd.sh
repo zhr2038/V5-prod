@@ -132,7 +132,11 @@ if [[ "$USER_MODE" == "1" ]]; then
       --mapping v5-spread-rollup.user.service=v5-spread-rollup.service \
       --mapping v5-spread-rollup.timer=v5-spread-rollup.timer \
       --mapping v5-daily-trend-paper.service=v5-daily-trend-paper.service \
-      --mapping v5-daily-trend-paper.timer=v5-daily-trend-paper.timer
+      --mapping v5-daily-trend-paper.timer=v5-daily-trend-paper.timer \
+      --mapping v5-paired-reference-paper.service=v5-paired-reference-paper.service \
+      --mapping v5-paired-reference-paper.timer=v5-paired-reference-paper.timer \
+      --mapping v5-live-cost-evidence.service=v5-live-cost-evidence.service \
+      --mapping v5-live-cost-evidence.timer=v5-live-cost-evidence.timer
     render_units "$DST" "$SHADOW_ROOT" \
       --mapping v5-shadow-tuned-xgboost.user.service=v5-shadow-tuned-xgboost.user.service \
       --mapping v5-shadow-tuned-xgboost.user.timer=v5-shadow-tuned-xgboost.user.timer
@@ -174,6 +178,8 @@ if [[ "$USER_MODE" == "1" ]]; then
     systemctl --user enable --now v5-cost-rollup-real.user.timer
     systemctl --user enable --now v5-spread-rollup.timer
     systemctl --user enable --now v5-daily-trend-paper.timer
+    systemctl --user enable --now v5-paired-reference-paper.timer
+    systemctl --user enable --now v5-live-cost-evidence.timer
     echo "[install_systemd] Superseded paper workers and ML research timers are disabled in live_prod."
     if [[ "$ENABLE_PROD_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-prod.user.timer
@@ -181,7 +187,7 @@ if [[ "$USER_MODE" == "1" ]]; then
     if [[ "$ENABLE_EVENT_DRIVEN_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-event-driven.timer
     fi
-    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|quant-lab-selfcheck|sentiment-collect|auto-risk-eval|reconcile|ledger|cost-rollup-real|spread-rollup|daily-trend-paper)" || true
+    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|quant-lab-selfcheck|sentiment-collect|auto-risk-eval|reconcile|ledger|cost-rollup-real|spread-rollup|daily-trend-paper|paired-reference-paper|live-cost-evidence)" || true
   else
     systemctl --user enable --now v5-hourly.timer
     systemctl --user enable --now v5-daily.timer

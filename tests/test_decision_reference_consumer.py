@@ -69,6 +69,24 @@ def test_missing_reference_records_unavailable_without_touching_live_files(tmp_p
     assert live.read_bytes() == b"live-evidence"
 
 
+def test_v3_diagnostics_reference_stays_record_only(tmp_path):
+    value = payload()
+    value["schema_version"] = "qlab.decision.result.v3"
+    result = record_cycle(payload=value, contexts=[], now=NOW, output=tmp_path)
+    receipt = result["receipts"][0]
+    assert receipt["reference_schema"] == "qlab.decision.result.v3"
+    assert receipt["reason"] == "record_only_not_adopted"
+    assert receipt["adoption"] == "not_adopted" and result["live_order_effect"] == "none"
+
+
+def test_v3_cannot_inject_live_permission(tmp_path):
+    value = payload()
+    value["schema_version"] = "qlab.decision.result.v3"
+    value["advice"][0]["eligibility"]["live_execution_eligible"] = True
+    result = record_cycle(payload=value, contexts=[], now=NOW, output=tmp_path)
+    assert result["receipts"][0]["reason"] == "invalid_research_boundary"
+
+
 def test_consumer_rejects_enforce_and_order_endpoints():
     with pytest.raises(ValidationError):
         DecisionReferenceConfig(mode="enforce")
